@@ -1,0 +1,4 @@
+CREATE TABLE IF NOT EXISTS evaluations(id uuid PRIMARY KEY,assessment_id uuid NOT NULL,classroom_id uuid NOT NULL,org_id text NOT NULL,student_id text NOT NULL,evidence jsonb NOT NULL,status text NOT NULL DEFAULT 'draft' CHECK(status IN ('draft','finalized')),finalized_by text,finalized_at timestamptz,created_at timestamptz NOT NULL DEFAULT now());
+CREATE TABLE IF NOT EXISTS audit(id bigserial PRIMARY KEY,evaluation_id uuid NOT NULL REFERENCES evaluations(id),actor_id text NOT NULL,action text NOT NULL,reason text NOT NULL,before_evidence jsonb NOT NULL,after_evidence jsonb NOT NULL,created_at timestamptz NOT NULL DEFAULT now());
+CREATE TABLE IF NOT EXISTS schema_migrations(version integer PRIMARY KEY, applied_at timestamptz NOT NULL DEFAULT now());
+INSERT INTO schema_migrations(version) VALUES(1) ON CONFLICT DO NOTHING;

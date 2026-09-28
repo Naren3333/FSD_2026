@@ -1,0 +1,14 @@
+.env
+.local/
+.venv/
+node_modules/
+dist/
+.angular/
+__pycache__/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+*.exe
+*.test
+test-results/
+playwright-report/

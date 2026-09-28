@@ -1,0 +1,333 @@
+name: learning-foundation
+services:
+  postgres:
+    image: postgres:17.6-alpine
+    environment:
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Run scripts/setup.py}
+    volumes:
+    - postgres-data:/var/lib/postgresql/data
+    - ./.local/postgres-init.sql:/docker-entrypoint-initdb.d/01-services.sql:ro
+    healthcheck:
+      test:
+      - CMD-SHELL
+      - pg_isready -U postgres
+      interval: 5s
+      timeout: 3s
+      retries: 20
+  keycloak:
+    image: quay.io/keycloak/keycloak:26.3.3
+    command:
+    - start-dev
+    - --import-realm
+    environment:
+      KC_BOOTSTRAP_ADMIN_USERNAME: admin
+      KC_BOOTSTRAP_ADMIN_PASSWORD: ${KEYCLOAK_ADMIN_PASSWORD}
+      KC_HOSTNAME: http://localhost:8081
+      KC_HOSTNAME_BACKCHANNEL_DYNAMIC: 'true'
+      KC_HEALTH_ENABLED: 'true'
+    ports:
+    - 127.0.0.1:8081:8080
+    volumes:
+    - ./.local/learning-realm.json:/opt/keycloak/data/import/learning-realm.json:ro
+    - keycloak-data:/opt/keycloak/data
+  kafka:
+    image: apache/kafka:4.1.2
+    environment:
+      KAFKA_NODE_ID: 1
+      KAFKA_PROCESS_ROLES: broker,controller
+      KAFKA_LISTENERS: PLAINTEXT://:9092,CONTROLLER://:9093
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT
+      KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
+      KAFKA_CONTROLLER_QUORUM_VOTERS: 1@kafka:9093
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: 'false'
+      KAFKA_LOG_RETENTION_HOURS: 720
+      KAFKA_LOG_DIRS: /var/lib/kafka/data
+    volumes:
+    - kafka-data:/var/lib/kafka/data
+    healthcheck:
+      test:
+      - CMD-SHELL
+      - /opt/kafka/bin/kafka-topics.sh --bootstrap-server localhost:9092 --list
+      interval: 10s
+      timeout: 10s
+      retries: 20
+  kafka-init:
+    image: apache/kafka:4.1.2
+    depends_on:
+      kafka:
+        condition: service_healthy
+    entrypoint:
+    - /bin/sh
+    - -ec
+    command:
+    - for topic in content.uploaded.v1 assessment.submitted.v1 grading.finalized.v1
+      assessment.submitted.v1.dlq grading.finalized.v1.dlq; do /opt/kafka/bin/kafka-topics.sh
+      --bootstrap-server kafka:9092 --create --if-not-exists --topic $$topic --partitions
+      3 --replication-factor 1; done
+  minio:
+    image: quay.io/minio/minio:RELEASE.2025-04-22T22-12-26Z
+    command:
+    - server
+    - /data
+    - --console-address
+    - :9001
+    environment:
+      MINIO_ROOT_USER: ${S3_ROOT_USER}
+      MINIO_ROOT_PASSWORD: ${S3_ROOT_PASSWORD}
+    volumes:
+    - minio-data:/data
+  storage-init:
+    image: quay.io/minio/mc:RELEASE.2025-04-16T18-13-26Z
+    depends_on:
+    - minio
+    environment:
+      ROOT_USER: ${S3_ROOT_USER}
+      ROOT_PASSWORD: ${S3_ROOT_PASSWORD}
+      CONTENT_USER: ${S3_CONTENT_USER}
+      CONTENT_PASSWORD: ${S3_CONTENT_PASSWORD}
+    volumes:
+    - ./infra/storage-policy.json:/policy.json:ro
+    entrypoint:
+    - /bin/sh
+    - -ec
+    command:
+    - for i in $$(seq 1 60); do mc alias set local http://minio:9000 $$ROOT_USER $$ROOT_PASSWORD
+      && break; sleep 2; done; mc mb --ignore-existing local/documents; mc admin user
+      add local $$CONTENT_USER $$CONTENT_PASSWORD; mc admin policy create local content-only
+      /policy.json; mc admin policy attach local content-only --user $$CONTENT_USER
+  gateway-config:
+    image: python:3.13.7-alpine
+    depends_on:
+    - keycloak
+    volumes:
+    - ./infra/kong/bootstrap.py:/bootstrap.py:ro
+    - kong-config:/output
+    command:
+    - python
+    - /bootstrap.py
+  kong:
+    image: kong:3.9.1
+    depends_on:
+      gateway-config:
+        condition: service_completed_successfully
+    environment:
+      KONG_DATABASE: 'off'
+      KONG_DECLARATIVE_CONFIG: /config/kong.json
+      KONG_ADMIN_LISTEN: 'off'
+      KONG_PROXY_ACCESS_LOG: 'off'
+      KONG_PROXY_ERROR_LOG: /dev/stderr
+    ports:
+    - 127.0.0.1:8000:8000
+    volumes:
+    - kong-config:/config:ro
+    healthcheck:
+      test:
+      - CMD
+      - kong
+      - health
+      interval: 10s
+      timeout: 5s
+      retries: 10
+  identity:
+    build:
+      context: .
+      dockerfile: services/identity/Dockerfile
+    environment:
+      OIDC_ISSUER: http://localhost:8081/realms/learning
+      OIDC_JWKS_URL: http://keycloak:8080/realms/learning/protocol/openid-connect/certs
+      OIDC_AUDIENCE: learning
+      DATABASE_URL: postgresql://identity:${IDENTITY_DB_PASSWORD}@postgres:5432/identity?sslmode=disable
+      IDENTITY_URL: http://identity:8080
+    depends_on:
+      keycloak:
+        condition: service_started
+      postgres:
+        condition: service_healthy
+    init: true
+    restart: on-failure:3
+    stop_grace_period: 45s
+  curriculum:
+    build:
+      context: .
+      dockerfile: services/curriculum/Dockerfile
+    environment:
+      OIDC_ISSUER: http://localhost:8081/realms/learning
+      OIDC_JWKS_URL: http://keycloak:8080/realms/learning/protocol/openid-connect/certs
+      OIDC_AUDIENCE: learning
+      DATABASE_URL: postgresql://curriculum:${CURRICULUM_DB_PASSWORD}@postgres:5432/curriculum?sslmode=disable
+      IDENTITY_URL: http://identity:8080
+    depends_on:
+      keycloak:
+        condition: service_started
+      postgres:
+        condition: service_healthy
+    init: true
+    restart: on-failure:3
+    stop_grace_period: 45s
+  content:
+    build:
+      context: .
+      dockerfile: services/content/Dockerfile
+    environment:
+      OIDC_ISSUER: http://localhost:8081/realms/learning
+      OIDC_JWKS_URL: http://keycloak:8080/realms/learning/protocol/openid-connect/certs
+      OIDC_AUDIENCE: learning
+      DATABASE_URL: postgresql://content:${CONTENT_DB_PASSWORD}@postgres:5432/content?sslmode=disable
+      IDENTITY_URL: http://identity:8080
+      KAFKA_BROKERS: kafka:9092
+      S3_ENDPOINT: minio:9000
+      S3_ACCESS_KEY: ${S3_CONTENT_USER}
+      S3_SECRET_KEY: ${S3_CONTENT_PASSWORD}
+      S3_BUCKET: documents
+      S3_SECURE: 'false'
+    depends_on:
+      keycloak:
+        condition: service_started
+      postgres:
+        condition: service_healthy
+      kafka-init:
+        condition: service_completed_successfully
+      storage-init:
+        condition: service_completed_successfully
+    init: true
+    restart: on-failure:3
+    stop_grace_period: 45s
+  assessment:
+    build:
+      context: .
+      dockerfile: services/assessment/Dockerfile
+    environment:
+      OIDC_ISSUER: http://localhost:8081/realms/learning
+      OIDC_JWKS_URL: http://keycloak:8080/realms/learning/protocol/openid-connect/certs
+      OIDC_AUDIENCE: learning
+      DATABASE_URL: postgresql://assessment:${ASSESSMENT_DB_PASSWORD}@postgres:5432/assessment?sslmode=disable
+      IDENTITY_URL: http://identity:8080
+      KAFKA_BROKERS: kafka:9092
+      CURRICULUM_URL: http://curriculum:8080
+    depends_on:
+      keycloak:
+        condition: service_started
+      postgres:
+        condition: service_healthy
+      kafka-init:
+        condition: service_completed_successfully
+    init: true
+    restart: on-failure:3
+    stop_grace_period: 45s
+  grading:
+    build:
+      context: .
+      dockerfile: services/grading/Dockerfile
+    environment:
+      OIDC_ISSUER: http://localhost:8081/realms/learning
+      OIDC_JWKS_URL: http://keycloak:8080/realms/learning/protocol/openid-connect/certs
+      OIDC_AUDIENCE: learning
+      DATABASE_URL: postgresql://grading:${GRADING_DB_PASSWORD}@postgres:5432/grading?sslmode=disable
+      IDENTITY_URL: http://identity:8080
+      KAFKA_BROKERS: kafka:9092
+    depends_on:
+      keycloak:
+        condition: service_started
+      postgres:
+        condition: service_healthy
+      kafka-init:
+        condition: service_completed_successfully
+    init: true
+    restart: on-failure:3
+    stop_grace_period: 45s
+  analytics:
+    build:
+      context: .
+      dockerfile: services/analytics/Dockerfile
+    environment:
+      OIDC_ISSUER: http://localhost:8081/realms/learning
+      OIDC_JWKS_URL: http://keycloak:8080/realms/learning/protocol/openid-connect/certs
+      OIDC_AUDIENCE: learning
+      DATABASE_URL: postgresql://analytics:${ANALYTICS_DB_PASSWORD}@postgres:5432/analytics?sslmode=disable
+      IDENTITY_URL: http://identity:8080
+      KAFKA_BROKERS: kafka:9092
+    depends_on:
+      keycloak:
+        condition: service_started
+      postgres:
+        condition: service_healthy
+      kafka-init:
+        condition: service_completed_successfully
+    init: true
+    restart: on-failure:3
+    stop_grace_period: 45s
+  ai-core:
+    build:
+      context: .
+      dockerfile: services/ai-core/Dockerfile
+    environment:
+      OIDC_ISSUER: http://localhost:8081/realms/learning
+      OIDC_JWKS_URL: http://keycloak:8080/realms/learning/protocol/openid-connect/certs
+      OIDC_AUDIENCE: learning
+    depends_on:
+      keycloak:
+        condition: service_started
+    init: true
+    restart: on-failure:3
+    stop_grace_period: 45s
+  question-generation-agent:
+    build:
+      context: .
+      dockerfile: services/question-generation-agent/Dockerfile
+    environment:
+      OIDC_ISSUER: http://localhost:8081/realms/learning
+      OIDC_JWKS_URL: http://keycloak:8080/realms/learning/protocol/openid-connect/certs
+      OIDC_AUDIENCE: learning
+    depends_on:
+      keycloak:
+        condition: service_started
+    init: true
+    restart: on-failure:3
+    stop_grace_period: 45s
+  student-performance-agent:
+    build:
+      context: .
+      dockerfile: services/student-performance-agent/Dockerfile
+    environment:
+      OIDC_ISSUER: http://localhost:8081/realms/learning
+      OIDC_JWKS_URL: http://keycloak:8080/realms/learning/protocol/openid-connect/certs
+      OIDC_AUDIENCE: learning
+    depends_on:
+      keycloak:
+        condition: service_started
+    init: true
+    restart: on-failure:3
+    stop_grace_period: 45s
+  question-chatbot-agent:
+    build:
+      context: .
+      dockerfile: services/question-chatbot-agent/Dockerfile
+    environment:
+      OIDC_ISSUER: http://localhost:8081/realms/learning
+      OIDC_JWKS_URL: http://keycloak:8080/realms/learning/protocol/openid-connect/certs
+      OIDC_AUDIENCE: learning
+    depends_on:
+      keycloak:
+        condition: service_started
+    init: true
+    restart: on-failure:3
+    stop_grace_period: 45s
+  web:
+    build:
+      context: .
+      dockerfile: apps/web/Dockerfile
+    ports:
+    - 127.0.0.1:4200:80
+    depends_on:
+    - kong
+volumes:
+  postgres-data: {}
+  keycloak-data: {}
+  kafka-data: {}
+  minio-data: {}
+  kong-config: {}
+

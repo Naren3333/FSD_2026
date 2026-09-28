@@ -1,0 +1,110 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:learning:grading.finalized.v1",
+  "type": "object",
+  "properties": {
+    "event_id": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "event_type": {
+      "const": "grading.finalized.v1"
+    },
+    "schema_version": {
+      "const": 1
+    },
+    "timestamp": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "correlation_id": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "resource_id": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "data": {
+      "type": "object",
+      "properties": {
+        "evaluation_id": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "assessment_id": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "classroom_id": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "org_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "student_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "evidence": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "question_id": {
+                "type": "string",
+                "format": "uuid"
+              },
+              "skill_id": {
+                "type": "string",
+                "format": "uuid"
+              },
+              "correct": {
+                "type": "boolean"
+              },
+              "awarded": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 1
+              },
+              "possible": {
+                "const": 1
+              }
+            },
+            "required": [
+              "question_id",
+              "skill_id",
+              "correct",
+              "awarded",
+              "possible"
+            ],
+            "additionalProperties": false
+          },
+          "minItems": 1,
+          "maxItems": 50
+        }
+      },
+      "required": [
+        "evaluation_id",
+        "assessment_id",
+        "classroom_id",
+        "org_id",
+        "student_id",
+        "evidence"
+      ],
+      "additionalProperties": false
+    }
+  },
+  "required": [
+    "event_id",
+    "event_type",
+    "schema_version",
+    "timestamp",
+    "correlation_id",
+    "resource_id",
+    "data"
+  ],
+  "additionalProperties": false
+}

@@ -1,0 +1,16 @@
+import { Component, inject, signal, OnInit } from '@angular/core';
+import { FormControl, FormGroup, ReactiveFormsModule, Validators } from '@angular/forms';
+import { Api, Node } from './api';
+import { ActionState, FieldComponent, StatusComponent } from './shared';
+@Component({selector:'app-curriculum',standalone:true,imports:[ReactiveFormsModule,FieldComponent,StatusComponent],template:`
+<div class="section-heading"><div><p class="eyebrow">Give learning a structure</p><h2>Curriculum</h2></div><button class="secondary" (click)="load()" [disabled]="state.busy()">Refresh curriculum</button></div>
+<p>Subjects lead to courses, units, topics and skills. A standalone skill can support your first assessment.</p><div class="split"><section class="panel"><h3>Learning map</h3><p class="caption">Up to 200 active curriculum nodes</p>@for(node of nodes();track node.id){<article class="record"><span class="badge">{{node.kind}}</span><strong>{{node.name}}</strong><span class="identifier">{{node.id}}</span></article>}@empty{<p class="empty">No curriculum yet. Add a skill to begin authoring an assessment.</p>}</section>
+@if(api.profile()?.role==='teacher'){<section class="panel"><h3>Add curriculum</h3><form novalidate [formGroup]="form" (ngSubmit)="create()"><app-field controlId="node-kind" label="Level"><select id="node-kind" formControlName="kind">@for(kind of kinds;track kind){<option [value]="kind">{{kind}}</option>}</select></app-field><app-field controlId="node-name" label="Name" [invalid]="form.controls.name.touched && form.controls.name.invalid" error="Enter a name of 1–160 characters."><input id="node-name" formControlName="name" maxlength="160" aria-describedby="node-name-help" [attr.aria-invalid]="form.controls.name.touched && form.controls.name.invalid"></app-field><app-field controlId="node-parent" label="Parent" hint="Optional. Choose the preceding curriculum level."><select id="node-parent" formControlName="parent_id"><option value="">Standalone</option>@for(node of nodes();track node.id){<option [value]="node.id">{{node.kind}} · {{node.name}}</option>}</select></app-field><button [disabled]="state.busy()">Add curriculum</button><button type="reset" class="secondary clear-form" [disabled]="state.busy()">Clear form</button></form></section>}</div><app-status [state]="state"/>`})
+export class CurriculumComponent implements OnInit {
+  readonly api=inject(Api);readonly state=new ActionState();readonly nodes=signal<Node[]>([]);readonly kinds=['subject','course','unit','topic','skill','objective'];
+  readonly form=new FormGroup({kind:new FormControl('skill',{nonNullable:true}),name:new FormControl('',{nonNullable:true,validators:[Validators.required,Validators.maxLength(160),Validators.pattern(/\S/)]}),parent_id:new FormControl('',{nonNullable:true})});
+  ngOnInit():void{this.load();} load():void{void this.state.run(async()=>this.nodes.set(await this.api.nodes()));}
+  create():void{if(!this.state.validate(this.form))return;void this.state.run(async()=>{const value=this.form.getRawValue();await this.api.request('curriculum','/nodes','POST',{...value,parent_id:value.parent_id||null});this.form.reset({kind:'skill',name:'',parent_id:''});this.nodes.set(await this.api.nodes());},'Curriculum added.');}
+}
+
+

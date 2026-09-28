@@ -1,0 +1,3 @@
+CREATE TABLE IF NOT EXISTS documents(id uuid PRIMARY KEY,classroom_id uuid NOT NULL,org_id text NOT NULL,owner_id text NOT NULL,title text NOT NULL,mime_type text NOT NULL,object_key text NOT NULL UNIQUE,sha256 text NOT NULL,revision integer NOT NULL DEFAULT 1,status text NOT NULL CHECK(status IN ('extracted','extraction_unsupported')),chunks jsonb NOT NULL,created_at timestamptz NOT NULL DEFAULT now());
+CREATE TABLE IF NOT EXISTS schema_migrations(version integer PRIMARY KEY, applied_at timestamptz NOT NULL DEFAULT now());
+INSERT INTO schema_migrations(version) VALUES(1) ON CONFLICT DO NOTHING;

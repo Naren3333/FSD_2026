@@ -1,0 +1,16 @@
+import { Component, Input, OnChanges, inject, signal } from '@angular/core';
+import { DecimalPipe, PercentPipe } from '@angular/common';
+import { FormControl, FormGroup, ReactiveFormsModule, Validators } from '@angular/forms';
+import { Api, Performance } from './api';
+import { ActionState, FieldComponent, StatusComponent } from './shared';
+@Component({selector:'app-performance',standalone:true,imports:[ReactiveFormsModule,FieldComponent,StatusComponent,PercentPipe,DecimalPipe],template:`
+<div class="section-heading"><div><p class="eyebrow">Evidence, before interpretation</p><h2>Learning performance</h2></div></div><p>Observed accuracy summarizes finalized question results. It is not a validated mastery probability.</p><section class="panel"><form class="inline-form" novalidate [formGroup]="form" (ngSubmit)="load()"><app-field controlId="performance-student" label="Student ID" [invalid]="form.controls.student.touched && form.controls.student.invalid"><input id="performance-student" formControlName="student" aria-describedby="performance-student-help" [readonly]="api.profile()?.role==='student'"></app-field><button [disabled]="state.busy() || !classroomId">View performance</button></form><app-status [state]="state"/>
+@if(result();as data){@if(data.skills.length){<div class="table-scroll" tabindex="0" role="region" aria-label="Skill evidence table"><table><caption>Finalized evidence by skill</caption><thead><tr><th scope="col">Skill</th><th scope="col">Attempted</th><th scope="col">Correct</th><th scope="col">Observed accuracy</th><th scope="col">Evidence</th></tr></thead><tbody>@for(skill of data.skills;track skill.skill_id){<tr><th scope="row" class="identifier">{{skill.skill_id}}</th><td>{{skill.attempted | number}}</td><td>{{skill.correct | number}}</td><td>{{skill.observed_accuracy | percent:'1.0-1'}}</td><td>{{skill.evidence_status==='insufficient_evidence'?'Insufficient evidence':'Observed'}}</td></tr>}</tbody></table></div><p class="caption">Fewer than five questions is reported as insufficient evidence. This is a reporting threshold, not a statistical validation.</p>}@else{<p class="empty">No finalized assessment evidence for this student yet. Complete an assessment and ask the teacher to review it.</p>}}@else{<p class="empty">Select a classroom and student to view their actual assessment evidence.</p>}</section>
+<aside class="ai-notice"><span class="badge">Future capability</span><h3>Personalized guidance</h3><p>AI feedback, generated practice and document chat are not available in this milestone.</p><button disabled>AI guidance unavailable</button></aside>`})
+export class PerformanceComponent implements OnChanges {
+  readonly api=inject(Api);readonly state=new ActionState();@Input() classroomId='';readonly result=signal<Performance|null>(null);readonly form=new FormGroup({student:new FormControl('',{nonNullable:true,validators:[Validators.required]})});
+  ngOnChanges():void{this.result.set(null);if(this.api.profile()?.role==='student')this.form.controls.student.setValue(this.api.profile()!.id);}
+  load():void{if(!this.state.validate(this.form))return;this.result.set(null);void this.state.run(async()=>{this.result.set(await this.api.request('analytics',`/performance/${encodeURIComponent(this.form.controls.student.value)}?classroom_id=${this.classroomId}`));this.form.markAsPristine();});}
+}
+
+

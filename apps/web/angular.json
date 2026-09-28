@@ -1,0 +1,1 @@
+{"version":1,"projects":{"web":{"projectType":"application","root":"","sourceRoot":"src","architect":{"build":{"builder":"@angular/build:application","options":{"browser":"src/main.ts","index":"src/index.html","tsConfig":"tsconfig.json","styles":["src/styles.css"],"outputPath":"dist/web"}},"serve":{"builder":"@angular/build:dev-server","options":{"buildTarget":"web:build"}}}}}}
