@@ -2,7 +2,7 @@
 
 ## Delivered architecture
 
-The repository began empty. It now contains exactly ten independent application services, their Dockerfiles and tests, an Angular client, and reproducible local Kong OSS / Keycloak / Kafka / PostgreSQL / MinIO infrastructure. No existing application or data was replaced. Service responsibilities and ownership are enumerated in the root README; diagrams and authentication/event boundaries are in `docs/architecture/system.md`.
+The repository began empty. It now contains exactly ten independent application services, their Dockerfiles and tests, an Angular client, and reproducible local Kong OSS / Keycloak / Kafka / PostgreSQL / MinIO infrastructure. No existing application or data was replaced. Service responsibilities, data ownership, diagrams and authentication/event boundaries are documented in `docs/architecture/system.md`.
 
 Go implements Identity/Classroom, Curriculum, Content, Assessment and Grading. These are transactional, explicitly authorized operations with bounded request handling and SQL transactions. Python/FastAPI implements deterministic Analytics and four future AI applications, with Pydantic contracts suitable for later analytical/model tooling. Angular 21 with strict TypeScript implements the browser. Shell/SQL/configuration are operational artifacts; no third backend language or extra business service was introduced.
 
