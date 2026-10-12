@@ -8,6 +8,11 @@ import (
 
 var decimal = regexp.MustCompile(`^-?[0-9]{1,12}(\.[0-9]{1,8})?$`)
 
+var (
+	errScoreOutOfBounds = errors.New("override score out of bounds")
+	errUnknownQuestion  = errors.New("override references unknown question")
+)
+
 type Question struct {
 	ID        string `json:"id"`
 	Type      string `json:"type"`
@@ -21,6 +26,35 @@ type Evidence struct {
 	Correct  bool   `json:"correct"`
 	Awarded  int    `json:"awarded"`
 	Possible int    `json:"possible"`
+}
+type Evaluation struct {
+	ID         string     `json:"id"`
+	Assessment string     `json:"assessment_id"`
+	Classroom  string     `json:"classroom_id"`
+	Student    string     `json:"student_id"`
+	Status     string     `json:"status"`
+	Evidence   []Evidence `json:"evidence"`
+}
+
+// applyOverrides updates evidence in place with the teacher's scores. It
+// returns errScoreOutOfBounds at the first out-of-range score, or
+// errUnknownQuestion if any override matched no question.
+func applyOverrides(evidence []Evidence, overrides map[string]int) error {
+	applied := 0
+	for i, e := range evidence {
+		if score, ok := overrides[e.Question]; ok {
+			if score < 0 || score > e.Possible {
+				return errScoreOutOfBounds
+			}
+			evidence[i].Awarded = score
+			evidence[i].Correct = score == e.Possible
+			applied++
+		}
+	}
+	if applied != len(overrides) {
+		return errUnknownQuestion
+	}
+	return nil
 }
 
 func evaluate(q Question, answer string) (Evidence, error) {

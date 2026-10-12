@@ -6,6 +6,17 @@ import (
 	"unicode/utf8"
 )
 
+type Document struct {
+	ID        string  `json:"id"`
+	Classroom string  `json:"classroom_id"`
+	Title     string  `json:"title"`
+	Type      string  `json:"mime_type"`
+	Status    string  `json:"status"`
+	Revision  int     `json:"revision"`
+	SHA       string  `json:"sha256"`
+	Chunks    []Chunk `json:"chunks,omitempty"`
+}
+
 type Chunk struct {
 	Ordinal int    `json:"ordinal"`
 	Text    string `json:"text"`
