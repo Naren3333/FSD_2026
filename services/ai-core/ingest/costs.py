@@ -1,4 +1,4 @@
-"""What an ingest cost (RAG_PLAN Iteration 15, Step 3): model calls by kind, cache hits, failures, tokens, retries
+"""What an ingest cost: model calls by kind, cache hits, failures, tokens, retries
 and wall time, plus the time each stage took. One record per ingest, logged and appended to INGEST_COST_LOG.
 
 The record lives in a ContextVar set by `ingest()`; the tasks `asyncio.gather` starts copy the context, so they

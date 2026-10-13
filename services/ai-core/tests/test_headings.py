@@ -1,4 +1,4 @@
-"""Heading detection and section paths (RAG_PLAN Iteration 6). No PDF, no DB, no OpenAI."""
+"""Heading detection and section paths. No PDF, no DB, no OpenAI."""
 
 from ingest.headings import outline
 from ingest.parse import Block, body_size
@@ -187,7 +187,7 @@ def test_a_contents_slide_without_entries_is_kept() -> None:
     assert "▪Why we test" in [p.text for p in outline(pages)]
 
 
-# ---- the PDF outline (RAG_PLAN Iteration 14, Step 3)
+# ---- the PDF outline
 
 
 def methods_report() -> tuple[list[list[Block]], list[tuple[int, str, int]]]:

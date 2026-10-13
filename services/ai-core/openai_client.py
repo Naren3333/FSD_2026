@@ -72,7 +72,7 @@ async def embed(texts: list[str]) -> tuple[list[list[float]], int]:
         batch = texts[start : start + EMBED_BATCH]
         # encoding_format left unset: the SDK then requests base64 and decodes it to floats itself.
         create = functools.partial(client.embeddings.create, model=model, input=batch, timeout=TIMEOUT)
-        result = await _call(create)
+        result = await call(create)
         # Place by OpenAI's index rather than trusting the order of `data`.
         placed: list[list[float]] = [[] for _ in batch]
         for item in result.data:
@@ -92,7 +92,7 @@ async def embed(texts: list[str]) -> tuple[list[list[float]], int]:
 async def stream_chat(messages: list[Any], max_tokens: int) -> AsyncGenerator[str | Usage, None]:
     """Text deltas in order, then one Usage. Breaking out early closes the HTTP stream."""
     client, settings = get_client(), get_settings()
-    stream = await _call(
+    stream = await call(
         lambda: client.chat.completions.create(
             model=settings.chat_model,
             messages=messages,
@@ -149,7 +149,7 @@ async def generate(
             "type": "json_schema",
             "json_schema": {"name": (name or "reply").replace(".", "_"), "strict": True, "schema": schema},
         }
-    result = await _call(
+    result = await call(
         lambda: client.chat.completions.create(
             model=settings.chat_model,
             messages=messages,
@@ -181,7 +181,8 @@ async def generate(
     return Completion(choice.message.content or "", usage, choice.finish_reason)
 
 
-async def _call[T](fn: Callable[[], Awaitable[T]]) -> T:
+async def call[T](fn: Callable[[], Awaitable[T]]) -> T:
+    """Run one SDK call with this module's retries (see the module docstring)."""
     for attempt in range(1, MAX_ATTEMPTS + 1):
         try:
             return await fn()
@@ -196,6 +197,14 @@ async def _call[T](fn: Callable[[], Awaitable[T]]) -> T:
             )
             await _sleep(delay)
     raise AssertionError("unreachable")
+
+
+def deterministic_options(model: str) -> dict[str, Any]:
+    """Request options for repeatable answers: low reasoning effort for reasoning models, otherwise temperature 0
+    (reasoning models reject a temperature)."""
+    if model.startswith(("gpt-5", "gpt-6", "o")):
+        return {"reasoning_effort": "low"}
+    return {"temperature": 0}
 
 
 def _retryable(exc: openai.OpenAIError) -> bool:

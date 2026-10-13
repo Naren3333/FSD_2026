@@ -27,6 +27,7 @@ from learning_transport import (
 import openai_client
 import rerank
 import spend
+from billing import Billing, StreamBill, ingest_charges, priced, reply_charge
 from contracts import (
     IngestChunk,
     IngestFigure,
@@ -36,7 +37,7 @@ from contracts import (
     RerankResponse,
     ResponseContract,
 )
-from ingest import IngestError, costs, ingest, vision_config
+from ingest import IngestError, IngestResult, costs, ingest, vision_config
 from settings import get_settings
 
 log = logging.getLogger("ai-core")
@@ -48,23 +49,19 @@ ERRORS: dict[int | str, dict[str, Any]] = {
     code: {"model": ErrorResponse} for code in (401, 403, 413, 415, 422, 429, 502, 503)
 }
 
-_ingest_slots: asyncio.Semaphore | None = None
-_recordings: set[asyncio.Future[None]] = set()  # ledger writes that must outlive a closed stream
-
 
 @asynccontextmanager
 async def lifespan(app: Any) -> AsyncIterator[None]:
-    global _ingest_slots
     require_env(*OIDC_SETTINGS)
-    _ingest_slots = asyncio.Semaphore(INGEST_CONCURRENCY)
+    app.state.ingest_slots = asyncio.Semaphore(INGEST_CONCURRENCY)
     opened = getattr(app.state, "ledger", None) is None
     if opened:
         require_env("DATABASE_URL")
         app.state.ledger = await spend.PostgresLedger.open(os.environ["DATABASE_URL"])
+    app.state.billing = Billing(app.state.ledger)
     yield
     await rerank.aclose()
-    if _recordings:
-        await asyncio.wait(_recordings, timeout=10)
+    await app.state.billing.drain()
     if opened:
         await app.state.ledger.close()
         del app.state.ledger
@@ -77,7 +74,7 @@ app = application("ai-core", lifespan=lifespan)
 async def ready(request: Request) -> dict[str, str]:
     # Only whether keys are configured: probing paid APIs on every health check would cost money and latency.
     try:
-        await asyncio.wait_for(ledger_of(request).ping(), 2)
+        await asyncio.wait_for(billing_of(request).ledger.ping(), 2)
     except Exception:
         raise failure(503, "DEPENDENCY_UNAVAILABLE", "The usage ledger is unavailable.") from None
     settings = get_settings()
@@ -107,48 +104,19 @@ PROVIDER_ERRORS = (
 )
 
 
-def ledger_of(request: Request) -> spend.Ledger:
-    ledger: spend.Ledger = request.app.state.ledger
-    return ledger
+def billing_of(request: Request) -> Billing:
+    billing: Billing = request.app.state.billing
+    return billing
 
 
-async def allowance(request: Request, billed: spend.Billed) -> None:
-    """Refuse before any paid work once the user's daily allowance is used up. Without a working ledger nothing
-    runs: a call nobody can account for is not made."""
-    try:
-        usage = await ledger_of(request).today(billed)
-    except Exception:
-        log.error("ledger_unavailable")
-        raise failure(503, "USAGE_LEDGER_UNAVAILABLE", "AI usage cannot be checked right now.") from None
-    if spend.over_limit(usage):
-        raise spend.limit_reached(usage)
+def correlation_of(request: Request) -> str:
+    return str(getattr(request.state, "correlation_id", "-"))
 
 
-def charge(request: Request, billed: spend.Billed, *charges: spend.Charge) -> None:
-    """Record what a call cost. The write runs as its own task so a caller hanging up (a closed stream) cannot
-    cancel it; a failed write is logged, since the money is already spent."""
-    if not charges:
-        return
-    ledger, correlation = ledger_of(request), getattr(request.state, "correlation_id", "-")
-
-    async def write() -> None:
-        for c in charges:
-            try:
-                await ledger.record(billed, c, correlation)
-            except Exception:
-                log.error("ledger_write_failed", extra={"operation": c.operation, "cost_usd": c.cost_usd})
-
-    task = asyncio.ensure_future(write())
-    _recordings.add(task)
-    task.add_done_callback(_recordings.discard)
-
-
-def priced(
-    operation: str, model: str, tokens_in: int, tokens_out: int = 0, estimated: bool = False
-) -> spend.Charge:
-    return spend.Charge(
-        operation, model, tokens_in, tokens_out, spend.cost(model, tokens_in, tokens_out), estimated
-    )
+def total(usage: openai_client.Usage) -> int | None:
+    if usage.tokens_in is None or usage.tokens_out is None:
+        return None
+    return usage.tokens_in + usage.tokens_out
 
 
 def message_text(messages: list[dict[str, Any]]) -> str:
@@ -165,7 +133,7 @@ async def usage_today(
 ) -> spend.Usage:
     """A user's spend today, their daily limit and when it resets, for a service showing it to that user."""
     try:
-        return await ledger_of(request).today(spend.Billed(user_id=user_id, org_id=org_id, role=role))
+        return await billing_of(request).ledger.today(spend.Billed(user_id=user_id, org_id=org_id, role=role))
     except Exception:
         raise failure(503, "USAGE_LEDGER_UNAVAILABLE", "AI usage cannot be checked right now.") from None
 
@@ -175,12 +143,12 @@ async def execute(
     request: RequestContract, http: Request, _caller: Claims = Depends(requires(AI_CLIENT))
 ) -> Any:
     settings = get_settings()
-    billed = request.billed_to
-    await allowance(http, billed)
+    billed, billing, correlation = request.billed_to, billing_of(http), correlation_of(http)
+    await billing.check(billed)
     try:
         if request.operation == "embed":
             vectors, tokens = await openai_client.embed([request.input or ""])
-            charge(http, billed, priced("embed", settings.embedding_model, tokens))
+            billing.charge(billed, correlation, priced("embed", settings.embedding_model, tokens))
             return ResponseContract(
                 vectors=vectors, model_version=settings.embedding_model, usage_tokens=tokens
             )
@@ -193,66 +161,21 @@ async def execute(
             # Opened before the response starts, so a provider failure is still a plain error status.
             stream = openai_client.stream_chat(messages, request.max_tokens)
             first = await anext(stream)
-            bill = StreamBill(http, billed, settings.chat_model, message_text(messages))
+            bill = StreamBill(billing, billed, correlation, settings.chat_model, message_text(messages))
             return StreamingResponse(events(first, stream, bill), media_type="text/event-stream")
         reply = await openai_client.generate(
             messages, request.max_tokens, request.response_schema, name=request.schema_name or ""
         )
     except PROVIDER_ERRORS as error:
         provider_error(error)
-    tokens_in, tokens_out = reply.usage.tokens_in, reply.usage.tokens_out
-    charge(
-        http,
-        billed,
-        priced(
-            "generate",
-            settings.chat_model,
-            spend.estimate_tokens(message_text(messages)) if tokens_in is None else tokens_in,
-            spend.estimate_tokens(reply.text) if tokens_out is None else tokens_out,
-            tokens_in is None or tokens_out is None,
-        ),
-    )
+    charge = reply_charge("generate", settings.chat_model, message_text(messages), reply.text, reply.usage)
+    billing.charge(billed, correlation, charge)
     return ResponseContract(
         output=reply.text,
         model_version=settings.chat_model,
         usage_tokens=total(reply.usage),
         finish_reason=reply.finish_reason,
     )
-
-
-def total(usage: openai_client.Usage) -> int | None:
-    if usage.tokens_in is None or usage.tokens_out is None:
-        return None
-    return usage.tokens_in + usage.tokens_out
-
-
-class StreamBill:
-    """Charges a streamed reply once, however it ends: with OpenAI's counts when the usage chunk arrived, or an
-    estimate from the text when the stream broke or the caller hung up first."""
-
-    def __init__(self, request: Request, billed: spend.Billed, model: str, prompt: str) -> None:
-        self.request, self.billed, self.model, self.prompt = request, billed, model, prompt
-        self.text: list[str] = []
-        self.done = False
-
-    def close(self, usage: openai_client.Usage | None = None) -> None:
-        if self.done:
-            return
-        self.done = True
-        tokens_in = usage.tokens_in if usage else None
-        tokens_out = usage.tokens_out if usage else None
-        exact = tokens_in is not None and tokens_out is not None
-        charge(
-            self.request,
-            self.billed,
-            priced(
-                "stream",
-                self.model,
-                spend.estimate_tokens(self.prompt) if tokens_in is None else tokens_in,
-                spend.estimate_tokens("".join(self.text)) if tokens_out is None else tokens_out,
-                not exact,
-            ),
-        )
 
 
 async def events(
@@ -289,7 +212,8 @@ async def events(
 async def rerank_documents(
     request: RerankRequest, http: Request, _caller: Claims = Depends(requires(AI_CLIENT))
 ) -> RerankResponse:
-    await allowance(http, request.billed_to)
+    billing = billing_of(http)
+    await billing.check(request.billed_to)
     try:
         scores, tokens = await rerank.rerank(request.query, request.documents)
     except PROVIDER_ERRORS as error:
@@ -300,9 +224,10 @@ async def rerank_documents(
         guess = sum(
             spend.estimate_tokens(request.query) + spend.estimate_tokens(d) for d in request.documents
         )
-        charge(http, request.billed_to, priced("rerank", model, guess, estimated=True))
+        charge = priced("rerank", model, guess, estimated=True)
     else:
-        charge(http, request.billed_to, priced("rerank", model, tokens))
+        charge = priced("rerank", model, tokens)
+    billing.charge(request.billed_to, correlation_of(http), charge)
     return RerankResponse(scores=scores, model_version=model, usage_tokens=tokens)
 
 
@@ -329,21 +254,21 @@ async def ingest_pdf(
     billed = spend.Billed(user_id=billed_user, org_id=billed_org, role=billed_role)
     if request.headers.get("content-type", "").split(";")[0].strip() != "application/pdf":
         raise failure(415, "UNSUPPORTED_MEDIA_TYPE", "Send the PDF as application/pdf.")
-    assert _ingest_slots is not None
     try:
         openai_client.get_client()  # without a key every model call would fail: refuse before any work
     except openai_client.NotConfiguredError as error:
         provider_error(error)
-    await allowance(request, billed)
+    await billing_of(request).check(billed)
     with tempfile.TemporaryDirectory(prefix="ingest-") as folder:
         path = Path(folder) / "document.pdf"
         await receive(request, path)
-        with costs.recording(getattr(request.state, "correlation_id", "-")) as record:
-            record.outcome = (
-                "error"  # until it ends otherwise; an unexpected error is a 500 for the caller to retry
-            )
+        with costs.recording(correlation_of(request)) as record:
+            # "error" until it ends otherwise: an unexpected error is a 500 for the caller to retry
+            record.outcome = "error"
             try:
-                result = await unless_disconnected(request, _ingest(path, title))
+                result = await unless_disconnected(
+                    request, _ingest(request.app.state.ingest_slots, path, title)
+                )
                 record.outcome = "indexed"
             except IngestError as e:
                 record.outcome, record.failure_reason = "failed", e.reason
@@ -358,7 +283,12 @@ async def ingest_pdf(
                 ) from None
             finally:
                 costs.write(record, None)
-                charge(request, billed, *ingest_charges(record))
+                billing_of(request).charge(billed, correlation_of(request), *ingest_charges(record))
+    return indexed_response(result)
+
+
+def indexed_response(result: IngestResult) -> IngestResponse:
+    """The ingest result as the contract sends it: chunks with their embed text and vector, and figure crops."""
     return IngestResponse(
         outcome="indexed",
         page_count=result.pages,
@@ -389,30 +319,8 @@ async def ingest_pdf(
     )
 
 
-def ingest_charges(record: costs.IngestCost) -> list[spend.Charge]:
-    """An ingest's model calls, one charge per model: the vision passes and the chunk embeddings."""
-    by_model: dict[str, list[int]] = {}
-    for calls in record.kinds.values():
-        if calls.model and calls.calls:
-            totals = by_model.setdefault(calls.model, [0, 0, 0])
-            totals[0] += calls.prompt_tokens
-            totals[1] += calls.cached_tokens
-            totals[2] += calls.completion_tokens
-    out = [
-        spend.Charge("ingest", model, t_in, t_out, spend.cost(model, t_in, t_out, cached))
-        for model, (t_in, cached, t_out) in by_model.items()
-    ]
-    if record.embed_tokens:
-        model = get_settings().embedding_model
-        out.append(
-            spend.Charge("ingest", model, record.embed_tokens, 0, spend.cost(model, record.embed_tokens))
-        )
-    return out
-
-
-async def _ingest(path: Path, title: str) -> Any:
-    assert _ingest_slots is not None
-    async with _ingest_slots:
+async def _ingest(slots: asyncio.Semaphore, path: Path, title: str) -> IngestResult:
+    async with slots:
         with costs.stage("total"):
             return await ingest(path, title, vision_config(get_settings()))
 

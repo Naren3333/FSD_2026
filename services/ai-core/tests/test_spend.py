@@ -12,11 +12,13 @@ from conftest import (
     MemoryLedger,
     chat_response,
     chat_stream,
+    configured,
     embedding_response,
 )
 from fastapi.testclient import TestClient
 
-import main
+import billing
+import settings
 import spend
 from ingest import costs
 
@@ -42,13 +44,15 @@ def test_prices() -> None:
 
 
 def test_price_overrides(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setenv("MODEL_PRICES", '{"gpt-6-luna": [1, 0.5, 2]}')
+    overridden = configured(model_prices={"gpt-6-luna": (1, 0.5, 2)})
+    monkeypatch.setattr("spend.get_settings", lambda: overridden)
     assert spend.cost("gpt-6-luna", 1_000_000, 1_000_000) == pytest.approx(3.0)
 
 
 def test_limits(monkeypatch: pytest.MonkeyPatch) -> None:
     assert (spend.limit("student"), spend.limit("teacher")) == (5.0, 10.0)
-    monkeypatch.setenv("SPEND_LIMIT_STUDENT_USD", "2.5")
+    lower = configured(spend_limit_student_usd=2.5)
+    monkeypatch.setattr("spend.get_settings", lambda: lower)
     assert spend.limit("student") == 2.5
 
 
@@ -138,8 +142,13 @@ def test_ingest_charges_per_model() -> None:
     record.of("describe").prompt_tokens = 500
     record.of("cached").model = "gpt-6-luna"  # only cache hits: nothing to pay
     record.embed_tokens = 3000
-    charges = main.ingest_charges(record)
+    charges = billing.ingest_charges(record)
     assert [(c.model, c.tokens_in, c.tokens_out) for c in charges] == [
         ("gpt-5.4-mini", 1500, 200),
         ("text-embedding-3-small", 3000, 0),
     ]
+
+
+def test_price_overrides_are_read_from_json() -> None:
+    assert settings._prices('{"gpt-x": [1, 0.5, "2"]}') == {"gpt-x": (1.0, 0.5, 2.0)}
+    assert settings._prices("  ") == {}

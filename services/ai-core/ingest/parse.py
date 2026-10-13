@@ -1,4 +1,4 @@
-"""PDF → styled text blocks and tables per page with PyMuPDF (PLAN.md §6.1 ingest step 2). Blocking: run it
+"""PDF → styled text blocks and tables per page with PyMuPDF. Blocking: run it
 in a thread.
 
 Tables come from ingest.tables (inside the vision pass's boxes, or find_tables "lines" without one); their
@@ -8,12 +8,12 @@ is joined into one. Described figures (ingest.figures) take their words and capt
 the same way, unless they cover most of the page. Repeated headers and footers are dropped here; headings are
 detected from the blocks' styles in ingest.headings.
 
-A page without a text layer that the vision pass transcribed (OCR, RAG_PLAN Iteration 13) takes its text from
+A page without a text layer that the vision pass transcribed (OCR) takes its text from
 the transcript instead: headings become blocks sized above the document's body text (by level), paragraphs
 body-size blocks, and tables vision tables, laid out top to bottom in the page's middle band (so they are
 never mistaken for headers or footers). Transcribed pages are listed in `Document.ocr_pages`.
 
-A page set in two columns (RAG_PLAN Iteration 14) has a gutter: a vertical strip in the middle of the page that no
+A page set in two columns has a gutter: a vertical strip in the middle of the page that no
 column's text crosses (`_columns`). Its blocks are put in reading order (the left column, then the right, band by
 band between blocks spanning both), and `reading_key` places tables and figures by the same order; a page without
 a gutter keeps the PDF's own order and is placed top to bottom.
@@ -30,9 +30,10 @@ import pymupdf
 
 from ingest import tables as table_extraction
 from ingest.figures import Figure, page_figures
+from ingest.pages import MIN_PAGE_CHARS
 from ingest.strings import join_lines, unligature
 from ingest.tables import Table
-from ingest.vision import MIN_PAGE_CHARS, PageVision, SeenText
+from ingest.vision import PageVision, SeenText
 
 MAX_EMPTY_SHARE = 0.5  # more empty pages than this → NO_TEXT_LAYER
 REPEAT_SHARE = 0.6  # a header/footer appears on more than this share of pages...
