@@ -308,6 +308,13 @@ func TestAnUnreadablePDFFailsWithItsReasonAndReindexRecovers(t *testing.T) {
 func TestSearchFusesRerankRelatedAndAccess(t *testing.T) {
 	f := newFixture(t)
 	notes := f.upload("teaching_material")
+	f.runAll()
+	// The rubric's passages differ from the notes': search keeps one copy of identical text (see distinct).
+	rubric := indexedResult()
+	for i := range rubric.Chunks {
+		rubric.Chunks[i].Content = "Rubric. " + rubric.Chunks[i].Content
+	}
+	f.ai.ingest = f.reply(rubric)
 	f.upload("rubric")
 	f.runAll()
 	ctx := context.Background()

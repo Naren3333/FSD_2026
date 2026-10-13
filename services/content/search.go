@@ -215,7 +215,9 @@ func (s server) embedQuery(ctx context.Context, query string, who billed) ([]flo
 }
 
 const legColumns = "id,document_id,doc_type,section_path,page_start,page_end,content,kind,source,image,cites"
-const resultColumns = "r.id,r.document_id,(SELECT title FROM documents d WHERE d.id=r.document_id),r.doc_type,r.section_path,r.page_start,r.page_end,r.content,r.kind,r.source,r.image,r.cites"
+
+// resultColumns are a leg's hits with their document's title; the legs select from r JOIN documents d.
+const resultColumns = "r.id,r.document_id,d.title,r.doc_type,r.section_path,r.page_start,r.page_end,r.content,r.kind,r.source,r.image,r.cites"
 
 func scanHits(rows pgx.Rows) ([]hit, error) {
 	defer rows.Close()

@@ -5,6 +5,7 @@ import (
 	"learning/platform"
 	"log/slog"
 	"net/http"
+	"sync"
 )
 
 type skillStatus int
@@ -18,6 +19,22 @@ const (
 // skills checks that a node is a skill in the caller's curriculum.
 type skills interface {
 	check(r *http.Request, skill string) skillStatus
+}
+
+// checkAll checks every skill at once and reports the worst answer: unavailable if Curriculum couldn't answer for
+// any of them, otherwise invalid if any is not a skill.
+func checkAll(r *http.Request, s skills, ids []string) skillStatus {
+	statuses := make([]skillStatus, len(ids))
+	var wg sync.WaitGroup
+	for i, id := range ids {
+		wg.Go(func() { statuses[i] = s.check(r, id) })
+	}
+	wg.Wait()
+	worst := skillValid
+	for _, status := range statuses {
+		worst = max(worst, status)
+	}
+	return worst
 }
 
 // curriculum asks the Curriculum service, forwarding the caller's token.

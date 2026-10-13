@@ -3,6 +3,7 @@ package main
 import (
 	"errors"
 	"learning/platform"
+	"slices"
 	"strings"
 )
 
@@ -79,6 +80,17 @@ func (q Question) validate() error {
 		return errors.New("unsupported question type")
 	}
 	return kind.validate(q)
+}
+
+// skillIDs are the distinct skills the questions assess.
+func (v Assessment) skillIDs() []string {
+	var ids []string
+	for _, q := range v.Questions {
+		if !slices.Contains(ids, q.Skill) {
+			ids = append(ids, q.Skill)
+		}
+	}
+	return ids
 }
 
 func (v Assessment) Public() PublicAssessment {

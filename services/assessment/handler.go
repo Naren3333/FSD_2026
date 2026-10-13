@@ -39,19 +39,15 @@ func (s server) create(w http.ResponseWriter, r *http.Request) {
 	if !s.access.TeacherOf(w, r, v.Classroom) {
 		return
 	}
-	checked := map[string]bool{}
-	for i, q := range v.Questions {
-		if !checked[q.Skill] {
-			switch s.skills.check(r, q.Skill) {
-			case skillUnavailable:
-				platform.Unavailable(w, "Curriculum unavailable.")
-				return
-			case skillInvalid:
-				platform.Error(w, http.StatusUnprocessableEntity, "INVALID_SKILL", "Every skill must exist in your curriculum.")
-				return
-			}
-			checked[q.Skill] = true
-		}
+	switch checkAll(r, s.skills, v.skillIDs()) {
+	case skillUnavailable:
+		platform.Unavailable(w, "Curriculum unavailable.")
+		return
+	case skillInvalid:
+		platform.Error(w, http.StatusUnprocessableEntity, "INVALID_SKILL", "Every skill must exist in your curriculum.")
+		return
+	}
+	for i := range v.Questions {
 		v.Questions[i].ID = uuid.NewString()
 	}
 	v.ID = uuid.NewString()
