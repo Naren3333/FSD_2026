@@ -34,6 +34,17 @@ PDF uploads are indexed by Content's worker through ai-core. A document's `statu
 
 A chat turn needs Content, ai-core with an OpenAI key, and (for reranking) a Voyage key. Without a key the turn ends with an `AI_UNAVAILABLE` error event and the message is saved with outcome `error`; without Voyage, search falls back to RRF order and the relevance floor is skipped. `RELEVANCE_FLOOR` (default 0.61, fsd_test's tuned value for Voyage rerank scores) and `ANSWER_MAX_TOKENS` (800) are optional environment settings. Each saved answer records its rewritten query, the chunk ids it was given, its citations, prompt version, model, tokens and latency, which is what to look at when an answer is wrong. The Postgres store tests run with `CHATBOT_TEST_DATABASE_URL` pointing at a scratch database.
 
+## Retrieval eval (golden set)
+
+`scripts/eval/` scores Content's search through Kong as real local users, with fsd_test's golden queries (`golden.yaml`, 267 queries) and the same scoring, so results compare with fsd_test's runs. The test PDFs are course material and are not in this repository: they are read from `EVAL_PDF_DIR` (default `../fsd_test/data/test_pdfs`), as listed in `corpus.yaml`.
+
+1. `python scripts/eval/load_corpus.py` creates the classrooms "Golden eval C1" and "Golden eval C2" as `teacher`, enrolls `student` in C1, creates a second local test student `eval-student2` for C2 (its generated password and the classroom and document ids are kept in `.local/eval-corpus.json`), uploads the PDFs and waits for indexing. It is safe to re-run.
+2. `python scripts/eval/run_golden.py --rerank --holdout [--label NAME] [--compare .local/eval-runs/EARLIER.json]` prints hit@1/3/5, MRR, recall, leaks and the refusal-floor table, including where the chatbot's `RELEVANCE_FLOOR` 0.61 falls. It exits 1 on a leak. Runs are saved in `.local/eval-runs/`.
+
+Costs: indexing pays for embeddings and for vision calls on pages ai-core has not cached (copying fsd_test's `data/table_vision/` into ai-core's cache volume under `vision/`, owned by uid 10001, makes the vision pass free); each eval query pays one embedding and one Voyage rerank per classroom searched. Teacher queries search both classrooms and keep the best-scoring results, because search is per classroom. Queries with a `topic_ids` filter are skipped: Content has no topics.
+
+Baseline (2026-10-13, `rerank-3`, all 266 runnable queries): hit@1 0.959, hit@3 0.991, MRR 0.975, recall@5 0.962, 0 leaks; held-back split MRR 0.967. The best refusal floor is 0.613, which refuses 93% of unanswerable queries and keeps 96% of correct answers. These match fsd_test's run on the same queries.
+
 ## Outbox retry and broker recovery
 
 Inspect only the affected service's `outbox` using its own database identity. Rows with `published_at IS NULL AND attempts >= 12` require operator action after repairing the broker. To retry a reviewed event, use a parameterized update on that specific event ID: set `attempts=0, next_attempt=now()` while retaining its original `id`, payload and creation time. Never invent a replacement grade or delete outbox history to clear an alert.

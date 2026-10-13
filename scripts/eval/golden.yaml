@@ -1,0 +1,1747 @@
+# Golden retrieval queries, ported from fsd_test's knowledge/eval/golden.yaml (its RAG_PLAN.md has the history).
+# Run with scripts/eval/run_golden.py after scripts/eval/load_corpus.py. Corpus: corpus.yaml (CSD lecture decks + gen-* stand-ins).
+# Users: t1 = teacher (C1 and C2), s1 = student (C1 only), s2 = eval-student2 (C2 only).
+# C1: decks 01-06, 10, 11, the rubric, the marking scheme, the Git handout. C2: 09 Basic Security, 12 Automation.
+# `page` is the slide the answer is on; several entries mean any of them counts.
+# Since Iteration 12 the `tables` / `figures` queries are `kind`-checked: only a table / figure chunk counts.
+
+# Unless tagged `group: prose`, queries are about the slide decks (group "default" = slides).
+# --- s1: paraphrases (semantic) -------------------------------------------------------------
+- id: waterfall-weakness
+  as: s1
+  query: what goes wrong when a team follows a fixed plan rigidly
+  expect: [{title: Software Processes, page: 7}]
+- id: devops-antipattern
+  as: s1
+  query: is it a good idea to create a separate DevOps team that the developers hand software to
+  expect: [{title: Software Processes, page: 21}]
+- id: shift-left
+  as: s1
+  query: why test for security problems early instead of just before release
+  expect: [{title: Software Processes, page: 23}]
+- id: good-user-story
+  as: s1
+  query: what qualities should a well written user story have
+  expect: [{title: "User Stories, Estimation and Planning", page: 20}]
+- id: card-estimation
+  as: s1
+  query: estimating stories as a team game using numbered cards
+  expect: [{title: "User Stories, Estimation and Planning", page: 27}, {title: "User Stories, Estimation and Planning", page: 26}]
+- id: burndown-off-track
+  as: s1
+  query: what should the team do halfway through the sprint if remaining work is not going down
+  expect: [{title: "User Stories, Estimation and Planning", page: 37}]
+- id: git-three-states
+  as: s1
+  query: difference between a modified file, a staged file and a committed file
+  expect: [{title: Collaboration Methods, page: 10}, {title: Collaboration Methods (Revised), page: 9}]
+- id: merge-conflict
+  as: s1
+  query: how do I resolve a conflict when two branches changed the same lines
+  expect: [{title: Collaboration Methods, page: 25}, {title: Git Workflow Handout}, {title: Collaboration Methods (Revised), page: 23},
+           {title: Git Command Cheat Sheet}]
+- id: circular-dependency
+  as: s1
+  query: two classes need each other in their constructors and the app fails to start
+  expect: [{title: Software Design, page: 17}]
+- id: rest-naming
+  as: s1
+  query: should URL paths in an API be named with nouns or verbs
+  expect: [{title: Software Design, page: 26}]
+- id: orm-mismatch
+  as: s1
+  query: why is it hard to store an inheritance hierarchy of objects in relational tables
+  expect: [{title: Persistence, page: 11}]
+- id: embeddings
+  as: s1
+  query: turning sentences into numeric vectors so similar meanings can be compared
+  expect: [{title: Persistence, page: 23}]
+- id: definition-of-ready
+  as: s1
+  query: when is a backlog item ready to be pulled into a sprint
+  expect: [{title: Sprint Planning and Execution, page: 5}, {title: Scanned Sprint Planning, page: 5}]
+- id: boundary-values
+  as: s1
+  query: why do bugs tend to appear at the edges of valid input ranges
+  expect: [{title: Software Testing, page: 11}, {title: Software Testing Revision Notes}]
+- id: mocking
+  as: s1
+  query: how to unit test code that talks to a database without using the real database
+  expect: [{title: Software Testing, page: 17}, {title: Software Testing Revision Notes}]
+- id: tests-first
+  as: s1
+  query: writing the tests before writing the implementation
+  expect: [{title: Software Testing, page: 7}, {title: Software Testing, page: 8}, {title: Software Testing Revision Notes}]
+- id: coverage-limits
+  as: s1
+  query: can a test suite with high coverage still miss bugs
+  expect: [{title: Software Testing, page: 13}, {title: Software Testing Revision Notes}]
+- id: two-hats
+  as: s1
+  query: should I add new features at the same time as restructuring code
+  expect: [{title: "Code Review, Refactoring and Pair Programming", page: 12}]
+- id: tech-debt
+  as: s1
+  query: the cost of taking shortcuts in code quality that make later changes harder
+  expect: [{title: "Code Review, Refactoring and Pair Programming", page: 10}]
+- id: ping-pong
+  as: s1
+  query: one programmer writes a failing test and the partner writes code to make it pass
+  expect:
+    - {title: "Code Review, Refactoring and Pair Programming", page: 31}
+    - {title: "Code Review, Refactoring and Pair Programming", page: 32}
+    - {title: "Code Review, Refactoring and Pair Programming", page: 33}
+    - {title: "Code Review, Refactoring and Pair Programming", page: 34}
+
+# --- s1: rare terms (keyword) -----------------------------------------------------------------
+- id: aaa-pattern
+  as: s1
+  query: Arrange Act Assert
+  expect: [{title: Software Testing, page: 15}, {title: Software Testing Revision Notes}]
+- id: llewellyn-falco
+  as: s1
+  query: Llewellyn Falco
+  expect: [{title: "Code Review, Refactoring and Pair Programming", page: 30}]
+- id: idea-folder
+  as: s1
+  query: .idea IntelliJ files in git
+  expect: [{title: Collaboration Methods, page: 35}, {title: Collaboration Methods (Revised), page: 33}]
+- id: handout-pr-review
+  as: s1
+  query: what does a pull request need before it can be merged
+  expect: [{title: Git Workflow Handout}, {title: Collaboration Methods, page: 33}, {title: Collaboration Methods (Revised), page: 31}]
+
+# --- t1: teacher-only material and C2 -------------------------------------------------------
+- id: rubric-version-control
+  as: t1
+  query: how many marks does a team get for version control in the project
+  expect: [{title: CSD Team Project Rubric}]
+- id: marking-partitions
+  as: t1
+  query: what answer is expected for the 20 to 80 character input partition question
+  expect: [{title: Quiz 3 Marking Scheme}]
+- id: sql-injection-t1
+  as: t1
+  query: how do prepared statements stop SQL injection
+  expect: [{title: Basic Security, page: 6}]
+- id: jwt-t1
+  as: t1
+  query: what is inside a JSON web token and how is it verified
+  expect: [{title: Basic Security, page: 24}, {title: Basic Security, page: 25}]
+- id: vm-vs-container-t1
+  as: t1
+  query: virtual machines versus containers startup time and isolation
+  expect: [{title: Automation and Deployment, page: 7}]
+
+# --- s2: C2 student sees C2 ------------------------------------------------------------------
+- id: password-salt-s2
+  as: s2
+  query: why add a salt before hashing passwords
+  expect: [{title: Basic Security, page: 16}]
+  expect_none_from: [CSD Team Project Rubric, Quiz 3 Marking Scheme]
+
+# --- s1 leak checks: exact wording of hidden material must return none of it ----------------
+- id: leak-rubric-wording
+  as: s1
+  query: Kestrelbrook bonus extra mark signed commits
+  expect_none_from: [CSD Team Project Rubric]
+- id: leak-marking-wording
+  as: s1
+  query: marrowgate boundary copied answer academic integrity review
+  expect_none_from: [Quiz 3 Marking Scheme]
+- id: leak-c2-security
+  as: s1
+  query: salted password hashing with a unique salt per user
+  expect_none_from: [Basic Security]
+- id: leak-c2-deployment
+  as: s1
+  query: continuous delivery versus continuous deployment to production
+  expect_none_from: [Automation and Deployment]
+
+# --- prose PDFs (data/test_pdfs/pure_pdfs): reports, a standard and a paper ------------------
+- id: nist-core-functions
+  group: prose
+  as: s1
+  query: what are the four functions of the AI risk management framework core
+  expect: [{title: NIST AI Risk Management Framework, page: 25}]
+- id: nist-bias-categories
+  group: prose
+  as: s1
+  query: what kinds of bias in AI systems should organisations manage
+  expect: [{title: NIST AI Risk Management Framework, page: 23}]
+- id: nist-trustworthy
+  group: prose
+  as: s1
+  query: characteristics that make an AI system trustworthy
+  expect: [{title: NIST AI Risk Management Framework, page: 17}]
+- id: nist-vs-software
+  group: prose
+  as: s1
+  query: how are risks from AI different from risks in ordinary software
+  expect: [{title: NIST AI Risk Management Framework, page: 43}]
+- id: rag-paper-chunking
+  group: prose
+  as: s1
+  query: splitting PDF text into coherent pieces along paragraphs or sections to improve retrieval
+  expect: [{title: Developing RAG-based LLM Systems from PDFs, page: 8}]
+- id: rag-paper-finetune
+  group: prose
+  as: s1
+  query: when should I fine-tune a model instead of using retrieval augmented generation
+  expect: [{title: Developing RAG-based LLM Systems from PDFs, page: 4}, {title: Developing RAG-based LLM Systems from PDFs, page: 5}]
+# ---- Iteration 10: questions answered by a table (row or cell level) ----
+- id: table-idempotent-methods
+  group: tables
+  as: s1
+  query: which HTTP methods are idempotent but not safe
+  expect: [{title: Software Design, page: 23, kind: table}]
+- id: table-story-points-iteration-3
+  group: tables
+  as: s1
+  query: how many story points were completed during iteration 3
+  expect: [{title: "User Stories, Estimation and Planning", page: 38, kind: table}]
+- id: table-sprint-goal-participants
+  group: tables
+  as: s1
+  query: who takes part in setting the sprint goal during sprint planning
+  expect: [{title: Sprint Planning and Execution, page: 6, kind: table}, {title: Scanned Sprint Planning, page: 6, kind: table}]
+- id: table-cognito-vs-self-built
+  group: tables
+  as: s2
+  query: how does Amazon Cognito compare with a self-built login system on scalability
+  expect: [{title: Basic Security, page: 27, kind: table}]
+- id: table-course-schedule-testing-week
+  group: tables
+  as: s1
+  query: which week of the course covers software testing
+  expect: [{title: Software Processes, page: 2, kind: table}, {title: "User Stories, Estimation and Planning", page: 2, kind: table},
+           {title: Collaboration Methods, page: 3, kind: table}, {title: Software Design, page: 3, kind: table}, {title: Persistence, page: 3, kind: table},
+           {title: Sprint Planning and Execution, page: 2, kind: table}, {title: Software Testing, page: 2, kind: table},
+           {title: Collaboration Methods (Revised), page: 2, kind: table}, {title: Scanned Sprint Planning, page: 2, kind: table}]
+- id: table-transformer-bleu
+  group: tables
+  as: s1
+  query: BLEU score of the big Transformer on English-to-German newstest2014
+  expect: [{title: Attention Is All You Need, page: 8, kind: table}]
+- id: table-self-attention-path-length
+  group: tables
+  as: s1
+  query: maximum path length and complexity per layer of self-attention versus recurrent layers
+  expect: [{title: Attention Is All You Need, page: 6, kind: table}]
+- id: table-constituency-parsing-f1
+  group: tables
+  as: s1
+  query: WSJ 23 F1 of the Transformer on English constituency parsing
+  expect: [{title: Attention Is All You Need, page: 10, kind: table}]
+- id: table-govern-decommissioning
+  group: tables
+  as: s1
+  query: which GOVERN subcategory covers decommissioning AI systems safely
+  expect: [{title: NIST AI Risk Management Framework, page: 28, kind: table}]
+- id: table-clip-mnist
+  group: tables
+  as: s1
+  query: zero-shot CLIP accuracy on MNIST and SVHN compared with linear probes
+  expect: [{title: Learning Transferable Visual Models From Natural Language Supervision, page: 46, kind: table}]
+# ---- Iteration 11: questions answered by a figure (diagram or chart content) ----
+- id: figure-scrum-share-pie
+  group: figures
+  as: s1
+  query: what share of agile teams use Scrum according to the survey pie chart
+  expect: [{title: Software Processes, page: 10, kind: figure}]
+- id: figure-epic-story-task-durations
+  group: figures
+  as: s1
+  query: how long do an epic, a story and a task typically take
+  expect: [{title: "User Stories, Estimation and Planning", page: 36, kind: figure}]
+- id: figure-git-file-states
+  group: figures
+  as: s1
+  query: which states does a file move between in git, from unmodified to staged
+  expect: [{title: Collaboration Methods, page: 12, kind: figure}, {title: Collaboration Methods (Revised), page: 11, kind: figure}]
+- id: figure-jpa-layers
+  group: figures
+  as: s1
+  query: what layers sit between the application code and the relational database when using JPA
+  expect: [{title: Persistence, page: 12, kind: figure}]
+- id: figure-password-salt-flow
+  group: figures
+  as: s2
+  query: how is a salt combined with a password before it is hashed
+  expect: [{title: Basic Security, page: 16, kind: figure}]
+- id: figure-defect-cost-by-phase
+  group: figures
+  as: s2
+  query: how does the cost to fix a defect change from design to production
+  expect: [{title: Automation and Deployment, page: 20, kind: figure}]
+- id: figure-deployment-pipeline-steps
+  group: figures
+  as: s2
+  query: what are the steps from local development to production in the deployment workflow
+  expect: [{title: Automation and Deployment, page: 19, kind: figure}]
+- id: figure-scaled-dot-product-steps
+  group: figures
+  as: s1
+  query: in what order are MatMul, Scale, Mask and SoftMax applied in scaled dot-product attention
+  expect: [{title: Attention Is All You Need, page: 4, kind: figure}]
+- id: figure-clip-data-efficiency
+  group: figures
+  as: s1
+  query: which dataset needs the most labeled examples per class for a linear probe to match zero-shot CLIP
+  expect: [{title: Learning Transferable Visual Models From Natural Language Supervision, page: 10, kind: figure}]
+- id: figure-rmf-functions-center
+  group: figures
+  as: s1
+  query: which AI RMF function is drawn at the center of Map, Measure and Manage
+  expect: [{title: NIST AI Risk Management Framework, page: 25, kind: figure}]
+
+# ==== Iteration 12 (RAG_PLAN.md) ====
+# origin: blind = knowledge/eval/blind_queries.yaml, written from titles only before reading content.
+# split: holdout = never looked at while tuning (run_golden.py --holdout); chosen at random per style.
+# Group as before; style = clean / vague / typo / multi / followup.
+- id: blind-agile-vs-waterfall
+  as: s1
+  style: vague
+  query: whats the actual difference between agile and waterfall, is waterfall just bad
+  expect:
+  - {title: Software Processes, page: 7}
+  - {title: Software Processes, page: 8}
+  origin: blind
+  split: holdout
+- id: blind-scrum-roles
+  as: s1
+  style: clean
+  query: who does what in scrum
+  expect:
+  - {title: Software Processes, page: 11}
+  - {title: 'User Stories, Estimation and Planning', page: 6}
+  origin: blind
+  split: holdout
+- id: blind-devops-meaning
+  as: s1
+  style: vague
+  query: devops is it a job title or a way of working
+  expect:
+  - {title: Software Processes, page: 21}
+  - {title: Software Processes, page: 20}
+  origin: blind
+  split: holdout
+- {id: blind-kanban, as: s1, style: typo, query: kanban vs scrum which one shud we use for the project, unanswerable: true, origin: blind}
+- id: blind-story-template
+  as: s1
+  style: clean
+  query: how do you write a user story, is there a template
+  expect:
+  - {title: 'User Stories, Estimation and Planning', page: 9}
+  - {title: 'User Stories, Estimation and Planning', page: 15}
+  origin: blind
+- id: blind-acceptance-criteria
+  as: s1
+  style: typo
+  query: acceptence criteria examples
+  expect:
+  - {title: 'User Stories, Estimation and Planning', page: 18}
+  - {title: 'User Stories, Estimation and Planning', page: 15}
+  - {title: Software Testing, page: 21}
+  origin: blind
+  split: holdout
+- id: blind-story-points-hours
+  as: s1
+  style: vague
+  query: why estimate in points and not hours
+  expect:
+  - {title: 'User Stories, Estimation and Planning', page: 25}
+  origin: blind
+  split: holdout
+- id: blind-velocity
+  as: s1
+  style: followup
+  query: velocity how is it calculated
+  expect:
+  - {title: 'User Stories, Estimation and Planning', page: 32}
+  origin: blind
+- id: blind-epic-split
+  as: s1
+  style: vague
+  query: my story is too big what do i do
+  expect:
+  - {title: 'User Stories, Estimation and Planning', page: 11}
+  - {title: 'User Stories, Estimation and Planning', page: 17}
+  origin: blind
+- {id: blind-rebase-merge, as: s1, style: typo, query: git rebas vs merg, unanswerable: true, origin: blind, split: holdout}
+- id: blind-undo-commit
+  as: s1
+  style: vague
+  query: how do i undo a commit i already pushed
+  expect:
+  - {title: Collaboration Methods, page: 18}
+  - {title: Collaboration Methods (Revised), page: 16}
+  - {title: Git Command Cheat Sheet}
+  origin: blind
+- id: blind-branching-strategy
+  as: s1
+  style: clean
+  query: what branching strategy should a student team use
+  expect:
+  - {title: Collaboration Methods, page: 31}
+  - {title: Collaboration Methods, page: 32}
+  - {title: Collaboration Methods (Revised), page: 29}
+  - {title: Collaboration Methods (Revised), page: 30}
+  - {title: Git Workflow Handout}
+  origin: blind
+- id: blind-gitignore
+  as: s1
+  style: typo
+  query: gitignore what to put
+  expect:
+  - {title: Collaboration Methods, page: 15}
+  - {title: Collaboration Methods (Revised), page: 13}
+  - {title: Git Command Cheat Sheet}
+  - {title: Collaboration Methods, page: 35}
+  - {title: Collaboration Methods (Revised), page: 33}
+  origin: blind
+- id: blind-pr-etiquette
+  as: s1
+  style: vague
+  query: how big should a pull request be
+  expect:
+  - {title: Git Workflow Handout}
+  origin: blind
+- id: blind-solid
+  as: s1
+  style: typo
+  query: SOLID principals
+  expect:
+  - {title: 'Code Review, Refactoring and Pair Programming', page: 14}
+  origin: blind
+- id: blind-coupling-cohesion
+  as: s1
+  style: clean
+  query: low coupling high cohesion meaning
+  expect:
+  - {title: Software Design, page: 11}
+  - {title: Software Design, page: 10}
+  origin: blind
+- id: blind-dependency-injection
+  as: s1
+  style: vague
+  query: why does spring inject things into my constructor
+  expect:
+  - {title: Software Design, page: 8}
+  - {title: Software Design, page: 9}
+  - {title: Software Design, page: 10}
+  - {title: Software Design, page: 13}
+  - {title: Software Design, page: 14}
+  origin: blind
+- id: blind-rest-status-codes
+  as: s1
+  style: clean
+  query: which HTTP status code to return when validation fails
+  expect:
+  - {title: Software Design, page: 27}
+  origin: blind
+- {id: blind-mvc-layers, as: s1, style: vague, query: controller service repository why so many layers, unanswerable: true, origin: blind, split: holdout}
+- id: blind-orm-what
+  as: s1
+  style: clean
+  query: what is an ORM and why use one
+  expect:
+  - {title: Persistence, page: 9}
+  - {title: Persistence, page: 10}
+  origin: blind
+- {id: blind-n-plus-one, as: s1, style: typo, query: n+1 query problem hibernate, unanswerable: true, origin: blind}
+- id: blind-sql-vs-nosql
+  as: s1
+  style: vague
+  query: sql or nosql for our app
+  expect:
+  - {title: Persistence, page: 21}
+  - {title: Persistence, page: 24}
+  - {title: Persistence, page: 25}
+  origin: blind
+- id: blind-transactions
+  as: s1
+  style: clean
+  query: what does @Transactional do
+  expect:
+  - {title: Persistence, page: 20}
+  origin: blind
+- id: blind-standup
+  as: s1
+  style: vague
+  query: what are we supposed to say at standup
+  expect:
+  - {title: 'User Stories, Estimation and Planning', page: 39}
+  origin: blind
+- id: blind-retro
+  as: s1
+  style: clean
+  query: how to run a sprint retrospective
+  expect:
+  - {title: 'User Stories, Estimation and Planning', page: 40}
+  origin: blind
+- id: blind-sprint-length
+  as: s1
+  style: vague
+  query: how long should a sprint be
+  expect:
+  - {title: 'User Stories, Estimation and Planning', page: 34}
+  - {title: 'User Stories, Estimation and Planning', page: 32}
+  - {title: Software Processes, page: 13}
+  - {title: 'User Stories, Estimation and Planning', page: 5}
+  - {title: 'User Stories, Estimation and Planning', page: 22}
+  - {title: 'User Stories, Estimation and Planning', page: 41}
+  origin: blind
+- {id: blind-dod, as: s1, style: typo, query: DoD scrum, unanswerable: true, origin: blind, split: holdout}
+- id: blind-tdd
+  as: s1
+  style: typo
+  query: TDD
+  expect:
+  - {title: Software Testing, page: 7}
+  - {title: Software Testing, page: 8}
+  - {title: Software Testing Revision Notes}
+  origin: blind
+- id: blind-mock-stub
+  as: s1
+  style: multi
+  query: difference between mocks and stubs and when to use each
+  expect_all:
+  - - {title: Software Testing, page: 17}
+    - {title: Software Testing, page: 18}
+    - {title: Software Testing Revision Notes}
+  - - {title: Software Testing, page: 19}
+    - {title: Software Testing Revision Notes}
+  origin: blind
+- id: blind-unit-vs-integration
+  as: s1
+  style: clean
+  query: unit test vs integration test
+  expect:
+  - {title: Software Testing, page: 14}
+  - {title: Software Testing, page: 20}
+  - {title: Software Testing Revision Notes}
+  origin: blind
+- id: blind-coverage-target
+  as: s1
+  style: vague
+  query: what code coverage percentage is good enough
+  expect:
+  - {title: Software Testing, page: 13}
+  - {title: Software Testing, page: 12}
+  - {title: Software Testing Revision Notes}
+  origin: blind
+- {id: blind-junit-assert, as: s1, style: followup, query: JUnit assertions for exceptions, unanswerable: true, origin: blind}
+- id: blind-code-smells
+  as: s1
+  style: clean
+  query: common code smells
+  expect:
+  - {title: 'Code Review, Refactoring and Pair Programming', page: 9}
+  - {title: 'Code Review, Refactoring and Pair Programming', page: 15}
+  - {title: 'Code Review, Refactoring and Pair Programming', page: 16}
+  - {title: 'Code Review, Refactoring and Pair Programming', page: 17}
+  - {title: 'Code Review, Refactoring and Pair Programming', page: 19}
+  - {title: 'Code Review, Refactoring and Pair Programming', page: 20}
+  - {title: 'Code Review, Refactoring and Pair Programming', page: 22}
+  - {title: 'Code Review, Refactoring and Pair Programming', page: 23}
+  - {title: 'Code Review, Refactoring and Pair Programming', page: 24}
+  - {title: 'Code Review, Refactoring and Pair Programming', page: 25}
+  origin: blind
+  split: holdout
+- id: blind-review-checklist
+  as: s1
+  style: vague
+  query: what should i look for when reviewing someone's code
+  expect:
+  - {title: 'Code Review, Refactoring and Pair Programming', page: 7}
+  - {title: 'Code Review, Refactoring and Pair Programming', page: 5}
+  - {title: 'Code Review, Refactoring and Pair Programming', page: 6}
+  - {title: 'Code Review, Refactoring and Pair Programming', page: 9}
+  - {title: 'Code Review, Refactoring and Pair Programming', page: 25}
+  origin: blind
+- id: blind-pairing-roles
+  as: s1
+  style: typo
+  query: pair programing driver navigator
+  expect:
+  - {title: 'Code Review, Refactoring and Pair Programming', page: 29}
+  - {title: Software Processes, page: 15}
+  - {title: 'Code Review, Refactoring and Pair Programming', page: 4}
+  origin: blind
+- id: blind-refactor-when
+  as: s1
+  style: vague
+  query: when is it worth refactoring
+  expect:
+  - {title: 'Code Review, Refactoring and Pair Programming', page: 13}
+  - {title: 'Code Review, Refactoring and Pair Programming', page: 12}
+  origin: blind
+- {id: blind-xss, as: s2, style: clean, query: what is XSS and how to prevent it, unanswerable: true, origin: blind}
+- id: blind-hash-vs-encrypt
+  as: s2
+  style: multi
+  query: hashing vs encryption for passwords and which to use
+  expect_all:
+  - - {title: Basic Security, page: 15}
+    - {title: Basic Security, page: 16}
+  - - {title: Basic Security, page: 17}
+  origin: blind
+- id: blind-owasp
+  as: s2
+  style: typo
+  query: owasp top 10
+  expect:
+  - {title: Basic Security, page: 6}
+  - {title: Basic Security, page: 12}
+  origin: blind
+- id: blind-https
+  as: s2
+  style: vague
+  query: do i need https for a school project
+  expect:
+  - {title: Basic Security, page: 14}
+  origin: blind
+- id: blind-ci-cd
+  as: s2
+  style: typo
+  query: CI/CD what does it stand for
+  expect:
+  - {title: Automation and Deployment, page: 19}
+  origin: blind
+  split: holdout
+- id: blind-docker-why
+  as: s2
+  style: vague
+  query: why docker instead of just running the jar
+  expect:
+  - {title: Automation and Deployment, page: 15}
+  - {title: Automation and Deployment, page: 14}
+  origin: blind
+- id: blind-github-actions
+  as: s2
+  style: clean
+  query: how to run tests automatically on every push
+  expect:
+  - {title: Automation and Deployment, page: 22}
+  - {title: Automation and Deployment, page: 19}
+  origin: blind
+- {id: blind-rollback, as: s2, style: followup, query: rolling back a bad deployment, unanswerable: true, origin: blind, split: holdout}
+- id: blind-attention-why
+  as: s1
+  style: vague
+  query: why did transformers replace RNNs
+  expect:
+  - {title: Attention Is All You Need, page: 2}
+  - {title: Attention Is All You Need, page: 6}
+  - {title: Attention Is All You Need, page: 7}
+  - {title: Attention Is All You Need, page: 10}
+  group: prose
+  origin: blind
+  split: holdout
+- id: blind-positional-encoding
+  as: s1
+  style: followup
+  query: positional encoding why sine
+  expect:
+  - {title: Attention Is All You Need, page: 6, section: Positional}
+  group: prose
+  origin: blind
+- id: blind-clip-how
+  as: s1
+  style: vague
+  query: how does CLIP learn from images and captions
+  expect:
+  - {title: Learning Transferable Visual Models From Natural Language Supervision, page: 1}
+  - {title: Learning Transferable Visual Models From Natural Language Supervision, page: 4}
+  - {title: Learning Transferable Visual Models From Natural Language Supervision, page: 6}
+  group: prose
+  origin: blind
+- id: blind-rag-pdf-problems
+  as: s1
+  style: clean
+  query: problems building a RAG system from PDF documents
+  expect:
+  - {title: Developing RAG-based LLM Systems from PDFs, page: 7}
+  - {title: Developing RAG-based LLM Systems from PDFs, page: 8}
+  group: prose
+  origin: blind
+- id: blind-nist-govern
+  as: s1
+  style: typo
+  query: AI RMF govern functon
+  expect:
+  - {title: NIST AI Risk Management Framework, page: 26}
+  - {title: NIST AI Risk Management Framework, page: 27}
+  group: prose
+  origin: blind
+- id: blind-ai-risk-who
+  as: s1
+  style: vague
+  query: who is responsible for AI risks in an organisation
+  expect:
+  - {title: NIST AI Risk Management Framework, page: 27}
+  - {title: NIST AI Risk Management Framework, page: 28}
+  - {title: NIST AI Risk Management Framework, page: 14}
+  - {title: NIST AI Risk Management Framework, page: 15}
+  - {title: NIST AI Risk Management Framework, page: 41}
+  - {title: NIST AI Risk Management Framework, page: 42}
+  group: prose
+  origin: blind
+- id: fig-vm-vs-container-engine
+  as: s2
+  style: clean
+  query: in the VM versus container diagram, what sits between the apps and the operating system for containers
+  expect:
+  - {title: Automation and Deployment, page: 7, kind: figure}
+  - {title: Automation and Deployment, page: 5, kind: figure}
+  group: figures
+- id: fig-docker-build-run
+  as: s2
+  style: clean
+  query: what does docker build produce and what does docker run create from it
+  expect:
+  - {title: Automation and Deployment, page: 10, kind: figure}
+  group: figures
+  split: holdout
+- id: fig-ear-war-jar-nesting
+  as: s2
+  style: clean
+  query: 'which Java archive format is nested inside which: EAR, WAR and JAR'
+  expect:
+  - {title: Automation and Deployment, page: 13, kind: figure}
+  group: figures
+- id: fig-environment-promotion
+  as: s2
+  style: clean
+  query: in what order is a release promoted through the environments before production
+  expect:
+  - {title: Automation and Deployment, page: 18, kind: figure}
+  group: figures
+- id: fig-jwt-sign-in-flow
+  as: s2
+  style: clean
+  query: what happens step by step when a client signs in and then calls an API with a JWT
+  expect:
+  - {title: Basic Security, page: 25, kind: figure}
+  group: figures
+  split: holdout
+- id: fig-basic-auth-challenge
+  as: s2
+  style: clean
+  query: what does the server send back to a request without credentials under HTTP basic authentication
+  expect:
+  - {title: Basic Security, page: 14, kind: figure}
+  group: figures
+- id: fig-tdd-cycle
+  as: s1
+  style: clean
+  query: in the TDD loop, what comes after the tests fail for the first time
+  expect:
+  - {title: Software Testing, page: 7, kind: figure}
+  group: figures
+- id: fig-three-way-merge-ancestor
+  as: s1
+  style: clean
+  query: in the three-way merge diagram, which commit is the common ancestor of the two branches
+  expect:
+  - {title: Collaboration Methods, page: 24, kind: figure}
+  - {title: Collaboration Methods (Revised), page: 22, kind: figure}
+  group: figures
+- id: fig-nist-harm-categories
+  as: s1
+  style: clean
+  query: what three groups of potential harm from AI systems does the framework illustrate
+  expect:
+  - {title: NIST AI Risk Management Framework, page: 10, kind: figure}
+  group: figures
+- id: fig-player-class-tables
+  as: s1
+  style: clean
+  query: how is a class hierarchy of players and footballers mapped onto database tables
+  expect:
+  - {title: Persistence, page: 11, kind: figure}
+  group: figures
+  split: holdout
+- id: fig-rag-architecture
+  as: s1
+  style: clean
+  query: what are the stages of the RAG system architecture in the PDF experience report
+  expect:
+  - {title: Developing RAG-based LLM Systems from PDFs, page: 3, kind: figure}
+  group: figures
+  split: holdout
+- id: fig-assistant-chunk-size
+  as: s1
+  style: clean
+  query: what chunk size does the OpenAI assistant vector store use for uploaded files
+  expect:
+  - {title: Developing RAG-based LLM Systems from PDFs, page: 14, kind: figure}
+  group: figures
+  split: holdout
+- id: tab-iaas-os-owner
+  as: s2
+  style: clean
+  query: 'with infrastructure as a service, who manages the operating system: the user or the provider'
+  expect:
+  - {title: Automation and Deployment, page: 9, kind: table}
+  group: tables
+- id: tab-salt-same-password
+  as: s2
+  style: clean
+  query: what happens to the stored hash when the same password is used with different salts
+  expect:
+  - {title: Basic Security, page: 16, kind: table}
+  group: tables
+- id: tab-rag-vs-finetune-fresh-data
+  as: s1
+  style: clean
+  query: 'which approach suits tasks needing up-to-date information: fine-tuning, RAG or a base model'
+  expect:
+  - {title: Developing RAG-based LLM Systems from PDFs, page: 6, kind: table}
+  group: tables
+- id: tab-openai-vs-llama-ease
+  as: s1
+  style: clean
+  query: how easy is the OpenAI assistant API to use for RAG compared with a self-hosted Llama setup
+  expect:
+  - {title: Developing RAG-based LLM Systems from PDFs, page: 13, kind: table}
+  group: tables
+- id: tab-measure-explain-validate
+  as: s1
+  style: clean
+  query: which MEASURE subcategory is about the AI model being explained and validated
+  expect:
+  - {title: NIST AI Risk Management Framework, page: 34, kind: table}
+  group: tables
+  split: holdout
+- id: tab-burndown-iteration-4-start
+  as: s1
+  style: clean
+  query: how many story points were left at the start of iteration 4 in the project burndown example
+  expect:
+  - {title: 'User Stories, Estimation and Planning', page: 38, kind: table}
+  group: tables
+  split: holdout
+- id: tab-agile-manifesto-values
+  as: s1
+  style: clean
+  query: what does the agile manifesto value over processes and tools and over comprehensive documentation
+  expect:
+  - {title: Software Processes, page: 9, kind: table}
+  group: tables
+- id: tab-map-intended-purpose
+  as: s1
+  style: clean
+  query: which MAP category covers establishing the intended purpose and context of an AI system
+  expect:
+  - {title: NIST AI Risk Management Framework, page: 31, kind: table}
+  group: tables
+- id: multi-git-states-commands
+  as: s1
+  style: multi
+  query: what are the states a file goes through in git and which commands move it between them
+  expect_all:
+  - - {title: Collaboration Methods, page: 10}
+    - {title: Collaboration Methods (Revised), page: 9}
+  - - {title: Collaboration Methods, page: 12}
+    - {title: Collaboration Methods (Revised), page: 11}
+    - {title: Collaboration Methods, page: 13}
+    - {title: Collaboration Methods (Revised), page: 12}
+    - {title: Git Command Cheat Sheet}
+  split: holdout
+- id: multi-blackbox-whitebox
+  as: s1
+  style: multi
+  query: compare black box and white box testing and name a technique used for each
+  expect_all:
+  - - {title: Software Testing, page: 9}
+    - {title: Software Testing Revision Notes}
+  - - {title: Software Testing, page: 10}
+    - {title: Software Testing, page: 11}
+    - {title: Software Testing Revision Notes}
+  - - {title: Software Testing, page: 12}
+    - {title: Software Testing Revision Notes}
+  split: holdout
+- id: multi-authn-authz-jwt
+  as: s2
+  style: multi
+  query: difference between authentication and authorization, and how a JWT is used for them
+  expect_all:
+  - - {title: Basic Security, page: 12}
+    - {title: Basic Security, page: 22}
+    - {title: Basic Security, page: 32}
+  - - {title: Basic Security, page: 24}
+    - {title: Basic Security, page: 25}
+    - {title: Basic Security, page: 28}
+    - {title: Basic Security, page: 29}
+- id: multi-monolith-microservices
+  as: s1
+  style: multi
+  query: pros and cons of a monolith versus microservices
+  expect_all:
+  - - {title: Software Design, page: 19}
+  - - {title: Software Design, page: 20}
+  split: holdout
+- id: multi-orm-jpa
+  as: s1
+  style: multi
+  query: what are the benefits and drawbacks of an ORM and what is JPA
+  expect_all:
+  - - {title: Persistence, page: 10}
+  - - {title: Persistence, page: 12}
+    - {title: Persistence, page: 29}
+- id: multi-dor-refinement
+  as: s1
+  style: multi
+  query: what makes a backlog item ready and what happens during backlog refinement in class
+  expect_all:
+  - - {title: Sprint Planning and Execution, page: 5}
+    - {title: Scanned Sprint Planning, page: 5}
+  - - {title: Sprint Planning and Execution, page: 4}
+    - {title: Scanned Sprint Planning, page: 4}
+- id: multi-constructor-vs-field-injection
+  as: s1
+  style: multi
+  query: constructor injection versus field injection, pros and cons of each
+  expect_all:
+  - - {title: Software Design, page: 14}
+    - {title: Software Design, page: 17}
+  - - {title: Software Design, page: 16}
+- id: multi-vm-container-compose
+  as: s2
+  style: multi
+  query: how do containers differ from virtual machines, and how do you run several containers together
+  expect_all:
+  - - {title: Automation and Deployment, page: 7}
+  - - {title: Automation and Deployment, page: 16}
+    - {title: Automation and Deployment, page: 17}
+- id: multi-attention-multihead
+  as: s1
+  style: multi
+  query: how does scaled dot-product attention work and why use multiple heads
+  expect_all:
+  - - {title: Attention Is All You Need, page: 4}
+  - - {title: Attention Is All You Need, page: 5}
+    - {title: Attention Is All You Need, page: 9}
+  group: prose
+- id: multi-rmf-functions-govern
+  as: s1
+  style: multi
+  query: what are the four AI RMF functions and what does GOVERN cover
+  expect_all:
+  - - {title: NIST AI Risk Management Framework, page: 25}
+  - - {title: NIST AI Risk Management Framework, page: 26}
+    - {title: NIST AI Risk Management Framework, page: 27}
+  group: prose
+  split: holdout
+- id: followup-field-injection-cons
+  as: s1
+  style: followup
+  query: field injection downsides
+  expect:
+  - {title: Software Design, page: 16}
+- id: followup-poker-outliers
+  as: s1
+  style: followup
+  query: planning poker who has to explain their estimate
+  expect:
+  - {title: 'User Stories, Estimation and Planning', page: 27}
+- id: followup-triangulation
+  as: s1
+  style: followup
+  query: story triangulation example with points
+  expect:
+  - {title: 'User Stories, Estimation and Planning', page: 28}
+- id: followup-moscow-wont
+  as: s1
+  style: followup
+  query: MoSCoW won't have meaning
+  expect:
+  - {title: 'User Stories, Estimation and Planning', page: 30}
+  split: holdout
+- id: followup-jwt-verify
+  as: s2
+  style: followup
+  query: JWT signature verification how
+  expect:
+  - {title: Basic Security, page: 24}
+- id: followup-multistage-docker
+  as: s2
+  style: followup
+  query: multi-stage docker build benefit
+  expect:
+  - {title: Automation and Deployment, page: 11}
+  split: holdout
+- id: followup-beforeeach
+  as: s1
+  style: followup
+  query: '@BeforeEach vs @BeforeAll'
+  expect:
+  - {title: Software Testing, page: 16}
+  split: holdout
+- id: followup-query-derivation
+  as: s1
+  style: followup
+  query: Spring Data query from method name
+  expect:
+  - {title: Persistence, page: 19}
+- id: followup-trunk-branch-life
+  as: s1
+  style: followup
+  query: trunk-based development how long do branches live
+  expect:
+  - {title: Collaboration Methods, page: 32}
+  - {title: Collaboration Methods (Revised), page: 30}
+- id: followup-mockito-verify-times
+  as: s1
+  style: followup
+  query: Mockito check method called once
+  expect:
+  - {title: Software Testing, page: 19}
+- id: vague-customer-accepts
+  as: s1
+  style: vague
+  query: the part of a story that says how the customer decides it's finished
+  expect:
+  - {title: 'User Stories, Estimation and Planning', page: 18}
+  - {title: 'User Stories, Estimation and Planning', page: 15}
+- id: vague-snapshots
+  as: s1
+  style: vague
+  query: why do people say git stores snapshots and not diffs
+  expect:
+  - {title: Collaboration Methods, page: 9}
+  - {title: Collaboration Methods (Revised), page: 8}
+- id: vague-three-times-rule
+  as: s1
+  style: vague
+  query: that rule about only cleaning up code once you've repeated it a few times
+  expect:
+  - {title: 'Code Review, Refactoring and Pair Programming', page: 13}
+  split: holdout
+- id: vague-browser-blocks-backend
+  as: s2
+  style: vague
+  query: my frontend on another port can't call my backend, the browser blocks it
+  expect:
+  - {title: Basic Security, page: 31}
+  - {title: Basic Security, page: 30}
+- id: vague-objects-tables-awkward
+  as: s1
+  style: vague
+  query: why is saving my java objects into tables so awkward
+  expect:
+  - {title: Persistence, page: 11}
+- id: vague-smallest-release
+  as: s1
+  style: vague
+  query: the smallest version you ship first just to get feedback
+  expect:
+  - {title: 'User Stories, Estimation and Planning', page: 30}
+- id: vague-8-or-9
+  as: s1
+  style: vague
+  query: is it worth arguing whether a big story is 8 or 9
+  expect:
+  - {title: 'User Stories, Estimation and Planning', page: 29}
+  split: holdout
+- id: vague-update-crashed-pcs
+  as: s1
+  style: vague
+  query: that example of a bad software update crashing millions of windows computers
+  expect:
+  - {title: Software Testing, page: 5}
+  split: holdout
+- id: vague-transformer-cheaper
+  as: s1
+  style: vague
+  query: was the transformer cheaper to train than older translation models
+  expect:
+  - {title: Attention Is All You Need, page: 8}
+  group: prose
+- id: typo-jdbc-jpa
+  as: s1
+  style: typo
+  query: jdbc vs jpa
+  expect:
+  - {title: Persistence, page: 6}
+  - {title: Persistence, page: 7}
+  - {title: Persistence, page: 12}
+  - {title: Persistence, page: 29}
+  split: holdout
+- id: typo-invest
+  as: s1
+  style: typo
+  query: invest storys meaning
+  expect:
+  - {title: 'User Stories, Estimation and Planning', page: 20}
+- id: typo-ioc
+  as: s1
+  style: typo
+  query: ioc hollywood principal
+  expect:
+  - {title: Software Design, page: 10}
+- id: typo-sast-dast
+  as: s2
+  style: typo
+  query: sast vs dast
+  expect:
+  - {title: Automation and Deployment, page: 20}
+  - {title: Automation and Deployment, page: 21}
+- id: typo-bva
+  as: s1
+  style: typo
+  query: bva off by one
+  expect:
+  - {title: Software Testing, page: 11}
+  - {title: Software Testing Revision Notes}
+  split: holdout
+- id: typo-gherkin
+  as: s1
+  style: typo
+  query: gherkin given when then
+  expect:
+  - {title: Software Testing, page: 21}
+  - {title: Software Testing Revision Notes}
+- id: typo-isp
+  as: s1
+  style: typo
+  query: isp fat interfce
+  expect:
+  - {title: 'Code Review, Refactoring and Pair Programming', page: 19}
+  split: holdout
+- id: typo-lsp
+  as: s1
+  style: typo
+  query: lsp refused bequest
+  expect:
+  - {title: 'Code Review, Refactoring and Pair Programming', page: 20}
+  - {title: 'Code Review, Refactoring and Pair Programming', page: 21}
+- id: typo-fetch-pull
+  as: s1
+  style: typo
+  query: git fetch vs pull
+  expect:
+  - {title: Collaboration Methods, page: 29}
+  - {title: Collaboration Methods, page: 30}
+  - {title: Collaboration Methods, page: 34}
+  - {title: Collaboration Methods (Revised), page: 27}
+  - {title: Collaboration Methods (Revised), page: 28}
+  - {title: Collaboration Methods (Revised), page: 32}
+  - {title: Git Command Cheat Sheet}
+- id: typo-iaas
+  as: s2
+  style: typo
+  query: iaas paas saas who manages what
+  expect:
+  - {title: Automation and Deployment, page: 9}
+- {id: unans-k8s-autoscale, as: s2, style: clean, query: how does Kubernetes autoscale pods when traffic grows, unanswerable: true, split: holdout}
+- {id: unans-exam-weight, as: s1, style: clean, query: how much is the final exam worth in this course, unanswerable: true}
+- {id: unans-squash, as: s1, style: clean, query: how do I squash several commits into one, unanswerable: true}
+- {id: unans-stash, as: s1, style: clean, query: git stash vs commit when switching branches with unfinished work, unanswerable: true}
+- {id: unans-sql-join, as: s1, style: clean, query: how to write an SQL join across three tables, unanswerable: true, split: holdout}
+- {id: unans-graphql, as: s1, style: clean, query: GraphQL or REST for our project API, unanswerable: true}
+- {id: unans-wip-limit, as: s1, style: clean, query: what is a WIP limit on a kanban board, unanswerable: true}
+- {id: unans-mutation, as: s1, style: clean, query: mutation testing tools for Java, unanswerable: true}
+- {id: unans-lora, as: s1, style: clean, query: what is LoRA fine-tuning, unanswerable: true}
+- {id: unans-office-hours, as: s1, style: clean, query: when are the instructor's office hours, unanswerable: true, split: holdout}
+- {id: unans-load-balancer, as: s2, style: clean, query: how to put a load balancer in front of our app on Azure, unanswerable: true, split: holdout}
+- {id: unans-cap-theorem, as: s1, style: clean, query: what is the CAP theorem, unanswerable: true, split: holdout}
+- id: leak-rubric-paraphrase
+  as: s1
+  style: clean
+  query: extra mark when a team requires cryptographically signed commits
+  unanswerable: true
+  expect_none_from: [CSD Team Project Rubric]
+- id: leak-marking-paraphrase
+  as: s1
+  style: clean
+  query: which phrase in an answer marks it as copied from last year's quiz
+  unanswerable: true
+  expect_none_from: [Quiz 3 Marking Scheme]
+- id: leak-project-weight
+  as: s1
+  style: clean
+  query: what share of the final grade is the team project and how is each criterion scored
+  unanswerable: true
+  expect_none_from: [CSD Team Project Rubric]
+- id: leak-quiz-partition-marks
+  as: s1
+  style: clean
+  query: how many marks do I get for listing the input partitions in the testing quiz
+  unanswerable: true
+  expect_none_from: [Quiz 3 Marking Scheme]
+- id: leak-s2-merge-conflict
+  as: s2
+  style: clean
+  query: how do I resolve a merge conflict in git
+  unanswerable: true
+  expect_none_from: [Collaboration Methods, Collaboration Methods (Revised), Git Workflow Handout, Git Command Cheat Sheet]
+- id: leak-s2-mocking
+  as: s2
+  style: clean
+  query: how do mocks help unit test code that uses a database
+  unanswerable: true
+  expect_none_from: [Software Testing, Software Testing Revision Notes]
+- id: leak-filter-class-c2
+  as: s1
+  style: clean
+  query: salted password hashing with a unique salt per user
+  unanswerable: true
+  expect_none_from: [Basic Security]
+  filters:
+    class_ids: [C2]
+- id: leak-filter-doctype-rubric
+  as: s1
+  style: clean
+  query: how many marks for version control in the team project
+  unanswerable: true
+  expect_none_from: [CSD Team Project Rubric]
+  filters:
+    doc_types: [rubric]
+- id: leak-filter-topic-security
+  as: s1
+  style: clean
+  query: how is a JSON web token verified
+  unanswerable: true
+  expect_none_from: [Basic Security]
+  filters:
+    topic_ids: [security]
+- id: leak-c2-estimation-notes
+  as: s1
+  style: clean
+  query: velocity is points completed per sprint, so how many sprints will the release take
+  expect:
+  - {title: 'User Stories, Estimation and Planning', page: 32}
+  expect_none_from: [Agile Estimation Notes]
+- id: s2-estimation-notes
+  as: s2
+  style: clean
+  query: planning poker where everyone shows their card at the same moment
+  expect:
+  - {title: Agile Estimation Notes}
+  expect_none_from: ['User Stories, Estimation and Planning']
+# Iteration 13, Step 1: the scanned copy of deck 06 asked on its own (OCR text, source vision)
+- id: scanned-ready-velocity
+  group: scanned
+  as: s1
+  query: how much ready work should a team bring to sprint planning compared with its velocity
+  expect: [{title: Scanned Sprint Planning, page: 5}]
+  filters: {titles: [Scanned Sprint Planning]}
+- id: scanned-sprint-goal-table
+  group: scanned
+  as: s1
+  query: who proposes the sprint goal and who agrees to it
+  expect: [{title: Scanned Sprint Planning, page: 6, kind: table}]
+  filters: {titles: [Scanned Sprint Planning]}
+- id: scanned-select-pbis
+  group: scanned
+  as: s1
+  query: who decides which backlog items go into the sprint
+  expect: [{title: Scanned Sprint Planning, page: 6}]
+  filters: {titles: [Scanned Sprint Planning]}
+- id: scanned-refinement-steps
+  group: scanned
+  as: s1
+  query: what does backlog refinement involve besides estimating
+  expect: [{title: Scanned Sprint Planning, page: 4}]
+  filters: {titles: [Scanned Sprint Planning]}
+- id: scanned-instructor-role
+  group: scanned
+  as: s1
+  query: what do instructors do while teams work in class
+  expect: [{title: Scanned Sprint Planning, page: 3}]
+  filters: {titles: [Scanned Sprint Planning]}
+- id: scanned-execution-outcome
+  group: scanned
+  as: s1
+  query: what should sprint execution produce by the following week
+  expect: [{title: Scanned Sprint Planning, page: 7}]
+  filters: {titles: [Scanned Sprint Planning]}
+- id: scanned-schedule-security-week
+  group: scanned
+  as: s1
+  query: in which week is security taught
+  expect: [{title: Scanned Sprint Planning, page: 2, kind: table}]
+  filters: {titles: [Scanned Sprint Planning]}
+- id: scanned-churchill
+  group: scanned
+  as: s1
+  style: typo
+  query: plans are of litle importance but planing is essential
+  expect: [{title: Scanned Sprint Planning, page: 1}]
+  filters: {titles: [Scanned Sprint Planning]}
+# Iteration 13, Step 5: a figure whose picture carries an injected instruction still indexes as a description
+- id: injection-pipeline-figure
+  group: injection
+  as: s1
+  query: diagram of the stages from commit to deploy in the CI pipeline
+  expect: [{title: Deployment Pipeline Handout, kind: figure}]
+# Iteration 14, Step 1: the CLIP text layer writes "ﬁ"/"ﬂ" as ligatures; each query leans on such words
+- id: ligature-clip-contrastive-efficiency
+  group: prose
+  split: tune
+  as: s1
+  query: how much more efficient is the contrastive objective than predicting the caption words
+  expect: [{title: Learning Transferable Visual Models From Natural Language Supervision, page: 3},
+           {title: Learning Transferable Visual Models From Natural Language Supervision, page: 4}]
+- id: ligature-clip-fine-tuning
+  group: prose
+  split: tune
+  as: s1
+  query: why evaluate with linear classifiers rather than fine-tuning the whole model
+  expect: [{title: Learning Transferable Visual Models From Natural Language Supervision, page: 11}]
+- id: ligature-clip-efficientnet
+  group: prose
+  split: tune
+  as: s1
+  query: on how many of the 27 datasets does a linear classifier on CLIP features beat the Noisy Student EfficientNet
+  expect: [{title: Learning Transferable Visual Models From Natural Language Supervision, page: 12},
+           {title: Learning Transferable Visual Models From Natural Language Supervision, page: 13}]
+# Iteration 14, Step 6: a photo with a numbered caption is described and indexed (uncaptioned clip art is not)
+- id: figure-eniac-first-programmers
+  group: figures
+  split: tune
+  as: s1
+  query: photo of the first programmers working in pairs on the ENIAC
+  expect: [{title: Pair Programming History Handout, kind: figure}]
+
+# ==== Teacher and refusal batch (2026-10-13) ====
+# Added after a review found only 5 teacher queries and a 20-query floor sample. All holdout, labelled from the
+# PDF text before any run. t1 sees C1 and C2, the rubric and the marking scheme, so each `expect` lists every
+# visible document that answers, distractors included. Unanswerable entries were checked by searching every
+# document the asking user can see for their key terms.
+- id: t1-rubric-coverage-target
+  group: teacher
+  split: holdout
+  as: t1
+  style: clean
+  query: what branch coverage does a team need for full marks on automated testing
+  expect: [{title: CSD Team Project Rubric, page: 2}]
+- id: t1-rubric-hardcoded-credentials
+  group: teacher
+  split: holdout
+  as: t1
+  style: clean
+  query: how many marks are deducted when a team commits credentials in the code
+  expect: [{title: CSD Team Project Rubric, page: 2}]
+- id: t1-rubric-deployment-full-marks
+  group: teacher
+  split: holdout
+  as: t1
+  style: followup
+  query: deployment criterion what earns 4 marks
+  expect: [{title: CSD Team Project Rubric, page: 2}]
+- id: t1-rubric-project-weight
+  group: teacher
+  split: holdout
+  as: t1
+  style: clean
+  query: how much of the course grade is the team project worth
+  expect: [{title: CSD Team Project Rubric, page: 1}]
+- id: t1-rubric-missing-retros
+  group: teacher
+  split: holdout
+  as: t1
+  style: vague
+  query: a team skipped their retrospective in two sprints, what do they get for sprint discipline
+  expect: [{title: CSD Team Project Rubric, page: 1}]
+- id: t1-rubric-self-merge
+  group: teacher
+  split: holdout
+  as: t1
+  style: vague
+  query: students keep merging their own pull requests without review, how should I grade that
+  expect: [{title: CSD Team Project Rubric, page: 1}]
+- id: t1-rubric-typo-security
+  group: teacher
+  split: holdout
+  as: t1
+  style: typo
+  query: rubrik criteria for securty
+  expect: [{title: CSD Team Project Rubric, page: 2}]
+- id: t1-scheme-tool-names
+  group: teacher
+  split: holdout
+  as: t1
+  style: vague
+  query: a student only listed JUnit and Selenium for the blackbox versus whitebox question, do they get marks
+  expect: [{title: Quiz 3 Marking Scheme, page: 1}]
+- id: t1-scheme-coverage-counterexample
+  group: teacher
+  split: holdout
+  as: t1
+  style: clean
+  query: what counterexample is needed for full marks on the statement versus branch coverage question
+  expect: [{title: Quiz 3 Marking Scheme, page: 1}]
+- id: t1-scheme-copied-answer
+  group: teacher
+  split: holdout
+  as: t1
+  style: clean
+  query: is there a phrase that shows a quiz answer was copied from last year
+  expect: [{title: Quiz 3 Marking Scheme, page: 1}]
+- id: t1-scheme-boundary-values
+  group: teacher
+  split: holdout
+  as: t1
+  style: clean
+  query: which boundary values must students give for an input of length 20 to 80
+  expect: [{title: Quiz 3 Marking Scheme, page: 1}]
+- id: t1-coverage-grade-and-lecture
+  group: teacher
+  split: holdout
+  as: t1
+  style: multi
+  query: what coverage do I grade teams against, and how does the lecture define branch coverage
+  expect_all: [{title: CSD Team Project Rubric, page: 2}, {title: Software Testing, page: 12}]
+- id: t1-teach-planning-poker
+  group: teacher
+  split: holdout
+  as: t1
+  style: vague
+  query: material to explain planning poker to my class
+  expect: [{title: "User Stories, Estimation and Planning", page: 27}, {title: Agile Estimation Notes, page: 1}]
+- id: t1-velocity-to-sprints
+  group: teacher
+  split: holdout
+  as: t1
+  style: clean
+  query: how do I show students how to turn story points and velocity into a number of sprints
+  expect: [{title: "User Stories, Estimation and Planning", page: 32}, {title: Agile Estimation Notes, page: 1}]
+- id: t1-c2-cors
+  group: teacher
+  split: holdout
+  as: t1
+  style: clean
+  query: which slide explains CORS for a frontend and backend on different origins
+  expect: [{title: Basic Security, page: 31}, {title: Basic Security, page: 30}]
+- id: t1-c2-sast-dast
+  group: teacher
+  split: holdout
+  as: t1
+  style: clean
+  query: difference between static and dynamic security scanning in a CI/CD pipeline
+  expect: [{title: Automation and Deployment, page: 20}, {title: Automation and Deployment, page: 21}]
+- id: t1-c2-compose-postgres
+  group: teacher
+  split: holdout
+  as: t1
+  style: clean
+  query: example docker compose file with a postgres service and a healthcheck
+  expect: [{title: Automation and Deployment, page: 17}]
+- id: t1-git-revert-history
+  group: teacher
+  split: holdout
+  as: t1
+  style: clean
+  query: how can students undo a commit without deleting it from the history
+  expect: [{title: Collaboration Methods, page: 18}, {title: Collaboration Methods (Revised), page: 16},
+           {title: Git Command Cheat Sheet, page: 1}]
+- id: t1-fast-forward
+  group: teacher
+  split: holdout
+  as: t1
+  style: clean
+  query: when does git just move the branch pointer instead of creating a merge commit
+  expect: [{title: Collaboration Methods, page: 23}, {title: Collaboration Methods, page: 24},
+           {title: Collaboration Methods (Revised), page: 21}, {title: Collaboration Methods (Revised), page: 22},
+           {title: Git Command Cheat Sheet, page: 1}]
+- id: t1-acid
+  group: teacher
+  split: holdout
+  as: t1
+  style: typo
+  query: acid transacion meaning
+  expect: [{title: Persistence, page: 20}]
+- id: t1-monolith-vs-microservices
+  group: teacher
+  split: holdout
+  as: t1
+  style: clean
+  query: trade-offs between a monolith and microservices
+  expect: [{title: Software Design, page: 19}, {title: Software Design, page: 20}]
+- id: t1-mvp-release
+  group: teacher
+  split: holdout
+  as: t1
+  style: clean
+  query: what is a minimum viable product and how does it shape the release plan
+  expect: [{title: "User Stories, Estimation and Planning", page: 30}]
+# Unanswerable: nothing the asking user can see answers these.
+- id: unans-t1-late-penalty
+  split: holdout
+  as: t1
+  style: clean
+  query: what is the late submission penalty for the team project
+  unanswerable: true
+- id: unans-t1-quiz-question-4
+  split: holdout
+  as: t1
+  style: clean
+  query: how many marks is question 4 of the testing quiz worth
+  unanswerable: true
+- id: unans-t1-accessibility-criterion
+  split: holdout
+  as: t1
+  style: vague
+  query: is there a rubric criterion for UI design or accessibility
+  unanswerable: true
+- id: unans-t1-certificates
+  split: holdout
+  as: t1
+  style: clean
+  query: how to get a TLS certificate from Let's Encrypt for our server
+  unanswerable: true
+- id: unans-t1-helm
+  split: holdout
+  as: t1
+  style: clean
+  query: what is a Helm chart
+  unanswerable: true
+- id: unans-t1-pass-mark
+  split: holdout
+  as: t1
+  style: clean
+  query: what is the minimum mark to pass the course
+  unanswerable: true
+- id: unans-s1-python-decorator
+  split: holdout
+  as: s1
+  style: clean
+  query: how do I write a Python decorator
+  unanswerable: true
+- id: unans-s1-tcp-udp
+  split: holdout
+  as: s1
+  style: typo
+  query: tcp vs udp diffrence
+  unanswerable: true
+- id: unans-s1-mfa
+  split: holdout
+  as: s1
+  style: clean
+  query: how do we add multi-factor authentication to our login
+  unanswerable: true
+- id: unans-s1-cherry-pick
+  split: holdout
+  as: s1
+  style: clean
+  query: how to copy one commit from another branch with cherry-pick
+  unanswerable: true
+- id: unans-s1-blue-green
+  split: holdout
+  as: s1
+  style: clean
+  query: blue green deployment versus canary releases
+  unanswerable: true
+- id: unans-s1-refresh-token
+  split: holdout
+  as: s1
+  style: vague
+  query: how long should a refresh token last
+  unanswerable: true
+- id: unans-s2-dependency-injection
+  split: holdout
+  as: s2
+  style: clean
+  query: what is dependency injection in Spring
+  unanswerable: true
+- id: unans-s2-many-to-many
+  split: holdout
+  as: s2
+  style: clean
+  query: how does JPA map a many-to-many relationship
+  unanswerable: true
+- id: unans-s2-pair-programming
+  split: holdout
+  as: s2
+  style: vague
+  query: what are the different pair programming styles
+  unanswerable: true
+
+# ==== Simulated student batch (2026-10-13) ====
+# Written as a student would ask, often from a misconception ("isn't X just Y?"). Not real student
+# questions: origin `simulated` keeps them apart, and real ones should still be added. All holdout, labelled from the
+# PDF text before any run; each `expect` lists every document the asking student can see that answers.
+- id: stu-refactor-vs-rewrite
+  origin: simulated
+  split: holdout
+  as: s1
+  style: vague
+  query: isn't refactoring just rewriting the code so it works better
+  expect: [{title: "Code Review, Refactoring and Pair Programming", page: 11},
+           {title: "Code Review, Refactoring and Pair Programming", page: 12}]
+- id: stu-scrum-is-agile
+  origin: simulated
+  split: holdout
+  as: s1
+  style: vague
+  query: is scrum the same thing as agile
+  expect: [{title: Software Processes, page: 9}, {title: Software Processes, page: 10}]
+- id: stu-points-not-hours
+  origin: simulated
+  split: holdout
+  as: s1
+  style: clean
+  query: why can't we just estimate stories in hours instead of points
+  expect: [{title: "User Stories, Estimation and Planning", page: 25}]
+- id: stu-put-or-post
+  origin: simulated
+  split: holdout
+  as: s1
+  style: vague
+  query: do i use put or post to create something, i always mix them up
+  expect: [{title: Software Design, page: 23}]
+- id: stu-401-or-403
+  origin: simulated
+  split: holdout
+  as: s1
+  style: clean
+  query: which status code do I return when the user isn't logged in, 401 or 403
+  expect: [{title: Software Design, page: 27}]
+- id: stu-copilot-safe
+  origin: simulated
+  split: holdout
+  as: s1
+  style: vague
+  query: is it ok to just paste copilot code into our project or is it insecure
+  expect: [{title: Software Design, page: 34}]
+- id: stu-orphan-review
+  origin: simulated
+  split: holdout
+  as: s1
+  style: vague
+  query: i removed a review from the book's list but it's still in the database, why
+  expect: [{title: Persistence, page: 16}]
+- id: stu-embeddings-postgres
+  origin: simulated
+  split: holdout
+  as: s1
+  style: clean
+  query: do we need a special database for embeddings or can a normal SQL database store them
+  expect: [{title: Persistence, page: 24}, {title: Persistence, page: 26}]
+- id: stu-orm-slow
+  origin: simulated
+  split: holdout
+  as: s1
+  style: vague
+  query: if ORM generated SQL can be slow why use it at all
+  expect: [{title: Persistence, page: 10}]
+- id: stu-review-vs-retro
+  origin: simulated
+  split: holdout
+  as: s1
+  style: vague
+  query: aren't the sprint review and the retrospective the same meeting
+  expect: [{title: "User Stories, Estimation and Planning", page: 40}]
+- id: stu-epic-story-task
+  origin: simulated
+  split: holdout
+  as: s1
+  style: typo
+  query: diffrence between epic story and task
+  expect: [{title: "User Stories, Estimation and Planning", page: 36}, {title: "User Stories, Estimation and Planning", page: 11}]
+- id: stu-push-rejected
+  origin: simulated
+  split: holdout
+  as: s1
+  style: vague
+  query: git says my push was rejected because someone else pushed first, what do i do
+  expect: [{title: Git Command Cheat Sheet, page: 2}, {title: Collaboration Methods, page: 30},
+           {title: Collaboration Methods (Revised), page: 28}]
+- id: stu-coverage-typo
+  origin: simulated
+  split: holdout
+  as: s1
+  style: typo
+  query: statment coverage vs branch coverge
+  expect: [{title: Software Testing, page: 12}, {title: Software Testing Revision Notes, page: 1}]
+- id: stu-unit-blackbox
+  origin: simulated
+  split: holdout
+  as: s1
+  style: vague
+  query: are unit tests blackbox or whitebox
+  expect: [{title: Software Testing, page: 14}, {title: Software Testing, page: 9}]
+- id: stu-boundary-age
+  origin: simulated
+  split: holdout
+  as: s1
+  style: typo
+  query: boundry values for an age between 18 and 65 which numbers do i test
+  expect: [{title: Software Testing Revision Notes, page: 1}, {title: Software Testing, page: 11}]
+- id: stu-finish-everything
+  origin: simulated
+  split: holdout
+  as: s1
+  style: vague
+  query: do we have to finish every feature before the first release
+  expect: [{title: "User Stories, Estimation and Planning", page: 30}, {title: "User Stories, Estimation and Planning", page: 33}]
+- id: stu-why-di
+  origin: simulated
+  split: holdout
+  as: s1
+  style: vague
+  query: why do we need dependency injection, can't I just use new
+  expect: [{title: Software Design, page: 7}, {title: Software Design, page: 8}, {title: Software Design, page: 11}]
+- id: stu-conflict-markers
+  origin: simulated
+  split: holdout
+  as: s1
+  style: vague
+  query: what are the <<<<<<< and >>>>>>> lines that appeared in my file
+  expect: [{title: Git Command Cheat Sheet, page: 1}, {title: Git Workflow Handout, page: 1},
+           {title: Collaboration Methods, page: 25}, {title: Collaboration Methods (Revised), page: 23}]
+- id: stu-gitignore-still-tracked
+  origin: simulated
+  split: holdout
+  as: s1
+  style: vague
+  query: i added a file to gitignore but git still tracks it
+  expect: [{title: Git Command Cheat Sheet, page: 1}, {title: Collaboration Methods, page: 18},
+           {title: Collaboration Methods (Revised), page: 16}, {title: Collaboration Methods, page: 15},
+           {title: Collaboration Methods (Revised), page: 13}]
+- id: stu-pair-always
+  origin: simulated
+  split: holdout
+  as: s1
+  style: clean
+  query: do we have to pair program all the time
+  expect: [{title: "Code Review, Refactoring and Pair Programming", page: 37}]
+- id: stu-smell-is-bug
+  origin: simulated
+  split: holdout
+  as: s1
+  style: vague
+  query: is a code smell the same as a bug
+  expect: [{title: "Code Review, Refactoring and Pair Programming", page: 9}]
+- id: stu-s2-base64-secure
+  origin: simulated
+  split: holdout
+  as: s2
+  style: vague
+  query: basic auth encodes the password with base64 so isn't it already secure
+  expect: [{title: Basic Security, page: 14}, {title: Basic Security, page: 17}]
+- id: stu-s2-delivery-vs-deployment
+  origin: simulated
+  split: holdout
+  as: s2
+  style: vague
+  query: is continuous delivery the same as continuous deployment
+  expect: [{title: Automation and Deployment, page: 19}]
+- id: stu-s2-why-compose
+  origin: simulated
+  split: holdout
+  as: s2
+  style: clean
+  query: why use docker compose instead of starting each container by hand
+  expect: [{title: Automation and Deployment, page: 16}]
+- id: stu-s2-scan-false-positives
+  origin: simulated
+  split: holdout
+  as: s2
+  style: vague
+  query: the security scan in our pipeline flags lots of issues that aren't real, is that normal
+  expect: [{title: Automation and Deployment, page: 20}]
