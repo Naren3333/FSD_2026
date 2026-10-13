@@ -214,3 +214,22 @@ def test_captions_give_labels_and_text_gives_citations() -> None:
     )
     [chunk] = chunk_paras([Para("As Figure 3 shows, the loss falls.", 1, ())])
     assert chunk.cites == ("figure 3",) and chunk.label is None
+
+
+def test_a_title_only_slide_with_a_table_keeps_just_the_table() -> None:
+    from ingest.tables import Table
+
+    table = Table((0, 0, 100, 100), ("Week", "Topic"), (("1", "Software processes"),))
+    paras = [
+        Para("Learning Journey", 2, ("Learning Journey",), 0),
+        Para("Week | Topic", 2, ("Learning Journey",), table=table),
+        Para(paragraph(1), 3, ("Learning Journey",)),
+    ]
+    chunks = chunk_paras(paras)
+    assert [c.kind for c in chunks] == ["table", "text"]
+    assert [c.ordinal for c in chunks] == [0, 1]
+
+
+def test_a_short_chunk_alone_on_its_page_is_kept() -> None:
+    chunks = chunk_paras([Para("Thank you", 1, ())])
+    assert [c.content for c in chunks] == ["Thank you"]

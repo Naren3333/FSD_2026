@@ -163,7 +163,7 @@ func (s server) runSearch(ctx context.Context, f filter, query string, topK int,
 	if err != nil {
 		return searchResponse{}, err
 	}
-	hits := fuse(vectorRows, k.rows)
+	hits := distinct(fuse(vectorRows, k.rows))
 	fallback := false
 	if rerank && len(hits) > 0 {
 		fallback = !s.rerankHits(ctx, query, hits)
@@ -297,6 +297,21 @@ func fuse(vector, keyword []hit) []hit {
 	})
 	if len(out) > rrfKeep {
 		out = out[:rrfKeep]
+	}
+	return out
+}
+
+// distinct keeps the best-ranked of hits with the same text: a slide repeated in every deck of a course (its
+// schedule, say) would otherwise fill several result slots with one passage.
+func distinct(hits []hit) []hit {
+	seen := map[string]bool{}
+	out := hits[:0:0]
+	for _, h := range hits {
+		key := strings.Join(strings.Fields(h.Content), " ")
+		if !seen[key] {
+			seen[key] = true
+			out = append(out, h)
+		}
 	}
 	return out
 }

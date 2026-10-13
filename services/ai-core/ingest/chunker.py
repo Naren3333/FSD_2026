@@ -45,6 +45,7 @@ CONTINUED = "(cont.)"
 DESCRIBED = "described by AI"
 MAX_LABEL_TOKENS = 300  # a figure's own words, as embedded
 TRANSCRIBED = "(transcribed from an image)"
+STUB_WORDS = 5  # a text chunk shorter than this is dropped when another chunk covers its page
 LABEL = re.compile(r"\b(fig(?:ure)?s?\.?|tables?|exhibits?)\s*(\d+[a-z]?)\b", re.IGNORECASE)
 
 
@@ -120,10 +121,27 @@ def chunk_paras(paras: list[Para], vision_pages: frozenset[int] = frozenset()) -
                 chunks += _table_chunks(enc, p)
                 run, figures = [], []
         chunks += _text_chunks(enc, run) + [c for f in figures for c in _figure_chunks(enc, f)]
+    chunks = _without_stubs(chunks)
     return [
         replace(c, ordinal=i, source="vision" if c.kind == "text" and _touches(c, vision_pages) else c.source)
         for i, c in enumerate(chunks)
     ]
+
+
+def _without_stubs(chunks: list[Chunk]) -> list[Chunk]:
+    """Drop text chunks of a few words, such as a slide title whose body became a table or figure chunk, or a
+    "Continued on next page" line, when another chunk covers the same page: alone they only take search slots."""
+
+    def stub(c: Chunk) -> bool:
+        return c.kind == "text" and len(c.content.split()) < STUB_WORDS
+
+    def covered(c: Chunk) -> bool:
+        return any(
+            o is not c and not stub(o) and o.page_start <= c.page_end and c.page_start <= o.page_end
+            for o in chunks
+        )
+
+    return [c for c in chunks if not (stub(c) and covered(c))]
 
 
 def _touches(chunk: Chunk, pages: frozenset[int]) -> bool:

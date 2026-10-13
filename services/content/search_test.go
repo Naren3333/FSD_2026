@@ -39,6 +39,17 @@ func TestFuseKeepsThirty(t *testing.T) {
 	}
 }
 
+func TestDistinctKeepsTheBestRankedCopy(t *testing.T) {
+	hits := []hit{{ChunkID: "a", Content: "Learning Journey\nWeek 1"}, {ChunkID: "b", Content: "Other"}, {ChunkID: "c", Content: " Learning Journey  Week 1 "}}
+	got := distinct(hits)
+	if len(got) != 2 || got[0].ChunkID != "a" || got[1].ChunkID != "b" {
+		t.Fatalf("got %+v", got)
+	}
+	if len(hits) != 3 || hits[2].ChunkID != "c" {
+		t.Fatal("the input slice was modified")
+	}
+}
+
 func TestPassageTextMatchesIngest(t *testing.T) {
 	section := "Chapter 1 > Leaves"
 	if got := passageText("Biology", &section, "Stomata"); got != "Biology\nLeaves\n\nStomata" {
