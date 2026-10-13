@@ -131,11 +131,15 @@ def test_top_score_below_the_floor_is_refused_without_a_model_call(
     assert len(fakes.calls("/v1/inference")) == 1  # the rewrite only
 
 
-def test_rerank_fallback_answers_below_the_floor(api: TestClient, fakes: Fakes) -> None:
-    """RRF scores are not comparable to the floor, so a fallback search is answered."""
+def test_rerank_fallback_fails_the_turn(api: TestClient, fakes: Fakes, store: MemoryStore) -> None:
+    """RRF scores can't be checked against the floor, so a fallback search is not answered."""
     fakes.results, fakes.fallback = [result(C1, "Chlorophyll absorbs light.", 3, score=0.03)], True
-    fakes.replies += [rewrite("q"), chat_stream(["Light [S1]."])]
-    assert post(api, thread(api), "q")[-1][1]["outcome"] == "answered"
+    fakes.replies.append(rewrite("q"))
+    tid = thread(api)
+    events = post(api, tid, "q")
+    assert events == [("error", {"code": "SEARCH_UNAVAILABLE", "message": events[0][1]["message"]})]
+    assert saved(store, tid)["outcome"] == "error"
+    assert len(fakes.calls("/v1/inference")) == 1  # the rewrite only: no answer was generated
 
 
 @pytest.mark.parametrize("results", [[], LOW], ids=["no-results", "low"])

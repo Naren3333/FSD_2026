@@ -142,18 +142,21 @@ class Turn:
             messages = prompts.build_small_talk_messages(role, self.history, self.content)
             tag_map: dict[str, str] = {}  # no documents, so any tag the model writes is dropped
         else:
-            fallback = False
             if self.is_on_topic is not False:
                 self.results, fallback = await self.services.search(
                     self.authorization, str(self.thread["classroom_id"]), self.rewritten_query or self.content,
                     self.correlation,
                 )  # fmt: skip
                 self.searched = True
+                if fallback and self.results:
+                    # Without the reranker the results are in RRF order and the floor can't be applied, so an
+                    # answer would rest on unchecked passages. Fail the turn instead; the user can ask again.
+                    raise UpstreamError("content", 503, "RERANK_UNAVAILABLE")
                 self.top_score = max((float(r["score"]) for r in self.results), default=None)
             if (
                 self.is_on_topic is False
                 or self.top_score is None
-                or (not fallback and self.top_score < self.settings.relevance_floor)
+                or self.top_score < self.settings.relevance_floor
             ):
                 self.outcome = "no_results"
                 reply = prompts.refusal(role)
