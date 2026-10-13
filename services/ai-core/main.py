@@ -1,13 +1,14 @@
 import asyncio
 import base64
+import contextlib
 import json
 import logging
 import os
 import tempfile
-from collections.abc import AsyncGenerator, AsyncIterator
+from collections.abc import AsyncGenerator, AsyncIterator, Coroutine
 from contextlib import asynccontextmanager
 from pathlib import Path
-from typing import Any, NoReturn
+from typing import Any, NoReturn, TypeVar
 
 import openai
 import openai_client
@@ -31,6 +32,8 @@ log = logging.getLogger("ai-core")
 
 MAX_PDF_BYTES = 50 * 1024 * 1024
 INGEST_CONCURRENCY = 2  # PDFs at once; more callers wait for a slot
+DISCONNECT_POLL = 2.0  # seconds between checks that an ingest's caller is still there
+T = TypeVar("T")
 ERRORS: dict[int | str, dict[str, Any]] = {
     code: {"model": ErrorResponse} for code in (401, 403, 413, 415, 422, 502, 503)
 }
@@ -191,15 +194,19 @@ async def ingest_pdf(
                 "error"  # until it ends otherwise; an unexpected error is a 500 for the caller to retry
             )
             try:
-                async with _ingest_slots:
-                    with costs.stage("total"):
-                        result = await ingest(path, title, vision_config(get_settings()))
+                result = await unless_disconnected(request, _ingest(path, title))
                 record.outcome = "indexed"
             except IngestFailure as e:
                 record.outcome, record.failure_reason = "failed", e.reason
                 return IngestResponse(outcome="failed", failure_reason=e.reason, failure_detail=str(e)[:2000])  # type: ignore[arg-type]
             except PROVIDER_ERRORS as error:
                 provider_error(error)
+            except CallerGone:
+                record.outcome = "abandoned"
+                log.info(json.dumps({"service": "ai-core", "event": "ingest_abandoned"}))
+                raise failure(
+                    503, "CALLER_GONE", "The caller disconnected before the ingest finished."
+                ) from None
             finally:
                 costs.write(record, None)
     return IngestResponse(
@@ -230,6 +237,36 @@ async def ingest_pdf(
             for name, png in result.figures.items()
         ],
     )
+
+
+async def _ingest(path: Path, title: str) -> Any:
+    assert _ingest_slots is not None
+    async with _ingest_slots:
+        with costs.stage("total"):
+            return await ingest(path, title, vision_config(get_settings()))
+
+
+class CallerGone(Exception):
+    """The caller hung up before the work finished."""
+
+
+async def unless_disconnected(
+    request: Request, work: Coroutine[Any, Any, T], poll: float = DISCONNECT_POLL
+) -> T:
+    """Await `work`, cancelling it if the caller disconnects first. Content gives up on an ingest after 20 minutes
+    and retries it later; without this the abandoned run would keep a slot and keep paying for model calls."""
+    task = asyncio.ensure_future(work)
+    try:
+        while not task.done():
+            await asyncio.wait({task}, timeout=poll)
+            if not task.done() and await request.is_disconnected():
+                task.cancel()
+                with contextlib.suppress(asyncio.CancelledError):
+                    await task
+                raise CallerGone()
+        return task.result()
+    finally:
+        task.cancel()
 
 
 async def receive(request: Request, path: Path) -> None:

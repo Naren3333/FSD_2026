@@ -45,7 +45,7 @@ class IngestCost:
     document_id: str
     started: str = field(default_factory=lambda: datetime.now(UTC).isoformat(timespec="seconds"))
     title: str | None = None
-    outcome: str | None = None  # indexed / failed / skipped
+    outcome: str | None = None  # indexed / failed / skipped / abandoned / error
     failure_reason: str | None = None
     pages: int | None = None
     chunks: int | None = None
