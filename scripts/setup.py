@@ -4,7 +4,7 @@ import secrets
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
-SERVICES = ["identity", "curriculum", "content", "assessment", "grading", "analytics"]
+SERVICES = ["identity", "curriculum", "content", "assessment", "grading", "analytics", "chatbot"]  # databases; chatbot is question-chatbot-agent's (ADR 0002)
 # Service accounts that call the private AI services (client-credentials grant, `ai-client` role).
 AI_CLIENTS = ["content-indexer", "question-chatbot-agent"]
 

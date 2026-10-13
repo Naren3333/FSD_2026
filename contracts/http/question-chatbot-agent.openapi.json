@@ -49,50 +49,332 @@
         }
       }
     },
-    "/v1/grounded_question_answering": {
+    "/v1/threads": {
       "post": {
-        "summary": "Execute",
-        "operationId": "execute_v1_grounded_question_answering_post",
+        "summary": "Create Thread",
+        "operationId": "create_thread_v1_threads_post",
         "requestBody": {
+          "required": true,
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/RequestContract"
+                "$ref": "#/components/schemas/NewThread"
               }
             }
-          },
-          "required": true
+          }
         },
         "responses": {
-          "200": {
+          "201": {
             "description": "Successful Response",
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/ResponseContract"
+                  "$ref": "#/components/schemas/Thread"
                 }
               }
             }
           },
-          "501": {
-            "description": "Not Implemented",
+          "401": {
             "content": {
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/ErrorResponse"
                 }
               }
-            }
+            },
+            "description": "Unauthorized"
           },
-          "422": {
-            "description": "Validation Error",
+          "403": {
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Unprocessable Content"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        }
+      },
+      "get": {
+        "summary": "List Threads",
+        "operationId": "list_threads_v1_threads_get",
+        "parameters": [
+          {
+            "name": "classroom_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "format": "uuid"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Classroom Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ThreadList"
                 }
               }
             }
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Unprocessable Content"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        }
+      }
+    },
+    "/v1/threads/{thread_id}/messages": {
+      "get": {
+        "summary": "List Messages",
+        "operationId": "list_messages_v1_threads__thread_id__messages_get",
+        "parameters": [
+          {
+            "name": "thread_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Thread Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MessageList"
+                }
+              }
+            }
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Unprocessable Content"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        }
+      },
+      "post": {
+        "summary": "Post Message",
+        "operationId": "post_message_v1_threads__thread_id__messages_post",
+        "parameters": [
+          {
+            "name": "thread_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Thread Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/NewMessage"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The answer as server-sent events: token, citations, done or error",
+            "content": {
+              "application/json": {
+                "schema": {}
+              },
+              "text/event-stream": {}
+            }
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Unprocessable Content"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Service Unavailable"
           }
         }
       }
@@ -100,6 +382,81 @@
   },
   "components": {
     "schemas": {
+      "Citation": {
+        "properties": {
+          "chunk_id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Chunk Id"
+          },
+          "document_id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Document Id"
+          },
+          "title": {
+            "type": "string",
+            "title": "Title"
+          },
+          "page_start": {
+            "type": "integer",
+            "minimum": 1.0,
+            "title": "Page Start"
+          },
+          "page_end": {
+            "type": "integer",
+            "minimum": 1.0,
+            "title": "Page End"
+          },
+          "kind": {
+            "type": "string",
+            "enum": [
+              "text",
+              "table",
+              "figure"
+            ],
+            "title": "Kind"
+          },
+          "source": {
+            "type": "string",
+            "enum": [
+              "pdf",
+              "vision"
+            ],
+            "title": "Source"
+          },
+          "content": {
+            "type": "string",
+            "title": "Content"
+          },
+          "image": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Image"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "chunk_id",
+          "document_id",
+          "title",
+          "page_start",
+          "page_end",
+          "kind",
+          "source",
+          "content",
+          "image"
+        ],
+        "title": "Citation",
+        "description": "A chunk the answer cites; `[doc:<chunk_id>]` in the message text marks where."
+      },
       "ErrorBody": {
         "properties": {
           "code": {
@@ -143,77 +500,143 @@
         ],
         "title": "ErrorResponse"
       },
-      "HTTPValidationError": {
+      "Message": {
         "properties": {
-          "detail": {
-            "items": {
-              "$ref": "#/components/schemas/ValidationError"
-            },
-            "type": "array",
-            "title": "Detail"
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Id"
+          },
+          "role": {
+            "type": "string",
+            "enum": [
+              "user",
+              "assistant"
+            ],
+            "title": "Role"
+          },
+          "content": {
+            "type": "string",
+            "title": "Content"
+          },
+          "outcome": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "answered",
+                  "no_results",
+                  "error",
+                  "interrupted"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Outcome"
+          },
+          "citations": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/components/schemas/Citation"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Citations"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At"
           }
         },
+        "additionalProperties": false,
         "type": "object",
-        "title": "HTTPValidationError"
+        "required": [
+          "id",
+          "role",
+          "content",
+          "outcome",
+          "citations",
+          "created_at"
+        ],
+        "title": "Message"
       },
-      "RequestContract": {
+      "MessageList": {
         "properties": {
-          "student_id": {
+          "messages": {
+            "items": {
+              "$ref": "#/components/schemas/Message"
+            },
+            "type": "array",
+            "title": "Messages"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "messages"
+        ],
+        "title": "MessageList"
+      },
+      "NewMessage": {
+        "properties": {
+          "content": {
             "type": "string",
-            "maxLength": 200,
+            "maxLength": 1000,
             "minLength": 1,
-            "title": "Student Id"
+            "title": "Content"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "content"
+        ],
+        "title": "NewMessage"
+      },
+      "NewThread": {
+        "properties": {
+          "classroom_id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Classroom Id"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "classroom_id"
+        ],
+        "title": "NewThread"
+      },
+      "Thread": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Id"
           },
           "classroom_id": {
             "type": "string",
             "format": "uuid",
             "title": "Classroom Id"
           },
-          "document_ids": {
-            "items": {
-              "type": "string",
-              "format": "uuid"
-            },
-            "type": "array",
-            "maxItems": 20,
-            "minItems": 1,
-            "title": "Document Ids"
-          },
-          "question": {
+          "role": {
             "type": "string",
-            "maxLength": 4000,
-            "minLength": 1,
-            "title": "Question"
+            "enum": [
+              "student",
+              "teacher"
+            ],
+            "title": "Role"
           },
-          "conversation_id": {
-            "type": "string",
-            "format": "uuid",
-            "title": "Conversation Id"
-          },
-          "retrieved_evidence": {
-            "items": {
-              "$ref": "#/components/schemas/SourceReference"
-            },
-            "type": "array",
-            "maxItems": 30,
-            "title": "Retrieved Evidence"
-          }
-        },
-        "additionalProperties": false,
-        "type": "object",
-        "required": [
-          "student_id",
-          "classroom_id",
-          "document_ids",
-          "question",
-          "conversation_id",
-          "retrieved_evidence"
-        ],
-        "title": "RequestContract"
-      },
-      "ResponseContract": {
-        "properties": {
-          "answer": {
+          "title": {
             "anyOf": [
               {
                 "type": "string"
@@ -222,94 +645,47 @@
                 "type": "null"
               }
             ],
-            "title": "Answer"
+            "title": "Title"
           },
-          "citations": {
-            "items": {
-              "$ref": "#/components/schemas/SourceReference"
-            },
-            "type": "array",
-            "title": "Citations"
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At"
           },
-          "insufficient_evidence": {
-            "type": "boolean",
-            "title": "Insufficient Evidence"
+          "last_message_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Last Message At"
           }
         },
         "additionalProperties": false,
         "type": "object",
         "required": [
-          "answer",
-          "citations",
-          "insufficient_evidence"
+          "id",
+          "classroom_id",
+          "role",
+          "title",
+          "created_at",
+          "last_message_at"
         ],
-        "title": "ResponseContract"
+        "title": "Thread"
       },
-      "SourceReference": {
+      "ThreadList": {
         "properties": {
-          "document_id": {
-            "type": "string",
-            "format": "uuid",
-            "title": "Document Id"
-          },
-          "revision": {
-            "type": "integer",
-            "minimum": 1.0,
-            "title": "Revision"
-          },
-          "chunk_ordinal": {
-            "type": "integer",
-            "minimum": 0.0,
-            "title": "Chunk Ordinal"
-          },
-          "source_sha256": {
-            "type": "string",
-            "pattern": "^[a-f0-9]{64}$",
-            "title": "Source Sha256"
+          "threads": {
+            "items": {
+              "$ref": "#/components/schemas/Thread"
+            },
+            "type": "array",
+            "title": "Threads"
           }
         },
         "additionalProperties": false,
         "type": "object",
         "required": [
-          "document_id",
-          "revision",
-          "chunk_ordinal",
-          "source_sha256"
+          "threads"
         ],
-        "title": "SourceReference"
-      },
-      "ValidationError": {
-        "properties": {
-          "loc": {
-            "items": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "integer"
-                }
-              ]
-            },
-            "type": "array",
-            "title": "Location"
-          },
-          "msg": {
-            "type": "string",
-            "title": "Message"
-          },
-          "type": {
-            "type": "string",
-            "title": "Error Type"
-          }
-        },
-        "type": "object",
-        "required": [
-          "loc",
-          "msg",
-          "type"
-        ],
-        "title": "ValidationError"
+        "title": "ThreadList"
       }
     }
   }

@@ -335,9 +335,20 @@ services:
       OIDC_ISSUER: http://localhost:8081/realms/learning
       OIDC_JWKS_URL: http://keycloak:8080/realms/learning/protocol/openid-connect/certs
       OIDC_AUDIENCE: learning
+      # Threads and messages only (ADR 0002). Run scripts/upgrade_local.py if .env predates this database.
+      DATABASE_URL: postgresql://chatbot:${CHATBOT_DB_PASSWORD:?Run scripts/upgrade_local.py}@postgres:5432/chatbot?sslmode=disable
+      IDENTITY_URL: http://identity:8080
+      # Searches run with the user's own token; ai-core gets this agent's service account.
+      CONTENT_URL: http://content:8080
+      AI_CORE_URL: http://ai-core:8080
+      AI_TOKEN_URL: http://keycloak:8080/realms/learning/protocol/openid-connect/token
+      AI_CLIENT_ID: question-chatbot-agent
+      AI_CLIENT_SECRET: ${QUESTION_CHATBOT_AGENT_CLIENT_SECRET:?Run scripts/setup.py}
     depends_on:
       keycloak:
         condition: service_started
+      postgres:
+        condition: service_healthy
     init: true
     restart: on-failure:3
     stop_grace_period: 45s

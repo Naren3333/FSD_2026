@@ -1,25 +1,57 @@
+from datetime import datetime
+from typing import Annotated, Literal
 from uuid import UUID
-from pydantic import Field
+
 from learning_transport import Contract
+from pydantic import Field, StringConstraints
+
+# Content caps a search query at 1000 characters, and the raw message is the query when the rewrite fails.
+MAX_MESSAGE = 1000
 
 
-class SourceReference(Contract):
-    document_id: UUID
-    revision: int = Field(ge=1)
-    chunk_ordinal: int = Field(ge=0)
-    source_sha256: str = Field(pattern=r"^[a-f0-9]{64}$")
-
-
-class RequestContract(Contract):
-    student_id: str = Field(min_length=1, max_length=200)
+class NewThread(Contract):
     classroom_id: UUID
-    document_ids: list[UUID] = Field(min_length=1, max_length=20)
-    question: str = Field(min_length=1, max_length=4000)
-    conversation_id: UUID
-    retrieved_evidence: list[SourceReference] = Field(max_length=30)
 
 
-class ResponseContract(Contract):
-    answer: str | None
-    citations: list[SourceReference]
-    insufficient_evidence: bool
+class Thread(Contract):
+    id: UUID
+    classroom_id: UUID
+    role: Literal["student", "teacher"]
+    title: str | None
+    created_at: datetime
+    last_message_at: datetime
+
+
+class ThreadList(Contract):
+    threads: list[Thread]
+
+
+class NewMessage(Contract):
+    content: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=MAX_MESSAGE)]
+
+
+class Citation(Contract):
+    """A chunk the answer cites; `[doc:<chunk_id>]` in the message text marks where."""
+
+    chunk_id: UUID
+    document_id: UUID
+    title: str
+    page_start: int = Field(ge=1)
+    page_end: int = Field(ge=1)
+    kind: Literal["text", "table", "figure"]
+    source: Literal["pdf", "vision"]
+    content: str
+    image: str | None  # GET /api/content/documents/{document_id}/figures/{image}
+
+
+class Message(Contract):
+    id: UUID
+    role: Literal["user", "assistant"]
+    content: str
+    outcome: Literal["answered", "no_results", "error", "interrupted"] | None
+    citations: list[Citation] | None
+    created_at: datetime
+
+
+class MessageList(Contract):
+    messages: list[Message]

@@ -15,6 +15,7 @@ from jsonschema import Draft202012Validator, FormatChecker
 ROOT = Path(__file__).resolve().parents[1]
 ENV = dict(line.split("=", 1) for line in (ROOT / ".env").read_text().splitlines() if line and not line.startswith("#"))
 BASE = "http://localhost:8000/api"
+CONTRACTS = {"chatbot": "question-chatbot-agent"}  # gateway path → contract file
 
 
 def docker(*args: str, input: str | None = None, check: bool = True) -> subprocess.CompletedProcess[str]:
@@ -50,7 +51,7 @@ def request(client: httpx.Client, method: str, path: str, status: int = 200, **k
     if data is not None:
         import re
         service, _, resource = path.lstrip("/").partition("/")
-        contract = json.loads((ROOT / f"contracts/http/{service}.openapi.json").read_text())
+        contract = json.loads((ROOT / f"contracts/http/{CONTRACTS.get(service, service)}.openapi.json").read_text())
         route = "/v1/" + resource.split("?")[0]
         for template, methods in contract["paths"].items():
             if re.fullmatch(re.sub(r"\{[^}]+\}", "[^/]+", template), route) and method.lower() in methods:
@@ -143,6 +144,21 @@ def main() -> None:
         assert searched.json()["error"]["code"] == "SEARCH_UNAVAILABLE"
     else:
         request(student, "POST", "/content/search", json=query)
+    # Chat: a thread needs classroom access; each turn searches with the user's own token and streams an answer
+    # from ai-core (an AI_UNAVAILABLE error event without provider keys, never a made-up answer).
+    assert httpx.post(BASE + "/chatbot/threads", json={"classroom_id": room["id"]}).status_code == 401
+    request(other, "POST", "/chatbot/threads", 403, json={"classroom_id": room["id"]})
+    chat = request(student, "POST", "/chatbot/threads", 201, json={"classroom_id": room["id"]})
+    with student.stream("POST", f"/chatbot/threads/{chat['id']}/messages", json={"content": "What is a fraction?"}, timeout=60) as streamed:
+        assert streamed.status_code == 200 and streamed.headers["content-type"].startswith("text/event-stream")
+        events = [block.split("\n")[0].removeprefix("event: ") for block in streamed.read().decode().strip().split("\n\n")]
+    assert events[-1] in ("done", "error"), events
+    turn = request(student, "GET", f"/chatbot/threads/{chat['id']}/messages")["messages"]
+    assert [m["role"] for m in turn] == ["user", "assistant"] and turn[0]["content"] == "What is a fraction?"
+    assert turn[1]["outcome"] in ("answered", "no_results", "error")
+    request(other, "GET", f"/chatbot/threads/{chat['id']}/messages", 404)
+    request(teacher, "GET", f"/chatbot/threads/{chat['id']}/messages", 404)
+    assert [t["id"] for t in request(student, "GET", f"/chatbot/threads?classroom_id={room['id']}")["threads"]] == [chat["id"]]
     assessment = request(teacher, "POST", "/assessment/assessments", 201, json={"classroom_id": room["id"], "title": "Decimal test", "questions": [{"prompt": "0.1 + 0.2?", "type": "numerical", "answer": "0.3", "tolerance": "0", "options": [], "skill_id": skill["id"]}, {"prompt": "Which is a fraction?", "type": "multiple_choice", "answer": "1/2", "tolerance": "", "options": ["1/2", "word"], "skill_id": skill["id"]}]})
     public = request(student, "GET", f"/assessment/assessments/{assessment['id']}")
     assert all("answer" not in q and "tolerance" not in q for q in public["questions"])
@@ -169,8 +185,9 @@ def main() -> None:
     eventually(lambda: docker("exec", "-T", "postgres", "psql", "-U", "analytics", "-d", "analytics", "-At", "-c", f"SELECT count(*) FROM inbox WHERE event_id='{duplicate_id}'").stdout.strip(), lambda value: value == "1", "duplicate processing")
     assert request(teacher, "GET", performance_path)["skills"] == result["skills"]
     assert len(request(teacher, "GET", f"/grading/evaluations?classroom_id={room['id']}")) == 1
-    isolation = docker("exec", "-T", "postgres", "psql", "-U", "identity", "-d", "grading", "-c", "SELECT 1", check=False)
-    assert isolation.returncode != 0 and "permission denied" in isolation.stderr.lower()
+    for role, database in [("identity", "grading"), ("chatbot", "content")]:
+        isolation = docker("exec", "-T", "postgres", "psql", "-U", role, "-d", database, "-c", "SELECT 1", check=False)
+        assert isolation.returncode != 0 and "permission denied" in isolation.stderr.lower(), (role, database)
     migrations = docker("exec", "-T", "postgres", "psql", "-U", "content", "-d", "content", "-At", "-c", "SELECT string_agg(version::text, ',' ORDER BY version) FROM schema_migrations").stdout.strip()
     assert migrations == "1,2", migrations
     vector = docker("exec", "-T", "postgres", "psql", "-U", "content", "-d", "content", "-At", "-c", "SELECT count(*) FROM pg_extension WHERE extname='vector'").stdout.strip()
@@ -179,7 +196,7 @@ def main() -> None:
     for client_id in ["content-indexer", "question-chatbot-agent"]:
         assert ai_core_status(service_token(client_id)) in (200, 503)
     assert ai_core_status(student.headers["Authorization"].removeprefix("Bearer ")) == 403
-    print("PASS: gateway auth, classroom isolation, curriculum, S3 upload/extraction, PDF indexing jobs, teacher-only rubrics, search access, answer-key secrecy, submissions, draft grading, teacher finalization, Kafka analytics, consumer restart, duplicate event and business-key idempotency, student privacy, database isolation, numbered migrations, pgvector, AI service accounts.")
+    print("PASS: gateway auth, classroom isolation, curriculum, S3 upload/extraction, PDF indexing jobs, teacher-only rubrics, search access, chat threads and streaming, answer-key secrecy, submissions, draft grading, teacher finalization, Kafka analytics, consumer restart, duplicate event and business-key idempotency, student privacy, database isolation, numbered migrations, pgvector, AI service accounts.")
 
 
 if __name__ == "__main__":

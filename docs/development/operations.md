@@ -10,6 +10,8 @@ Document storage moved from MinIO to SeaweedFS (volume `seaweedfs-data`). Docume
 
 ai-core reads `OPENAI_API_KEY` and `VOYAGE_API_KEY` from `.env`. A new setup writes them empty; an older `.env` needs the two lines added by hand. Without them ai-core starts and answers `503 AI_PROVIDER_NOT_CONFIGURED`, and the integration test accepts that.
 
+The chatbot (stage 4) has its own database: run `python scripts/upgrade_local.py` once with the stack up. It adds `CHATBOT_DB_PASSWORD` to `.env` and creates the `chatbot` role and database, changing nothing that exists. Then `docker compose up -d --build` and `docker compose restart kong` (new `/api/chatbot` route).
+
 Content indexing (stage 3) needs no reset: Content's migration `002_indexing.sql` applies on start and keeps existing documents. Run `docker compose up -d --build`, then `docker compose restart kong` so Kong loads the larger Content body limit; `kafka-init` creates the new `content.indexed.v1` topic.
 
 The Postgres image also changed from Alpine to Debian (pgvector), so text-index collations differ. Recreating the volume is the clean path. Keeping data means reindexing every database (`REINDEX DATABASE <name>;` as each owner) after the switch, plus adding the clients and extension by hand.
@@ -28,6 +30,10 @@ Go uses JSON slog and Python emits JSON application telemetry. Request IDs and c
 PDF uploads are indexed by Content's worker through ai-core. A document's `status` shows the state: `indexing`, `indexed`, or `failed` with `failure_reason` (`NO_TEXT_LAYER`, `ENCRYPTED`, `CORRUPT` from the PDF itself; `AI_UNAVAILABLE` after six failed attempts to reach ai-core or its providers; `INTERNAL` for a result Content could not store). Pending work is in Content's `index_jobs` table: `attempts`, `next_attempt` and `last_error` explain a waiting job, for example `ai-core 503 AI_PROVIDER_NOT_CONFIGURED` until provider keys are set. After fixing the cause, a teacher (or `POST /v1/documents/{id}/reindex`) queues the document again; PDFs uploaded before indexing existed (`extraction_unsupported`) are indexed the same way. Each ingest costs model calls, so do not loop reindexes.
 
 `python scripts/content_db_tests.py` runs Content's database-backed Go tests (worker, duplicate and stale jobs, retries, search) in a Go container on the Compose network. It creates a separate `content_test` database once and works in throwaway schemas there; Content's own data is not touched. They are skipped by `check.py`, which has no database.
+## Chatbot
+
+A chat turn needs Content, ai-core with an OpenAI key, and (for reranking) a Voyage key. Without a key the turn ends with an `AI_UNAVAILABLE` error event and the message is saved with outcome `error`; without Voyage, search falls back to RRF order and the relevance floor is skipped. `RELEVANCE_FLOOR` (default 0.61, fsd_test's tuned value for Voyage rerank scores) and `ANSWER_MAX_TOKENS` (800) are optional environment settings. Each saved answer records its rewritten query, the chunk ids it was given, its citations, prompt version, model, tokens and latency, which is what to look at when an answer is wrong. The Postgres store tests run with `CHATBOT_TEST_DATABASE_URL` pointing at a scratch database.
+
 ## Outbox retry and broker recovery
 
 Inspect only the affected service's `outbox` using its own database identity. Rows with `published_at IS NULL AND attempts >= 12` require operator action after repairing the broker. To retry a reviewed event, use a parameterized update on that specific event ID: set `attempts=0, next_attempt=now()` while retaining its original `id`, payload and creation time. Never invent a replacement grade or delete outbox history to clear an alert.

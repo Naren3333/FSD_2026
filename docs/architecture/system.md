@@ -10,6 +10,10 @@ flowchart LR
   Kong --> Assessment[Assessment / Go]
   Kong --> Grading[Grading / Go]
   Kong --> Analytics[Analytics / Python]
+  Kong --> QC
+  QC -->|search with the user's token| Content
+  QC -->|rewrite, answer| AI
+  QC --> ChatDB[(chatbot database)]
   Content --> S3[Content-only S3 bucket]
   Content -->|authorize| Identity
   Assessment -->|authorize| Identity
@@ -22,15 +26,15 @@ flowchart LR
   Kafka --> Analytics
   Content -->|outbox: uploaded, indexed| Kafka
   Content -->|ingest, embed, rerank as content-indexer| AI
-  subgraph Private stateless applications
+  subgraph AI applications
     AI[AI core: ingest, embed, generate, rerank]
     QG[Question generation: 501]
     SP[Performance interpretation: 501]
-    QC[Grounded chatbot: 501]
+    QC[Question chatbot]
   end
 ```
 
-Content is the only business service that calls an AI application: its indexing worker sends PDFs to ai-core, and search asks ai-core for the query vector and the rerank (ADR 0002). ai-core calls nothing back, so there is no circular dependency. Each persistent application connects only to its own database. Database and schema grants enforce the boundary; identifiers across services are references, not cross-database foreign keys. Assessment validates skill references through Curriculum. Identity is the policy owner for classroom access; bearer tokens forwarded by a business service are revalidated at Identity. No user identity headers are trusted.
+Content and the chatbot call ai-core: its indexing worker sends PDFs to ai-core, and search asks ai-core for the query vector and the rerank (ADR 0002). ai-core calls nothing back, so there is no circular dependency. Each persistent application connects only to its own database. Database and schema grants enforce the boundary; identifiers across services are references, not cross-database foreign keys. Assessment validates skill references through Curriculum. Identity is the policy owner for classroom access; bearer tokens forwarded by a business service are revalidated at Identity. No user identity headers are trusted.
 
 Go domain files implement exact grading, assessment validation and text chunking without framework/database dependencies, except the small transport UUID helper used by assessment validation (a remaining layering cleanup). SQL is explicit, application transactions are visible in handlers, and source remains intentionally small. The shared Go package implements transport, auth, connection lifecycle, outbox plumbing and consumer inboxes; it owns no educational entity. Python's shared package implements auth/error/logging only.
 
@@ -56,14 +60,14 @@ flowchart LR
   Vector --> Event[content.indexed.v1]
   Search[POST /v1/search with the caller's token] --> Vector
   Search --> Rerank[ai-core embed + rerank]
-  Student[Authenticated student question] -.-> Chat[Question chatbot agent]
-  Chat -. user's own token .-> Search
-  Chat -.-> Inference[ai-core generation]
-  Inference -. grounded answer + citations .-> Student
+  Student[Authenticated student question] --> Chat[Question chatbot agent]
+  Chat -->|user's own token| Search
+  Chat --> Inference[ai-core generation]
+  Inference -->|streamed answer + citations| Student
 ```
 
-Dashed steps are future work (ADR 0002 stage 4: the chatbot). ai-core implements `/v1/ingest` (PDF bytes in; chunks, vectors and figure crops out), `/v1/inference` (embed, generate, structured or streamed generation) and `/v1/rerank`, statelessly: Content stores the results. Provider failures are errors (502/503), never placeholder output; Content retries indexing and answers search with 503 `SEARCH_UNAVAILABLE` instead of inventing results.
+ai-core implements `/v1/ingest` (PDF bytes in; chunks, vectors and figure crops out), `/v1/inference` (embed, generate, structured or streamed generation) and `/v1/rerank`, statelessly: Content stores the results. Provider failures are errors (502/503), never placeholder output; Content retries indexing and answers search with 503 `SEARCH_UNAVAILABLE` instead of inventing results.
 
-Content's index: a PDF upload commits the document (status `indexing`) and its `index_jobs` row together. Worker goroutines lease due jobs with `FOR UPDATE SKIP LOCKED`; the result is stored in one transaction that first deletes the job by its lease, so a run that lost its lease (outlived it, or was taken over) changes nothing and `content.indexed.v1` is emitted once per completed run. Chunks carry copies of the document's org, classroom and type, kept identical by a composite foreign key, so search filters on them without a join; vectors are compared only within the query's embedding model. A reindex keeps the old chunks searchable until the new result replaces them. Search applies the caller's own classroom access (through Identity) and, for students, teaching material only; the chatbot will call it with the student's token, so an agent never gets wider access than its user.
+Content's index: a PDF upload commits the document (status `indexing`) and its `index_jobs` row together. Worker goroutines lease due jobs with `FOR UPDATE SKIP LOCKED`; the result is stored in one transaction that first deletes the job by its lease, so a run that lost its lease (outlived it, or was taken over) changes nothing and `content.indexed.v1` is emitted once per completed run. Chunks carry copies of the document's org, classroom and type, kept identical by a composite foreign key, so search filters on them without a join; vectors are compared only within the query's embedding model. A reindex keeps the old chunks searchable until the new result replaces them. Search applies the caller's own classroom access (through Identity) and, for students, teaching material only; the chatbot calls it with the student's token, so an agent never gets wider access than its user. The chatbot stores only threads and messages (with the chunk ids each answer was given and cited) in its own `chatbot` database.
 
-The other three private Python applications define versioned input/output contracts and return `AI_CAPABILITY_NOT_IMPLEMENTED` (501) after authentication, role checking and validation. None accesses business data or uses test doubles in runtime code. The agent contracts carry untrusted references; accepting a syntactically valid reference is not authorization to retrieve it.
+The other two private Python agents define versioned input/output contracts and return `AI_CAPABILITY_NOT_IMPLEMENTED` (501) after authentication, role checking and validation. None accesses business data or uses test doubles in runtime code. The agent contracts carry untrusted references; accepting a syntactically valid reference is not authorization to retrieve it.
