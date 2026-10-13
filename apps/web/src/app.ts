@@ -1,100 +1,74 @@
-import { Component, HostListener, OnInit, ViewChild, inject, signal } from '@angular/core';
-import { Api, Classroom } from './api';
-import { ActionState, StatusComponent } from './shared';
-import { ClassroomsComponent } from './classrooms';
-import { CurriculumComponent } from './curriculum';
-import { MaterialsComponent } from './materials';
-import { AssessmentsComponent } from './assessments';
-import { ReviewComponent } from './review';
-import { PerformanceComponent } from './performance';
-import { ChatComponent } from './chat';
-import { UsageComponent } from './usage';
+import { Component, HostListener, OnInit, computed, inject } from '@angular/core';
+import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
+import { NavigationEnd, Router, RouterLink, RouterLinkActive, RouterOutlet } from '@angular/router';
+import { filter } from 'rxjs';
+import { SECTIONS } from './app.routes';
+import { AiUsage } from './core/ai-usage';
+import { ClassroomContext } from './core/classroom-context';
+import { Session } from './core/session';
+import { UnsavedChanges } from './core/unsaved-changes';
+import { UsageComponent } from './features/usage/usage';
+import { ActionState } from './shared/action-state';
+import { StatusComponent } from './shared/status';
 
+/** The workspace shell: navigation, the signed-in user, the current classroom and the open section. */
 @Component({
   selector: 'app-root',
   standalone: true,
-  imports: [
-    StatusComponent,
-    ClassroomsComponent,
-    CurriculumComponent,
-    MaterialsComponent,
-    AssessmentsComponent,
-    ReviewComponent,
-    PerformanceComponent,
-    ChatComponent,
-    UsageComponent,
-  ],
+  imports: [RouterOutlet, RouterLink, RouterLinkActive, StatusComponent, UsageComponent],
   templateUrl: './app.html',
 })
 export class AppComponent implements OnInit {
-  @ViewChild(ClassroomsComponent) classroomForms?: ClassroomsComponent;
-  @ViewChild(CurriculumComponent) curriculumForm?: CurriculumComponent;
-  @ViewChild(MaterialsComponent) materialsForm?: MaterialsComponent;
-  @ViewChild(AssessmentsComponent) assessmentForms?: AssessmentsComponent;
-  @ViewChild(ReviewComponent) reviewForm?: ReviewComponent;
-  @ViewChild(ChatComponent) chat?: ChatComponent;
-  @ViewChild(UsageComponent) usage?: UsageComponent;
-  readonly api = inject(Api);
+  readonly session = inject(Session);
+  readonly context = inject(ClassroomContext);
+  private readonly unsaved = inject(UnsavedChanges);
+  private readonly usage = inject(AiUsage);
   readonly state = new ActionState();
-  readonly classrooms = signal<Classroom[]>([]);
-  readonly classroomId = signal('');
-  readonly section = signal('classrooms');
-  readonly sections = [
-    { key: 'classrooms', label: 'Classrooms' },
-    { key: 'curriculum', label: 'Curriculum' },
-    { key: 'materials', label: 'Teaching materials' },
-    { key: 'chat', label: 'Ask the materials' },
-    { key: 'assessments', label: 'Assessments' },
-    { key: 'review', label: 'Grading review' },
-    { key: 'performance', label: 'Learning performance' },
-  ];
+  readonly sections = computed(() =>
+    SECTIONS.filter((section) => !section.teacherOnly || this.session.isTeacher()),
+  );
+
+  constructor() {
+    // A section may have spent AI allowance (indexing, chat) since the meter last loaded.
+    inject(Router)
+      .events.pipe(
+        filter((event) => event instanceof NavigationEnd),
+        takeUntilDestroyed(),
+      )
+      .subscribe(() => {
+        if (this.session.profile()) this.usage.refresh();
+      });
+  }
+
   ngOnInit(): void {
     void this.state.run(async () => {
-      await this.api.initialize();
-      if (this.api.profile()) await this.refresh();
+      await this.session.ready();
+      if (this.session.profile()) await this.context.refresh();
     });
   }
-  private async refresh(): Promise<void> {
-    const rooms = await this.api.classrooms();
-    this.classrooms.set(rooms);
-    if (!rooms.some((r) => r.id === this.classroomId())) this.classroomId.set(rooms[0]?.id || '');
-  }
-  load(): void {
-    void this.state.run(() => this.refresh());
-  }
+
   login(): void {
-    void this.state.run(() => this.api.login());
+    void this.state.run(() => this.session.login());
   }
+
   logout(): void {
     if (this.hasUnsaved()) {
       this.state.error.set('Finish or clear your unsaved forms before signing out.');
       return;
     }
-    void this.state.run(() => this.api.logout());
+    void this.state.run(() => this.session.logout());
   }
-  /** Opens a section; the AI use meter refreshes too, since indexing may have spent since it last loaded. */
-  show(key: string): void {
-    this.section.set(key);
-    this.usage?.refresh();
-  }
+
   selectClassroom(event: Event): void {
-    this.classroomId.set((event.target as HTMLSelectElement).value);
+    this.context.select((event.target as HTMLSelectElement).value);
   }
+
   hasUnsaved(): boolean {
-    return (
-      [
-        this.classroomForms?.form,
-        this.classroomForms?.enrollment,
-        this.curriculumForm?.form,
-        this.materialsForm?.form,
-        this.assessmentForms?.form,
-        this.assessmentForms?.answers,
-        this.reviewForm?.form,
-        this.chat?.form,
-      ].some((form) => form?.dirty) || !!this.chat?.streaming()
-    );
+    return this.unsaved.any();
   }
-  @HostListener('window:beforeunload', ['$event']) beforeUnload(event: BeforeUnloadEvent): void {
+
+  @HostListener('window:beforeunload', ['$event'])
+  beforeUnload(event: BeforeUnloadEvent): void {
     if (this.hasUnsaved()) {
       event.preventDefault();
       event.returnValue = '';

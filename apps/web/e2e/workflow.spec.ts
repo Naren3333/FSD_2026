@@ -28,11 +28,11 @@ test('teacher and student complete a real assessment through Kong', async ({ bro
   await teacher.getByLabel('Student ID', { exact: true }).filter({ visible: true }).fill(studentId);
   await teacher.getByRole('button', { name: 'Enroll student', exact: true }).click();
   await expect(teacher.getByText('Student enrolled.', { exact: true })).toBeVisible();
-  await teacher.getByRole('button', { name: 'Curriculum', exact: true }).click();
+  await teacher.getByRole('link', { name: 'Curriculum', exact: true }).click();
   await teacher.getByLabel('Name', { exact: true }).fill('Browser skill ' + suffix);
   await teacher.getByRole('button', { name: 'Add curriculum', exact: true }).click();
   await expect(teacher.getByText('Curriculum added.', { exact: true })).toBeVisible();
-  await teacher.getByRole('button', { name: 'Assessments', exact: true }).click();
+  await teacher.getByRole('link', { name: 'Assessments', exact: true }).click();
   await teacher.getByRole('button', { name: 'Refresh assessments' }).click();
   await teacher.getByLabel('Assessment title').fill('Browser assessment ' + suffix);
   await teacher.getByLabel('Question', { exact: true }).fill('What is 0.1 plus 0.2?');
@@ -42,14 +42,14 @@ test('teacher and student complete a real assessment through Kong', async ({ bro
   await expect(teacher.getByText('Assessment created.', { exact: true })).toBeVisible();
   await student.getByRole('button', { name: 'Refresh classrooms' }).click();
   await student.getByLabel('Current classroom').selectOption({ label: 'Browser ' + suffix });
-  await student.getByRole('button', { name: 'Assessments', exact: true }).click();
+  await student.getByRole('link', { name: 'Assessments', exact: true }).click();
   await student.getByRole('button', { name: 'Open assessment', exact: true }).click();
   await student.getByLabel('What is 0.1 plus 0.2?').fill('0.30');
   await student.getByRole('button', { name: 'Submit answers', exact: true }).click();
   await expect(
     student.getByText('Answers submitted. Your teacher will review the grade.', { exact: true }),
   ).toBeVisible();
-  await teacher.getByRole('button', { name: 'Grading review', exact: true }).click();
+  await teacher.getByRole('link', { name: 'Grading review', exact: true }).click();
   await expect(async () => {
     await teacher.getByRole('button', { name: 'Refresh grades' }).click();
     await expect(teacher.getByRole('button', { name: 'Review grade', exact: true })).toBeVisible();
@@ -60,7 +60,7 @@ test('teacher and student complete a real assessment through Kong', async ({ bro
   await expect(
     teacher.getByText('Grade finalized. Performance will update after event processing.', { exact: true }),
   ).toBeVisible();
-  await student.getByRole('button', { name: 'Learning performance', exact: true }).click();
+  await student.getByRole('link', { name: 'Learning performance', exact: true }).click();
   await expect(async () => {
     await student.getByRole('button', { name: 'View performance' }).click();
     await expect(student.getByRole('cell', { name: '100%' })).toBeVisible();
