@@ -31,7 +31,7 @@ test('teacher and student complete a real assessment through Kong',async({browse
 });
 
 test('anonymous workspace has honest unavailable state and keyboard navigation',async({page})=>{
-  await page.goto('/');await expect(page.getByRole('heading',{level:1})).toBeVisible();await expect(page.getByText(/AI questions, feedback and document chat are not implemented/)).toBeVisible();
+  await page.goto('/');await expect(page.getByRole('heading',{level:1})).toBeVisible();await expect(page.getByText(/AI-generated questions and feedback are not implemented/)).toBeVisible();
   await page.keyboard.press('Tab');await expect(page.getByRole('link',{name:'Skip to workspace'})).toBeFocused();
   await page.screenshot({path:'test-results/welcome.png',fullPage:true});
 });

@@ -13,7 +13,7 @@ export class ActionState {
   }
   validate(form: FormGroup): boolean {
     form.markAllAsTouched();
-    if (form.invalid) { this.error.set('Check the highlighted fields before continuing.'); setTimeout(() => document.querySelector<HTMLElement>('form:not([hidden]) .ng-invalid:not(form)')?.focus()); return false; }
+    if (form.invalid) { this.error.set('Check the highlighted fields before continuing.'); setTimeout(() => Array.from(document.querySelectorAll<HTMLElement>('form .ng-invalid:not(form)')).find(el => !el.closest('[hidden]'))?.focus()); return false; }
     return true;
   }
 }

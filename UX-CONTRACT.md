@@ -16,5 +16,5 @@ Tab panels stay mounted to retain work; page unload warns when a form is dirty. 
 
 Lists are capped by APIs at 100 (curriculum 200); the UI states this limit. Full server pagination is a documented remaining limitation. No search or selection feature is claimed. Empty states explain the next action. All shared feedback reserves space. Errors appear inline; status has a polite live region.
 
-Unsupported AI actions are explanatory text with disabled controls. PDF upload reports extraction unsupported. Displayed metrics come only from finalized evidence. Dates/numbers use en-SG; student IDs are plain identifiers, never interpreted as display names.
+Unsupported AI actions are explanatory text with disabled controls. PDFs show their indexing status (indexing, indexed with page and passage counts, or failed with a reason and a teacher-only retry); text files say they are not indexed. Chat questions stay in the field until the chatbot accepts them, answers stream with a Stop control, every answer ends answered, with no matching material, failed or stopped, and failures appear inline with the question kept for retry. Displayed metrics come only from finalized evidence. Dates/numbers use en-SG; student IDs are plain identifiers, never interpreted as display names.
 

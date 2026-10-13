@@ -18,7 +18,7 @@ Runtime source of truth: apps/web/src/styles.css `:root`. This document records 
 Desktop uses a 220px navigation column with a natural document-scrolling main canvas; narrow screens stack header/navigation above the workspace. Forms have visible labels, text error messages and stable feedback regions. Native selects are intentional: operating-system popup geometry is acceptable. The global scrollbar is visible, tokenized and forced-color aware.
 
 ## Motion and content
-Only short hover/focus transitions; reduced-motion removes transitions. No animated counters or fabricated progress. Say “Finalize grade”, “Create classroom”, and “Upload document”. Display AI features as unavailable; do not imply extraction is indexing. Evidence uses textual counts plus observed accuracy, never mastery claims.
+Only short hover/focus transitions; reduced-motion removes transitions. No animated counters or fabricated progress. Say “Finalize grade”, “Create classroom”, and “Upload document”. AI features that are not implemented are displayed as unavailable. Document chat (“Ask the materials”) answers only from indexed PDFs and shows numbered sources; never imply text extraction is indexing, and label model-written passages as such. Evidence uses textual counts plus observed accuracy, never mastery claims.
 
 ## Accessibility
 WCAG 2.2 AA target, semantic controls, visible keyboard focus, error/live regions, minimum 44px controls, no color-only statuses. Light theme only in the initial foundation. English Singapore formatting; no Japanese market assumptions.
