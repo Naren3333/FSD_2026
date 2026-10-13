@@ -12,10 +12,10 @@ import (
 
 // store is Content's documents, their index jobs and their indexed chunks.
 type store interface {
-	insertDocument(ctx context.Context, id, classroom, org, owner, title, kind, key, hash, status, docType string, chunks []Chunk) (commitAttempted bool, err error)
+	insertDocument(ctx context.Context, d newDocument) (commitAttempted bool, err error)
 	listDocuments(ctx context.Context, org, classroom string, teacher bool) ([]Document, error)
 	findDocument(ctx context.Context, org, id string) (Document, []byte, error)
-	findOriginal(ctx context.Context, org, id string) (classroom, key, kind, docType string, err error)
+	findOriginal(ctx context.Context, org, id string) (storedDocument, error)
 	findIndexed(ctx context.Context, org, id, image string) (Document, error)
 	queueIndex(ctx context.Context, org, id string) (bool, error)
 	vectorLeg(ctx context.Context, f filter, vector []float32, model string) ([]hit, error)
@@ -29,22 +29,22 @@ type pgStore struct{ db *pgxpool.Pool }
 // insertDocument stores the document row, queues a PDF for indexing and emits the outbox event in one
 // transaction. commitAttempted reports whether Commit was called: an uncertain
 // commit may have succeeded, so callers must then retain the stored original.
-func (p pgStore) insertDocument(ctx context.Context, id, classroom, org, owner, title, kind, key, hash, status, docType string, chunks []Chunk) (commitAttempted bool, err error) {
+func (p pgStore) insertDocument(ctx context.Context, d newDocument) (commitAttempted bool, err error) {
 	tx, err := p.db.Begin(ctx)
 	if err != nil {
 		return false, err
 	}
 	defer tx.Rollback(ctx)
-	encoded, err := json.Marshal(chunks)
+	encoded, err := json.Marshal(d.Chunks)
 	if err != nil {
 		return false, err
 	}
-	_, err = tx.Exec(ctx, "INSERT INTO documents(id,classroom_id,org_id,owner_id,title,mime_type,object_key,sha256,status,doc_type,chunks) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)", id, classroom, org, owner, title, kind, key, hash, status, docType, encoded)
-	if err == nil && status == statusIndexing {
-		_, err = tx.Exec(ctx, "INSERT INTO index_jobs(document_id) VALUES($1)", id)
+	_, err = tx.Exec(ctx, "INSERT INTO documents(id,classroom_id,org_id,owner_id,title,mime_type,object_key,sha256,status,doc_type,chunks) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)", d.ID, d.Classroom, d.Org, d.Owner, d.Title, d.Type, d.Key, d.SHA, d.Status, d.DocType, encoded)
+	if err == nil && d.Status == statusIndexing {
+		_, err = tx.Exec(ctx, "INSERT INTO index_jobs(document_id) VALUES($1)", d.ID)
 	}
 	if err == nil {
-		err = platform.Emit(ctx, tx, "content.uploaded.v1", id, map[string]any{"document_id": id, "classroom_id": classroom, "org_id": org, "revision": 1, "status": status})
+		err = platform.Emit(ctx, tx, "content.uploaded.v1", d.ID, map[string]any{"document_id": d.ID, "classroom_id": d.Classroom, "org_id": d.Org, "revision": d.Revision, "status": d.Status})
 	}
 	if err == nil {
 		// An uncertain commit may have succeeded. Retain the original for reconciliation.
@@ -90,9 +90,12 @@ func (p pgStore) findDocument(ctx context.Context, org, id string) (Document, []
 	return v, data, err
 }
 
-func (p pgStore) findOriginal(ctx context.Context, org, id string) (classroom, key, kind, docType string, err error) {
-	err = p.db.QueryRow(ctx, "SELECT classroom_id,object_key,mime_type,doc_type FROM documents WHERE id=$1 AND org_id=$2", id, org).Scan(&classroom, &key, &kind, &docType)
-	return classroom, key, kind, docType, err
+// findOriginal returns what serving the original needs: where it is stored, its media type, and its classroom and
+// type for the access check.
+func (p pgStore) findOriginal(ctx context.Context, org, id string) (storedDocument, error) {
+	var v storedDocument
+	err := p.db.QueryRow(ctx, "SELECT id,classroom_id,object_key,mime_type,doc_type FROM documents WHERE id=$1 AND org_id=$2", id, org).Scan(&v.ID, &v.Classroom, &v.Key, &v.Type, &v.DocType)
+	return v, err
 }
 
 // findIndexed finds the document whose current chunks point at a figure crop.

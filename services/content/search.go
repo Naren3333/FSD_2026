@@ -9,7 +9,6 @@ import (
 	"slices"
 	"sort"
 	"strings"
-	"sync"
 	"time"
 	"unicode/utf8"
 
@@ -201,22 +200,8 @@ func (s server) runSearch(ctx context.Context, f filter, query string, topK int,
 	return searchResponse{hits, fallback}, nil
 }
 
-// queryCache keeps recent query vectors, so a repeated question costs no embedding call.
-var queryCache = struct {
-	sync.Mutex
-	entries map[string]cachedVector
-}{entries: map[string]cachedVector{}}
-
-type cachedVector struct {
-	vector []float32
-	model  string
-}
-
 func (s server) embedQuery(ctx context.Context, query string, who billed) ([]float32, string, error) {
-	queryCache.Lock()
-	cached, ok := queryCache.entries[query]
-	queryCache.Unlock()
-	if ok {
+	if cached, ok := s.vectors.get(query); ok {
 		return cached.vector, cached.model, nil
 	}
 	ctx, cancel := context.WithTimeout(ctx, embedTimeout)
@@ -225,12 +210,7 @@ func (s server) embedQuery(ctx context.Context, query string, who billed) ([]flo
 	if err != nil {
 		return nil, "", err
 	}
-	queryCache.Lock()
-	if len(queryCache.entries) >= 256 {
-		clear(queryCache.entries)
-	}
-	queryCache.entries[query] = cachedVector{vector, model}
-	queryCache.Unlock()
+	s.vectors.put(query, cachedVector{vector, model})
 	return vector, model, nil
 }
 

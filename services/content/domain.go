@@ -2,6 +2,7 @@ package main
 
 import (
 	"errors"
+	"fmt"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -33,8 +34,9 @@ const (
 )
 
 const (
-	maxPDF  = 50 << 20
-	maxText = 5 << 20
+	maxPDF   = 50 << 20
+	maxText  = 5 << 20
+	maxTitle = 160
 )
 
 type Document struct {
@@ -55,6 +57,18 @@ type Document struct {
 	FailureReason  *string    `json:"failure_reason,omitempty"`
 }
 
+// newDocument is an upload about to be stored: the document plus who owns it and where its original is.
+type newDocument struct {
+	Document
+	Org, Owner, Key string
+}
+
+// storedDocument is a document with the object key of its original.
+type storedDocument struct {
+	Document
+	Key string
+}
+
 type Chunk struct {
 	Ordinal int    `json:"ordinal"`
 	Text    string `json:"text"`
@@ -62,7 +76,7 @@ type Chunk struct {
 	End     int    `json:"end_character"`
 }
 
-var errTooLarge = errors.New("text documents must be no larger than 5 MiB")
+var errTooLarge = fmt.Errorf("text documents must be no larger than %d MiB", maxText>>20)
 
 // extract chunks a text document. A PDF is only checked here: it is indexed asynchronously.
 func extract(data []byte, kind string) ([]Chunk, string, error) {
