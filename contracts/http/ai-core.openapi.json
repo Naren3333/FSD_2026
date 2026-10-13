@@ -849,16 +849,14 @@
               "$ref": "#/components/schemas/IngestChunk"
             },
             "type": "array",
-            "title": "Chunks",
-            "default": []
+            "title": "Chunks"
           },
           "figures": {
             "items": {
               "$ref": "#/components/schemas/IngestFigure"
             },
             "type": "array",
-            "title": "Figures",
-            "default": []
+            "title": "Figures"
           }
         },
         "additionalProperties": false,
