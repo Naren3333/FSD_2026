@@ -115,11 +115,12 @@ func (s server) search(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	if !s.Access(w, r, req.Classroom, "") {
+	relation, ok := s.Relation(w, r, req.Classroom, "")
+	if !ok {
 		return
 	}
 	f := filter{platform.Actor(r).Org, req.Classroom, req.DocTypes, req.DocumentIDs}
-	if !platform.Actor(r).Has("teacher") {
+	if relation != platform.RelationTeacher {
 		if len(f.docTypes) > 0 && !contains(f.docTypes, "teaching_material") {
 			platform.JSON(w, 200, searchResponse{Results: []hit{}})
 			return

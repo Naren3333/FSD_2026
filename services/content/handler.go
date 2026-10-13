@@ -21,10 +21,11 @@ type server struct {
 	ai    *aiCore
 }
 
-// visible reports whether the caller may see a document of this type once classroom access is settled: students
-// see teaching material only.
-func visible(r *http.Request, docType string) bool {
-	return docType == "teaching_material" || platform.Actor(r).Has("teacher")
+// visible reports whether a caller with this classroom relation may see a document of this type: students see
+// teaching material only. The relation comes from Identity, not the token role, so an account that is a teacher
+// elsewhere but enrolled here sees what students see.
+func visible(relation, docType string) bool {
+	return docType == "teaching_material" || relation == platform.RelationTeacher
 }
 
 func (s server) upload(w http.ResponseWriter, r *http.Request) {
@@ -32,7 +33,7 @@ func (s server) upload(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	classroom := r.URL.Query().Get("classroom_id")
-	if !s.Access(w, r, classroom, "") {
+	if !s.TeacherOf(w, r, classroom) {
 		return
 	}
 	title := strings.TrimSpace(r.URL.Query().Get("title"))
@@ -90,10 +91,11 @@ func (s server) upload(w http.ResponseWriter, r *http.Request) {
 
 func (s server) list(w http.ResponseWriter, r *http.Request) {
 	classroom := r.URL.Query().Get("classroom_id")
-	if !s.Access(w, r, classroom, "") {
+	relation, ok := s.Relation(w, r, classroom, "")
+	if !ok {
 		return
 	}
-	result, err := s.listDocuments(r.Context(), platform.Actor(r).Org, classroom, platform.Actor(r).Has("teacher"))
+	result, err := s.listDocuments(r.Context(), platform.Actor(r).Org, classroom, relation == platform.RelationTeacher)
 	if err != nil {
 		platform.Fail(w, err)
 		return
@@ -115,10 +117,11 @@ func (s server) get(w http.ResponseWriter, r *http.Request) {
 		platform.Fail(w, err)
 		return
 	}
-	if !s.Access(w, r, v.Classroom, "") {
+	relation, ok := s.Relation(w, r, v.Classroom, "")
+	if !ok {
 		return
 	}
-	if !visible(r, v.DocType) {
+	if !visible(relation, v.DocType) {
 		platform.Error(w, 404, "NOT_FOUND", "Document not found.")
 		return
 	}
@@ -143,10 +146,11 @@ func (s server) original(w http.ResponseWriter, r *http.Request) {
 		platform.Fail(w, err)
 		return
 	}
-	if !s.Access(w, r, classroom, "") {
+	relation, ok := s.Relation(w, r, classroom, "")
+	if !ok {
 		return
 	}
-	if !visible(r, docType) {
+	if !visible(relation, docType) {
 		platform.Error(w, 404, "NOT_FOUND", "Document not found.")
 		return
 	}
@@ -169,10 +173,11 @@ func (s server) figure(w http.ResponseWriter, r *http.Request) {
 		platform.Fail(w, err)
 		return
 	}
-	if !s.Access(w, r, v.Classroom, "") {
+	relation, ok := s.Relation(w, r, v.Classroom, "")
+	if !ok {
 		return
 	}
-	if !visible(r, v.DocType) {
+	if !visible(relation, v.DocType) {
 		platform.Error(w, 404, "NOT_FOUND", "Figure not found.")
 		return
 	}
@@ -198,7 +203,7 @@ func (s server) reindex(w http.ResponseWriter, r *http.Request) {
 		platform.Fail(w, err)
 		return
 	}
-	if !s.Access(w, r, v.Classroom, "") {
+	if !s.TeacherOf(w, r, v.Classroom) {
 		return
 	}
 	if v.Type != "application/pdf" {

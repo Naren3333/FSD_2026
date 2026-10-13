@@ -236,15 +236,46 @@ func (a *App) Handler() http.Handler {
 
 // Access delegates classroom policy to its owner and forwards the verified caller token.
 func (a *App) Access(w http.ResponseWriter, r *http.Request, classroom, student string) bool {
+	_, ok := a.Relation(w, r, classroom, student)
+	return ok
+}
+
+// TeacherOf allows only the classroom's own teacher. The token's teacher role is not enough: an account with both
+// roles that is enrolled in someone else's classroom is a student there.
+func (a *App) TeacherOf(w http.ResponseWriter, r *http.Request, classroom string) bool {
+	if !Teacher(w, r) {
+		return false
+	}
+	relation, ok := a.Relation(w, r, classroom, "")
+	if !ok {
+		return false
+	}
+	if relation != RelationTeacher {
+		Error(w, 403, "FORBIDDEN", "Only the classroom's teacher may do this.")
+		return false
+	}
+	return true
+}
+
+// Relations Identity reports between the caller and a classroom.
+const (
+	RelationTeacher = "teacher"
+	RelationStudent = "student"
+)
+
+// Relation asks Identity how the caller may access the classroom (optionally on behalf of a student): as its
+// teacher or as an enrolled student. Teacher-only data must be gated on RelationTeacher, not on the token role.
+// On denial or failure it has already written the error response.
+func (a *App) Relation(w http.ResponseWriter, r *http.Request, classroom, student string) (string, bool) {
 	if !ID(classroom) {
 		Error(w, 422, "VALIDATION_ERROR", "A valid classroom identifier is required.")
-		return false
+		return "", false
 	}
 	url := Required("IDENTITY_URL") + "/v1/classrooms/" + classroom + "/access"
 	req, err := http.NewRequestWithContext(r.Context(), "GET", url, nil)
 	if err != nil {
 		Error(w, 503, "DEPENDENCY_UNAVAILABLE", "Authorization unavailable.")
-		return false
+		return "", false
 	}
 	q := req.URL.Query()
 	if student != "" {
@@ -256,7 +287,7 @@ func (a *App) Access(w http.ResponseWriter, r *http.Request, classroom, student 
 	res, err := a.Client.Do(req)
 	if err != nil {
 		Error(w, 503, "DEPENDENCY_UNAVAILABLE", "Authorization unavailable; retry later.")
-		return false
+		return "", false
 	}
 	defer res.Body.Close()
 	if res.StatusCode != 200 {
@@ -265,9 +296,16 @@ func (a *App) Access(w http.ResponseWriter, r *http.Request, classroom, student 
 		} else {
 			Error(w, 403, "FORBIDDEN", "You do not have access to this classroom or student.")
 		}
-		return false
+		return "", false
 	}
-	return true
+	var answer struct {
+		Relation string `json:"relation"`
+	}
+	if json.NewDecoder(io.LimitReader(res.Body, 4096)).Decode(&answer) != nil || (answer.Relation != RelationTeacher && answer.Relation != RelationStudent) {
+		Error(w, 503, "DEPENDENCY_UNAVAILABLE", "Authorization answer was not understood.")
+		return "", false
+	}
+	return answer.Relation, true
 }
 func (a *App) Run(workers ...func(context.Context)) error {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)

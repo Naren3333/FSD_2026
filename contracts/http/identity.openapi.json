@@ -817,10 +817,17 @@
                   "properties": {
                     "allowed": {
                       "const": true
+                    },
+                    "relation": {
+                      "enum": [
+                        "teacher",
+                        "student"
+                      ]
                     }
                   },
                   "required": [
-                    "allowed"
+                    "allowed",
+                    "relation"
                   ],
                   "additionalProperties": false
                 }

@@ -23,7 +23,7 @@ func (s server) create(w http.ResponseWriter, r *http.Request) {
 		platform.Error(w, 422, "VALIDATION_ERROR", err.Error())
 		return
 	}
-	if !s.Access(w, r, v.Classroom, "") {
+	if !s.TeacherOf(w, r, v.Classroom) {
 		return
 	}
 	checked := map[string]bool{}
@@ -77,10 +77,12 @@ func (s server) get(w http.ResponseWriter, r *http.Request) {
 		platform.Fail(w, err)
 		return
 	}
-	if !s.Access(w, r, v.Classroom, "") {
+	relation, ok := s.Relation(w, r, v.Classroom, "")
+	if !ok {
 		return
 	}
-	if platform.Actor(r).Has("teacher") {
+	// Answer keys go to the classroom's own teacher only, never on the strength of the token role.
+	if relation == platform.RelationTeacher {
 		platform.JSON(w, 200, v)
 	} else {
 		platform.JSON(w, 200, v.Public())

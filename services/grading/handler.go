@@ -16,7 +16,7 @@ func (s server) list(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	classroom := r.URL.Query().Get("classroom_id")
-	if !s.Access(w, r, classroom, "") {
+	if !s.TeacherOf(w, r, classroom) {
 		return
 	}
 	result, err := s.listEvaluations(r.Context(), platform.Actor(r).Org, classroom)
@@ -55,7 +55,7 @@ func (s server) finalize(w http.ResponseWriter, r *http.Request) {
 		platform.Fail(w, err)
 		return
 	}
-	if !s.Access(w, r, classroom, "") {
+	if !s.TeacherOf(w, r, classroom) {
 		return
 	}
 	v, err := s.finalizeEvaluation(r.Context(), platform.Actor(r).Org, r.PathValue("id"), platform.Actor(r).Subject, input.Reason, input.Overrides)

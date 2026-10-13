@@ -27,16 +27,16 @@ func (s server) register(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s server) access(w http.ResponseWriter, r *http.Request) {
-	ok, err := s.allowed(r.Context(), platform.Actor(r), r.PathValue("id"), r.URL.Query().Get("student_id"))
+	relation, err := s.relation(r.Context(), platform.Actor(r), r.PathValue("id"), r.URL.Query().Get("student_id"))
 	if err != nil {
 		platform.Fail(w, err)
 		return
 	}
-	if !ok {
+	if relation == "" {
 		platform.Error(w, 403, "FORBIDDEN", "Classroom or student access denied.")
 		return
 	}
-	platform.JSON(w, 200, map[string]bool{"allowed": true})
+	platform.JSON(w, 200, map[string]any{"allowed": true, "relation": relation})
 }
 
 func (s server) create(w http.ResponseWriter, r *http.Request) {
@@ -78,12 +78,12 @@ func (s server) enroll(w http.ResponseWriter, r *http.Request) {
 	}
 	c := platform.Actor(r)
 	id := r.PathValue("id")
-	ok, err := s.allowed(r.Context(), c, id, "")
+	relation, err := s.relation(r.Context(), c, id, "")
 	if err != nil {
 		platform.Fail(w, err)
 		return
 	}
-	if !ok {
+	if relation != relationTeacher {
 		platform.Error(w, 403, "FORBIDDEN", "Only the classroom teacher may enroll students.")
 		return
 	}
