@@ -1,7 +1,6 @@
 package main
 
 import (
-	"encoding/json"
 	"errors"
 	"learning/platform"
 	"net/http"
@@ -126,13 +125,8 @@ func (s server) submit(w http.ResponseWriter, r *http.Request) {
 		platform.Invalid(w, "Provide one valid answer for every question.")
 		return
 	}
-	data, err := json.Marshal(input.Answers)
-	if err != nil {
-		platform.Fail(w, err)
-		return
-	}
-	id := uuid.NewString()
-	inserted, err := s.store.insertSubmission(r.Context(), id, v, c.Org, c.Subject, data, input.Answers)
+	sub := Submission{ID: uuid.NewString(), Org: c.Org, Student: c.Subject, Answers: input.Answers}
+	inserted, err := s.store.insertSubmission(r.Context(), v, sub)
 	if err != nil {
 		platform.Fail(w, err)
 		return
@@ -141,5 +135,5 @@ func (s server) submit(w http.ResponseWriter, r *http.Request) {
 		platform.Error(w, http.StatusConflict, "ALREADY_SUBMITTED", "This assessment has already been submitted.")
 		return
 	}
-	platform.JSON(w, http.StatusCreated, map[string]string{"id": id, "status": "submitted"})
+	platform.JSON(w, http.StatusCreated, map[string]string{"id": sub.ID, "status": "submitted"})
 }

@@ -143,7 +143,13 @@ func (f *fixture) upload(docType string) string {
 	id := uuid.NewString()
 	key := f.org + "/" + id + "/1"
 	f.store.put(context.Background(), key, []byte("%PDF-1.7"), "application/pdf")
-	_, err := f.s.store.insertDocument(context.Background(), id, f.room, f.org, "teacher", "Biology", "application/pdf", key, strings.Repeat("a", 64), "indexing", docType, []Chunk{})
+	d := newDocument{
+		Document: Document{ID: id, Classroom: f.room, Title: "Biology", Type: mimePDF, Status: statusIndexing, Revision: 1, SHA: strings.Repeat("a", 64), DocType: docType, Chunks: []Chunk{}},
+		Org:      f.org,
+		Owner:    "teacher",
+		Key:      key,
+	}
+	_, err := f.s.store.insertDocument(context.Background(), d)
 	if err != nil {
 		f.t.Fatal(err)
 	}

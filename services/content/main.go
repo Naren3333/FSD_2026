@@ -20,7 +20,7 @@ func main() {
 		}
 		ai := newAICore()
 		a.Checks = append(a.Checks, files.check)
-		server{store: pgStore{a.DB}, access: a.Identity(), files: files, ai: ai}.routes(a.Mux)
+		server{store: pgStore{a.DB}, access: a.Identity(), files: files, ai: ai, vectors: newVectorCache()}.routes(a.Mux)
 		// Two indexing workers: ai-core ingests two PDFs at once.
 		x := indexer{a.DB, files, ai, 2 * time.Second}
 		return []func(context.Context){platform.Outbox{DB: a.DB}.Run, x.run, x.run}, nil

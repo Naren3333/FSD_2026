@@ -22,6 +22,7 @@ const (
 	maxAttempts   = 6    // ai-core outages are retried this many times before the document fails
 	leaseTime     = 30 * time.Minute
 	ingestTimeout = 20 * time.Minute // shorter than the lease, so a live job is never taken over
+	maxDetail     = 2000             // characters of a failure or retry reason kept
 )
 
 var figureName = regexp.MustCompile(`^[a-f0-9]{16}\.png$`)
@@ -175,6 +176,12 @@ var errLostLease = errors.New("the job's lease was lost")
 // complete replaces the document's chunks, marks it indexed, ends the job and emits content.indexed.v1 in one
 // transaction.
 func (x indexer) complete(ctx context.Context, j job, r ingestResult) error {
+	return x.finish(ctx, j, func(tx pgx.Tx) error { return storeResult(ctx, tx, j, r) })
+}
+
+// finish ends the job and replaces the document's chunks in one transaction: it deletes the job (unless another
+// run took it over, when nothing is changed), drops the old chunks and lets write record the outcome.
+func (x indexer) finish(ctx context.Context, j job, write func(pgx.Tx) error) error {
 	tx, err := x.db.Begin(ctx)
 	if err != nil {
 		return err
@@ -190,6 +197,14 @@ func (x indexer) complete(ctx context.Context, j job, r ingestResult) error {
 	if _, err = tx.Exec(ctx, "DELETE FROM document_chunks WHERE document_id=$1", j.document); err != nil {
 		return err
 	}
+	if err = write(tx); err != nil {
+		return err
+	}
+	return tx.Commit(ctx)
+}
+
+// storeResult inserts the new chunks, marks the document indexed and emits content.indexed.v1.
+func storeResult(ctx context.Context, tx pgx.Tx, j job, r ingestResult) error {
 	batch := &pgx.Batch{}
 	for _, c := range r.Chunks {
 		cites := c.Cites
@@ -202,44 +217,27 @@ VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,CAST($18::text
 	}
 	results := tx.SendBatch(ctx, batch)
 	for range r.Chunks {
-		if _, err = results.Exec(); err != nil {
+		if _, err := results.Exec(); err != nil {
 			results.Close()
 			return err
 		}
 	}
-	if err = results.Close(); err != nil {
+	if err := results.Close(); err != nil {
 		return err
 	}
-	if _, err = tx.Exec(ctx, "UPDATE documents SET status='indexed',page_count=$2,chunk_count=$3,embedding_model=$4,indexed_at=now(),failure_reason=NULL,failure_detail=NULL WHERE id=$1", j.document, *r.PageCount, len(r.Chunks), *r.EmbeddingModel); err != nil {
+	if _, err := tx.Exec(ctx, "UPDATE documents SET status='indexed',page_count=$2,chunk_count=$3,embedding_model=$4,indexed_at=now(),failure_reason=NULL,failure_detail=NULL WHERE id=$1", j.document, *r.PageCount, len(r.Chunks), *r.EmbeddingModel); err != nil {
 		return err
 	}
-	if err = platform.Emit(ctx, tx, "content.indexed.v1", j.document, map[string]any{"document_id": j.document, "classroom_id": j.classroom, "org_id": j.org, "revision": j.revision, "doc_type": j.docType, "page_count": *r.PageCount, "chunk_count": len(r.Chunks), "embedding_model": *r.EmbeddingModel}); err != nil {
-		return err
-	}
-	return tx.Commit(ctx)
+	return platform.Emit(ctx, tx, "content.indexed.v1", j.document, map[string]any{"document_id": j.document, "classroom_id": j.classroom, "org_id": j.org, "revision": j.revision, "doc_type": j.docType, "page_count": *r.PageCount, "chunk_count": len(r.Chunks), "embedding_model": *r.EmbeddingModel})
 }
 
 // fail marks the document failed with its reason, drops any chunks from an earlier index and ends the job.
 func (x indexer) fail(ctx context.Context, j job, reason, detail string) error {
 	slog.Warn("index_failed", "document_id", j.document, "reason", reason, "attempts", j.attempts)
-	tx, err := x.db.Begin(ctx)
-	if err != nil {
+	return x.finish(ctx, j, func(tx pgx.Tx) error {
+		_, err := tx.Exec(ctx, "UPDATE documents SET status='failed',failure_reason=$2,failure_detail=$3,indexed_at=NULL WHERE id=$1", j.document, reason, truncate(detail, maxDetail))
 		return err
-	}
-	defer tx.Rollback(ctx)
-	if err = endJob(ctx, tx, j); err != nil {
-		if errors.Is(err, errLostLease) {
-			return nil
-		}
-		return err
-	}
-	if _, err = tx.Exec(ctx, "DELETE FROM document_chunks WHERE document_id=$1", j.document); err != nil {
-		return err
-	}
-	if _, err = tx.Exec(ctx, "UPDATE documents SET status='failed',failure_reason=$2,failure_detail=$3,indexed_at=NULL WHERE id=$1", j.document, reason, truncate(detail, 2000)); err != nil {
-		return err
-	}
-	return tx.Commit(ctx)
+	})
 }
 
 // retry gives the job back with a backoff, or fails the document once the attempts are spent.
@@ -248,7 +246,7 @@ func (x indexer) retry(ctx context.Context, j job, reason string) error {
 		return x.fail(ctx, j, "AI_UNAVAILABLE", fmt.Sprintf("gave up after %d attempts: %s", j.attempts, reason))
 	}
 	slog.Warn("index_retry", "document_id", j.document, "attempts", j.attempts, "reason", reason)
-	_, err := x.db.Exec(ctx, "UPDATE index_jobs SET lease=NULL,next_attempt=now()+make_interval(secs=>$3),last_error=$4 WHERE document_id=$1 AND lease=$2", j.document, j.lease, backoff(j.attempts).Seconds(), truncate(reason, 2000))
+	_, err := x.db.Exec(ctx, "UPDATE index_jobs SET lease=NULL,next_attempt=now()+make_interval(secs=>$3),last_error=$4 WHERE document_id=$1 AND lease=$2", j.document, j.lease, backoff(j.attempts).Seconds(), truncate(reason, maxDetail))
 	return err
 }
 
@@ -259,7 +257,7 @@ func (x indexer) wait(ctx context.Context, j job, until time.Time, reason string
 		until = time.Now().Add(time.Hour)
 	}
 	slog.Info("index_waiting_for_allowance", "document_id", j.document, "until", until)
-	_, err := x.db.Exec(ctx, "UPDATE index_jobs SET lease=NULL,next_attempt=$3,attempts=attempts-1,last_error=$4 WHERE document_id=$1 AND lease=$2", j.document, j.lease, until, truncate(reason, 2000))
+	_, err := x.db.Exec(ctx, "UPDATE index_jobs SET lease=NULL,next_attempt=$3,attempts=attempts-1,last_error=$4 WHERE document_id=$1 AND lease=$2", j.document, j.lease, until, truncate(reason, maxDetail))
 	return err
 }
 

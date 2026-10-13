@@ -3,9 +3,12 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"learning/platform"
 	"learning/platform/platformtest"
 	"net/http"
+	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/jackc/pgx/v5"
@@ -86,6 +89,79 @@ func TestSearchValidatesBeforeAnyLookup(t *testing.T) {
 	} {
 		if w := platformtest.Serve(s.routes, http.MethodPost, "/v1/search", body, "user", "teacher"); w.Code != 422 {
 			t.Errorf("%s: %d", body, w.Code)
+		}
+	}
+}
+
+// uploadStore records the inserted document, or fails after or before attempting the commit.
+type uploadStore struct {
+	store
+	inserted        *newDocument
+	err             error
+	commitAttempted bool
+}
+
+func (u uploadStore) insertDocument(_ context.Context, d newDocument) (bool, error) {
+	*u.inserted = d
+	return u.commitAttempted, u.err
+}
+
+// fileStore records what was put and what was removed.
+type fileStore struct {
+	documentFiles
+	puts, removed []string
+}
+
+func (f *fileStore) put(_ context.Context, key string, _ []byte, _ string) error {
+	f.puts = append(f.puts, key)
+	return nil
+}
+
+func (f *fileStore) removeOrphan(_, key string) { f.removed = append(f.removed, key) }
+
+func upload(t *testing.T, store uploadStore, files *fileStore, query string) *httptest.ResponseRecorder {
+	t.Helper()
+	s := server{store: store, access: platformtest.Access(platform.RelationTeacher), files: files}
+	mux := http.NewServeMux()
+	s.routes(mux)
+	var c platform.Claims
+	c.Subject, c.Org, c.Realm.Roles = "teacher-1", "org", []string{"teacher"}
+	r := httptest.NewRequestWithContext(platform.WithClaims(context.Background(), c), http.MethodPost, "/v1/documents?classroom_id="+classID+query, strings.NewReader("Photosynthesis makes glucose."))
+	r.Header.Set("Content-Type", mimeText)
+	w := httptest.NewRecorder()
+	mux.ServeHTTP(w, r)
+	return w
+}
+
+func TestUploadStoresTheDocumentAndItsOriginal(t *testing.T) {
+	var inserted newDocument
+	files := &fileStore{}
+	w := upload(t, uploadStore{inserted: &inserted, commitAttempted: true}, files, "&title=Notes")
+	if w.Code != 201 || inserted.Title != "Notes" || inserted.DocType != docTeachingMaterial || inserted.Status != statusExtracted {
+		t.Fatalf("%d %+v", w.Code, inserted.Document)
+	}
+	if len(files.puts) != 1 || files.puts[0] != inserted.Key || inserted.Org != "org" || inserted.Owner != "teacher-1" {
+		t.Fatalf("original stored at %v, row says %q", files.puts, inserted.Key)
+	}
+}
+
+func TestUploadRemovesAnOriginalWhoseRowWasNeverCommitted(t *testing.T) {
+	var inserted newDocument
+	failed := &fileStore{}
+	if w := upload(t, uploadStore{inserted: &inserted, err: errors.New("db down")}, failed, "&title=Notes"); w.Code != 500 || len(failed.removed) != 1 {
+		t.Fatalf("%d, removed %v", w.Code, failed.removed)
+	}
+	// After an uncertain commit the row may exist, so the original stays.
+	uncertain := &fileStore{}
+	if w := upload(t, uploadStore{inserted: &inserted, err: errors.New("commit lost"), commitAttempted: true}, uncertain, "&title=Notes"); w.Code != 500 || len(uncertain.removed) != 0 {
+		t.Fatalf("%d, removed %v", w.Code, uncertain.removed)
+	}
+}
+
+func TestUploadValidatesItsFields(t *testing.T) {
+	for _, query := range []string{"&title=", "&title=Notes&doc_type=lesson"} {
+		if w := upload(t, uploadStore{inserted: &newDocument{}}, &fileStore{}, query); w.Code != 422 {
+			t.Errorf("%s: %d", query, w.Code)
 		}
 	}
 }

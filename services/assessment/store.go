@@ -13,8 +13,8 @@ import (
 type store interface {
 	findAssessment(ctx context.Context, org, id string) (Assessment, error)
 	insertAssessment(ctx context.Context, org string, v Assessment) error
-	listAssessments(ctx context.Context, org, classroomID string) ([]map[string]string, error)
-	insertSubmission(ctx context.Context, id string, v Assessment, org, studentID string, data []byte, answers map[string]string) (bool, error)
+	listAssessments(ctx context.Context, org, classroomID string) ([]Summary, error)
+	insertSubmission(ctx context.Context, v Assessment, sub Submission) (bool, error)
 }
 
 // pgStore is the store in the service's own Postgres database.
@@ -42,19 +42,19 @@ func (p pgStore) insertAssessment(ctx context.Context, org string, v Assessment)
 	return err
 }
 
-func (p pgStore) listAssessments(ctx context.Context, org, classroomID string) ([]map[string]string, error) {
+func (p pgStore) listAssessments(ctx context.Context, org, classroomID string) ([]Summary, error) {
 	rows, err := p.db.Query(ctx, "SELECT id,title FROM assessments WHERE classroom_id=$1 AND org_id=$2 ORDER BY created_at DESC LIMIT 100", classroomID, org)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	result := []map[string]string{}
+	result := []Summary{}
 	for rows.Next() {
-		var id, title string
-		if err = rows.Scan(&id, &title); err != nil {
+		var v Summary
+		if err = rows.Scan(&v.ID, &v.Title); err != nil {
 			return nil, err
 		}
-		result = append(result, map[string]string{"id": id, "title": title})
+		result = append(result, v)
 	}
 	if rows.Err() != nil {
 		return nil, rows.Err()
@@ -65,20 +65,24 @@ func (p pgStore) listAssessments(ctx context.Context, org, classroomID string) (
 // insertSubmission stores the submission and emits the outbox event in one
 // transaction. It reports inserted=false (with a nil error) when the student
 // has already submitted this assessment.
-func (p pgStore) insertSubmission(ctx context.Context, id string, v Assessment, org, studentID string, data []byte, answers map[string]string) (bool, error) {
+func (p pgStore) insertSubmission(ctx context.Context, v Assessment, sub Submission) (bool, error) {
+	answers, err := json.Marshal(sub.Answers)
+	if err != nil {
+		return false, err
+	}
 	tx, err := p.db.Begin(ctx)
 	if err != nil {
 		return false, err
 	}
 	defer tx.Rollback(ctx)
-	result, err := tx.Exec(ctx, "INSERT INTO submissions(id,assessment_id,student_id,answers) VALUES($1,$2,$3,$4) ON CONFLICT(assessment_id,student_id) DO NOTHING", id, v.ID, studentID, data)
+	result, err := tx.Exec(ctx, "INSERT INTO submissions(id,assessment_id,student_id,answers) VALUES($1,$2,$3,$4) ON CONFLICT(assessment_id,student_id) DO NOTHING", sub.ID, v.ID, sub.Student, answers)
 	if err != nil {
 		return false, err
 	}
 	if result.RowsAffected() == 0 {
 		return false, nil
 	}
-	err = platform.Emit(ctx, tx, "assessment.submitted.v1", id, map[string]any{"submission_id": id, "assessment_id": v.ID, "classroom_id": v.Classroom, "org_id": org, "student_id": studentID, "questions": v.Questions, "answers": answers})
+	err = platform.Emit(ctx, tx, "assessment.submitted.v1", sub.ID, map[string]any{"submission_id": sub.ID, "assessment_id": v.ID, "classroom_id": v.Classroom, "org_id": sub.Org, "student_id": sub.Student, "questions": v.Questions, "answers": sub.Answers})
 	if err == nil {
 		err = tx.Commit(ctx)
 	}
