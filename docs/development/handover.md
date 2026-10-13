@@ -16,7 +16,7 @@ services/{analytics,ai-core,question-generation-agent,
           student-performance-agent,question-chatbot-agent}/
                                    Independent Python apps, requirements, tests, Dockerfiles
 packages/platform/                 Go HTTP/auth/db/event operational helpers
-packages/python-platform/          Python auth/error/logging helpers
+packages/python-platform/          Python auth, errors, JSON logging, Identity and token clients, SSE, DB pools
 contracts/{http,events}/            Ten OpenAPI documents, three event schemas
 infra/                             Kong config generator, restricted storage policy
 scripts/                           Setup, checks, readiness, contracts and real integration
