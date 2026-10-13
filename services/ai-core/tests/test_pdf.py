@@ -1,4 +1,4 @@
-"""PyMuPDF calls in worker threads never overlap (RAG_PLAN Iteration 14: overlapping calls changed results)."""
+"""PyMuPDF calls in worker threads never overlap (Overlapping calls changed results)."""
 
 import asyncio
 import threading

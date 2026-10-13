@@ -1,4 +1,4 @@
-"""The vision pass (RAG_PLAN Iterations 10-11): caching and rendering. OpenAI is the mock transport."""
+"""The vision pass: caching and rendering. OpenAI is the mock transport."""
 
 import asyncio
 import json
@@ -8,7 +8,7 @@ import pymupdf
 import pytest
 from conftest import FakeOpenAI, make_pdf, page_key0
 
-from ingest import vision
+from ingest import pages, vision, vision_calls
 
 MODEL = "vision-model"
 
@@ -40,7 +40,7 @@ def test_a_cached_page_is_neither_rendered_nor_sent(
     tmp_path: Path, openai_fake: FakeOpenAI, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     cache, path = tmp_path / "cache", pdf(tmp_path)
-    entry = vision.cache_file(cache, MODEL, page_key0(path))
+    entry = vision_calls.cache_file(cache, MODEL, page_key0(path))
     entry.parent.mkdir(parents=True)
     entry.write_text(json.dumps({"tables": [], "figures": []}), encoding="utf-8")
 
@@ -56,16 +56,16 @@ def test_an_answer_that_is_not_json_is_not_cached(tmp_path: Path, openai_fake: F
     cache, path = tmp_path / "cache", pdf(tmp_path)
     openai_fake.reply(json=chat_reply("sorry, I can't"))
     assert see(path, cache) == [None]  # the page falls back to "lines"
-    assert not vision.cache_file(cache, MODEL, page_key0(path)).exists()
+    assert not vision_calls.cache_file(cache, MODEL, page_key0(path)).exists()
 
     openai_fake.reply(json=chat_reply('{"tables": [], "figures": []}'))
     assert see(path, cache) == [vision.PageVision()]
-    assert vision.cache_file(cache, MODEL, page_key0(path)).exists()
+    assert vision_calls.cache_file(cache, MODEL, page_key0(path)).exists()
     assert len(openai_fake.requests) == 2 and list(cache.rglob("*.tmp")) == []
 
 
 def test_the_cache_is_keyed_by_what_the_page_shows(tmp_path: Path, openai_fake: FakeOpenAI) -> None:
-    """RAG_PLAN Iteration 14: the same page in another file (a revised deck) reuses the answer; a changed word
+    """The same page in another file (a revised deck) reuses the answer; a changed word
     doesn't."""
     cache = tmp_path / "cache"
     first, second, changed = tmp_path / "a.pdf", tmp_path / "b.pdf", tmp_path / "c.pdf"
@@ -76,7 +76,7 @@ def test_the_cache_is_keyed_by_what_the_page_shows(tmp_path: Path, openai_fake: 
     doc.save(second)
     changed.write_bytes(make_pdf(paragraphs=[["Some text on the pages."]]))
     with pymupdf.open(first) as a, pymupdf.open(second) as b, pymupdf.open(changed) as c:
-        assert vision.page_key(a[0]) == vision.page_key(b[1]) != vision.page_key(c[0])
+        assert pages.page_key(a[0]) == pages.page_key(b[1]) != pages.page_key(c[0])
     openai_fake.reply(json=chat_reply('{"tables": [], "figures": []}'))
     see(first, cache)
     openai_fake.reply(json=chat_reply('{"tables": [], "figures": []}'))

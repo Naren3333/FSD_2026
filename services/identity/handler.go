@@ -25,14 +25,14 @@ func (s server) register(w http.ResponseWriter, r *http.Request) {
 	if c.Has("teacher") {
 		role = "teacher"
 	} else if !c.Has("student") {
-		platform.Error(w, 403, "FORBIDDEN", "An application role is required.")
+		platform.Forbidden(w, "An application role is required.")
 		return
 	}
 	if err := s.store.registerUser(r.Context(), c.Org, c.Subject, role); err != nil {
 		platform.Fail(w, err)
 		return
 	}
-	platform.JSON(w, 200, map[string]string{"id": c.Subject, "org_id": c.Org, "role": role})
+	platform.JSON(w, http.StatusOK, map[string]string{"id": c.Subject, "org_id": c.Org, "role": role})
 }
 
 func (s server) access(w http.ResponseWriter, r *http.Request) {
@@ -42,10 +42,10 @@ func (s server) access(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if relation == "" {
-		platform.Error(w, 403, "FORBIDDEN", "Classroom or student access denied.")
+		platform.Forbidden(w, "Classroom or student access denied.")
 		return
 	}
-	platform.JSON(w, 200, map[string]any{"allowed": true, "relation": relation})
+	platform.JSON(w, http.StatusOK, map[string]any{"allowed": true, "relation": relation})
 }
 
 func (s server) create(w http.ResponseWriter, r *http.Request) {
@@ -59,16 +59,16 @@ func (s server) create(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if !validName(input.Name) {
-		platform.Error(w, 422, "VALIDATION_ERROR", "Name must contain 1–120 characters.")
+		platform.Invalid(w, "Name must contain 1–120 characters.")
 		return
 	}
 	c := platform.Actor(r)
 	id := uuid.NewString()
 	if err := s.store.insertClassroom(r.Context(), id, strings.TrimSpace(input.Name), c.Org, c.Subject); err != nil {
-		platform.Error(w, 409, "PROFILE_REQUIRED", "Complete sign-in registration before creating a classroom.")
+		platform.Error(w, http.StatusConflict, "PROFILE_REQUIRED", "Complete sign-in registration before creating a classroom.")
 		return
 	}
-	platform.JSON(w, 201, Classroom{id, input.Name, c.Subject})
+	platform.JSON(w, http.StatusCreated, Classroom{id, input.Name, c.Subject})
 }
 
 func (s server) list(w http.ResponseWriter, r *http.Request) {
@@ -78,7 +78,7 @@ func (s server) list(w http.ResponseWriter, r *http.Request) {
 		platform.Fail(w, err)
 		return
 	}
-	platform.JSON(w, 200, result)
+	platform.JSON(w, http.StatusOK, result)
 }
 
 func (s server) enroll(w http.ResponseWriter, r *http.Request) {
@@ -93,7 +93,7 @@ func (s server) enroll(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if relation != platform.RelationTeacher {
-		platform.Error(w, 403, "FORBIDDEN", "Only the classroom teacher may enroll students.")
+		platform.Forbidden(w, "Only the classroom teacher may enroll students.")
 		return
 	}
 	var input struct {
@@ -108,12 +108,12 @@ func (s server) enroll(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if !exists {
-		platform.Error(w, 422, "INVALID_STUDENT", "Student must first sign in to this organization.")
+		platform.Error(w, http.StatusUnprocessableEntity, "INVALID_STUDENT", "Student must first sign in to this organization.")
 		return
 	}
 	if err = s.store.insertEnrollment(r.Context(), id, input.Student); err != nil {
 		platform.Fail(w, err)
 		return
 	}
-	platform.JSON(w, 200, map[string]string{"student_id": input.Student, "classroom_id": id})
+	platform.JSON(w, http.StatusOK, map[string]string{"student_id": input.Student, "classroom_id": id})
 }

@@ -12,8 +12,6 @@ a reindex never renames an image the live chunks still point at.
 
 Scans: a page without a text layer is transcribed by the vision pass (OCR); its text chunks are source "vision".
 NO_TEXT_LAYER is left for scans with OCR off, or whose transcripts come back empty.
-
-The module docstrings mention fsd_test's RAG_PLAN iterations: they record why each rule exists.
 """
 
 import logging

@@ -43,6 +43,7 @@ CITATION_FIELDS = (
     "image",
 )
 MAX_DOCUMENTS_CHARS = 55000  # ai-core takes messages of up to 60000 characters
+PASSAGE_OVERHEAD = 200  # characters each passage adds to the prompt besides its content: tag, title, pages
 
 
 class SSEResponse(StreamingResponse):
@@ -201,7 +202,7 @@ class Turn:
         kept: list[dict[str, Any]] = []
         size = 0
         for r in self.results:
-            size += len(r.get("content") or "") + 200
+            size += len(r.get("content") or "") + PASSAGE_OVERHEAD
             if kept and size > MAX_DOCUMENTS_CHARS:
                 break
             kept.append(r)

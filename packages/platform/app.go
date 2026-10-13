@@ -41,7 +41,7 @@ func New(name string, migrations fs.FS, bootstrap string) (*App, error) {
 	client := &http.Client{Timeout: 5 * time.Second}
 	a := &App{Name: name, DB: db, Mux: http.NewServeMux(), Client: client, auth: NewAuthenticator(client)}
 	a.Mux.HandleFunc("GET /health/live", func(w http.ResponseWriter, _ *http.Request) {
-		JSON(w, 200, map[string]string{"status": "alive"})
+		JSON(w, http.StatusOK, map[string]string{"status": "alive"})
 	})
 	a.Mux.HandleFunc("GET /health/ready", a.ready)
 	return a, nil
@@ -51,16 +51,16 @@ func (a *App) ready(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithTimeout(r.Context(), 2*time.Second)
 	defer cancel()
 	if a.DB.Ping(ctx) != nil {
-		Error(w, 503, "DEPENDENCY_UNAVAILABLE", "Database unavailable.")
+		Unavailable(w, "Database unavailable.")
 		return
 	}
 	for _, check := range a.Checks {
 		if check(ctx) != nil {
-			Error(w, 503, "DEPENDENCY_UNAVAILABLE", "An essential dependency is unavailable.")
+			Unavailable(w, "An essential dependency is unavailable.")
 			return
 		}
 	}
-	JSON(w, 200, map[string]string{"status": "ready"})
+	JSON(w, http.StatusOK, map[string]string{"status": "ready"})
 }
 
 // Identity returns ClassroomAccess backed by the Identity service at IDENTITY_URL.

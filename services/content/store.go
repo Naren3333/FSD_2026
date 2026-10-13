@@ -40,7 +40,7 @@ func (p pgStore) insertDocument(ctx context.Context, id, classroom, org, owner, 
 		return false, err
 	}
 	_, err = tx.Exec(ctx, "INSERT INTO documents(id,classroom_id,org_id,owner_id,title,mime_type,object_key,sha256,status,doc_type,chunks) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)", id, classroom, org, owner, title, kind, key, hash, status, docType, encoded)
-	if err == nil && status == "indexing" {
+	if err == nil && status == statusIndexing {
 		_, err = tx.Exec(ctx, "INSERT INTO index_jobs(document_id) VALUES($1)", id)
 	}
 	if err == nil {

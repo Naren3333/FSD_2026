@@ -6,6 +6,7 @@ import (
 	"learning/platform"
 	"log/slog"
 	"net/http"
+	"slices"
 	"sort"
 	"strings"
 	"sync"
@@ -93,7 +94,7 @@ func (s server) search(w http.ResponseWriter, r *http.Request) {
 	}
 	topK, rerank, problem := req.normalize()
 	if problem != "" {
-		platform.Error(w, 422, "VALIDATION_ERROR", problem)
+		platform.Invalid(w, problem)
 		return
 	}
 	relation, ok := s.access.Relation(w, r, req.Classroom, "")
@@ -102,18 +103,18 @@ func (s server) search(w http.ResponseWriter, r *http.Request) {
 	}
 	f := filter{platform.Actor(r).Org, req.Classroom, req.DocTypes, req.DocumentIDs}
 	if relation != platform.RelationTeacher {
-		if len(f.docTypes) > 0 && !contains(f.docTypes, "teaching_material") {
-			platform.JSON(w, 200, searchResponse{Results: []hit{}})
+		if len(f.docTypes) > 0 && !slices.Contains(f.docTypes, docTeachingMaterial) {
+			platform.JSON(w, http.StatusOK, searchResponse{Results: []hit{}})
 			return
 		}
-		f.docTypes = []string{"teaching_material"}
+		f.docTypes = []string{docTeachingMaterial}
 	}
 	result, err := s.runSearch(r.Context(), f, req.Query, topK, rerank, caller(platform.Actor(r)))
 	if err != nil {
 		searchFailed(w, err)
 		return
 	}
-	platform.JSON(w, 200, result)
+	platform.JSON(w, http.StatusOK, result)
 }
 
 // normalize trims the query and applies the defaults (top 8, reranked). It returns a message when the request is
@@ -147,12 +148,12 @@ func (req *searchRequest) normalize() (topK int, rerank bool, problem string) {
 // internal error.
 func searchFailed(w http.ResponseWriter, err error) {
 	if limit, ok := spendLimit(err); ok {
-		platform.JSON(w, 429, map[string]any{"error": map[string]any{"code": limit.Code, "message": limit.Message, "resets_at": limit.ResetsAt}})
+		platform.ErrorWith(w, http.StatusTooManyRequests, limit.Code, limit.Message, map[string]any{"resets_at": limit.ResetsAt})
 		return
 	}
 	var unavailable *aiError
 	if errors.As(err, &unavailable) {
-		platform.Error(w, 503, "SEARCH_UNAVAILABLE", "Search is unavailable right now; retry later.")
+		platform.Error(w, http.StatusServiceUnavailable, "SEARCH_UNAVAILABLE", "Search is unavailable right now; retry later.")
 		return
 	}
 	platform.Fail(w, err)
@@ -345,13 +346,4 @@ func passageText(title string, section *string, content string) string {
 		head += "\n" + parts[len(parts)-1]
 	}
 	return head + "\n\n" + content
-}
-
-func contains(values []string, want string) bool {
-	for _, v := range values {
-		if v == want {
-			return true
-		}
-	}
-	return false
 }

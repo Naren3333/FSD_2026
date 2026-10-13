@@ -1,4 +1,4 @@
-"""Figures (PLAN.md §6.1 ingest step 2, RAG_PLAN Iteration 11). Blocking: runs while parsing.
+"""Figures. Blocking: runs while parsing.
 
 The vision pass (ingest.vision) finds each page's figures and describes the informative ones from their
 crop, with the PDF words inside them as grounding. Here they become `Figure`s: each is indexed as a chunk of its
@@ -15,8 +15,9 @@ from dataclasses import dataclass, field
 
 import pymupdf
 
+from ingest.geometry import TABLE_OVERLAP, Box, area, overlap
 from ingest.tables import Table
-from ingest.vision import TABLE_OVERLAP, Box, SeenFigure, area, overlap
+from ingest.vision import SeenFigure
 
 MAX_STRIP_SHARE = 0.6  # a figure covering at least this share of the page keeps its words in the prose
 

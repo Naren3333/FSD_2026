@@ -39,7 +39,7 @@ func (s server) routes(mux *http.ServeMux) {
 // teaching material only. The relation comes from Identity, not the token role, so an account that is a teacher
 // elsewhere but enrolled here sees what students see.
 func visible(relation, docType string) bool {
-	return docType == "teaching_material" || relation == platform.RelationTeacher
+	return docType == docTeachingMaterial || relation == platform.RelationTeacher
 }
 
 func (s server) upload(w http.ResponseWriter, r *http.Request) {
@@ -49,31 +49,31 @@ func (s server) upload(w http.ResponseWriter, r *http.Request) {
 	}
 	title := strings.TrimSpace(r.URL.Query().Get("title"))
 	if title == "" || len(title) > 160 {
-		platform.Error(w, 422, "VALIDATION_ERROR", "Title must contain 1–160 characters.")
+		platform.Invalid(w, "Title must contain 1–160 characters.")
 		return
 	}
 	docType := r.URL.Query().Get("doc_type")
 	if docType == "" {
-		docType = "teaching_material"
+		docType = docTeachingMaterial
 	}
 	if !docTypes[docType] {
-		platform.Error(w, 422, "VALIDATION_ERROR", "doc_type must be teaching_material, rubric or marking_scheme.")
+		platform.Invalid(w, "doc_type must be teaching_material, rubric or marking_scheme.")
 		return
 	}
 	r.Body = http.MaxBytesReader(w, r.Body, maxPDF)
 	data, err := io.ReadAll(r.Body)
 	if err != nil {
-		platform.Error(w, 413, "UPLOAD_TOO_LARGE", "PDFs must be no larger than 50 MiB and text documents 5 MiB.")
+		platform.Error(w, http.StatusRequestEntityTooLarge, "UPLOAD_TOO_LARGE", "PDFs must be no larger than 50 MiB and text documents 5 MiB.")
 		return
 	}
 	kind := strings.Split(r.Header.Get("Content-Type"), ";")[0]
 	chunks, status, err := extract(data, kind)
 	if errors.Is(err, errTooLarge) {
-		platform.Error(w, 413, "UPLOAD_TOO_LARGE", "PDFs must be no larger than 50 MiB and text documents 5 MiB.")
+		platform.Error(w, http.StatusRequestEntityTooLarge, "UPLOAD_TOO_LARGE", "PDFs must be no larger than 50 MiB and text documents 5 MiB.")
 		return
 	}
 	if err != nil {
-		platform.Error(w, 422, "UNSUPPORTED_DOCUMENT", err.Error())
+		platform.Error(w, http.StatusUnprocessableEntity, "UNSUPPORTED_DOCUMENT", err.Error())
 		return
 	}
 	id := uuid.NewString()
@@ -81,7 +81,7 @@ func (s server) upload(w http.ResponseWriter, r *http.Request) {
 	sum := sha256.Sum256(data)
 	hash := hex.EncodeToString(sum[:])
 	if err = s.files.put(r.Context(), key, data, kind); err != nil {
-		platform.Error(w, 503, "STORAGE_UNAVAILABLE", "Upload storage is unavailable; retry later.")
+		platform.Error(w, http.StatusServiceUnavailable, "STORAGE_UNAVAILABLE", "Upload storage is unavailable; retry later.")
 		return
 	}
 	stored := false
@@ -97,7 +97,7 @@ func (s server) upload(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	stored = true
-	platform.JSON(w, 201, Document{ID: id, Classroom: classroom, Title: title, Type: kind, Status: status, Revision: 1, SHA: hash, DocType: docType, Chunks: chunks})
+	platform.JSON(w, http.StatusCreated, Document{ID: id, Classroom: classroom, Title: title, Type: kind, Status: status, Revision: 1, SHA: hash, DocType: docType, Chunks: chunks})
 }
 
 func (s server) list(w http.ResponseWriter, r *http.Request) {
@@ -111,17 +111,17 @@ func (s server) list(w http.ResponseWriter, r *http.Request) {
 		platform.Fail(w, err)
 		return
 	}
-	platform.JSON(w, 200, result)
+	platform.JSON(w, http.StatusOK, result)
 }
 
 func (s server) get(w http.ResponseWriter, r *http.Request) {
 	if !platform.ID(r.PathValue("id")) {
-		platform.Error(w, 404, "NOT_FOUND", "Document not found.")
+		platform.NotFound(w, "Document not found.")
 		return
 	}
 	v, data, err := s.store.findDocument(r.Context(), platform.Actor(r).Org, r.PathValue("id"))
 	if errors.Is(err, pgx.ErrNoRows) {
-		platform.Error(w, 404, "NOT_FOUND", "Document not found.")
+		platform.NotFound(w, "Document not found.")
 		return
 	}
 	if err != nil {
@@ -133,24 +133,24 @@ func (s server) get(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if !visible(relation, v.DocType) {
-		platform.Error(w, 404, "NOT_FOUND", "Document not found.")
+		platform.NotFound(w, "Document not found.")
 		return
 	}
 	if err = json.Unmarshal(data, &v.Chunks); err != nil {
 		platform.Fail(w, err)
 		return
 	}
-	platform.JSON(w, 200, v)
+	platform.JSON(w, http.StatusOK, v)
 }
 
 func (s server) original(w http.ResponseWriter, r *http.Request) {
 	if !platform.ID(r.PathValue("id")) {
-		platform.Error(w, 404, "NOT_FOUND", "Document not found.")
+		platform.NotFound(w, "Document not found.")
 		return
 	}
 	classroom, key, kind, docType, err := s.store.findOriginal(r.Context(), platform.Actor(r).Org, r.PathValue("id"))
 	if errors.Is(err, pgx.ErrNoRows) {
-		platform.Error(w, 404, "NOT_FOUND", "Document not found.")
+		platform.NotFound(w, "Document not found.")
 		return
 	}
 	if err != nil {
@@ -162,7 +162,7 @@ func (s server) original(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if !visible(relation, docType) {
-		platform.Error(w, 404, "NOT_FOUND", "Document not found.")
+		platform.NotFound(w, "Document not found.")
 		return
 	}
 	s.send(w, r, key, kind, "attachment")
@@ -171,13 +171,13 @@ func (s server) original(w http.ResponseWriter, r *http.Request) {
 // figure serves a figure crop that a search result points at.
 func (s server) figure(w http.ResponseWriter, r *http.Request) {
 	if !platform.ID(r.PathValue("id")) || !figureName.MatchString(r.PathValue("image")) {
-		platform.Error(w, 404, "NOT_FOUND", "Figure not found.")
+		platform.NotFound(w, "Figure not found.")
 		return
 	}
 	org := platform.Actor(r).Org
 	v, err := s.store.findIndexed(r.Context(), org, r.PathValue("id"), r.PathValue("image"))
 	if errors.Is(err, pgx.ErrNoRows) {
-		platform.Error(w, 404, "NOT_FOUND", "Figure not found.")
+		platform.NotFound(w, "Figure not found.")
 		return
 	}
 	if err != nil {
@@ -189,10 +189,10 @@ func (s server) figure(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if !visible(relation, v.DocType) {
-		platform.Error(w, 404, "NOT_FOUND", "Figure not found.")
+		platform.NotFound(w, "Figure not found.")
 		return
 	}
-	s.send(w, r, figureKey(org, v.ID, r.PathValue("image")), "image/png", "inline")
+	s.send(w, r, figureKey(org, v.ID, r.PathValue("image")), mimePNG, "inline")
 }
 
 // reindex queues a PDF for indexing again: after a failure, or a PDF uploaded before indexing existed.
@@ -201,13 +201,13 @@ func (s server) reindex(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if !platform.ID(r.PathValue("id")) {
-		platform.Error(w, 404, "NOT_FOUND", "Document not found.")
+		platform.NotFound(w, "Document not found.")
 		return
 	}
 	org := platform.Actor(r).Org
 	v, _, err := s.store.findDocument(r.Context(), org, r.PathValue("id"))
 	if errors.Is(err, pgx.ErrNoRows) {
-		platform.Error(w, 404, "NOT_FOUND", "Document not found.")
+		platform.NotFound(w, "Document not found.")
 		return
 	}
 	if err != nil {
@@ -217,8 +217,8 @@ func (s server) reindex(w http.ResponseWriter, r *http.Request) {
 	if !s.access.TeacherOf(w, r, v.Classroom) {
 		return
 	}
-	if v.Type != "application/pdf" {
-		platform.Error(w, 409, "NOT_INDEXABLE", "Only PDFs are indexed.")
+	if v.Type != mimePDF {
+		platform.Error(w, http.StatusConflict, "NOT_INDEXABLE", "Only PDFs are indexed.")
 		return
 	}
 	queued, err := s.store.queueIndex(r.Context(), org, v.ID)
@@ -227,7 +227,7 @@ func (s server) reindex(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if !queued {
-		platform.Error(w, 409, "ALREADY_INDEXING", "The document is already being indexed.")
+		platform.Error(w, http.StatusConflict, "ALREADY_INDEXING", "The document is already being indexed.")
 		return
 	}
 	v, _, err = s.store.findDocument(r.Context(), org, v.ID)
@@ -235,13 +235,13 @@ func (s server) reindex(w http.ResponseWriter, r *http.Request) {
 		platform.Fail(w, err)
 		return
 	}
-	platform.JSON(w, 202, v)
+	platform.JSON(w, http.StatusAccepted, v)
 }
 
 func (s server) send(w http.ResponseWriter, r *http.Request, key, kind, disposition string) {
 	object, size, err := s.files.open(r.Context(), key)
 	if err != nil {
-		platform.Error(w, 503, "STORAGE_UNAVAILABLE", "Original file is unavailable.")
+		platform.Error(w, http.StatusServiceUnavailable, "STORAGE_UNAVAILABLE", "Original file is unavailable.")
 		return
 	}
 	defer object.Close()

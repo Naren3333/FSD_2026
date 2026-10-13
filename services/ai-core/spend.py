@@ -6,9 +6,7 @@ SPEND_LIMIT_TEACHER_USD (default 10), and the day starts at midnight in SPEND_TI
 The check happens before a call and the cost is recorded after it, so calls already running when a user reaches
 the cap still finish: the overshoot is at most the calls in flight."""
 
-import json
 import logging
-import os
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
@@ -18,6 +16,8 @@ from learning_transport import Contract, failure
 from learning_transport.db import open_async_pool
 from psycopg_pool import AsyncConnectionPool
 from pydantic import Field
+
+from settings import get_settings
 
 log = logging.getLogger("ai-core.spend")
 
@@ -63,10 +63,7 @@ class Charge:
 
 
 def prices() -> dict[str, tuple[float, float, float]]:
-    table = dict(DEFAULT_PRICES)
-    if raw := os.environ.get("MODEL_PRICES", "").strip():
-        table.update({model: (float(a), float(b), float(c)) for model, (a, b, c) in json.loads(raw).items()})
-    return table
+    return {**DEFAULT_PRICES, **get_settings().model_prices}
 
 
 def cost(model: str, tokens_in: int, tokens_out: int = 0, cached_in: int = 0) -> float:
@@ -87,13 +84,12 @@ def estimate_tokens(text: str) -> int:
 
 
 def limit(role: Role) -> float:
-    if role == "teacher":
-        return float(os.environ.get("SPEND_LIMIT_TEACHER_USD") or 10)
-    return float(os.environ.get("SPEND_LIMIT_STUDENT_USD") or 5)
+    settings = get_settings()
+    return settings.spend_limit_teacher_usd if role == "teacher" else settings.spend_limit_student_usd
 
 
 def timezone() -> str:
-    return os.environ.get("SPEND_TIMEZONE") or "Asia/Singapore"
+    return get_settings().spend_timezone
 
 
 class Ledger(Protocol):

@@ -1,4 +1,4 @@
-"""Tables (RAG_PLAN Iteration 10): extraction from the text layer, the parser, the outline and the chunker.
+"""Tables: extraction from the text layer, the parser, the outline and the chunker.
 No DB, no OpenAI: the vision pass's results are given directly."""
 
 from pathlib import Path
@@ -188,14 +188,15 @@ def test_a_transcribed_table_says_so() -> None:
     assert chunk.source == "vision" and TRANSCRIBED in chunk.content.split("\n")[0]
 
 
-# ---- verified layouts for tables no method could read (RAG_PLAN Iteration 14, Step 7)
+# ---- verified layouts for tables no method could read
 
 SPARSE_HEADER = ["Model", "h", "dk", "BLEU"]
 SPARSE = [["base", "8", "64", "25.8"], ["(A)", "", "16", "24.9"], ["(B)", "4", "", "25.5"]]
 
 
 def box_words(tmp_path: Path, header: list[str], rows: list[list[str]]) -> tuple[list, tuple]:
-    from ingest.vision import center_in, pad, visible_words
+    from ingest.geometry import center_in, pad
+    from ingest.pages import visible_words
 
     data, box = make_table_pdf(header, rows, ruled=False)
     page = page_of(tmp_path, data)

@@ -60,6 +60,40 @@ func Error(w http.ResponseWriter, status int, code, message string) {
 	JSON(w, status, map[string]any{"error": map[string]string{"code": code, "message": message}})
 }
 
+// ErrorWith writes the error envelope with extra fields beside code and message, such as when a limit resets.
+func ErrorWith(w http.ResponseWriter, status int, code, message string, extra map[string]any) {
+	body := map[string]any{"code": code, "message": message}
+	for k, v := range extra {
+		body[k] = v
+	}
+	JSON(w, status, map[string]any{"error": body})
+}
+
+// NotFound answers 404 NOT_FOUND.
+func NotFound(w http.ResponseWriter, message string) {
+	Error(w, http.StatusNotFound, "NOT_FOUND", message)
+}
+
+// Invalid answers 422 VALIDATION_ERROR: the request does not meet the contract.
+func Invalid(w http.ResponseWriter, message string) {
+	Error(w, http.StatusUnprocessableEntity, "VALIDATION_ERROR", message)
+}
+
+// Forbidden answers 403 FORBIDDEN.
+func Forbidden(w http.ResponseWriter, message string) {
+	Error(w, http.StatusForbidden, "FORBIDDEN", message)
+}
+
+// Unavailable answers 503 DEPENDENCY_UNAVAILABLE: another service or store this one needs is down.
+func Unavailable(w http.ResponseWriter, message string) {
+	Error(w, http.StatusServiceUnavailable, "DEPENDENCY_UNAVAILABLE", message)
+}
+
+// Unauthenticated answers 401 UNAUTHENTICATED.
+func Unauthenticated(w http.ResponseWriter, message string) {
+	Error(w, http.StatusUnauthorized, "UNAUTHENTICATED", message)
+}
+
 // Decode reads one JSON value of at most 2 MiB into target, rejecting unknown fields. On failure it has already
 // written a 422 response.
 func Decode(w http.ResponseWriter, r *http.Request, target any) bool {
@@ -67,11 +101,11 @@ func Decode(w http.ResponseWriter, r *http.Request, target any) bool {
 	d := json.NewDecoder(r.Body)
 	d.DisallowUnknownFields()
 	if err := d.Decode(target); err != nil {
-		Error(w, 422, "VALIDATION_ERROR", "Request body does not match the contract.")
+		Invalid(w, "Request body does not match the contract.")
 		return false
 	}
 	if err := d.Decode(new(any)); err != io.EOF {
-		Error(w, 422, "VALIDATION_ERROR", "Expected one JSON value.")
+		Invalid(w, "Expected one JSON value.")
 		return false
 	}
 	return true
@@ -83,7 +117,7 @@ func ID(value string) bool { _, err := uuid.Parse(value); return err == nil }
 // Teacher requires the token's teacher role, writing a 403 otherwise. Classroom-specific access needs TeacherOf.
 func Teacher(w http.ResponseWriter, r *http.Request) bool {
 	if !Actor(r).Has("teacher") {
-		Error(w, 403, "FORBIDDEN", "Teacher access is required.")
+		Forbidden(w, "Teacher access is required.")
 		return false
 	}
 	return true
@@ -92,5 +126,5 @@ func Teacher(w http.ResponseWriter, r *http.Request) bool {
 // Fail logs an unexpected error and answers 500 without exposing it.
 func Fail(w http.ResponseWriter, err error) {
 	slog.Error("operation_failed", "error_category", fmt.Sprintf("%T", err), "error", err.Error())
-	Error(w, 500, "INTERNAL_ERROR", "The operation could not be completed.")
+	Error(w, http.StatusInternalServerError, "INTERNAL_ERROR", "The operation could not be completed.")
 }

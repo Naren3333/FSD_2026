@@ -1,4 +1,4 @@
-"""Tables every extraction method rejected, laid out by the model from the PDF's own words (RAG_PLAN Iteration 14).
+"""Tables every extraction method rejected, laid out by the model from the PDF's own words.
 Async; runs after the vision pass, before parsing.
 
 The vision pass says where a table is; ingest.tables reads its cells from the text layer and keeps the grid
@@ -20,23 +20,12 @@ import pymupdf
 
 import pdf
 from ingest import tables as extraction
+from ingest.geometry import Word, center_in, pad
+from ingest.pages import page_key, visible_words
+from ingest.prompts import UNTRUSTED
 from ingest.strings import clean_cell
-from ingest.vision import (
-    FIGURE_CONCURRENCY,
-    MIN_TEXT_WORDS,
-    UNTRUSTED,
-    PageRef,
-    PageVision,
-    SeenTable,
-    Word,
-    _semaphore,
-    ask,
-    cached,
-    center_in,
-    pad,
-    page_key,
-    visible_words,
-)
+from ingest.vision import MIN_TEXT_WORDS, PageRef, PageVision, SeenTable
+from ingest.vision_calls import FIGURE_CONCURRENCY, _semaphore, ask, cached
 
 log = logging.getLogger("ai-core.ingest.rescue")
 

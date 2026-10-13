@@ -1,4 +1,4 @@
-"""The ingest cost record (RAG_PLAN Iteration 15, Step 3): calls, hits, failures, tokens and retries by kind."""
+"""The ingest cost record: calls, hits, failures, tokens and retries by kind."""
 
 import asyncio
 import json
@@ -8,7 +8,7 @@ import pytest
 from conftest import BILLED_PARAMS, FakeOpenAI, ingested, make_pdf, page_key0, textbook
 from fastapi.testclient import TestClient
 
-from ingest import costs, vision
+from ingest import costs, vision, vision_calls
 
 MODEL = "vision-model"
 EMPTY = '{"tables": [], "figures": []}'
@@ -66,7 +66,7 @@ def test_a_failed_call_is_counted_with_its_retries(tmp_path: Path, openai_fake: 
     openai_fake.reply(500, json={"error": {"message": "boom"}}, times=3)  # the first try and both retries
     page = see(pdf(tmp_path), tmp_path / "cache").kinds["page"]
     assert (page.calls, page.failed, page.retries, page.prompt_tokens) == (0, 1, 2, 0)
-    assert not vision.cache_file(tmp_path / "cache", MODEL, page_key0(pdf(tmp_path))).exists()
+    assert not vision_calls.cache_file(tmp_path / "cache", MODEL, page_key0(pdf(tmp_path))).exists()
 
 
 def test_an_answer_that_is_not_json_counts_as_a_call_and_a_failure(

@@ -53,7 +53,7 @@ func (i *Identity) TeacherOf(w http.ResponseWriter, r *http.Request, classroom s
 		return false
 	}
 	if relation != RelationTeacher {
-		Error(w, 403, "FORBIDDEN", "Only the classroom's teacher may do this.")
+		Forbidden(w, "Only the classroom's teacher may do this.")
 		return false
 	}
 	return true
@@ -63,7 +63,7 @@ func (i *Identity) TeacherOf(w http.ResponseWriter, r *http.Request, classroom s
 // RelationTeacher, not on the token role. On denial or failure it has already written the error response.
 func (i *Identity) Relation(w http.ResponseWriter, r *http.Request, classroom, student string) (string, bool) {
 	if !ID(classroom) {
-		Error(w, 422, "VALIDATION_ERROR", "A valid classroom identifier is required.")
+		Invalid(w, "A valid classroom identifier is required.")
 		return "", false
 	}
 	target := i.base + "/v1/classrooms/" + classroom + "/access"
@@ -72,22 +72,22 @@ func (i *Identity) Relation(w http.ResponseWriter, r *http.Request, classroom, s
 	}
 	req, err := http.NewRequestWithContext(r.Context(), http.MethodGet, target, nil)
 	if err != nil {
-		Error(w, 503, "DEPENDENCY_UNAVAILABLE", "Authorization unavailable.")
+		Unavailable(w, "Authorization unavailable.")
 		return "", false
 	}
 	req.Header.Set("Authorization", r.Header.Get("Authorization"))
 	req.Header.Set("X-Correlation-ID", Correlation(r.Context()))
 	res, err := i.client.Do(req)
 	if err != nil {
-		Error(w, 503, "DEPENDENCY_UNAVAILABLE", "Authorization unavailable; retry later.")
+		Unavailable(w, "Authorization unavailable; retry later.")
 		return "", false
 	}
 	defer res.Body.Close()
 	if res.StatusCode != http.StatusOK {
 		if res.StatusCode >= 500 {
-			Error(w, 503, "DEPENDENCY_UNAVAILABLE", "Authorization unavailable.")
+			Unavailable(w, "Authorization unavailable.")
 		} else {
-			Error(w, 403, "FORBIDDEN", "You do not have access to this classroom or student.")
+			Forbidden(w, "You do not have access to this classroom or student.")
 		}
 		return "", false
 	}
@@ -95,7 +95,7 @@ func (i *Identity) Relation(w http.ResponseWriter, r *http.Request, classroom, s
 		Relation string `json:"relation"`
 	}
 	if json.NewDecoder(io.LimitReader(res.Body, 4096)).Decode(&answer) != nil || (answer.Relation != RelationTeacher && answer.Relation != RelationStudent) {
-		Error(w, 503, "DEPENDENCY_UNAVAILABLE", "Authorization answer was not understood.")
+		Unavailable(w, "Authorization answer was not understood.")
 		return "", false
 	}
 	return answer.Relation, true

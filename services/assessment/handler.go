@@ -34,7 +34,7 @@ func (s server) create(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := v.Validate(); err != nil {
-		platform.Error(w, 422, "VALIDATION_ERROR", err.Error())
+		platform.Invalid(w, err.Error())
 		return
 	}
 	if !s.access.TeacherOf(w, r, v.Classroom) {
@@ -45,10 +45,10 @@ func (s server) create(w http.ResponseWriter, r *http.Request) {
 		if !checked[q.Skill] {
 			switch s.skills.check(r, q.Skill) {
 			case skillUnavailable:
-				platform.Error(w, 503, "DEPENDENCY_UNAVAILABLE", "Curriculum unavailable.")
+				platform.Unavailable(w, "Curriculum unavailable.")
 				return
 			case skillInvalid:
-				platform.Error(w, 422, "INVALID_SKILL", "Every skill must exist in your curriculum.")
+				platform.Error(w, http.StatusUnprocessableEntity, "INVALID_SKILL", "Every skill must exist in your curriculum.")
 				return
 			}
 			checked[q.Skill] = true
@@ -60,7 +60,7 @@ func (s server) create(w http.ResponseWriter, r *http.Request) {
 		platform.Fail(w, err)
 		return
 	}
-	platform.JSON(w, 201, v)
+	platform.JSON(w, http.StatusCreated, v)
 }
 
 func (s server) list(w http.ResponseWriter, r *http.Request) {
@@ -73,13 +73,13 @@ func (s server) list(w http.ResponseWriter, r *http.Request) {
 		platform.Fail(w, err)
 		return
 	}
-	platform.JSON(w, 200, result)
+	platform.JSON(w, http.StatusOK, result)
 }
 
 func (s server) get(w http.ResponseWriter, r *http.Request) {
 	v, err := s.store.findAssessment(r.Context(), platform.Actor(r).Org, r.PathValue("id"))
 	if errors.Is(err, pgx.ErrNoRows) {
-		platform.Error(w, 404, "NOT_FOUND", "Assessment not found.")
+		platform.NotFound(w, "Assessment not found.")
 		return
 	}
 	if err != nil {
@@ -92,21 +92,21 @@ func (s server) get(w http.ResponseWriter, r *http.Request) {
 	}
 	// Answer keys go to the classroom's own teacher only, never on the strength of the token role.
 	if relation == platform.RelationTeacher {
-		platform.JSON(w, 200, v)
+		platform.JSON(w, http.StatusOK, v)
 	} else {
-		platform.JSON(w, 200, v.Public())
+		platform.JSON(w, http.StatusOK, v.Public())
 	}
 }
 
 func (s server) submit(w http.ResponseWriter, r *http.Request) {
 	c := platform.Actor(r)
 	if !c.Has("student") || c.Has("teacher") {
-		platform.Error(w, 403, "FORBIDDEN", "Only enrolled students may submit.")
+		platform.Forbidden(w, "Only enrolled students may submit.")
 		return
 	}
 	v, err := s.store.findAssessment(r.Context(), c.Org, r.PathValue("id"))
 	if errors.Is(err, pgx.ErrNoRows) {
-		platform.Error(w, 404, "NOT_FOUND", "Assessment not found.")
+		platform.NotFound(w, "Assessment not found.")
 		return
 	}
 	if err != nil {
@@ -123,7 +123,7 @@ func (s server) submit(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if !validateAnswers(v, input.Answers) {
-		platform.Error(w, 422, "VALIDATION_ERROR", "Provide one valid answer for every question.")
+		platform.Invalid(w, "Provide one valid answer for every question.")
 		return
 	}
 	data, err := json.Marshal(input.Answers)
@@ -138,8 +138,8 @@ func (s server) submit(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if !inserted {
-		platform.Error(w, 409, "ALREADY_SUBMITTED", "This assessment has already been submitted.")
+		platform.Error(w, http.StatusConflict, "ALREADY_SUBMITTED", "This assessment has already been submitted.")
 		return
 	}
-	platform.JSON(w, 201, map[string]string{"id": id, "status": "submitted"})
+	platform.JSON(w, http.StatusCreated, map[string]string{"id": id, "status": "submitted"})
 }

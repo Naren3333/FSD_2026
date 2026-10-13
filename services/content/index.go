@@ -108,7 +108,7 @@ func (x indexer) process(ctx context.Context, j job) error {
 		}
 		return x.retry(book, j, err.Error())
 	}
-	if result.Outcome != "indexed" {
+	if result.Outcome != statusIndexed {
 		reason, detail := "INTERNAL", "ai-core returned outcome "+result.Outcome
 		if result.FailureReason != nil && documentFailures[*result.FailureReason] {
 			reason = *result.FailureReason
@@ -123,7 +123,7 @@ func (x indexer) process(ctx context.Context, j job) error {
 	}
 	for _, f := range result.Figures {
 		// Crops are named by content hash, so a retried or repeated run rewrites identical objects.
-		if err = x.store.put(ctx, figureKey(j.org, j.document, f.Image), f.PNG, "image/png"); err != nil {
+		if err = x.store.put(ctx, figureKey(j.org, j.document, f.Image), f.PNG, mimePNG); err != nil {
 			return x.retry(book, j, "figure storage unavailable")
 		}
 	}

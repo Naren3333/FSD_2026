@@ -1,4 +1,4 @@
-"""Headings and section paths from block styles (PLAN.md §6.1 ingest step 3).
+"""Headings and section paths from block styles.
 
 A heading is a short block that is clearly bigger than the body text, or bold at body size, and not a
 bullet point. Its level comes from its size: the biggest heading size in the document is level 0, the
@@ -8,7 +8,7 @@ one-off banner or callout) or only on the cover/title pages is body text. So a s
 become the top level, and a report's cover title doesn't sit above everything. Consecutive heading lines
 in the same style (a heading wrapped over two lines) are one heading.
 
-A PDF outline (bookmarks) with several levels, when its entries are found on the page (RAG_PLAN Iteration 14),
+A PDF outline (bookmarks) with several levels, when its entries are found on the page,
 takes over from the sizes: each entry's heading gets its outline level. Fonts don't always follow a document's
 structure (NIST's "1.1" and "1.2.1" are the same bold body size; GAO's summary headings are bigger than its
 sections). Headings the outline doesn't list are kept only when smaller than every listed one (subheadings below

@@ -1,4 +1,4 @@
-"""PDF parsing, header/footer stripping and the ingest failure reasons (RAG_PLAN Iterations 4 and 6).
+"""PDF parsing, header/footer stripping and the ingest failure reasons.
 No DB, no OpenAI."""
 
 from pathlib import Path
@@ -207,7 +207,7 @@ def test_a_short_block_on_its_own_line_stays_a_block() -> None:
     ]
 
 
-# ---- ligatures (RAG_PLAN Iteration 14, Step 1)
+# ---- ligatures
 
 LIGATURE_TEXT = (
     "The data eﬃciency of zero-shot transfer varies widely, and ﬁne-tuning on the ﬂow of"
@@ -266,7 +266,7 @@ def test_a_caption_line_is_stripped_when_the_model_changes_its_punctuation(tmp_p
     assert not any("Figure 7" in b.text for b in kept)
 
 
-# ---- two columns (RAG_PLAN Iteration 14, Step 4)
+# ---- two columns
 
 COLUMN_TEXT = "Attention lets every position look at every other position in one step, so paths stay short."
 

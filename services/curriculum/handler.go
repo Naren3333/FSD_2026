@@ -28,24 +28,24 @@ func (s server) list(w http.ResponseWriter, r *http.Request) {
 		platform.Fail(w, err)
 		return
 	}
-	platform.JSON(w, 200, result)
+	platform.JSON(w, http.StatusOK, result)
 }
 
 func (s server) get(w http.ResponseWriter, r *http.Request) {
 	if !platform.ID(r.PathValue("id")) {
-		platform.Error(w, 404, "NOT_FOUND", "Node not found.")
+		platform.NotFound(w, "Node not found.")
 		return
 	}
 	v, err := s.store.findNode(r.Context(), platform.Actor(r).Org, r.PathValue("id"))
 	if errors.Is(err, pgx.ErrNoRows) {
-		platform.Error(w, 404, "NOT_FOUND", "Node not found.")
+		platform.NotFound(w, "Node not found.")
 		return
 	}
 	if err != nil {
 		platform.Fail(w, err)
 		return
 	}
-	platform.JSON(w, 200, v)
+	platform.JSON(w, http.StatusOK, v)
 }
 
 func (s server) create(w http.ResponseWriter, r *http.Request) {
@@ -57,14 +57,14 @@ func (s server) create(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if !valid(v) {
-		platform.Error(w, 422, "VALIDATION_ERROR", "Provide a supported kind, name and optional parent UUID.")
+		platform.Invalid(w, "Provide a supported kind, name and optional parent UUID.")
 		return
 	}
 	org := platform.Actor(r).Org
 	if v.Parent != nil {
 		kind, err := s.store.findKind(r.Context(), org, *v.Parent)
 		if err != nil || expectedParent[v.Kind] != kind {
-			platform.Error(w, 422, "INVALID_PARENT", "Parent must be the preceding curriculum level in your organization.")
+			platform.Error(w, http.StatusUnprocessableEntity, "INVALID_PARENT", "Parent must be the preceding curriculum level in your organization.")
 			return
 		}
 	}
@@ -73,7 +73,7 @@ func (s server) create(w http.ResponseWriter, r *http.Request) {
 		platform.Fail(w, err)
 		return
 	}
-	platform.JSON(w, 201, Node{id, v.Kind, v.Name, v.Parent})
+	platform.JSON(w, http.StatusCreated, Node{id, v.Kind, v.Name, v.Parent})
 }
 
 func (s server) rename(w http.ResponseWriter, r *http.Request) {
@@ -86,8 +86,8 @@ func (s server) rename(w http.ResponseWriter, r *http.Request) {
 	if !platform.Decode(w, r, &v) {
 		return
 	}
-	if !platform.ID(r.PathValue("id")) || strings.TrimSpace(v.Name) == "" || len(v.Name) > 160 {
-		platform.Error(w, 422, "VALIDATION_ERROR", "Provide an identifier and a name of 1–160 characters.")
+	if !platform.ID(r.PathValue("id")) || !validName(v.Name) {
+		platform.Invalid(w, "Provide an identifier and a name of 1–160 characters.")
 		return
 	}
 	updated, err := s.store.renameNode(r.Context(), platform.Actor(r).Org, r.PathValue("id"), strings.TrimSpace(v.Name))
@@ -96,10 +96,10 @@ func (s server) rename(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if !updated {
-		platform.Error(w, 404, "NOT_FOUND", "Node not found.")
+		platform.NotFound(w, "Node not found.")
 		return
 	}
-	platform.JSON(w, 200, map[string]string{"id": r.PathValue("id"), "name": v.Name})
+	platform.JSON(w, http.StatusOK, map[string]string{"id": r.PathValue("id"), "name": v.Name})
 }
 
 func (s server) archive(w http.ResponseWriter, r *http.Request) {
@@ -107,7 +107,7 @@ func (s server) archive(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if !platform.ID(r.PathValue("id")) {
-		platform.Error(w, 404, "NOT_FOUND", "Node not found.")
+		platform.NotFound(w, "Node not found.")
 		return
 	}
 	archived, err := s.store.archiveNode(r.Context(), platform.Actor(r).Org, r.PathValue("id"))
@@ -116,7 +116,7 @@ func (s server) archive(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if !archived {
-		platform.Error(w, 409, "ARCHIVE_CONFLICT", "Node is absent, already archived, or has active children.")
+		platform.Error(w, http.StatusConflict, "ARCHIVE_CONFLICT", "Node is absent, already archived, or has active children.")
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
@@ -134,7 +134,7 @@ func (s server) addPrerequisite(w http.ResponseWriter, r *http.Request) {
 	}
 	id := r.PathValue("id")
 	if !platform.ID(id) || !platform.ID(input.Prerequisite) || id == input.Prerequisite {
-		platform.Error(w, 422, "INVALID_PREREQUISITE", "Choose a different skill.")
+		platform.Error(w, http.StatusUnprocessableEntity, "INVALID_PREREQUISITE", "Choose a different skill.")
 		return
 	}
 	result, err := s.store.insertPrerequisite(r.Context(), platform.Actor(r).Org, id, input.Prerequisite)
@@ -144,11 +144,11 @@ func (s server) addPrerequisite(w http.ResponseWriter, r *http.Request) {
 	}
 	switch result {
 	case prerequisiteInvalid:
-		platform.Error(w, 422, "INVALID_PREREQUISITE", "Both skills must be active in your organization.")
+		platform.Error(w, http.StatusUnprocessableEntity, "INVALID_PREREQUISITE", "Both skills must be active in your organization.")
 		return
 	case prerequisiteCycle:
-		platform.Error(w, 409, "PREREQUISITE_CYCLE", "This prerequisite would create a cycle.")
+		platform.Error(w, http.StatusConflict, "PREREQUISITE_CYCLE", "This prerequisite would create a cycle.")
 		return
 	}
-	platform.JSON(w, 200, map[string]string{"skill_id": id, "prerequisite_id": input.Prerequisite})
+	platform.JSON(w, http.StatusOK, map[string]string{"skill_id": id, "prerequisite_id": input.Prerequisite})
 }

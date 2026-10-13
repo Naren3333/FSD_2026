@@ -1,4 +1,4 @@
-"""Table extraction (PLAN.md §6.1 ingest step 2, RAG_PLAN Iteration 10). Blocking: runs while parsing.
+"""Table extraction. Blocking: runs while parsing.
 
 The vision pass (ingest.vision) says where each table is and what it looks like; the cells are read from
 the PDF's own text layer inside each box, and a grid that doesn't match the model's description stays prose:
@@ -9,7 +9,7 @@ from the vision pass and are marked source="vision".
 A page without a vision result falls back to find_tables "lines", which the table audit found has no
 false positives.
 
-A table no method could read may come with a layout from ingest.rescue (Iteration 14): the model's
+A table no method could read may come with a layout from ingest.rescue: the model's
 arrangement of the PDF's own words into cells, checked here (`verify_layout`) before it was accepted. It is used
 only when every method fails, and is source "pdf": its cells are the text layer's words.
 """
@@ -23,8 +23,9 @@ from typing import Any
 
 import pymupdf
 
+from ingest.geometry import area, center_in, overlap, pad
 from ingest.strings import clean_cell, join_lines, unligature
-from ingest.vision import MIN_TEXT_WORDS, SeenTable, area, center_in, overlap, pad
+from ingest.vision import MIN_TEXT_WORDS, SeenTable
 
 Box = tuple[float, float, float, float]
 

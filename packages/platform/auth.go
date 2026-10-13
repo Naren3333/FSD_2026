@@ -28,17 +28,17 @@ func (a *Authenticator) Wrap(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		auth := r.Header.Get("Authorization")
 		if !strings.HasPrefix(auth, "Bearer ") {
-			Error(w, 401, "UNAUTHENTICATED", "Sign in to continue.")
+			Unauthenticated(w, "Sign in to continue.")
 			return
 		}
 		token, err := a.verifier.Verify(r.Context(), strings.TrimPrefix(auth, "Bearer "))
 		if err != nil {
-			Error(w, 401, "UNAUTHENTICATED", "The session is invalid or expired.")
+			Unauthenticated(w, "The session is invalid or expired.")
 			return
 		}
 		var c Claims
 		if token.Claims(&c) != nil || c.Subject == "" || c.Org == "" {
-			Error(w, 401, "UNAUTHENTICATED", "Required identity claims are missing.")
+			Unauthenticated(w, "Required identity claims are missing.")
 			return
 		}
 		next.ServeHTTP(w, r.WithContext(WithClaims(r.Context(), c)))
