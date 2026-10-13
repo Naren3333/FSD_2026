@@ -10,7 +10,7 @@ PostgreSQL uses a separate database and non-superuser login for each of six pers
 
 Kafka carries committed facts through transactional outboxes. At-least-once delivery is assumed. Consumer inboxes and business uniqueness constraints prevent duplicate effects. Outbox retries are persistent and capped, with failed rows retained for operator recovery. Poison records go to a dead-letter topic before acknowledgment; transient exhaustion stops processing without acknowledging. Durable grading events can reconstruct analytics within broker retention; long-term archival is an operational prerequisite.
 
-MinIO stores original content; content metadata and extracted text remain Content-owned. No vectors or indexed events are emitted. Future pgvector belongs to Content; version embeddings by model, dimensions, chunker and source revision, backfill a separate index, validate coverage, then switch atomically.
+S3-compatible object storage (MinIO originally, SeaweedFS since ADR 0002) stores original content; content metadata and extracted text remain Content-owned. No vectors or indexed events are emitted. Future pgvector belongs to Content; version embeddings by model, dimensions, chunker and source revision, backfill a separate index, validate coverage, then switch atomically.
 
 AI is deferred deliberately. Four independently authenticated Python applications validate capability-specific contracts and return explicit 501 errors. They never fetch private content or fabricate output.
 

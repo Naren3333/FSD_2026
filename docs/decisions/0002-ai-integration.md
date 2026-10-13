@@ -34,6 +34,8 @@ The owner decided to:
 - **Postgres image:** the local image becomes `pgvector/pgvector:0.8.1-pg17` (Debian based).
   - pgvector is not a trusted extension, so `scripts/setup.py` has the superuser create it in Content's database.
   - An existing volume from the earlier `postgres:17.6-alpine` image should be recreated, because musl and glibc collations differ for text indexes. Alternatively, reindex text indexes after the switch.
+- **Object storage:** MinIO's images are no longer publicly downloadable (quay.io and Docker Hub both refuse anonymous pulls), so local S3 storage is now SeaweedFS (`chrislusf/seaweedfs:4.48`). Content still uses the S3 API through minio-go. The restricted `content-service` identity can only read, write and list the `documents` bucket, which replaces `infra/storage-policy.json`. This is not an AI change, but it blocked every local start.
+- **Line endings:** `.gitattributes` keeps LF line endings on Windows, so `gofmt` in `scripts/check.py` passes there.
 - **Migrations:** Go services now apply numbered migrations (`migrations/NNN_name.sql`) once each, recorded in `schema_migrations`, under the existing advisory lock. Content's chunk and index tables arrive as `002_*.sql`.
 - **Chatbot database:** the chatbot gets the seventh service-owned database and credential, with the same isolation as the other six.
 - **Delivery:** the work lands in stages: foundations, ai-core, Content indexing and search, chatbot, Angular, then documentation. See `docs/development/handover.md` for what each stage verified.

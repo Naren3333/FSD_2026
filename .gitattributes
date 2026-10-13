@@ -1,0 +1,2 @@
+# Keep LF in the working tree on every OS: gofmt, shell scripts and container init files expect it.
+* text=auto eol=lf

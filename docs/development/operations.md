@@ -6,6 +6,8 @@
 
 If you have no local data you want to keep, back up `.env`, then run `docker compose down -v`, delete `.env` and `.local/`, rerun `python scripts/setup.py`, and run `docker compose up -d --build`. **This deletes every local database, upload and Keycloak user.**
 
+Document storage moved from MinIO to SeaweedFS (volume `seaweedfs-data`). Documents in an old `minio-data` volume are not migrated; re-upload them, or copy them out with any S3 client before removing that volume.
+
 The Postgres image also changed from Alpine to Debian (pgvector), so text-index collations differ. Recreating the volume is the clean path. Keeping data means reindexing every database (`REINDEX DATABASE <name>;` as each owner) after the switch, plus adding the clients and extension by hand.
 
 ## Health and logs
