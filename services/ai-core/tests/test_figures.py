@@ -9,6 +9,7 @@ from pathlib import Path
 
 import pymupdf
 import pytest
+from conftest import FIGURE_LABELS, FakeOpenAI, ingested, make_figure_pdf, page_key0, with_vision
 from fastapi.testclient import TestClient
 
 from ingest import VisionConfig, vision
@@ -17,7 +18,6 @@ from ingest.figures import image_name
 from ingest.headings import outline
 from ingest.parse import read_pages
 from ingest.vision import PageVision, SeenFigure, SeenTable
-from conftest import FIGURE_LABELS, FakeOpenAI, ingested, make_figure_pdf, page_key0, with_vision
 
 SHA = "cd" * 32
 DESCRIPTION = "Three boxes in a row: the encoder feeds attention, which feeds the decoder."

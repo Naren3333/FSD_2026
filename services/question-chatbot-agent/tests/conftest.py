@@ -120,8 +120,11 @@ class Fakes:
             return httpx.Response(200, json={"access_token": "service-token", "expires_in": 300})
         if path.endswith("/access"):
             classroom = path.split("/")[3]
-            allowed = (request.headers["authorization"], classroom) in self.access
-            return httpx.Response(200 if allowed else 403, json={})
+            token = request.headers["authorization"]
+            if (token, classroom) not in self.access:
+                return httpx.Response(403, json={"error": {"code": "FORBIDDEN", "message": "denied"}})
+            relation = "teacher" if token == "Bearer t1" else "student"
+            return httpx.Response(200, json={"allowed": True, "relation": relation})
         if path == "/v1/usage":
             return httpx.Response(200, json=self.usage)
         if path == "/v1/search":

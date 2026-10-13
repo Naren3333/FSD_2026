@@ -1,0 +1,36 @@
+# Shared Ruff settings for every Python service and package. Each pyproject.toml extends this file.
+line-length = 110
+target-version = "py312"
+
+[lint]
+select = [
+    "E", "W", "F",  # pycodestyle and pyflakes
+    "I",            # import order
+    "B",            # bugbear: likely bugs
+    "C90",          # cyclomatic complexity
+    "SIM",          # simplifications
+    "UP",           # modern syntax
+    "N",            # naming
+    "RET",          # return statements
+    "PL",           # pylint
+    "RUF",          # Ruff's own rules
+]
+ignore = [
+    "E501",     # the formatter wraps code; long prompt text and URLs stay readable on one line
+    "B008",     # FastAPI's Depends() and Query() defaults are the framework's idiom
+    "PLR2004",  # HTTP statuses and similar literals read better inline than as one-use constants
+    "PLW0603",  # provider clients are created lazily, once per process, in module globals
+    "RUF001",   # en dashes and curly quotes in user-facing text are intended
+]
+
+[lint.mccabe]
+max-complexity = 12
+
+[lint.pylint]
+max-args = 6
+max-branches = 14
+
+[lint.per-file-ignores]
+"**/tests/**" = ["PLC0415", "PLR0911", "PLR0913"]
+"**/test_*.py" = ["PLC0415", "PLR0911", "PLR0913"]
+"**/conftest.py" = ["PLC0415", "PLR0911", "PLR0913"]

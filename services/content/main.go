@@ -1,3 +1,5 @@
+// Command content is the Content service: classroom documents in object storage, their indexing through
+// ai-core, and hybrid search over the indexed chunks.
 package main
 
 import (

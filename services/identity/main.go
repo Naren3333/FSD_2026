@@ -1,3 +1,5 @@
+// Command identity is the Identity & Classroom service: users, classrooms, enrollment, and the classroom
+// access decisions the other services ask it for.
 package main
 
 import (

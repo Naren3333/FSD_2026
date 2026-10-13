@@ -1,183 +1,50 @@
-from pathlib import Path
-import json
-import logging
+"""Learning Analytics: per-student skill accuracy from finalized grades only."""
+
 import os
 import threading
+from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
-from typing import Any, AsyncIterator
+from pathlib import Path
+from typing import Any
 from uuid import UUID
 
 import httpx
-from confluent_kafka import Consumer, KafkaException, Producer
 from fastapi import Depends, Request
-from psycopg.rows import dict_row
+from fastapi.concurrency import run_in_threadpool
+from learning_transport import (
+    OIDC_SETTINGS,
+    TEACHER,
+    Claims,
+    IdentityClient,
+    UpstreamError,
+    application,
+    failure,
+    require_env,
+    requires,
+)
+from learning_transport.db import open_pool
 from psycopg_pool import ConnectionPool
-from pydantic import ValidationError
-from learning_transport import actor, application, failure
-from domain import Event, PerformanceResponse, summarize
+
+from consumer import consume
+from domain import PerformanceResponse, summarize
 
 MIGRATION = (Path(__file__).parent / "migrations/001_init.sql").read_text()
-logger = logging.getLogger("analytics")
-
-
-def process(pool: ConnectionPool[Any], event: Event) -> None:
-    with pool.connection() as conn, conn.transaction():
-        inserted = conn.execute(
-            "INSERT INTO inbox(event_id) VALUES(%s) ON CONFLICT DO NOTHING RETURNING event_id",
-            (event.event_id,),
-        ).fetchone()
-        if inserted is None:
-            return
-        data = event.data
-        inserted = conn.execute(
-            "INSERT INTO evaluations(evaluation_id,event_id) VALUES(%s,%s) ON CONFLICT(evaluation_id) DO NOTHING RETURNING evaluation_id",
-            (data.evaluation_id, event.event_id),
-        ).fetchone()
-        if inserted is None:
-            return
-        for e in data.evidence:
-            conn.execute(
-                "INSERT INTO evidence(evaluation_id,question_id,assessment_id,classroom_id,org_id,student_id,skill_id,correct,awarded,possible) VALUES(%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)",
-                (
-                    data.evaluation_id,
-                    e.question_id,
-                    data.assessment_id,
-                    data.classroom_id,
-                    data.org_id,
-                    data.student_id,
-                    e.skill_id,
-                    e.correct,
-                    e.awarded,
-                    e.possible,
-                ),
-            )
-
-
-RESTART_FIRST, RESTART_MAX = 5.0, 60.0  # seconds a stopped consumer waits before its next session
-
-
-def restart_wait(previous: float | None, progressed: bool) -> float:
-    """How long to wait before the next session: the first wait after a session that made progress, otherwise
-    double the previous wait, up to a minute."""
-    if progressed or previous is None:
-        return RESTART_FIRST
-    return min(2 * previous, RESTART_MAX)
-
-
-def consume(pool: ConnectionPool[Any], stop: threading.Event, connected: threading.Event) -> None:
-    """Keep consuming until shutdown. A session that stops on an event it cannot store (the database is down, say)
-    or on a broker error is followed, after a backoff, by a new one from the last committed offset: the event is
-    retried rather than skipped, and the consumer never stays down while the process looks alive."""
-    wait: float | None = None
-    while not stop.is_set():
-        progressed = consume_session(pool, stop, connected)
-        if stop.is_set():
-            return
-        wait = restart_wait(wait, progressed)
-        logger.error(
-            json.dumps(
-                {"service": "analytics", "error_category": "consumer_restarting", "after_seconds": wait}
-            )
-        )
-        if stop.wait(wait):
-            return
-
-
-def consume_session(pool: ConnectionPool[Any], stop: threading.Event, connected: threading.Event) -> bool:
-    """One consumer session; returns whether it committed anything."""
-    progressed = False
-    consumer = Consumer(
-        {
-            "bootstrap.servers": os.environ["KAFKA_BROKERS"],
-            "group.id": os.getenv("KAFKA_GROUP", "analytics-v1"),
-            "auto.offset.reset": "earliest",
-            "enable.auto.commit": False,
-            "enable.auto.offset.store": False,
-        }
-    )
-    producer = Producer(
-        {"bootstrap.servers": os.environ["KAFKA_BROKERS"], "acks": "all", "message.timeout.ms": 10000}
-    )
-    consumer.subscribe(["grading.finalized.v1"])
-    try:
-        consumer.list_topics(timeout=10)
-        connected.set()
-        while not stop.is_set():
-            msg = consumer.poll(1)
-            if msg is None:
-                continue
-            if msg.error():
-                raise KafkaException(msg.error())
-            try:
-                event = Event.model_validate_json(msg.value())
-            except (ValidationError, ValueError):
-                delivery_errors: list[Any] = []
-                producer.produce(
-                    "grading.finalized.v1.dlq",
-                    key=msg.key(),
-                    value=msg.value(),
-                    on_delivery=lambda error, _: delivery_errors.append(error) if error else None,
-                )
-                if producer.flush(12) or delivery_errors:
-                    raise RuntimeError("Dead-letter delivery failed")
-                logger.error(
-                    json.dumps(
-                        {"service": "analytics", "error_category": "invalid_event", "dead_lettered": True}
-                    )
-                )
-                consumer.commit(message=msg, asynchronous=False)
-                progressed = True
-                continue
-            for attempt in range(5):
-                try:
-                    process(pool, event)
-                    break
-                except Exception:
-                    logger.error(
-                        json.dumps(
-                            {
-                                "service": "analytics",
-                                "error_category": "consumer_retry",
-                                "event_id": str(event.event_id),
-                                "correlation_id": str(event.correlation_id),
-                                "attempt": attempt + 1,
-                            }
-                        )
-                    )
-                    if attempt == 4 or stop.wait(2**attempt):
-                        return progressed
-            consumer.commit(message=msg, asynchronous=False)
-            progressed = True
-    except Exception:
-        logger.error(json.dumps({"service": "analytics", "error_category": "consumer_stopped_uncommitted"}))
-    finally:
-        connected.clear()
-        consumer.close()
-    return progressed
+CONSUMER_STOP_GRACE = 35  # seconds shutdown waits for the consumer thread
 
 
 @asynccontextmanager
 async def lifespan(app: Any) -> AsyncIterator[None]:
-    for key in ("OIDC_ISSUER", "OIDC_JWKS_URL", "OIDC_AUDIENCE", "IDENTITY_URL", "KAFKA_BROKERS"):
-        if not os.environ.get(key):
-            raise RuntimeError(f"Missing configuration: {key}")
-    pool = ConnectionPool(
-        os.environ["DATABASE_URL"],
-        min_size=1,
-        max_size=8,
-        timeout=5,
-        kwargs={"row_factory": dict_row, "options": "-c statement_timeout=10000"},
-    )
-    pool.wait(timeout=15)
-    with pool.connection() as conn:
-        conn.execute(MIGRATION)
+    require_env(*OIDC_SETTINGS, "IDENTITY_URL", "KAFKA_BROKERS", "DATABASE_URL")
+    pool = open_pool(os.environ["DATABASE_URL"], MIGRATION)
     stop, connected = threading.Event(), threading.Event()
     thread = threading.Thread(target=consume, args=(pool, stop, connected), daemon=True)
-    app.state.pool, app.state.connected = pool, connected
-    thread.start()
-    yield
-    stop.set()
-    thread.join(timeout=35)
+    async with httpx.AsyncClient() as http:
+        app.state.pool, app.state.connected = pool, connected
+        app.state.identity = IdentityClient(os.environ["IDENTITY_URL"], http)
+        thread.start()
+        yield
+        stop.set()
+        thread.join(timeout=CONSUMER_STOP_GRACE)
     pool.close()
 
 
@@ -196,36 +63,35 @@ def ready(request: Request) -> dict[str, str]:
     return {"status": "ready"}
 
 
-@app.get("/v1/performance/{student_id}")
-def performance(
-    student_id: str, classroom_id: UUID, request: Request, claims: dict[str, Any] = Depends(actor)
-) -> PerformanceResponse:
-    roles = claims.get("realm_access", {}).get("roles", [])
-    if "teacher" not in roles and ("student" not in roles or student_id != claims["sub"]):
-        raise failure(403, "FORBIDDEN", "Students can only view their own performance.")
-    try:
-        res = httpx.get(
-            f"{os.environ['IDENTITY_URL']}/v1/classrooms/{classroom_id}/access",
-            params={"student_id": student_id},
-            headers={
-                "Authorization": request.headers["authorization"],
-                "X-Correlation-ID": request.state.correlation_id,
-            },
-            timeout=5,
-        )
-    except httpx.HTTPError:
-        raise failure(503, "DEPENDENCY_UNAVAILABLE", "Authorization is unavailable.") from None
-    if res.status_code != 200:
-        raise failure(
-            503 if res.status_code >= 500 else 403,
-            "ACCESS_DENIED",
-            "Classroom or student access could not be verified.",
-        )
-    with request.app.state.pool.connection() as conn:
-        rows = conn.execute(
+def skill_evidence(pool: ConnectionPool[Any], org: str, classroom_id: UUID, student_id: str) -> list[Any]:
+    with pool.connection() as conn:
+        return conn.execute(
             "SELECT skill_id,correct FROM evidence WHERE org_id=%s AND classroom_id=%s AND student_id=%s",
-            (claims["org_id"], classroom_id, student_id),
+            (org, classroom_id, student_id),
         ).fetchall()
+
+
+@app.get("/v1/performance/{student_id}")
+async def performance(
+    student_id: str,
+    classroom_id: UUID,
+    request: Request,
+    claims: Claims = Depends(requires("teacher", "student")),
+) -> PerformanceResponse:
+    if claims.person_role != TEACHER and student_id != claims.subject:
+        raise failure(403, "FORBIDDEN", "Students can only view their own performance.")
+    identity: IdentityClient = request.app.state.identity
+    try:
+        relation = await identity.relation(
+            request.headers["authorization"], str(classroom_id), request.state.correlation_id, student_id
+        )
+    except UpstreamError:
+        raise failure(503, "DEPENDENCY_UNAVAILABLE", "Authorization is unavailable.") from None
+    if relation is None:
+        raise failure(403, "ACCESS_DENIED", "Classroom or student access could not be verified.")
+    rows = await run_in_threadpool(
+        skill_evidence, request.app.state.pool, claims.org, classroom_id, student_id
+    )
     return PerformanceResponse.model_validate(
         {
             "student_id": student_id,

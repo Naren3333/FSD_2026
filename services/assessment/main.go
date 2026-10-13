@@ -1,3 +1,5 @@
+// Command assessment is the Assessment service: immutable quizzes and student submissions, published as
+// assessment.submitted events.
 package main
 
 import (

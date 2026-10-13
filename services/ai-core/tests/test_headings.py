@@ -270,4 +270,4 @@ def test_a_wrapped_listed_heading_is_joined() -> None:
     pages[0][2:3] = [b("1.1 Sampling of the", 12, True), b("population", 12, True)]
     toc[1] = (2, "Sampling of the population", 1)
     paras = outline(pages, toc=toc)
-    assert [p.text for p in paras if p.level == 1][0] == "1.1 Sampling of the population"
+    assert next(p.text for p in paras if p.level == 1) == "1.1 Sampling of the population"

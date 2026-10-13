@@ -30,8 +30,8 @@ import pymupdf
 
 from ingest import tables as table_extraction
 from ingest.figures import Figure, page_figures
-from ingest.tables import Table
 from ingest.strings import join_lines, unligature
+from ingest.tables import Table
 from ingest.vision import MIN_PAGE_CHARS, PageVision, SeenText
 
 MAX_EMPTY_SHARE = 0.5  # more empty pages than this → NO_TEXT_LAYER
@@ -100,7 +100,7 @@ class Columns:
     cuts: tuple[float, ...] = ()
 
 
-class IngestFailure(Exception):
+class IngestError(Exception):
     """A failure with a `failure_reason` of its own (anything else becomes INTERNAL)."""
 
     def __init__(self, reason: str, detail: str) -> None:
@@ -113,16 +113,20 @@ def open_checked(path: Path) -> Iterator[pymupdf.Document]:
     """The PDF, opened; ENCRYPTED or CORRUPT when it can't be read. Ingest also runs this before the vision
     pass, so a bad file fails with its own reason and costs no vision calls."""
     if not path.exists():
-        raise FileNotFoundError(
-            f"{path.name} is missing"
-        )  # deleted mid-ingest: INTERNAL, if the row survives
+        # deleted mid-ingest: INTERNAL, if the row survives
+        raise FileNotFoundError(f"{path.name} is missing")
+    problem: str | None = None
     try:
         doc = pymupdf.open(path)
     except Exception as e:
-        raise IngestFailure("CORRUPT", f"PyMuPDF could not open the file: {e}") from e
+        problem = str(e)
+    # Raised outside the except block: the failed open's traceback would otherwise keep the file open, and
+    # Windows then cannot delete the temporary copy.
+    if problem is not None:
+        raise IngestError("CORRUPT", f"PyMuPDF could not open the file: {problem}")
     with doc:
         if doc.needs_pass:
-            raise IngestFailure("ENCRYPTED", "The PDF needs a password")
+            raise IngestError("ENCRYPTED", "The PDF needs a password")
         yield doc
 
 
@@ -136,45 +140,53 @@ def read_pages(path: Path, vision: list[PageVision | None] | None = None) -> Doc
                 vision[page.number] if vision and page.number < len(vision) else None for page in doc_pages
             ]
             ocr = [s is not None and s.transcript is not None for s in seen]
-            tables = [[] if o else _page_tables(page, s) for page, s, o in zip(doc_pages, seen, ocr)]
+            tables = [
+                [] if o else _page_tables(page, s) for page, s, o in zip(doc_pages, seen, ocr, strict=False)
+            ]
             figures = [
                 page_figures(page, s.figures, found) if s else []
-                for page, s, found in zip(doc_pages, seen, tables)
+                for page, s, found in zip(doc_pages, seen, tables, strict=False)
             ]
             pages = [
                 [] if o else _blocks(_without_regions(page.get_text("dict"), found, figs))
-                for page, s, found, figs, o in zip(doc_pages, seen, tables, figures, ocr)
+                for page, s, found, figs, o in zip(doc_pages, seen, tables, figures, ocr, strict=False)
             ]
             heights = [page.rect.height for page in doc_pages]
             widths = [page.rect.width for page in doc_pages]
             toc = [(e[0], unligature(" ".join(str(e[1]).split())), e[2]) for e in doc.get_toc()]
         except Exception as e:
-            raise IngestFailure("CORRUPT", f"PyMuPDF could not read the text: {e}") from e
+            raise IngestError("CORRUPT", f"PyMuPDF could not read the text: {e}") from e
     body = body_size(pages) or OCR_BODY_SIZE
     columns = [None if ocr[n] else _columns(pages[n], widths[n], body) for n in range(len(pages))]
     pages = [
         sorted(blocks, key=lambda b: reading_key(cols, (b.x0, b.top, b.x1, b.bottom))) if cols else blocks
-        for blocks, cols in zip(pages, columns)
+        for blocks, cols in zip(pages, columns, strict=False)
     ]
     for n, s in enumerate(seen):
         if ocr[n]:
             assert s is not None and s.transcript is not None
             band = (0.0, heights[n] * OCR_BAND[0], widths[n], heights[n] * OCR_BAND[1])
             pages[n], tables[n] = _laid_out(s.transcript, body, band)
-    tables = [sorted(found, key=lambda t: reading_key(cols, t.bbox)) for found, cols in zip(tables, columns)]
+    tables = [
+        sorted(found, key=lambda t: reading_key(cols, t.bbox))
+        for found, cols in zip(tables, columns, strict=False)
+    ]
     transcribed = frozenset(n + 1 for n, o in enumerate(ocr) if o)
     chars = [
         len("".join(b.text for b in blocks))
         + sum(_table_chars(t) for t in found)
         + sum(len(f.words) for f in figs if f.strip)
-        for blocks, found, figs in zip(pages, tables, figures)
+        for blocks, found, figs in zip(pages, tables, figures, strict=False)
     ]
     empty = sum(1 for n in chars if n < MIN_PAGE_CHARS)
     if not pages or empty / len(pages) > MAX_EMPTY_SHARE:
-        raise IngestFailure(
+        raise IngestError(
             "NO_TEXT_LAYER", f"{empty} of {len(pages)} pages have under {MIN_PAGE_CHARS} characters of text"
         )
-    figures = [sorted(figs, key=lambda f: reading_key(cols, f.bbox)) for figs, cols in zip(figures, columns)]
+    figures = [
+        sorted(figs, key=lambda f: reading_key(cols, f.bbox))
+        for figs, cols in zip(figures, columns, strict=False)
+    ]
     return Document(
         _strip_repeated(pages, heights), _join_continued(tables), figures, transcribed, toc, columns
     )
@@ -423,11 +435,12 @@ def _strip_repeated(pages: Pages, heights: list[float]) -> Pages:
     body = body_size(pages)
     counts = Counter(
         k
-        for blocks, h in zip(pages, heights)
+        for blocks, h in zip(pages, heights, strict=False)
         for k in {_repeat_key(b, h, body) for b in blocks}
         if k is not None
     )
     repeated = {k for k, n in counts.items() if n > REPEAT_SHARE * len(pages)}
     return [
-        [b for b in blocks if _repeat_key(b, h, body) not in repeated] for blocks, h in zip(pages, heights)
+        [b for b in blocks if _repeat_key(b, h, body) not in repeated]
+        for blocks, h in zip(pages, heights, strict=False)
     ]

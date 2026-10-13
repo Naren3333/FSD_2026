@@ -13,14 +13,14 @@ import pymupdf
 import pytest
 from fastapi.testclient import TestClient
 from httpx import Response
+from learning_transport import actor
 from openai import AsyncOpenAI
 
+import main
 import openai_client
 import rerank
 import settings
 import spend
-from learning_transport import actor
-import main
 from ingest import VisionConfig
 from main import app
 

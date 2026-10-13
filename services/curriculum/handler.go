@@ -1,6 +1,7 @@
 package main
 
 import (
+	"errors"
 	"learning/platform"
 	"net/http"
 	"strings"
@@ -26,7 +27,7 @@ func (s server) get(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	v, err := s.findNode(r.Context(), platform.Actor(r).Org, r.PathValue("id"))
-	if err == pgx.ErrNoRows {
+	if errors.Is(err, pgx.ErrNoRows) {
 		platform.Error(w, 404, "NOT_FOUND", "Node not found.")
 		return
 	}
@@ -108,7 +109,7 @@ func (s server) archive(w http.ResponseWriter, r *http.Request) {
 		platform.Error(w, 409, "ARCHIVE_CONFLICT", "Node is absent, already archived, or has active children.")
 		return
 	}
-	w.WriteHeader(204)
+	w.WriteHeader(http.StatusNoContent)
 }
 
 func (s server) addPrerequisite(w http.ResponseWriter, r *http.Request) {

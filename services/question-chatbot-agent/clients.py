@@ -1,40 +1,28 @@
 """Calls to the other services. Identity and Content get the user's own token, so their access rules decide what
 the chat may see; ai-core gets this agent's service-account token (role ai-client), never the user's."""
 
-import asyncio
-import json
 import logging
-import time
 from collections.abc import AsyncIterator
 from dataclasses import dataclass
 from typing import Any
 
 import httpx
+from learning_transport import STUDENT, Claims, IdentityClient, ServiceToken, UpstreamError, read_events
 
 from config import Settings
 
 log = logging.getLogger("question-chatbot-agent.clients")
 
 SEARCH_TOP_K = 8
+SEARCH_TIMEOUT = 15.0
+GENERATE_TIMEOUT = 30.0
+STREAM_TIMEOUT = httpx.Timeout(60, connect=5)
+USAGE_TIMEOUT = 5.0
 
 
-class UpstreamError(Exception):
-    """Another service answered with an error or couldn't be reached (status 0). `resets_at` comes with
-    AI_SPEND_LIMIT: the user's daily AI allowance is used up until then."""
-
-    def __init__(self, service: str, status: int, code: str = "", resets_at: str | None = None) -> None:
-        super().__init__(f"{service} {status} {code}".strip())
-        self.service, self.status, self.code, self.resets_at = service, status, code, resets_at
-
-
-def billed(claims: dict[str, Any]) -> dict[str, str]:
+def billed(claims: Claims) -> dict[str, str]:
     """Whose daily AI allowance pays for a call: the signed-in user, at the teacher allowance with that role."""
-    roles = claims.get("realm_access", {}).get("roles", [])
-    return {
-        "user_id": str(claims["sub"]),
-        "org_id": str(claims["org_id"]),
-        "role": "teacher" if "teacher" in roles else "student",
-    }
+    return {"user_id": claims.subject, "org_id": claims.org, "role": claims.person_role or STUDENT}
 
 
 @dataclass(frozen=True)
@@ -48,24 +36,13 @@ class Done:
 class Services:
     def __init__(self, settings: Settings, http: httpx.AsyncClient) -> None:
         self.settings, self.http = settings, http
-        self._token: str | None = None
-        self._expires = 0.0
-        self._lock = asyncio.Lock()
+        self.identity = IdentityClient(settings.identity_url, http)
+        self.token = ServiceToken(http, settings.token_url, settings.client_id, settings.client_secret)
 
     # ---- user-token calls
 
     async def classroom_access(self, authorization: str, classroom_id: str, correlation: str) -> bool:
-        try:
-            resp = await self.http.get(
-                f"{self.settings.identity_url}/v1/classrooms/{classroom_id}/access",
-                headers={"Authorization": authorization, "X-Correlation-ID": correlation},
-                timeout=5,
-            )
-        except httpx.HTTPError:
-            raise UpstreamError("identity", 0) from None
-        if resp.status_code >= 500:
-            raise UpstreamError("identity", resp.status_code)
-        return resp.status_code == 200
+        return await self.identity.relation(authorization, classroom_id, correlation) is not None
 
     async def search(
         self, authorization: str, classroom_id: str, query: str, correlation: str
@@ -78,7 +55,7 @@ class Services:
                 f"{self.settings.content_url}/v1/search",
                 json=body,
                 headers={"Authorization": authorization, "X-Correlation-ID": correlation},
-                timeout=15,
+                timeout=SEARCH_TIMEOUT,
             )
         except httpx.HTTPError:
             raise UpstreamError("content", 0) from None
@@ -106,7 +83,7 @@ class Services:
             "schema_name": name,
             "billed_to": billed_to,
         }
-        resp = await self._ai_core(body, correlation, timeout=30)
+        resp = await self._ai_core("POST", "/v1/inference", correlation, GENERATE_TIMEOUT, json=body)
         output = resp.json().get("output")
         if not isinstance(output, str):
             raise UpstreamError("ai-core", 502, "AI_OUTPUT_REJECTED")
@@ -123,109 +100,65 @@ class Services:
             "stream": True,
             "billed_to": billed_to,
         }
-        token = await self._service_token()
+        headers = await self._headers(correlation)
         try:
             async with self.http.stream(
                 "POST",
                 f"{self.settings.ai_core_url}/v1/inference",
                 json=body,
-                headers=self._headers(token, correlation),
-                timeout=httpx.Timeout(60, connect=5),
+                headers=headers,
+                timeout=STREAM_TIMEOUT,
             ) as resp:
                 if resp.status_code != 200:
                     await resp.aread()
-                    self._refused(resp)
-                    raise _error("ai-core", resp)
-                event = ""
-                async for line in resp.aiter_lines():
-                    if line.startswith("event: "):
-                        event = line[7:]
-                    elif line.startswith("data: "):
-                        data = json.loads(line[6:])
-                        if event == "delta":
-                            yield data["text"]
-                        elif event == "done":
-                            yield Done(data.get("model_version"), data.get("usage_tokens"))
-                            return
-                        elif event == "error":
-                            raise UpstreamError("ai-core", 502, data.get("code", "AI_PROVIDER_FAILED"))
+                    raise self._refused(resp)
+                async for event, data in read_events(resp.aiter_lines()):
+                    if event == "delta":
+                        yield data["text"]
+                    elif event == "done":
+                        yield Done(data.get("model_version"), data.get("usage_tokens"))
+                        return
+                    elif event == "error":
+                        raise UpstreamError("ai-core", 502, data.get("code", "AI_PROVIDER_FAILED"))
         except httpx.HTTPError:
             raise UpstreamError("ai-core", 0) from None
         raise UpstreamError("ai-core", 502, "STREAM_ENDED_EARLY")
 
-    async def _ai_core(self, body: dict[str, Any], correlation: str, timeout: float) -> httpx.Response:
-        token = await self._service_token()
-        try:
-            resp = await self.http.post(
-                f"{self.settings.ai_core_url}/v1/inference",
-                json=body,
-                headers=self._headers(token, correlation),
-                timeout=timeout,
-            )
-        except httpx.HTTPError:
-            raise UpstreamError("ai-core", 0) from None
-        if resp.status_code != 200:
-            self._refused(resp)
-            raise _error("ai-core", resp)
-        return resp
-
     async def usage(self, billed_to: dict[str, str], correlation: str) -> dict[str, Any]:
         """The user's AI spend today, their daily limit and when it resets, from ai-core's ledger."""
-        token = await self._service_token()
-        try:
-            resp = await self.http.get(
-                f"{self.settings.ai_core_url}/v1/usage",
-                params=billed_to,
-                headers=self._headers(token, correlation),
-                timeout=5,
-            )
-        except httpx.HTTPError:
-            raise UpstreamError("ai-core", 0) from None
-        if resp.status_code != 200:
-            self._refused(resp)
-            raise _error("ai-core", resp)
+        resp = await self._ai_core("GET", "/v1/usage", correlation, USAGE_TIMEOUT, params=billed_to)
         data: dict[str, Any] = resp.json()
         return data
 
-    def _headers(self, token: str, correlation: str) -> dict[str, str]:
-        return {"Authorization": f"Bearer {token}", "X-Correlation-ID": correlation}
+    async def _ai_core(
+        self, method: str, path: str, correlation: str, timeout: float, **request: Any
+    ) -> httpx.Response:
+        headers = await self._headers(correlation)
+        try:
+            resp = await self.http.request(
+                method, f"{self.settings.ai_core_url}{path}", headers=headers, timeout=timeout, **request
+            )
+        except httpx.HTTPError:
+            raise UpstreamError("ai-core", 0) from None
+        if resp.status_code != 200:
+            raise self._refused(resp)
+        return resp
 
-    def _refused(self, resp: httpx.Response) -> None:
+    async def _headers(self, correlation: str) -> dict[str, str]:
+        return {"Authorization": f"Bearer {await self.token.get()}", "X-Correlation-ID": correlation}
+
+    def _refused(self, resp: httpx.Response) -> UpstreamError:
+        """ai-core's error; a refused token is dropped so the next call fetches a new one."""
         if resp.status_code == 401:
-            self._token = None  # the next call fetches a new one
-
-    async def _service_token(self) -> str:
-        async with self._lock:
-            if self._token and time.monotonic() < self._expires:
-                return self._token
-            form = {
-                "grant_type": "client_credentials",
-                "client_id": self.settings.client_id,
-                "client_secret": self.settings.client_secret,
-            }
-            try:
-                resp = await self.http.post(self.settings.token_url, data=form, timeout=10)
-                resp.raise_for_status()
-                data = resp.json()
-            except (httpx.HTTPError, ValueError):
-                raise UpstreamError("keycloak", 0, "TOKEN_UNAVAILABLE") from None
-            self._token = str(data["access_token"])
-            self._expires = time.monotonic() + int(data.get("expires_in", 60)) - 30
-            return self._token
-
-
-def _code(resp: httpx.Response) -> str:
-    try:
-        return str(resp.json()["error"]["code"])
-    except (ValueError, KeyError, TypeError):
-        return ""
+            self.token.reset()
+        return _error("ai-core", resp)
 
 
 def _error(service: str, resp: httpx.Response) -> UpstreamError:
-    resets_at = None
+    """The service's error code and, for AI_SPEND_LIMIT, when the allowance resets."""
     try:
-        value = resp.json()["error"].get("resets_at")
-        resets_at = str(value) if value else None
+        error = resp.json()["error"]
+        code, resets_at = str(error.get("code") or ""), error.get("resets_at")
     except (ValueError, KeyError, TypeError, AttributeError):
-        pass
-    return UpstreamError(service, resp.status_code, _code(resp), resets_at)
+        code, resets_at = "", None
+    return UpstreamError(service, resp.status_code, code, str(resets_at) if resets_at else None)

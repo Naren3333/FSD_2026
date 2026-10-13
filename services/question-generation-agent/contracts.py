@@ -1,7 +1,8 @@
 from typing import Literal
 from uuid import UUID
-from pydantic import Field
+
 from learning_transport import Contract
+from pydantic import Field
 
 
 class SourceReference(Contract):

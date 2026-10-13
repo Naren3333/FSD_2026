@@ -15,9 +15,9 @@ from pathlib import Path
 from typing import Any, Literal, Protocol
 
 from learning_transport import Contract, failure
-from pydantic import Field
-from psycopg.rows import dict_row
+from learning_transport.db import open_async_pool
 from psycopg_pool import AsyncConnectionPool
+from pydantic import Field
 
 log = logging.getLogger("ai-core.spend")
 
@@ -74,7 +74,7 @@ def cost(model: str, tokens_in: int, tokens_out: int = 0, cached_in: int = 0) ->
     if model in table:
         rate_in, rate_cached, rate_out = table[model]
     else:
-        log.warning(json.dumps({"service": "ai-core", "error_category": "unpriced_model", "model": model}))
+        log.warning("unpriced_model", extra={"model": model})
         rate_in = rate_cached = max(p[0] for p in table.values())
         rate_out = max(p[2] for p in table.values())
     cached_in = min(cached_in, tokens_in)
@@ -112,18 +112,7 @@ class PostgresLedger:
 
     @classmethod
     async def open(cls, url: str) -> "PostgresLedger":
-        pool: AsyncConnectionPool[Any] = AsyncConnectionPool(
-            url,
-            min_size=1,
-            max_size=8,
-            timeout=5,
-            open=False,
-            kwargs={"row_factory": dict_row, "options": "-c statement_timeout=10000"},
-        )
-        await pool.open(wait=True, timeout=15)
-        async with pool.connection() as conn:
-            await conn.execute(MIGRATION)
-        return cls(pool)
+        return cls(await open_async_pool(url, MIGRATION))
 
     async def today(self, billed: Billed) -> Usage:
         # The day boundary is computed by PostgreSQL, which carries the time zone database.

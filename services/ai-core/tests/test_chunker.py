@@ -1,5 +1,7 @@
 """The structure-aware chunker (RAG_PLAN Iterations 4 and 6). No DB, no OpenAI."""
 
+from itertools import pairwise
+
 from ingest.chunker import MAX_TOKENS, SEPARATOR, chunk_paras, encoding
 from ingest.headings import Para
 
@@ -54,7 +56,7 @@ def test_chunks_fit_the_token_budget() -> None:
 
 def test_consecutive_chunks_overlap_by_a_paragraph() -> None:
     chunks = chunk_paras(plain(book()))
-    for prev, nxt in zip(chunks, chunks[1:]):
+    for prev, nxt in pairwise(chunks):
         assert prev.content.split(SEPARATOR)[-1] == nxt.content.split(SEPARATOR)[0]
     # ...and nothing else repeats: every paragraph appears, in order.
     seen = [p for c in chunks for p in c.content.split(SEPARATOR)]
@@ -63,7 +65,7 @@ def test_consecutive_chunks_overlap_by_a_paragraph() -> None:
 
 def test_paragraphs_over_the_overlap_budget_still_overlap() -> None:
     chunks = chunk_paras(plain([[paragraph(n, sentences=8).strip() for n in range(20)]]))  # ~110 tokens each
-    for prev, nxt in zip(chunks, chunks[1:]):
+    for prev, nxt in pairwise(chunks):
         carried = nxt.content.split(SEPARATOR)[0]
         assert prev.content.endswith(carried) and not carried.startswith("Paragraph")
         assert 40 <= tokens(carried) < 90
@@ -75,7 +77,7 @@ def test_page_ranges_follow_the_paragraphs() -> None:
     chunks = chunk_paras(plain(book()))
     assert chunks[0].page_start == 1 and chunks[-1].page_end == 3
     assert any(c.page_start < c.page_end for c in chunks)  # some chunk crosses a page break
-    for prev, nxt in zip(chunks, chunks[1:]):
+    for prev, nxt in pairwise(chunks):
         assert prev.page_start <= nxt.page_start and nxt.page_start <= prev.page_end + 1
 
 

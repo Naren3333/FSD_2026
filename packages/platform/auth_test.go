@@ -43,7 +43,7 @@ func TestRealJWTValidation(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			r := httptest.NewRequest("GET", "/private", nil)
+			r := httptest.NewRequest(http.MethodGet, "/private", nil)
 			r.Header.Set("Authorization", "Bearer "+token)
 			w := httptest.NewRecorder()
 			a.Handler().ServeHTTP(w, r)
@@ -52,7 +52,7 @@ func TestRealJWTValidation(t *testing.T) {
 			}
 		})
 	}
-	r := httptest.NewRequest("GET", "/private", nil)
+	r := httptest.NewRequest(http.MethodGet, "/private", nil)
 	r.Header.Set("X-User-ID", "test-student")
 	w := httptest.NewRecorder()
 	a.Handler().ServeHTTP(w, r)

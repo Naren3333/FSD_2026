@@ -1,6 +1,7 @@
 from uuid import UUID
-from pydantic import Field, model_validator
+
 from learning_transport import Contract
+from pydantic import Field, model_validator
 
 
 class SourceReference(Contract):

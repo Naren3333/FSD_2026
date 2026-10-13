@@ -1,16 +1,29 @@
 import asyncio
 import base64
 import contextlib
-import json
 import logging
 import os
 import tempfile
 from collections.abc import AsyncGenerator, AsyncIterator, Coroutine
 from contextlib import asynccontextmanager
 from pathlib import Path
-from typing import Any, NoReturn, TypeVar
+from typing import Any, NoReturn
 
 import openai
+from fastapi import Depends, Query, Request
+from fastapi.responses import StreamingResponse
+from learning_transport import (
+    AI_CLIENT,
+    OIDC_SETTINGS,
+    Claims,
+    ErrorResponse,
+    application,
+    failure,
+    require_env,
+    requires,
+    sse_event,
+)
+
 import openai_client
 import rerank
 import spend
@@ -23,10 +36,7 @@ from contracts import (
     RerankResponse,
     ResponseContract,
 )
-from fastapi import Depends, Query, Request
-from fastapi.responses import StreamingResponse
-from ingest import IngestFailure, costs, ingest, vision_config
-from learning_transport import ErrorResponse, actor, application, failure, require_role
+from ingest import IngestError, costs, ingest, vision_config
 from settings import get_settings
 
 log = logging.getLogger("ai-core")
@@ -34,7 +44,6 @@ log = logging.getLogger("ai-core")
 MAX_PDF_BYTES = 50 * 1024 * 1024
 INGEST_CONCURRENCY = 2  # PDFs at once; more callers wait for a slot
 DISCONNECT_POLL = 2.0  # seconds between checks that an ingest's caller is still there
-T = TypeVar("T")
 ERRORS: dict[int | str, dict[str, Any]] = {
     code: {"model": ErrorResponse} for code in (401, 403, 413, 415, 422, 429, 502, 503)
 }
@@ -46,14 +55,11 @@ _recordings: set[asyncio.Future[None]] = set()  # ledger writes that must outliv
 @asynccontextmanager
 async def lifespan(app: Any) -> AsyncIterator[None]:
     global _ingest_slots
-    for name in ("OIDC_ISSUER", "OIDC_AUDIENCE", "OIDC_JWKS_URL"):
-        if not os.environ.get(name):
-            raise RuntimeError(f"Missing configuration: {name}")
+    require_env(*OIDC_SETTINGS)
     _ingest_slots = asyncio.Semaphore(INGEST_CONCURRENCY)
     opened = getattr(app.state, "ledger", None) is None
     if opened:
-        if not os.environ.get("DATABASE_URL"):
-            raise RuntimeError("Missing configuration: DATABASE_URL")
+        require_env("DATABASE_URL")
         app.state.ledger = await spend.PostgresLedger.open(os.environ["DATABASE_URL"])
     yield
     await rerank.aclose()
@@ -84,22 +90,20 @@ async def ready(request: Request) -> dict[str, str]:
 
 def provider_error(error: Exception) -> NoReturn:
     """Provider failures as errors the caller can retry or fall back on; never a made-up result."""
-    if isinstance(error, openai_client.NotConfigured | rerank.RerankNotConfigured):
+    if isinstance(error, openai_client.NotConfiguredError | rerank.RerankNotConfiguredError):
         raise failure(503, "AI_PROVIDER_NOT_CONFIGURED", "The AI provider is not configured.")
     if isinstance(error, openai_client.StructuredOutputError):
         raise failure(502, "AI_OUTPUT_REJECTED", "The model did not return a usable reply.")
-    log.warning(
-        json.dumps({"service": "ai-core", "error_category": "provider", "error": type(error).__name__})
-    )
+    log.warning("provider_failed", extra={"error": type(error).__name__})
     raise failure(502, "AI_PROVIDER_FAILED", "The AI provider could not complete the request.")
 
 
 PROVIDER_ERRORS = (
     openai.OpenAIError,
-    openai_client.NotConfigured,
+    openai_client.NotConfiguredError,
     openai_client.StructuredOutputError,
-    rerank.RerankNotConfigured,
-    rerank.RerankFailed,
+    rerank.RerankNotConfiguredError,
+    rerank.RerankError,
 )
 
 
@@ -114,7 +118,7 @@ async def allowance(request: Request, billed: spend.Billed) -> None:
     try:
         usage = await ledger_of(request).today(billed)
     except Exception:
-        log.error(json.dumps({"service": "ai-core", "error_category": "ledger_unavailable"}))
+        log.error("ledger_unavailable")
         raise failure(503, "USAGE_LEDGER_UNAVAILABLE", "AI usage cannot be checked right now.") from None
     if spend.over_limit(usage):
         raise spend.limit_reached(usage)
@@ -132,16 +136,7 @@ def charge(request: Request, billed: spend.Billed, *charges: spend.Charge) -> No
             try:
                 await ledger.record(billed, c, correlation)
             except Exception:
-                log.error(
-                    json.dumps(
-                        {
-                            "service": "ai-core",
-                            "error_category": "ledger_write_failed",
-                            "operation": c.operation,
-                            "cost_usd": c.cost_usd,
-                        }
-                    )
-                )
+                log.error("ledger_write_failed", extra={"operation": c.operation, "cost_usd": c.cost_usd})
 
     task = asyncio.ensure_future(write())
     _recordings.add(task)
@@ -166,10 +161,9 @@ async def usage_today(
     user_id: str = Query(min_length=1, max_length=200),
     org_id: str = Query(min_length=1, max_length=200),
     role: spend.Role = Query(),
-    claims: dict[str, Any] = Depends(actor),
+    _caller: Claims = Depends(requires(AI_CLIENT)),
 ) -> spend.Usage:
     """A user's spend today, their daily limit and when it resets, for a service showing it to that user."""
-    require_role(claims, "ai-client")
     try:
         return await ledger_of(request).today(spend.Billed(user_id=user_id, org_id=org_id, role=role))
     except Exception:
@@ -177,8 +171,9 @@ async def usage_today(
 
 
 @app.post("/v1/inference", response_model=ResponseContract, responses=ERRORS)
-async def execute(request: RequestContract, http: Request, claims: dict[str, Any] = Depends(actor)) -> Any:
-    require_role(claims, "ai-client")
+async def execute(
+    request: RequestContract, http: Request, _caller: Claims = Depends(requires(AI_CLIENT))
+) -> Any:
     settings = get_settings()
     billed = request.billed_to
     await allowance(http, billed)
@@ -231,10 +226,6 @@ def total(usage: openai_client.Usage) -> int | None:
     return usage.tokens_in + usage.tokens_out
 
 
-def event(name: str, data: dict[str, Any]) -> str:
-    return f"event: {name}\ndata: {json.dumps(data, separators=(',', ':'))}\n\n"
-
-
 class StreamBill:
     """Charges a streamed reply once, however it ends: with OpenAI's counts when the usage chunk arrived, or an
     estimate from the text when the stream broke or the caller hung up first."""
@@ -277,17 +268,17 @@ async def events(
             if isinstance(item, openai_client.Usage):
                 if bill:
                     bill.close(item)
-                yield event("done", {"model_version": model, "usage_tokens": total(item)})
+                yield sse_event("done", {"model_version": model, "usage_tokens": total(item)})
                 return
             if bill:
                 bill.text.append(item)
-            yield event("delta", {"text": item})
+            yield sse_event("delta", {"text": item})
             item = await anext(stream, None)
     except openai.OpenAIError as error:
-        log.warning(
-            json.dumps({"service": "ai-core", "error_category": "provider", "error": type(error).__name__})
+        log.warning("provider_failed", extra={"error": type(error).__name__})
+        yield sse_event(
+            "error", {"code": "AI_PROVIDER_FAILED", "message": "The AI provider stopped responding."}
         )
-        yield event("error", {"code": "AI_PROVIDER_FAILED", "message": "The AI provider stopped responding."})
     finally:
         if bill:
             bill.close()
@@ -296,9 +287,8 @@ async def events(
 
 @app.post("/v1/rerank", response_model=RerankResponse, responses=ERRORS)
 async def rerank_documents(
-    request: RerankRequest, http: Request, claims: dict[str, Any] = Depends(actor)
+    request: RerankRequest, http: Request, _caller: Claims = Depends(requires(AI_CLIENT))
 ) -> RerankResponse:
-    require_role(claims, "ai-client")
     await allowance(http, request.billed_to)
     try:
         scores, tokens = await rerank.rerank(request.query, request.documents)
@@ -331,19 +321,18 @@ async def ingest_pdf(
     billed_user: str = Query(min_length=1, max_length=200),
     billed_org: str = Query(min_length=1, max_length=200),
     billed_role: spend.Role = Query(),
-    claims: dict[str, Any] = Depends(actor),
+    _caller: Claims = Depends(requires(AI_CLIENT)),
 ) -> IngestResponse:
     """One PDF (the raw body) → chunks with embeddings and the figure crops they point at. Stateless: the caller
     stores the result. A document problem is a `failed` outcome; a provider outage is an error to retry. The
     model calls are charged to `billed_user` (the teacher who uploaded the document), whatever the outcome."""
-    require_role(claims, "ai-client")
     billed = spend.Billed(user_id=billed_user, org_id=billed_org, role=billed_role)
     if request.headers.get("content-type", "").split(";")[0].strip() != "application/pdf":
         raise failure(415, "UNSUPPORTED_MEDIA_TYPE", "Send the PDF as application/pdf.")
     assert _ingest_slots is not None
     try:
         openai_client.get_client()  # without a key every model call would fail: refuse before any work
-    except openai_client.NotConfigured as error:
+    except openai_client.NotConfiguredError as error:
         provider_error(error)
     await allowance(request, billed)
     with tempfile.TemporaryDirectory(prefix="ingest-") as folder:
@@ -356,14 +345,14 @@ async def ingest_pdf(
             try:
                 result = await unless_disconnected(request, _ingest(path, title))
                 record.outcome = "indexed"
-            except IngestFailure as e:
+            except IngestError as e:
                 record.outcome, record.failure_reason = "failed", e.reason
                 return IngestResponse(outcome="failed", failure_reason=e.reason, failure_detail=str(e)[:2000])  # type: ignore[arg-type]
             except PROVIDER_ERRORS as error:
                 provider_error(error)
-            except CallerGone:
+            except CallerGoneError:
                 record.outcome = "abandoned"
-                log.info(json.dumps({"service": "ai-core", "event": "ingest_abandoned"}))
+                log.info("ingest_abandoned")
                 raise failure(
                     503, "CALLER_GONE", "The caller disconnected before the ingest finished."
                 ) from None
@@ -428,11 +417,11 @@ async def _ingest(path: Path, title: str) -> Any:
             return await ingest(path, title, vision_config(get_settings()))
 
 
-class CallerGone(Exception):
+class CallerGoneError(Exception):
     """The caller hung up before the work finished."""
 
 
-async def unless_disconnected(
+async def unless_disconnected[T](
     request: Request, work: Coroutine[Any, Any, T], poll: float = DISCONNECT_POLL
 ) -> T:
     """Await `work`, cancelling it if the caller disconnects first. Content gives up on an ingest after 20 minutes
@@ -445,7 +434,7 @@ async def unless_disconnected(
                 task.cancel()
                 with contextlib.suppress(asyncio.CancelledError):
                     await task
-                raise CallerGone()
+                raise CallerGoneError()
         return task.result()
     finally:
         task.cancel()

@@ -1,9 +1,10 @@
 from collections import defaultdict
+from datetime import datetime
 from typing import Any, Literal
 from uuid import UUID
-from datetime import datetime
-from pydantic import Field, model_validator
+
 from learning_transport import Contract
+from pydantic import Field, model_validator
 
 
 class Evidence(Contract):

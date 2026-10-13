@@ -13,14 +13,16 @@ import logging
 import time
 from collections.abc import AsyncIterator
 from contextlib import aclosing
+from dataclasses import dataclass
 from typing import Any
 
 from fastapi.responses import StreamingResponse
+from learning_transport import UpstreamError, sse_event
 from starlette.types import Send
 
 import prompts
 from citations import CitationRewriter
-from clients import Done, Services, UpstreamError
+from clients import Done, Services
 from config import Settings
 from contracts import MAX_MESSAGE
 from store import Store
@@ -59,10 +61,6 @@ class SSEResponse(StreamingResponse):
             await super().stream_response(send)
 
 
-def sse(event: str, data: dict[str, Any]) -> str:
-    return f"event: {event}\ndata: {json.dumps(data)}\n\n"
-
-
 def error_of(e: UpstreamError) -> tuple[str, str]:
     """The `error` event for a failed upstream call: a code the browser can act on and a safe message."""
     if e.code == "AI_SPEND_LIMIT":
@@ -76,6 +74,18 @@ def error_of(e: UpstreamError) -> tuple[str, str]:
     return "AI_PROVIDER_FAILED", "The model could not answer. Try again."
 
 
+@dataclass(frozen=True)
+class TurnRequest:
+    """What the user asked, in which thread, and on whose behalf."""
+
+    thread: dict[str, Any]
+    authorization: str  # the user's own bearer token, for Content search
+    correlation: str
+    content: str
+    history: list[dict[str, str]]
+    billed_to: dict[str, str]  # whose daily AI allowance pays for this turn's model calls
+
+
 class Turn:
     """One answer: runs the pipeline, yields SSE frames and saves the assistant message."""
 
@@ -85,17 +95,16 @@ class Turn:
         store: Store,
         settings: Settings,
         pending: set[asyncio.Task[Any]],
-        thread: dict[str, Any],
-        authorization: str,
-        correlation: str,
-        content: str,
-        history: list[dict[str, str]],
-        billed_to: dict[str, str],
+        request: TurnRequest,
     ) -> None:
         self.services, self.store, self.settings, self.pending = services, store, settings, pending
-        self.billed_to = billed_to  # whose daily AI allowance pays for this turn's model calls
-        self.thread, self.authorization, self.correlation = thread, authorization, correlation
-        self.content, self.history = content, history
+        self.billed_to = request.billed_to
+        self.thread, self.authorization, self.correlation = (
+            request.thread,
+            request.authorization,
+            request.correlation,
+        )
+        self.content, self.history = request.content, request.history
         self.started = time.perf_counter()
         self.parts: list[str] = []
         self.results: list[dict[str, Any]] = []
@@ -131,14 +140,14 @@ class Turn:
         # Saved before the last events, so a disconnect while they are sent can't lose the row.
         if error is None:
             message_id = await self._save(self.outcome)
-            yield sse("citations", {"citations": self._citations()})
-            yield sse("done", {"message_id": message_id, "outcome": self.outcome})
+            yield sse_event("citations", {"citations": self._citations()})
+            yield sse_event("done", {"message_id": message_id, "outcome": self.outcome})
         else:
             await self._save("error")
             data: dict[str, Any] = {"code": error[0], "message": error[1]}
             if resets_at:
                 data["resets_at"] = resets_at
-            yield sse("error", data)
+            yield sse_event("error", data)
 
     async def _answer(self) -> AsyncIterator[str]:
         """Small talk gets a short reply without documents; an off-topic message, no results, or a top score under
@@ -169,7 +178,7 @@ class Turn:
                 self.outcome = "no_results"
                 reply = prompts.refusal(role)
                 self.parts.append(reply)
-                yield sse("token", {"text": reply})
+                yield sse_event("token", {"text": reply})
                 return
             messages, self.version, tag_map = prompts.build_messages(
                 role, self._fitting(), self.history, self.content
@@ -182,10 +191,10 @@ class Turn:
                 self.model, self.usage_tokens = item.model, item.usage_tokens
             elif out := self.rewriter.feed(item):
                 self.parts.append(out)
-                yield sse("token", {"text": out})
+                yield sse_event("token", {"text": out})
         if out := self.rewriter.flush():
             self.parts.append(out)
-            yield sse("token", {"text": out})
+            yield sse_event("token", {"text": out})
 
     def _fitting(self) -> list[dict[str, Any]]:
         """The results, best first, that fit in one prompt message."""
@@ -257,19 +266,17 @@ class Turn:
         }
         message_id = await self.store.save_answer(str(self.thread["id"]), answer)
         log.info(
-            json.dumps(
-                {
-                    "service": "question-chatbot-agent",
-                    "thread_id": str(self.thread["id"]),
-                    "outcome": outcome,
-                    "prompt_version": self.version,
-                    "retrieved": len(self.results),
-                    "top_score": self.top_score,
-                    "cited": len(self.rewriter.cited if self.rewriter else []),
-                    "usage_tokens": self.usage_tokens,
-                    "latency_ms": answer["latency_ms"],
-                }
-            )
+            "chat_turn",
+            extra={
+                "thread_id": str(self.thread["id"]),
+                "outcome": outcome,
+                "prompt_version": self.version,
+                "retrieved": len(self.results),
+                "top_score": self.top_score,
+                "cited": len(self.rewriter.cited if self.rewriter else []),
+                "usage_tokens": self.usage_tokens,
+                "latency_ms": answer["latency_ms"],
+            },
         )
         return message_id
 

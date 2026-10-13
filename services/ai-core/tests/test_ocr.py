@@ -9,14 +9,14 @@ from pathlib import Path
 import httpx2
 import pymupdf
 import pytest
+from conftest import SCAN_BOX, FakeOpenAI, ingested, make_mixed_pdf, make_scanned_pdf, page_key0, with_vision
 from fastapi.testclient import TestClient
 
 from ingest import VisionConfig, vision
 from ingest.chunker import chunk_paras
 from ingest.headings import outline
-from ingest.parse import IngestFailure, read_pages
+from ingest.parse import IngestError, read_pages
 from ingest.vision import PageVision, SeenFigure, SeenText
-from conftest import SCAN_BOX, FakeOpenAI, ingested, make_mixed_pdf, make_scanned_pdf, page_key0, with_vision
 
 SHA = "ef" * 32
 TRANSCRIPT = [
@@ -69,7 +69,7 @@ class Models:
     def __init__(
         self,
         fake: FakeOpenAI,
-        ocr: dict | int = None,
+        ocr: dict | int | None = None,
         page: dict | int | None = None,
         other: dict | None = None,
     ):
@@ -287,7 +287,7 @@ def test_a_transcript_becomes_the_page_text(tmp_path: Path) -> None:
 
 
 def test_an_empty_transcript_is_still_no_text_layer(tmp_path: Path) -> None:
-    with pytest.raises(IngestFailure) as e:
+    with pytest.raises(IngestError) as e:
         read_pages(write(tmp_path, make_mixed_pdf("ii")), [transcript(), transcript()])
     assert e.value.reason == "NO_TEXT_LAYER"
 

@@ -12,6 +12,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"slices"
 	"strings"
 	"sync"
 	"syscall"
@@ -22,6 +23,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
+// Claims are the verified token claims services use: the user, their organization and realm roles.
 type Claims struct {
 	Subject string `json:"sub"`
 	Org     string `json:"org_id"`
@@ -30,21 +32,18 @@ type Claims struct {
 	} `json:"realm_access"`
 }
 
-func (c Claims) Has(role string) bool {
-	for _, r := range c.Realm.Roles {
-		if r == role {
-			return true
-		}
-	}
-	return false
-}
+// Has reports whether the token carries the realm role.
+func (c Claims) Has(role string) bool { return slices.Contains(c.Realm.Roles, role) }
 
 type contextKey string
 
 const claimsKey contextKey = "claims"
 const correlationKey contextKey = "correlation"
 
+// Actor returns the verified claims of the request's caller.
 func Actor(r *http.Request) Claims { c, _ := r.Context().Value(claimsKey).(Claims); return c }
+
+// Correlation returns the request's correlation id, or a new one outside a request.
 func Correlation(ctx context.Context) string {
 	v, _ := ctx.Value(correlationKey).(string)
 	if v == "" {
@@ -52,6 +51,8 @@ func Correlation(ctx context.Context) string {
 	}
 	return v
 }
+
+// Required returns an environment variable that must be set, panicking at startup when it is missing.
 func Required(key string) string {
 	value := os.Getenv(key)
 	if value == "" {
@@ -59,20 +60,29 @@ func Required(key string) string {
 	}
 	return value
 }
+
+// Env returns an environment variable, or fallback when it is unset.
 func Env(key, fallback string) string {
 	if v := os.Getenv(key); v != "" {
 		return v
 	}
 	return fallback
 }
+
+// JSON writes value as the response body with the given status.
 func JSON(w http.ResponseWriter, status int, value any) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
 	_ = json.NewEncoder(w).Encode(value)
 }
+
+// Error writes the standard error envelope {"error": {"code", "message"}}.
 func Error(w http.ResponseWriter, status int, code, message string) {
 	JSON(w, status, map[string]any{"error": map[string]string{"code": code, "message": message}})
 }
+
+// Decode reads one JSON value of at most 2 MiB into target, rejecting unknown fields. On failure it has already
+// written a 422 response.
 func Decode(w http.ResponseWriter, r *http.Request, target any) bool {
 	r.Body = http.MaxBytesReader(w, r.Body, 2<<20)
 	d := json.NewDecoder(r.Body)
@@ -87,7 +97,11 @@ func Decode(w http.ResponseWriter, r *http.Request, target any) bool {
 	}
 	return true
 }
+
+// ID reports whether value is a UUID.
 func ID(value string) bool { _, err := uuid.Parse(value); return err == nil }
+
+// Teacher requires the token's teacher role, writing a 403 otherwise. Classroom-specific access needs TeacherOf.
 func Teacher(w http.ResponseWriter, r *http.Request) bool {
 	if !Actor(r).Has("teacher") {
 		Error(w, 403, "FORBIDDEN", "Teacher access is required.")
@@ -96,6 +110,7 @@ func Teacher(w http.ResponseWriter, r *http.Request) bool {
 	return true
 }
 
+// App is one service: its database, routes, token verifier and the background workers it runs.
 type App struct {
 	DB       *pgxpool.Pool
 	Mux      *http.ServeMux
@@ -170,7 +185,7 @@ func New(name string, migrations fs.FS, bootstrap string) (*App, error) {
 	authCtx := oidc.ClientContext(context.Background(), client)
 	verifier := oidc.NewVerifier(issuer, oidc.NewRemoteKeySet(authCtx, Required("OIDC_JWKS_URL")), &oidc.Config{ClientID: Required("OIDC_AUDIENCE"), SupportedSigningAlgs: []string{"RS256"}})
 	a := &App{DB: db, Mux: http.NewServeMux(), Name: name, verifier: verifier, Client: client}
-	a.Mux.HandleFunc("GET /health/live", func(w http.ResponseWriter, r *http.Request) { JSON(w, 200, map[string]string{"status": "alive"}) })
+	a.Mux.HandleFunc("GET /health/live", func(w http.ResponseWriter, _ *http.Request) { JSON(w, 200, map[string]string{"status": "alive"}) })
 	a.Mux.HandleFunc("GET /health/ready", func(w http.ResponseWriter, r *http.Request) {
 		ctx, cancel := context.WithTimeout(r.Context(), 2*time.Second)
 		defer cancel()
@@ -189,6 +204,8 @@ func New(name string, migrations fs.FS, bootstrap string) (*App, error) {
 	initialized = true
 	return a, nil
 }
+
+// Handler wraps the routes with request logging, correlation ids, a deadline and bearer-token verification.
 func (a *App) Handler() http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		recorder := &responseRecorder{ResponseWriter: w}
@@ -272,7 +289,7 @@ func (a *App) Relation(w http.ResponseWriter, r *http.Request, classroom, studen
 		return "", false
 	}
 	url := Required("IDENTITY_URL") + "/v1/classrooms/" + classroom + "/access"
-	req, err := http.NewRequestWithContext(r.Context(), "GET", url, nil)
+	req, err := http.NewRequestWithContext(r.Context(), http.MethodGet, url, nil)
 	if err != nil {
 		Error(w, 503, "DEPENDENCY_UNAVAILABLE", "Authorization unavailable.")
 		return "", false
@@ -290,7 +307,7 @@ func (a *App) Relation(w http.ResponseWriter, r *http.Request, classroom, studen
 		return "", false
 	}
 	defer res.Body.Close()
-	if res.StatusCode != 200 {
+	if res.StatusCode != http.StatusOK {
 		if res.StatusCode >= 500 {
 			Error(w, 503, "DEPENDENCY_UNAVAILABLE", "Authorization unavailable.")
 		} else {
@@ -307,6 +324,8 @@ func (a *App) Relation(w http.ResponseWriter, r *http.Request, classroom, studen
 	}
 	return answer.Relation, true
 }
+
+// Run serves HTTP and runs the workers until SIGINT or SIGTERM, then shuts down gracefully.
 func (a *App) Run(workers ...func(context.Context)) error {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
@@ -332,6 +351,8 @@ func (a *App) Run(workers ...func(context.Context)) error {
 	defer cancel()
 	return server.Shutdown(shutdown)
 }
+
+// Fail logs an unexpected error and answers 500 without exposing it.
 func Fail(w http.ResponseWriter, err error) {
 	slog.Error("operation_failed", "error_category", fmt.Sprintf("%T", err))
 	Error(w, 500, "INTERNAL_ERROR", "The operation could not be completed.")
