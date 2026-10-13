@@ -1,15 +1,17 @@
 """Load the golden set's test corpus into the local stack and wait until Content has indexed it.
 
-    python scripts/eval/load_corpus.py
+    python scripts/eval/load_corpus.py [--reindex]
 
 - Creates two classrooms as `teacher` ("Golden eval C1" and "Golden eval C2") and enrolls `student` in C1 and a
   second local test student, eval-student2, in C2. eval-student2 is created in the local Keycloak realm the first
   time, with a generated password kept in .local/eval-corpus.json (gitignored).
 - Uploads each PDF in corpus.yaml from EVAL_PDF_DIR into its class's classroom, as its doc_type.
-- Safe to re-run: documents already in the classroom are kept, failed ones are queued again.
+- Safe to re-run: documents already in the classroom are kept, failed ones are queued again. --reindex queues
+  every document again, after a change to ingest.
 
 Indexing calls ai-core, so it costs OpenAI embeddings, plus vision calls for pages ai-core hasn't cached.
 """
+import argparse
 import secrets
 import sys
 import time
@@ -53,6 +55,9 @@ def ensure_student2(state: dict) -> None:
 
 
 def main() -> None:
+    ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    ap.add_argument("--reindex", action="store_true", help="index every document again")
+    args = ap.parse_args()
     manifest = corpus()
     missing = [name for name in manifest if not (PDF_DIR / name).exists()]
     if missing:
@@ -81,7 +86,7 @@ def main() -> None:
     for name, meta in manifest.items():
         title, room = meta["title"], classrooms[meta["class_ids"][0]]
         existing = documents.get(title)
-        if existing and existing["status"] == "failed":
+        if existing and (existing["status"] == "failed" or (args.reindex and existing["status"] != "indexing")):
             check(teacher.request("POST", f"/content/documents/{existing['id']}/reindex", json={}))
         elif not existing:
             data = (PDF_DIR / name).read_bytes()
