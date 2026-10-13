@@ -29,7 +29,7 @@ type Access string
 // Relation implements platform.ClassroomAccess.
 func (a Access) Relation(w http.ResponseWriter, _ *http.Request, _, _ string) (string, bool) {
 	if a == "" {
-		platform.Error(w, 403, "FORBIDDEN", "You do not have access to this classroom or student.")
+		platform.Forbidden(w, "You do not have access to this classroom or student.")
 		return "", false
 	}
 	return string(a), true
@@ -48,7 +48,7 @@ func (a Access) TeacherOf(w http.ResponseWriter, r *http.Request, classroom stri
 	}
 	relation, ok := a.Relation(w, r, classroom, "")
 	if ok && relation != platform.RelationTeacher {
-		platform.Error(w, 403, "FORBIDDEN", "Only the classroom's teacher may do this.")
+		platform.Forbidden(w, "Only the classroom's teacher may do this.")
 		return false
 	}
 	return ok

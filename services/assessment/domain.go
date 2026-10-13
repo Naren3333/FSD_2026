@@ -4,10 +4,27 @@ import (
 	"errors"
 	"learning/platform"
 	"regexp"
+	"slices"
 	"strings"
 )
 
 var decimal = regexp.MustCompile(`^-?[0-9]{1,12}(\.[0-9]{1,8})?$`)
+
+// Question types.
+const (
+	typeMultipleChoice = "multiple_choice"
+	typeNumerical      = "numerical"
+)
+
+// Assessment limits.
+const (
+	maxTitle     = 160
+	maxQuestions = 50
+	maxPrompt    = 2000
+	minOptions   = 2
+	maxOptions   = 8
+	maxAnswer    = 500 // also the longest option
+)
 
 type Question struct {
 	ID        string   `json:"id"`
@@ -39,7 +56,7 @@ type PublicAssessment struct {
 }
 
 func (v Assessment) Validate() error {
-	if !platform.ID(v.Classroom) || strings.TrimSpace(v.Title) == "" || len(v.Title) > 160 || len(v.Questions) < 1 || len(v.Questions) > 50 {
+	if !platform.ID(v.Classroom) || strings.TrimSpace(v.Title) == "" || len(v.Title) > maxTitle || len(v.Questions) < 1 || len(v.Questions) > maxQuestions {
 		return errors.New("provide a classroom, title, and 1–50 questions")
 	}
 	for _, q := range v.Questions {
@@ -51,13 +68,13 @@ func (v Assessment) Validate() error {
 }
 
 func (q Question) validate() error {
-	if strings.TrimSpace(q.Prompt) == "" || len(q.Prompt) > 2000 || !platform.ID(q.Skill) {
+	if strings.TrimSpace(q.Prompt) == "" || len(q.Prompt) > maxPrompt || !platform.ID(q.Skill) {
 		return errors.New("each question needs a prompt and curriculum skill")
 	}
 	switch q.Type {
-	case "multiple_choice":
+	case typeMultipleChoice:
 		return q.validateMultipleChoice()
-	case "numerical":
+	case typeNumerical:
 		if !decimal.MatchString(q.Answer) || !decimal.MatchString(q.Tolerance) || strings.HasPrefix(q.Tolerance, "-") || len(q.Options) > 0 {
 			return errors.New("numerical answers require decimal answer and nonnegative decimal tolerance, without options")
 		}
@@ -68,12 +85,12 @@ func (q Question) validate() error {
 }
 
 func (q Question) validateMultipleChoice() error {
-	if len(q.Options) < 2 || len(q.Options) > 8 {
+	if len(q.Options) < minOptions || len(q.Options) > maxOptions {
 		return errors.New("multiple choice needs 2–8 options")
 	}
 	seen := map[string]bool{}
 	for _, o := range q.Options {
-		if strings.TrimSpace(o) == "" || len(o) > 500 || seen[o] {
+		if strings.TrimSpace(o) == "" || len(o) > maxAnswer || seen[o] {
 			return errors.New("options must be unique nonempty values")
 		}
 		seen[o] = true
@@ -99,22 +116,14 @@ func validateAnswers(v Assessment, answers map[string]string) bool {
 	}
 	for _, q := range v.Questions {
 		answer, exists := answers[q.ID]
-		if !exists || len(answer) > 500 {
+		if !exists || len(answer) > maxAnswer {
 			return false
 		}
-		if q.Type == "numerical" && !decimal.MatchString(answer) {
+		if q.Type == typeNumerical && !decimal.MatchString(answer) {
 			return false
 		}
-		if q.Type == "multiple_choice" {
-			found := false
-			for _, o := range q.Options {
-				if answer == o {
-					found = true
-				}
-			}
-			if !found {
-				return false
-			}
+		if q.Type == typeMultipleChoice && !slices.Contains(q.Options, answer) {
+			return false
 		}
 	}
 	return true

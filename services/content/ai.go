@@ -130,7 +130,7 @@ type ingestResult struct {
 func (a *aiCore) ingest(ctx context.Context, title string, pdf io.Reader, size int64, who billed) (ingestResult, error) {
 	var out ingestResult
 	query := url.Values{"title": {title}, "billed_user": {who.UserID}, "billed_org": {who.OrgID}, "billed_role": {who.Role}}
-	err := a.call(ctx, "/v1/ingest?"+query.Encode(), "application/pdf", pdf, size, &out)
+	err := a.call(ctx, "/v1/ingest?"+query.Encode(), mimePDF, pdf, size, &out)
 	return out, err
 }
 

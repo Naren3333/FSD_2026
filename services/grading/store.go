@@ -74,7 +74,7 @@ func (p pgStore) finalizeEvaluation(ctx context.Context, org, id, actor, reason 
 	if err != nil {
 		return v, err
 	}
-	if v.Status != "draft" {
+	if v.Status != statusDraft {
 		return v, errAlreadyFinalized
 	}
 	if err = json.Unmarshal(before, &v.Evidence); err != nil {
@@ -100,6 +100,6 @@ func (p pgStore) finalizeEvaluation(ctx context.Context, org, id, actor, reason 
 	if err != nil {
 		return v, err
 	}
-	v.Status = "finalized"
+	v.Status = statusFinalized
 	return v, nil
 }

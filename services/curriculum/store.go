@@ -85,6 +85,9 @@ const (
 	prerequisiteCycle
 )
 
+// prerequisiteLock serializes prerequisite inserts, so two concurrent edges cannot together form a cycle.
+const prerequisiteLock = 271828
+
 // insertPrerequisite runs under a global advisory lock so concurrent inserts
 // cannot race past the cycle check.
 func (p pgStore) insertPrerequisite(ctx context.Context, org, id, prerequisite string) (prerequisiteResult, error) {
@@ -93,7 +96,7 @@ func (p pgStore) insertPrerequisite(ctx context.Context, org, id, prerequisite s
 		return prerequisiteAdded, err
 	}
 	defer tx.Rollback(ctx)
-	if _, err = tx.Exec(ctx, "SELECT pg_advisory_xact_lock(271828)"); err != nil {
+	if _, err = tx.Exec(ctx, "SELECT pg_advisory_xact_lock($1)", prerequisiteLock); err != nil {
 		return prerequisiteAdded, err
 	}
 	var count int

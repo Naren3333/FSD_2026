@@ -8,6 +8,18 @@ import (
 
 var decimal = regexp.MustCompile(`^-?[0-9]{1,12}(\.[0-9]{1,8})?$`)
 
+// Evaluation statuses: a draft until the classroom's teacher finalizes it.
+const (
+	statusDraft     = "draft"
+	statusFinalized = "finalized"
+)
+
+// Question types, as Assessment publishes them.
+const (
+	typeMultipleChoice = "multiple_choice"
+	typeNumerical      = "numerical"
+)
+
 var (
 	errScoreOutOfBounds = errors.New("override score out of bounds")
 	errUnknownQuestion  = errors.New("override references unknown question")
@@ -60,9 +72,9 @@ func applyOverrides(evidence []Evidence, overrides map[string]int) error {
 func evaluate(q Question, answer string) (Evidence, error) {
 	e := Evidence{Question: q.ID, Skill: q.Skill, Possible: 1}
 	switch q.Type {
-	case "multiple_choice":
+	case typeMultipleChoice:
 		e.Correct = answer == q.Answer
-	case "numerical":
+	case typeNumerical:
 		if !decimal.MatchString(answer) || !decimal.MatchString(q.Answer) || !decimal.MatchString(q.Tolerance) {
 			return e, errors.New("invalid decimal")
 		}

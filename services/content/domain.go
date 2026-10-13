@@ -8,7 +8,29 @@ import (
 )
 
 // Document types. Students see teaching material only; rubrics and marking schemes stay with teachers.
-var docTypes = map[string]bool{"teaching_material": true, "rubric": true, "marking_scheme": true}
+const (
+	docTeachingMaterial = "teaching_material"
+	docRubric           = "rubric"
+	docMarkingScheme    = "marking_scheme"
+)
+
+var docTypes = map[string]bool{docTeachingMaterial: true, docRubric: true, docMarkingScheme: true}
+
+// Document statuses: a text file is extracted on upload; a PDF is indexing until ai-core's result is indexed or
+// failed.
+const (
+	statusExtracted = "extracted"
+	statusIndexing  = "indexing"
+	statusIndexed   = "indexed"
+	statusFailed    = "failed"
+)
+
+// Media types Content accepts and serves.
+const (
+	mimePDF  = "application/pdf"
+	mimeText = "text/plain"
+	mimePNG  = "image/png"
+)
 
 const (
 	maxPDF  = 50 << 20
@@ -44,16 +66,16 @@ var errTooLarge = errors.New("text documents must be no larger than 5 MiB")
 
 // extract chunks a text document. A PDF is only checked here: it is indexed asynchronously.
 func extract(data []byte, kind string) ([]Chunk, string, error) {
-	if kind == "application/pdf" {
+	if kind == mimePDF {
 		if !strings.HasPrefix(string(data), "%PDF-") {
 			return nil, "", errors.New("file is not a PDF")
 		}
-		return []Chunk{}, "indexing", nil // the indexing worker sends it to ai-core
+		return []Chunk{}, statusIndexing, nil // the indexing worker sends it to ai-core
 	}
 	if len(data) > maxText {
 		return nil, "", errTooLarge
 	}
-	if kind != "text/plain" || !utf8.Valid(data) || strings.ContainsRune(string(data), 0) {
+	if kind != mimeText || !utf8.Valid(data) || strings.ContainsRune(string(data), 0) {
 		return nil, "", errors.New("upload UTF-8 plain text or a valid PDF")
 	}
 	runes := []rune(string(data))
@@ -68,5 +90,5 @@ func extract(data []byte, kind string) ([]Chunk, string, error) {
 		}
 		chunks = append(chunks, Chunk{len(chunks), string(runes[start:end]), start, end})
 	}
-	return chunks, "extracted", nil
+	return chunks, statusExtracted, nil
 }
