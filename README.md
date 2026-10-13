@@ -48,6 +48,8 @@ npm run test:e2e
 
 Integration and browser tests require the Docker stack to be running.
 
+`check.py` fails on unformatted web code; run `npm run format` in `apps/web` to fix it. Component templates live in `.html` files next to their components.
+
 ## Current scope
 
 This is a local development foundation, not production ready. PDFs are indexed and document chat answers from them with sources once `OPENAI_API_KEY` (and, for reranking, `VOYAGE_API_KEY`) are set in `.env`; without them uploads wait in indexing and chat answers fail with a clear message. AI question generation and performance interpretation return `501 Not Implemented`. The assessment UI supports one question per assessment.

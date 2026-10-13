@@ -26,6 +26,6 @@ for name in ["analytics", "ai-core", "question-generation-agent", "student-perfo
     cwd = ROOT/"services"/name
     for args in [["ruff", "format", "--check", "."], ["ruff", "check", "."], ["mypy", "main.py"], ["pytest", "-q"]]:
         run([sys.executable, "-m", *args], cwd)
-for script in ["lint", "typecheck", "test", "build"]:
+for script in ["format:check", "lint", "typecheck", "test", "build"]:
     run(["npm.cmd" if os.name == "nt" else "npm", "run", script], ROOT/"apps/web")
 print("PASS: all local quality gates")

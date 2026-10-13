@@ -1,0 +1,246 @@
+<div class="section-heading">
+  <div>
+    <p class="eyebrow">Grounded in your classroom’s documents</p>
+    <h2>Ask the materials</h2>
+  </div>
+  <button class="secondary" (click)="loadThreads()" [disabled]="state.busy() || streaming() || !classroomId">
+    Refresh conversations
+  </button>
+</div>
+<p>
+  Answers come only from this classroom’s indexed PDFs and cite their sources by number. Check anything
+  important against the original document.
+</p>
+<div class="chat-layout">
+  <section class="panel thread-panel" aria-labelledby="threads-heading">
+    <h3 id="threads-heading">Your conversations</h3>
+    <p class="caption">Up to 100 most recent, visible only to you</p>
+    <button class="secondary new-thread" (click)="newThread()" [disabled]="streaming() || !classroomId">
+      New conversation
+    </button>
+    @if (threadsLoading()) {
+      <p class="empty" aria-busy="true">Loading conversations…</p>
+    } @else {
+      <ul class="thread-list">
+        @for (thread of threads(); track thread.id) {
+          <li>
+            <button
+              class="thread"
+              [class.active]="thread.id === active()?.id"
+              [attr.aria-current]="thread.id === active()?.id ? 'true' : null"
+              (click)="open(thread)"
+              [disabled]="streaming()"
+            >
+              <span>{{ thread.title || 'Untitled conversation' }}</span>
+              <small>{{ when(thread.last_message_at) }}</small>
+            </button>
+          </li>
+        } @empty {
+          <li class="empty">
+            {{
+              classroomId
+                ? 'No conversations yet. Ask a question to start one.'
+                : 'Select a classroom to ask about its materials.'
+            }}
+          </li>
+        }
+      </ul>
+    }
+  </section>
+  <section class="panel conversation-panel" aria-labelledby="conversation-heading">
+    <h3 id="conversation-heading">{{ active()?.title || 'New conversation' }}</h3>
+    @if (messagesLoading()) {
+      <p class="empty" aria-busy="true">Loading messages…</p>
+    } @else {
+      <ol class="conversation" [attr.aria-busy]="streaming()">
+        @for (message of messages(); track message.id) {
+          <li class="turn" [class.answer]="message.role === 'assistant'">
+            <span class="speaker">{{ message.role === 'user' ? 'You' : 'Assistant' }}</span>
+            @if (message.role === 'user') {
+              <p class="turn-text">{{ message.content }}</p>
+            } @else {
+              @if (message.content || message.id === streamingId) {
+                <div class="turn-text">
+                  @for (block of blocks(message); track $index) {
+                    @switch (block.kind) {
+                      @case ('ul') {
+                        <ul>
+                          @for (item of block.items; track $index) {
+                            <li>
+                              <ng-container
+                                *ngTemplateOutlet="runs; context: { $implicit: item, message: message }"
+                              />
+                            </li>
+                          }
+                        </ul>
+                      }
+                      @case ('ol') {
+                        <ol>
+                          @for (item of block.items; track $index) {
+                            <li>
+                              <ng-container
+                                *ngTemplateOutlet="runs; context: { $implicit: item, message: message }"
+                              />
+                            </li>
+                          }
+                        </ol>
+                      }
+                      @case ('pre') {
+                        <pre><code>{{block.items[0][0].text}}</code></pre>
+                      }
+                      @case ('h') {
+                        <p class="answer-heading">
+                          <ng-container
+                            *ngTemplateOutlet="runs; context: { $implicit: block.items[0], message: message }"
+                          />
+                        </p>
+                      }
+                      @default {
+                        <p>
+                          <ng-container
+                            *ngTemplateOutlet="runs; context: { $implicit: block.items[0], message: message }"
+                          />
+                        </p>
+                      }
+                    }
+                  }
+                  @if (message.id === streamingId) {
+                    <span class="cursor" aria-hidden="true">▍</span>
+                  }
+                </div>
+              }
+              @if (message.outcome && notes[message.outcome]) {
+                <p class="outcome" [class.error]="message.outcome === 'error'">
+                  <span class="badge">
+                    {{
+                      message.outcome === 'no_results'
+                        ? 'No matching material'
+                        : message.outcome === 'error'
+                          ? 'Failed'
+                          : 'Stopped'
+                    }}
+                  </span>
+                  {{ notes[message.outcome] }}
+                </p>
+              }
+              @if (message.citations?.length) {
+                <ol class="sources" [attr.aria-label]="'Sources for this answer'">
+                  @for (source of message.citations; track source.chunk_id; let n = $index) {
+                    <li [id]="sourceId(message, n + 1)" tabindex="-1">
+                      <details (toggle)="reveal($event, source)">
+                        <summary>
+                          <span class="source-number">{{ n + 1 }}</span>
+                          <span>
+                            <strong>{{ source.title }}</strong>
+                            <small>
+                              {{ pageText(source) }}
+                              @if (source.kind !== 'text') {
+                                <span>· {{ source.kind === 'table' ? 'Table' : 'Figure' }}</span>
+                              }
+                            </small>
+                          </span>
+                        </summary>
+                        @if (source.source === 'vision') {
+                          <p class="caption">This passage was written by a model from the page image.</p>
+                        }
+                        @if (source.page_end > source.page_start) {
+                          <p class="caption">
+                            The assistant was given this whole passage from {{ pageText(source) }}; the cited
+                            point can be on any of these pages.
+                          </p>
+                        }
+                        <!-- One line: the passage keeps its own line breaks (pre-wrap), so no whitespace around it. -->
+                        <!-- prettier-ignore -->
+                        <div class="passage" tabindex="0" [attr.aria-label]="'Passage from ' + source.title + ', ' + pageText(source)">{{ source.content }}</div>
+                        <button type="button" class="secondary open-page" (click)="openPage(source)">
+                          Open the PDF at page {{ source.page_start }}
+                        </button>
+                        @if (source.image) {
+                          @if (figures()[source.chunk_id]; as url) {
+                            <img
+                              [src]="url"
+                              [alt]="'Figure from ' + source.title + ', ' + pageText(source)"
+                            />
+                          } @else {
+                            <p class="caption">{{ figureErrors()[source.chunk_id] || 'Loading figure…' }}</p>
+                          }
+                        }
+                      </details>
+                    </li>
+                  }
+                </ol>
+              }
+            }
+          </li>
+        } @empty {
+          <li class="empty">
+            {{
+              classroomId
+                ? 'Ask about the teaching materials in this classroom, for example a definition or a worked step.'
+                : 'Select a classroom first.'
+            }}
+          </li>
+        }
+      </ol>
+    }
+    <form novalidate [formGroup]="form" (ngSubmit)="send()">
+      <app-field
+        controlId="chat-question"
+        label="Your question"
+        [hint]="
+          'Up to ' +
+          max +
+          ' characters. Press Ctrl+Enter to send. ' +
+          form.controls.question.value.length +
+          '/' +
+          max
+        "
+        error="Enter a question of 1 to 1000 characters."
+        [invalid]="tried() && form.controls.question.invalid"
+      >
+        <textarea
+          id="chat-question"
+          formControlName="question"
+          rows="3"
+          [attr.maxlength]="max"
+          aria-describedby="chat-question-help"
+          [attr.aria-invalid]="tried() && form.controls.question.invalid"
+          (keydown)="shortcut($event)"
+        ></textarea>
+      </app-field>
+      <div class="chat-actions">
+        <button [disabled]="state.busy() || streaming() || !classroomId">Send question</button>
+        @if (streaming()) {
+          <button type="button" class="secondary" (click)="stop()">Stop answer</button>
+        }
+      </div>
+    </form>
+    <div class="feedback">
+      <p role="status" aria-live="polite">{{ announcement() }}</p>
+    </div>
+  </section>
+</div>
+<app-status [state]="state" />
+<ng-template #runs let-runs let-message="message">
+  @for (run of asRuns(runs); track $index) {
+    @switch (run.kind) {
+      @case ('strong') {
+        <strong>{{ run.text }}</strong>
+      }
+      @case ('em') {
+        <em>{{ run.text }}</em>
+      }
+      @case ('code') {
+        <code>{{ run.text }}</code>
+      }
+      @case ('ref') {
+        <!-- One line: whitespace inside the link would show around the citation number. -->
+        <!-- prettier-ignore -->
+        <a class="cite" [href]="'#' + sourceId(message, run.ref)" (click)="jump($event, message, run.ref)" [attr.aria-label]="'Source ' + run.ref">[{{ run.ref }}]</a>
+      }
+      @default {
+        <span>{{ run.text }}</span>
+      }
+    }
+  }
+</ng-template>

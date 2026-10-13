@@ -1,0 +1,3 @@
+<label [for]="controlId">{{ label }}</label>
+<ng-content />
+<small [id]="controlId + '-help'" [class.error]="invalid">{{ invalid ? error : hint }}</small>
