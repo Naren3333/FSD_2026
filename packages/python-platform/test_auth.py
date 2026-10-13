@@ -9,13 +9,14 @@ from fastapi import HTTPException
 from starlette.requests import Request
 
 import learning_transport as transport
+from learning_transport import auth
 
 
 def test_real_jwt_validation(monkeypatch: Any) -> None:
     key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
     # Only remote key discovery is replaced; the actual JWT verifier is exercised.
     monkeypatch.setattr(
-        transport,
+        auth,
         "keyset",
         lambda: SimpleNamespace(get_signing_key_from_jwt=lambda _: SimpleNamespace(key=key.public_key())),
     )

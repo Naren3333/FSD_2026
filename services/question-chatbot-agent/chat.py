@@ -17,11 +17,12 @@ from dataclasses import dataclass
 from typing import Any
 
 from fastapi.responses import StreamingResponse
+from learning_transport import UpstreamError, sse_event
 from starlette.types import Send
 
 import prompts
 from citations import CitationRewriter
-from clients import Done, Services, UpstreamError
+from clients import Done, Services
 from config import Settings
 from contracts import MAX_MESSAGE
 from store import Store
@@ -58,10 +59,6 @@ class SSEResponse(StreamingResponse):
     async def stream_response(self, send: Send) -> None:
         async with aclosing(self.body_iterator):  # type: ignore[type-var]
             await super().stream_response(send)
-
-
-def sse(event: str, data: dict[str, Any]) -> str:
-    return f"event: {event}\ndata: {json.dumps(data)}\n\n"
 
 
 def error_of(e: UpstreamError) -> tuple[str, str]:
@@ -143,14 +140,14 @@ class Turn:
         # Saved before the last events, so a disconnect while they are sent can't lose the row.
         if error is None:
             message_id = await self._save(self.outcome)
-            yield sse("citations", {"citations": self._citations()})
-            yield sse("done", {"message_id": message_id, "outcome": self.outcome})
+            yield sse_event("citations", {"citations": self._citations()})
+            yield sse_event("done", {"message_id": message_id, "outcome": self.outcome})
         else:
             await self._save("error")
             data: dict[str, Any] = {"code": error[0], "message": error[1]}
             if resets_at:
                 data["resets_at"] = resets_at
-            yield sse("error", data)
+            yield sse_event("error", data)
 
     async def _answer(self) -> AsyncIterator[str]:
         """Small talk gets a short reply without documents; an off-topic message, no results, or a top score under
@@ -181,7 +178,7 @@ class Turn:
                 self.outcome = "no_results"
                 reply = prompts.refusal(role)
                 self.parts.append(reply)
-                yield sse("token", {"text": reply})
+                yield sse_event("token", {"text": reply})
                 return
             messages, self.version, tag_map = prompts.build_messages(
                 role, self._fitting(), self.history, self.content
@@ -194,10 +191,10 @@ class Turn:
                 self.model, self.usage_tokens = item.model, item.usage_tokens
             elif out := self.rewriter.feed(item):
                 self.parts.append(out)
-                yield sse("token", {"text": out})
+                yield sse_event("token", {"text": out})
         if out := self.rewriter.flush():
             self.parts.append(out)
-            yield sse("token", {"text": out})
+            yield sse_event("token", {"text": out})
 
     def _fitting(self) -> list[dict[str, Any]]:
         """The results, best first, that fit in one prompt message."""
@@ -269,19 +266,17 @@ class Turn:
         }
         message_id = await self.store.save_answer(str(self.thread["id"]), answer)
         log.info(
-            json.dumps(
-                {
-                    "service": "question-chatbot-agent",
-                    "thread_id": str(self.thread["id"]),
-                    "outcome": outcome,
-                    "prompt_version": self.version,
-                    "retrieved": len(self.results),
-                    "top_score": self.top_score,
-                    "cited": len(self.rewriter.cited if self.rewriter else []),
-                    "usage_tokens": self.usage_tokens,
-                    "latency_ms": answer["latency_ms"],
-                }
-            )
+            "chat_turn",
+            extra={
+                "thread_id": str(self.thread["id"]),
+                "outcome": outcome,
+                "prompt_version": self.version,
+                "retrieved": len(self.results),
+                "top_score": self.top_score,
+                "cited": len(self.rewriter.cited if self.rewriter else []),
+                "usage_tokens": self.usage_tokens,
+                "latency_ms": answer["latency_ms"],
+            },
         )
         return message_id
 

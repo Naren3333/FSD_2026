@@ -7,6 +7,6 @@ version = "0.1.0"
 requires-python = ">=3.12"
 dependencies = ["fastapi==0.116.1", "PyJWT[crypto]==2.10.1", "httpx==0.28.1"]
 [tool.setuptools]
-py-modules = ["learning_transport"]
+packages = ["learning_transport"]
 [tool.ruff]
 extend = "../../ruff.toml"
