@@ -5,6 +5,8 @@ import { ActionState, FieldComponent, StatusComponent } from './shared';
 
 const MIB = 1024 * 1024;
 export const LIMITS = {pdf: 50 * MIB, txt: 5 * MIB};
+// Long enough for a 50 MiB PDF at about 1.5 Mbit/s; other calls keep the 20 s default.
+const UPLOAD_TIMEOUT = 5 * 60 * 1000;
 const FAILURES: Record<string, string> = {
   NO_TEXT_LAYER: 'the PDF has no readable text layer',
   ENCRYPTED: 'the PDF is password protected',
@@ -45,6 +47,6 @@ export class MaterialsComponent implements OnChanges, OnDestroy {
   typeLabel(type:DocType):string{return DOC_TYPES.find(t=>t.value===type)?.label||type;}
   selectFile(event:Event):void{const file=(event.target as HTMLInputElement).files?.[0]||null;const pdf=!!file&&/\.pdf$/i.test(file.name);if(file&&(file.size===0||!(/\.(txt|pdf)$/i).test(file.name)||file.size>(pdf?LIMITS.pdf:LIMITS.txt))){this.state.error.set('Choose a nonempty PDF up to 50 MiB or .txt file up to 5 MiB.');this.file.set(null);return;}this.file.set(file);this.form.markAsDirty();}
   upload():void{if(!this.state.validate(this.form))return;const file=this.file();if(!file){this.state.error.set('Choose a file to upload.');return;}const pdf=file.name.toLowerCase().endsWith('.pdf');const {title,doc_type}=this.form.getRawValue();
-    void this.state.run(async()=>{await this.api.request('content',`/documents?classroom_id=${encodeURIComponent(this.classroomId)}&title=${encodeURIComponent(title)}&doc_type=${doc_type}`,'POST',file,pdf?'application/pdf':'text/plain');this.form.reset();this.file.set(null);const input=document.getElementById('document-file') as HTMLInputElement|null;if(input)input.value='';this.show(await this.api.documents(this.classroomId));},pdf?'Document uploaded. Indexing has started.':'Document uploaded. Text files are not indexed for the assistant.');}
+    void this.state.run(async()=>{await this.api.request('content',`/documents?classroom_id=${encodeURIComponent(this.classroomId)}&title=${encodeURIComponent(title)}&doc_type=${doc_type}`,'POST',file,pdf?'application/pdf':'text/plain',UPLOAD_TIMEOUT);this.form.reset();this.file.set(null);const input=document.getElementById('document-file') as HTMLInputElement|null;if(input)input.value='';this.show(await this.api.documents(this.classroomId));},pdf?'Document uploaded. Indexing has started.':'Document uploaded. Text files are not indexed for the assistant.');}
   reindex(doc:DocumentRecord):void{void this.state.run(async()=>{await this.api.reindex(doc.id);this.show(await this.api.documents(this.classroomId));},'Indexing has started.');}
 }

@@ -29,8 +29,9 @@ export class Api {
   }
   login(): Promise<void> { return this.auth.login({redirectUri:location.origin+'/'}); }
   logout(): Promise<void> { return this.auth.logout({redirectUri:location.origin+'/'}); }
-  async request<T>(service: string, path: string, method='GET', body?: unknown, contentType?: string): Promise<T> {
-    const response = await this.send(service, path, method, body, contentType, AbortSignal.timeout(20000));
+  /** `timeout` bounds the whole call, upload included: a 50 MiB PDF needs far longer than the default on a slow link. */
+  async request<T>(service: string, path: string, method='GET', body?: unknown, contentType?: string, timeout=20000): Promise<T> {
+    const response = await this.send(service, path, method, body, contentType, AbortSignal.timeout(timeout));
     return response.json() as Promise<T>;
   }
   /** A file the API serves, such as a figure crop, as an object URL the caller revokes. */
