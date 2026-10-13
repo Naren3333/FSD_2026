@@ -17,6 +17,8 @@ export interface Question { id?: string; prompt: string; type: 'numerical' | 'mu
 export interface Assessment { id: string; classroom_id: string; title: string; questions: Question[] }
 export interface Evidence { question_id: string; skill_id: string; correct: boolean; awarded: number; possible: number }
 export interface Evaluation { id: string; student_id: string; status: 'draft' | 'finalized'; evidence: Evidence[] }
+/** The signed-in user's AI spend today against their daily allowance (ADR 0003). */
+export interface Usage { spent_usd: number; limit_usd: number; resets_at: string }
 export interface Performance { evidence_status: string; interpretation: string; skills: {skill_id: string; attempted: number; correct: number; observed_accuracy: number; evidence_status: string}[] }
 
 @Injectable({providedIn:'root'})
@@ -70,5 +72,6 @@ export class Api {
   createThread(id: string): Promise<Thread> {return this.request('chatbot','/threads','POST',{classroom_id:id});}
   messages(id: string): Promise<{messages: ChatMessage[]}> {return this.request('chatbot',`/threads/${encodeURIComponent(id)}/messages`);}
   evaluations(id: string): Promise<Evaluation[]> {return this.request('grading',`/evaluations?classroom_id=${encodeURIComponent(id)}`);}
+  usage(): Promise<Usage> {return this.request('chatbot','/usage');}
 }
 

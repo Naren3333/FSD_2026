@@ -306,19 +306,19 @@ func TestSearchFusesRerankRelatedAndAccess(t *testing.T) {
 	f.runAll()
 	ctx := context.Background()
 	all := filter{f.org, f.room, nil, nil}
-	plain, err := f.s.runSearch(ctx, all, "leaves", 30, false)
+	plain, err := f.s.runSearch(ctx, all, "leaves", 30, false, testBilled)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if len(plain.Results) != 4 || plain.RerankFallback {
 		t.Fatalf("%d results", len(plain.Results))
 	}
-	reranked, err := f.s.runSearch(ctx, all, "leaves", 30, true)
+	reranked, err := f.s.runSearch(ctx, all, "leaves", 30, true, testBilled)
 	if err != nil || reranked.RerankFallback || reranked.Results[0].ChunkID != plain.Results[3].ChunkID || reranked.Results[0].Score != 3 {
 		t.Fatalf("rerank did not reorder: %v", err)
 	}
 	students := filter{f.org, f.room, []string{"teaching_material"}, nil}
-	only, _ := f.s.runSearch(ctx, students, "leaves", 30, false)
+	only, _ := f.s.runSearch(ctx, students, "leaves", 30, false, testBilled)
 	for _, h := range only.Results {
 		if h.DocType != "teaching_material" || h.DocumentID != notes {
 			t.Fatalf("a student filter returned %s", h.DocType)
@@ -333,12 +333,12 @@ func TestSearchFusesRerankRelatedAndAccess(t *testing.T) {
 	if len(text.Related) != 1 || *text.Related[0].Label != "figure 1" || *text.Related[0].Image != "0123456789abcdef.png" {
 		t.Fatalf("related %+v", text.Related)
 	}
-	other, _ := f.s.runSearch(ctx, filter{f.org, uuid.NewString(), nil, nil}, "leaves", 30, false)
+	other, _ := f.s.runSearch(ctx, filter{f.org, uuid.NewString(), nil, nil}, "leaves", 30, false, testBilled)
 	if len(other.Results) != 0 {
 		t.Fatal("another classroom's chunks were returned")
 	}
 	f.ai.scores = func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(502) }
-	fallback, err := f.s.runSearch(ctx, all, "leaves", 2, true)
+	fallback, err := f.s.runSearch(ctx, all, "leaves", 2, true, testBilled)
 	if err != nil || !fallback.RerankFallback || len(fallback.Results) != 2 || fallback.Results[0].ChunkID != plain.Results[0].ChunkID {
 		t.Fatalf("fallback: %v", err)
 	}

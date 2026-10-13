@@ -47,7 +47,7 @@ OpenAPI defines request and future response schemas (questions/keys/explanations
 
 Implemented topics: `content.uploaded.v1`, `content.indexed.v1`, `assessment.submitted.v1`, `grading.finalized.v1`; dead-letter topics: `assessment.submitted.v1.dlq`, `grading.finalized.v1.dlq`. Each envelope has UUID event/correlation/resource IDs, type, schema version, UTC timestamp and typed payload. Content emits `content.indexed.v1` when a PDF's chunks are stored (no consumer yet); Analytics does not yet publish a performance-updated event.
 
-Seven service-owned databases (including the chatbot's) use independent non-superuser credentials and deny public connection privileges. The other three AI applications are stateless. Producers write outboxes in the business transaction and publish at least once. Consumers commit Kafka offsets only after inbox/business transaction success or confirmed dead-letter delivery. Event-ID plus natural business-key deduplication covers replay and new IDs for the same finalized evaluation. Outbox attempts and consumer retries are bounded; operator recovery is documented.
+Eight service-owned databases (including the chatbot's, and ai-core's usage ledger from ADR 0003) use independent non-superuser credentials and deny public connection privileges. The other three AI applications are stateless. Producers write outboxes in the business transaction and publish at least once. Consumers commit Kafka offsets only after inbox/business transaction success or confirmed dead-letter delivery. Event-ID plus natural business-key deduplication covers replay and new IDs for the same finalized evaluation. Outbox attempts and consumer retries are bounded; operator recovery is documented.
 
 ## Verification evidence
 

@@ -38,7 +38,7 @@ def service_token(client_id: str) -> str:
 def ai_core_status(token: str) -> int:
     """POST a valid embed request to the private ai-core from inside its own container (it has no published port)."""
     script = ("import json,sys,urllib.request,urllib.error\n"
-              "req=urllib.request.Request('http://localhost:8080/v1/inference',data=json.dumps({'operation':'embed','input':'fractions','model_profile':'default'}).encode(),headers={'Authorization':'Bearer '+sys.stdin.read().strip(),'Content-Type':'application/json'})\n"
+              "req=urllib.request.Request('http://localhost:8080/v1/inference',data=json.dumps({'operation':'embed','input':'fractions','model_profile':'default','billed_to':{'user_id':'integration-test','org_id':'local-school','role':'teacher'}}).encode(),headers={'Authorization':'Bearer '+sys.stdin.read().strip(),'Content-Type':'application/json'})\n"
               "try:\n print(urllib.request.urlopen(req,timeout=10).status)\n"
               "except urllib.error.HTTPError as e:\n print(e.code)\n")
     return int(docker("exec", "-T", "ai-core", "python", "-c", script, input=token).stdout.strip())
@@ -159,6 +159,10 @@ def main() -> None:
     request(other, "GET", f"/chatbot/threads/{chat['id']}/messages", 404)
     request(teacher, "GET", f"/chatbot/threads/{chat['id']}/messages", 404)
     assert [t["id"] for t in request(student, "GET", f"/chatbot/threads?classroom_id={room['id']}")["threads"]] == [chat["id"]]
+    # Each user's AI spend today against their daily allowance (ADR 0003): $5 for a student, $10 for a teacher.
+    assert request(student, "GET", "/chatbot/usage")["limit_usd"] == 5.0
+    assert request(teacher, "GET", "/chatbot/usage")["limit_usd"] == 10.0
+    assert httpx.get(BASE + "/chatbot/usage").status_code == 401
     assessment = request(teacher, "POST", "/assessment/assessments", 201, json={"classroom_id": room["id"], "title": "Decimal test", "questions": [{"prompt": "0.1 + 0.2?", "type": "numerical", "answer": "0.3", "tolerance": "0", "options": [], "skill_id": skill["id"]}, {"prompt": "Which is a fraction?", "type": "multiple_choice", "answer": "1/2", "tolerance": "", "options": ["1/2", "word"], "skill_id": skill["id"]}]})
     public = request(student, "GET", f"/assessment/assessments/{assessment['id']}")
     assert all("answer" not in q and "tolerance" not in q for q in public["questions"])
@@ -185,7 +189,7 @@ def main() -> None:
     eventually(lambda: docker("exec", "-T", "postgres", "psql", "-U", "analytics", "-d", "analytics", "-At", "-c", f"SELECT count(*) FROM inbox WHERE event_id='{duplicate_id}'").stdout.strip(), lambda value: value == "1", "duplicate processing")
     assert request(teacher, "GET", performance_path)["skills"] == result["skills"]
     assert len(request(teacher, "GET", f"/grading/evaluations?classroom_id={room['id']}")) == 1
-    for role, database in [("identity", "grading"), ("chatbot", "content")]:
+    for role, database in [("identity", "grading"), ("chatbot", "content"), ("aicore", "chatbot"), ("chatbot", "aicore")]:
         isolation = docker("exec", "-T", "postgres", "psql", "-U", role, "-d", database, "-c", "SELECT 1", check=False)
         assert isolation.returncode != 0 and "permission denied" in isolation.stderr.lower(), (role, database)
     migrations = docker("exec", "-T", "postgres", "psql", "-U", "content", "-d", "content", "-At", "-c", "SELECT string_agg(version::text, ',' ORDER BY version) FROM schema_migrations").stdout.strip()
@@ -196,7 +200,7 @@ def main() -> None:
     for client_id in ["content-indexer", "question-chatbot-agent"]:
         assert ai_core_status(service_token(client_id)) in (200, 503)
     assert ai_core_status(student.headers["Authorization"].removeprefix("Bearer ")) == 403
-    print("PASS: gateway auth, classroom isolation, curriculum, S3 upload/extraction, PDF indexing jobs, teacher-only rubrics, search access, chat threads and streaming, answer-key secrecy, submissions, draft grading, teacher finalization, Kafka analytics, consumer restart, duplicate event and business-key idempotency, student privacy, database isolation, numbered migrations, pgvector, AI service accounts.")
+    print("PASS: gateway auth, classroom isolation, curriculum, S3 upload/extraction, PDF indexing jobs, teacher-only rubrics, search access, chat threads and streaming, AI spend allowance, answer-key secrecy, submissions, draft grading, teacher finalization, Kafka analytics, consumer restart, duplicate event and business-key idempotency, student privacy, database isolation, numbered migrations, pgvector, AI service accounts.")
 
 
 if __name__ == "__main__":

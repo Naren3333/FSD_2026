@@ -30,13 +30,42 @@ func newAICore() *aiCore {
 	}
 }
 
-// aiError is a non-200 answer from ai-core, or a failure to reach it (Status 0).
+// aiError is a non-200 answer from ai-core, or a failure to reach it (Status 0). Message and ResetsAt are set
+// for AI_SPEND_LIMIT: the user's daily AI allowance is used up until ResetsAt.
 type aiError struct {
-	Status int
-	Code   string
+	Status   int
+	Code     string
+	Message  string
+	ResetsAt time.Time
 }
 
 func (e *aiError) Error() string { return fmt.Sprintf("ai-core %d %s", e.Status, e.Code) }
+
+// spendLimit reports whether err is ai-core refusing because the billed user's daily allowance is used up.
+func spendLimit(err error) (*aiError, bool) {
+	e, ok := err.(*aiError)
+	if ok && e.Status == 429 && e.Code == "AI_SPEND_LIMIT" {
+		return e, true
+	}
+	return nil, false
+}
+
+// billed is whose daily AI allowance pays for a call (docs/decisions/0003-ai-spend.md): the user who searched, or
+// the teacher who uploaded the document being indexed.
+type billed struct {
+	UserID string `json:"user_id"`
+	OrgID  string `json:"org_id"`
+	Role   string `json:"role"`
+}
+
+// caller bills the signed-in user, at the teacher allowance when their token holds the teacher role.
+func caller(c platform.Claims) billed {
+	role := "student"
+	if c.Has("teacher") {
+		role = "teacher"
+	}
+	return billed{c.Subject, c.Org, role}
+}
 
 // transient reports whether a later retry may succeed: ai-core or its provider being down, slow, rate limited or
 // not configured yet, or our token being refused. Anything else (a 4xx about the request) will fail again.
@@ -82,39 +111,40 @@ type ingestResult struct {
 
 // ingest sends one PDF to ai-core: chunks with embeddings and the figure crops they point at, or a failed outcome
 // when the PDF itself cannot be indexed.
-func (a *aiCore) ingest(ctx context.Context, title string, pdf io.Reader, size int64) (ingestResult, error) {
+func (a *aiCore) ingest(ctx context.Context, title string, pdf io.Reader, size int64, who billed) (ingestResult, error) {
 	var out ingestResult
-	err := a.call(ctx, "/v1/ingest?title="+url.QueryEscape(title), "application/pdf", pdf, size, &out)
+	query := url.Values{"title": {title}, "billed_user": {who.UserID}, "billed_org": {who.OrgID}, "billed_role": {who.Role}}
+	err := a.call(ctx, "/v1/ingest?"+query.Encode(), "application/pdf", pdf, size, &out)
 	return out, err
 }
 
 // embed returns the query's vector and the model that made it.
-func (a *aiCore) embed(ctx context.Context, text string) ([]float32, string, error) {
+func (a *aiCore) embed(ctx context.Context, text string, who billed) ([]float32, string, error) {
 	var out struct {
 		Vectors      [][]float32 `json:"vectors"`
 		ModelVersion string      `json:"model_version"`
 	}
-	body, _ := json.Marshal(map[string]string{"operation": "embed", "input": text})
+	body, _ := json.Marshal(map[string]any{"operation": "embed", "input": text, "billed_to": who})
 	if err := a.call(ctx, "/v1/inference", "application/json", bytes.NewReader(body), int64(len(body)), &out); err != nil {
 		return nil, "", err
 	}
 	if len(out.Vectors) != 1 || len(out.Vectors[0]) != dimensions {
-		return nil, "", &aiError{502, "UNEXPECTED_EMBEDDING"}
+		return nil, "", &aiError{Status: 502, Code: "UNEXPECTED_EMBEDDING"}
 	}
 	return out.Vectors[0], out.ModelVersion, nil
 }
 
 // rerank scores each document against the query, in the documents' order.
-func (a *aiCore) rerank(ctx context.Context, query string, documents []string) ([]float64, error) {
+func (a *aiCore) rerank(ctx context.Context, query string, documents []string, who billed) ([]float64, error) {
 	var out struct {
 		Scores []float64 `json:"scores"`
 	}
-	body, _ := json.Marshal(map[string]any{"query": query, "documents": documents})
+	body, _ := json.Marshal(map[string]any{"query": query, "documents": documents, "billed_to": who})
 	if err := a.call(ctx, "/v1/rerank", "application/json", bytes.NewReader(body), int64(len(body)), &out); err != nil {
 		return nil, err
 	}
 	if len(out.Scores) != len(documents) {
-		return nil, &aiError{502, "UNEXPECTED_SCORES"}
+		return nil, &aiError{Status: 502, Code: "UNEXPECTED_SCORES"}
 	}
 	return out.Scores, nil
 }
@@ -124,7 +154,7 @@ func (a *aiCore) rerank(ctx context.Context, query string, documents []string) (
 func (a *aiCore) call(ctx context.Context, path, contentType string, body io.Reader, size int64, out any) error {
 	token, err := a.tokens.get(ctx)
 	if err != nil {
-		return &aiError{0, "TOKEN_UNAVAILABLE"}
+		return &aiError{Code: "TOKEN_UNAVAILABLE"}
 	}
 	req, err := http.NewRequestWithContext(ctx, "POST", a.base+path, body)
 	if err != nil {
@@ -136,23 +166,25 @@ func (a *aiCore) call(ctx context.Context, path, contentType string, body io.Rea
 	req.Header.Set("X-Correlation-ID", platform.Correlation(ctx))
 	res, err := a.client.Do(req)
 	if err != nil {
-		return &aiError{0, "UNREACHABLE"}
+		return &aiError{Code: "UNREACHABLE"}
 	}
 	defer res.Body.Close()
 	if res.StatusCode != 200 {
 		var e struct {
 			Error struct {
-				Code string `json:"code"`
+				Code     string    `json:"code"`
+				Message  string    `json:"message"`
+				ResetsAt time.Time `json:"resets_at"`
 			} `json:"error"`
 		}
 		_ = json.NewDecoder(io.LimitReader(res.Body, 1<<16)).Decode(&e)
 		if res.StatusCode == 401 {
 			a.tokens.reset()
 		}
-		return &aiError{res.StatusCode, e.Error.Code}
+		return &aiError{res.StatusCode, e.Error.Code, e.Error.Message, e.Error.ResetsAt}
 	}
 	if err = json.NewDecoder(res.Body).Decode(out); err != nil {
-		return &aiError{502, "UNREADABLE_RESPONSE"}
+		return &aiError{Status: 502, Code: "UNREADABLE_RESPONSE"}
 	}
 	return nil
 }

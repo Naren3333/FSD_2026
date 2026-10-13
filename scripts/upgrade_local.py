@@ -1,7 +1,8 @@
 """Bring a local setup made by an older scripts/setup.py up to date, without touching existing data or secrets.
 
 Adds missing secrets to .env (it never changes an existing line), and creates missing service databases and
-roles in the running Compose PostgreSQL (for example `chatbot`, added in ADR 0002 stage 4). Safe to run again.
+roles in the running Compose PostgreSQL (for example `chatbot`, added in ADR 0002 stage 4, and `aicore`, ai-core's
+usage ledger from ADR 0003). Safe to run again.
 Keycloak clients are not added here: a realm change still needs a fresh Keycloak volume (see operations.md).
 """
 import secrets

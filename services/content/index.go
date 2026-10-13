@@ -44,8 +44,8 @@ type indexer struct {
 }
 
 type job struct {
-	document, lease, org, classroom, title, key, docType string
-	revision, attempts                                   int
+	document, lease, org, classroom, title, key, docType, owner string
+	revision, attempts                                          int
 }
 
 func (x indexer) run(ctx context.Context) {
@@ -86,8 +86,8 @@ func (x indexer) claim(ctx context.Context) (job, error) {
 	err := x.db.QueryRow(ctx, `WITH due AS (SELECT document_id FROM index_jobs WHERE next_attempt<=now() ORDER BY next_attempt LIMIT 1 FOR UPDATE SKIP LOCKED)
 UPDATE index_jobs j SET attempts=j.attempts+1, lease=$1, next_attempt=now()+make_interval(secs=>$2)
 FROM due, documents d WHERE j.document_id=due.document_id AND d.id=j.document_id
-RETURNING j.document_id, j.attempts, d.org_id, d.classroom_id, d.title, d.object_key, d.doc_type, d.revision`, j.lease, leaseTime.Seconds()).
-		Scan(&j.document, &j.attempts, &j.org, &j.classroom, &j.title, &j.key, &j.docType, &j.revision)
+RETURNING j.document_id, j.attempts, d.org_id, d.classroom_id, d.title, d.object_key, d.doc_type, d.revision, d.owner_id`, j.lease, leaseTime.Seconds()).
+		Scan(&j.document, &j.attempts, &j.org, &j.classroom, &j.title, &j.key, &j.docType, &j.revision, &j.owner)
 	return j, err
 }
 
@@ -100,6 +100,9 @@ func (x indexer) process(ctx context.Context, j job) error {
 		return x.release(book, j)
 	}
 	if err != nil {
+		if limit, ok := spendLimit(err); ok {
+			return x.wait(book, j, limit.ResetsAt, "the uploading teacher's daily AI allowance is used up")
+		}
 		if !transient(err) {
 			return x.fail(book, j, "INTERNAL", err.Error())
 		}
@@ -138,7 +141,8 @@ func (x indexer) ingest(ctx context.Context, j job) (ingestResult, error) {
 		return ingestResult{}, fmt.Errorf("original unavailable: %w", err)
 	}
 	defer object.Close()
-	return x.ai.ingest(ctx, j.title, object, size)
+	// The teacher who uploaded the document pays for its model calls.
+	return x.ai.ingest(ctx, j.title, object, size, billed{j.owner, j.org, "teacher"})
 }
 
 // validate rejects an ingest result Content cannot store as-is, rather than storing part of it.
@@ -245,6 +249,17 @@ func (x indexer) retry(ctx context.Context, j job, reason string) error {
 	}
 	slog.Warn("index_retry", "document_id", j.document, "attempts", j.attempts, "reason", reason)
 	_, err := x.db.Exec(ctx, "UPDATE index_jobs SET lease=NULL,next_attempt=now()+make_interval(secs=>$3),last_error=$4 WHERE document_id=$1 AND lease=$2", j.document, j.lease, backoff(j.attempts).Seconds(), truncate(reason, 2000))
+	return err
+}
+
+// wait puts the job off until `until` (when the uploader's daily AI allowance resets) without counting the
+// attempt: being over the allowance is not a failure of the document or of ai-core.
+func (x indexer) wait(ctx context.Context, j job, until time.Time, reason string) error {
+	if until.Before(time.Now()) {
+		until = time.Now().Add(time.Hour)
+	}
+	slog.Info("index_waiting_for_allowance", "document_id", j.document, "until", until)
+	_, err := x.db.Exec(ctx, "UPDATE index_jobs SET lease=NULL,next_attempt=$3,attempts=attempts-1,last_error=$4 WHERE document_id=$1 AND lease=$2", j.document, j.lease, until, truncate(reason, 2000))
 	return err
 }
 

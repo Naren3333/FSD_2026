@@ -50,6 +50,7 @@ class IngestCost:
     pages: int | None = None
     chunks: int | None = None
     embed_inputs: int = 0
+    embed_tokens: int = 0  # the chunk embeddings, in tokens
     stages: dict[str, float] = field(default_factory=dict)  # seconds: queued, vision, parse, embed, total
     kinds: dict[str, Calls] = field(default_factory=dict)
 

@@ -19,11 +19,22 @@ SEARCH_TOP_K = 8
 
 
 class UpstreamError(Exception):
-    """Another service answered with an error or couldn't be reached (status 0)."""
+    """Another service answered with an error or couldn't be reached (status 0). `resets_at` comes with
+    AI_SPEND_LIMIT: the user's daily AI allowance is used up until then."""
 
-    def __init__(self, service: str, status: int, code: str = "") -> None:
+    def __init__(self, service: str, status: int, code: str = "", resets_at: str | None = None) -> None:
         super().__init__(f"{service} {status} {code}".strip())
-        self.service, self.status, self.code = service, status, code
+        self.service, self.status, self.code, self.resets_at = service, status, code, resets_at
+
+
+def billed(claims: dict[str, Any]) -> dict[str, str]:
+    """Whose daily AI allowance pays for a call: the signed-in user, at the teacher allowance with that role."""
+    roles = claims.get("realm_access", {}).get("roles", [])
+    return {
+        "user_id": str(claims["sub"]),
+        "org_id": str(claims["org_id"]),
+        "role": "teacher" if "teacher" in roles else "student",
+    }
 
 
 @dataclass(frozen=True)
@@ -72,7 +83,7 @@ class Services:
         except httpx.HTTPError:
             raise UpstreamError("content", 0) from None
         if resp.status_code != 200:
-            raise UpstreamError("content", resp.status_code, _code(resp))
+            raise _error("content", resp)
         data = resp.json()
         return data["results"], bool(data.get("rerank_fallback"))
 
@@ -85,6 +96,7 @@ class Services:
         schema: dict[str, Any],
         name: str,
         correlation: str,
+        billed_to: dict[str, str],
     ) -> str:
         body = {
             "operation": "generate",
@@ -92,6 +104,7 @@ class Services:
             "max_tokens": max_tokens,
             "response_schema": schema,
             "schema_name": name,
+            "billed_to": billed_to,
         }
         resp = await self._ai_core(body, correlation, timeout=30)
         output = resp.json().get("output")
@@ -100,10 +113,16 @@ class Services:
         return output
 
     async def stream(
-        self, messages: list[dict[str, str]], max_tokens: int, correlation: str
+        self, messages: list[dict[str, str]], max_tokens: int, correlation: str, billed_to: dict[str, str]
     ) -> AsyncIterator[str | Done]:
         """The reply's text as it arrives, then Done. A failure before the first word or mid-stream raises."""
-        body = {"operation": "generate", "messages": messages, "max_tokens": max_tokens, "stream": True}
+        body = {
+            "operation": "generate",
+            "messages": messages,
+            "max_tokens": max_tokens,
+            "stream": True,
+            "billed_to": billed_to,
+        }
         token = await self._service_token()
         try:
             async with self.http.stream(
@@ -116,7 +135,7 @@ class Services:
                 if resp.status_code != 200:
                     await resp.aread()
                     self._refused(resp)
-                    raise UpstreamError("ai-core", resp.status_code, _code(resp))
+                    raise _error("ai-core", resp)
                 event = ""
                 async for line in resp.aiter_lines():
                     if line.startswith("event: "):
@@ -147,8 +166,26 @@ class Services:
             raise UpstreamError("ai-core", 0) from None
         if resp.status_code != 200:
             self._refused(resp)
-            raise UpstreamError("ai-core", resp.status_code, _code(resp))
+            raise _error("ai-core", resp)
         return resp
+
+    async def usage(self, billed_to: dict[str, str], correlation: str) -> dict[str, Any]:
+        """The user's AI spend today, their daily limit and when it resets, from ai-core's ledger."""
+        token = await self._service_token()
+        try:
+            resp = await self.http.get(
+                f"{self.settings.ai_core_url}/v1/usage",
+                params=billed_to,
+                headers=self._headers(token, correlation),
+                timeout=5,
+            )
+        except httpx.HTTPError:
+            raise UpstreamError("ai-core", 0) from None
+        if resp.status_code != 200:
+            self._refused(resp)
+            raise _error("ai-core", resp)
+        data: dict[str, Any] = resp.json()
+        return data
 
     def _headers(self, token: str, correlation: str) -> dict[str, str]:
         return {"Authorization": f"Bearer {token}", "X-Correlation-ID": correlation}
@@ -182,3 +219,13 @@ def _code(resp: httpx.Response) -> str:
         return str(resp.json()["error"]["code"])
     except (ValueError, KeyError, TypeError):
         return ""
+
+
+def _error(service: str, resp: httpx.Response) -> UpstreamError:
+    resets_at = None
+    try:
+        value = resp.json()["error"].get("resets_at")
+        resets_at = str(value) if value else None
+    except (ValueError, KeyError, TypeError, AttributeError):
+        pass
+    return UpstreamError(service, resp.status_code, _code(resp), resets_at)

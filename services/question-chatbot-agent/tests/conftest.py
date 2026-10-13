@@ -102,8 +102,14 @@ class Fakes:
         self.results: list[dict[str, Any]] = []
         self.fallback = False
         self.search_status = 200
+        self.search_error: dict[str, Any] = {"error": {"code": "X", "message": "x"}}
         self.replies: list[httpx.Response | str] = []
         self.requests: list[tuple[str, dict[str, Any], httpx.Request]] = []
+        self.usage: dict[str, Any] = {
+            "spent_usd": 1.5,
+            "limit_usd": 5.0,
+            "resets_at": "2026-10-14T00:00:00+08:00",
+        }
 
     def handle(self, request: httpx.Request) -> httpx.Response:
         path = request.url.path
@@ -116,9 +122,11 @@ class Fakes:
             classroom = path.split("/")[3]
             allowed = (request.headers["authorization"], classroom) in self.access
             return httpx.Response(200 if allowed else 403, json={})
+        if path == "/v1/usage":
+            return httpx.Response(200, json=self.usage)
         if path == "/v1/search":
             if self.search_status != 200:
-                return httpx.Response(self.search_status, json={"error": {"code": "X", "message": "x"}})
+                return httpx.Response(self.search_status, json=self.search_error)
             return httpx.Response(200, json={"results": self.results, "rerank_fallback": self.fallback})
         if path == "/v1/inference":
             assert request.headers["authorization"] == "Bearer service-token", (

@@ -14,8 +14,8 @@ from learning_transport import ErrorResponse, actor, application, failure
 
 import config
 from chat import HISTORY_TURNS, SSEResponse, Turn
-from clients import Services, UpstreamError
-from contracts import MessageList, NewMessage, NewThread, Thread, ThreadList
+from clients import Services, UpstreamError, billed
+from contracts import MessageList, NewMessage, NewThread, Thread, ThreadList, Usage
 from store import PostgresStore, Store
 
 ERRORS: dict[int | str, dict[str, Any]] = {
@@ -133,5 +133,17 @@ async def post_message(
         request.state.correlation_id,
         body.content,
         history,
+        billed(claims),
     )
     return SSEResponse(turn.events())
+
+
+@app.get("/v1/usage", response_model=Usage, responses=ERRORS)
+async def usage(request: Request, claims: dict[str, Any] = Depends(actor)) -> Any:
+    """The caller's AI spend today against their daily allowance, from ai-core's ledger."""
+    user_role(claims)
+    services: Services = request.app.state.services
+    try:
+        return await services.usage(billed(claims), request.state.correlation_id)
+    except UpstreamError:
+        raise failure(503, "DEPENDENCY_UNAVAILABLE", "AI usage is unavailable right now.") from None

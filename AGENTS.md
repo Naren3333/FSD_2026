@@ -9,6 +9,7 @@
 - Publish business events through a transactional outbox; acknowledge consumers only after durable processing or durable dead-letter delivery. Test duplicate business events.
 - Grades remain drafts until an authorized teacher finalizes them. Never expose answer keys to students.
 - AI contracts return 501 until real implementation is authorized. Authorized so far (ADR 0002): ai-core inference, ingest and rerank; Content retrieval; question-chatbot-agent grounded answering. Never manufacture questions, citations, embeddings, metrics or successful placeholder output.
+- Every paid AI call names the user it is billed to; ai-core records its cost and enforces each user's daily allowance (ADR 0003). Never add a model call that bypasses ai-core or its spend check.
 - Future retrieval uses authorized Content APIs. Agents have no direct access to business databases.
 - Run scripts/check.py and applicable real infrastructure integration/E2E tests. Report checks that could not run. Do not claim production readiness.
 - UI changes follow DESIGN.md and UX-CONTRACT.md; preserve loading, empty, failure, keyboard and narrow-screen states.

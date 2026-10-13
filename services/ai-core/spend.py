@@ -1,0 +1,186 @@
+"""What each user's model calls cost, and the daily cap (ADR 0003). ai-core is the one place every paid call
+passes through, so it keeps the ledger: one row per billable call, priced from the provider's token counts, in its
+own `aicore` database. The cap is per user per day: SPEND_LIMIT_STUDENT_USD (default 5) and
+SPEND_LIMIT_TEACHER_USD (default 10), and the day starts at midnight in SPEND_TIMEZONE (default Asia/Singapore).
+
+The check happens before a call and the cost is recorded after it, so calls already running when a user reaches
+the cap still finish: the overshoot is at most the calls in flight."""
+
+import json
+import logging
+import os
+from dataclasses import dataclass
+from datetime import datetime
+from pathlib import Path
+from typing import Any, Literal, Protocol
+
+from learning_transport import Contract, failure
+from pydantic import Field
+from psycopg.rows import dict_row
+from psycopg_pool import AsyncConnectionPool
+
+log = logging.getLogger("ai-core.spend")
+
+MIGRATION = (Path(__file__).parent / "migrations/001_init.sql").read_text()
+Role = Literal["student", "teacher"]
+
+# USD per million tokens: input, cached input, output. Checked against third-party price listings on 2026-10-13;
+# OpenAI's and Voyage's own price pages are authoritative. MODEL_PRICES (JSON, same shape) overrides or adds
+# models. A model missing from the table is billed at the most expensive known rate, never for free.
+DEFAULT_PRICES: dict[str, tuple[float, float, float]] = {
+    "gpt-6-luna": (0.10, 0.01, 0.50),
+    "gpt-5.4-mini": (0.75, 0.075, 4.50),
+    "text-embedding-3-small": (0.02, 0.02, 0.0),
+    "rerank-3": (0.05, 0.05, 0.0),
+}
+
+
+class Billed(Contract):
+    """The user a call is made for. Callers are trusted service accounts (role ai-client) that took this from the
+    user's verified token: it decides whose allowance pays, never what the call may read."""
+
+    user_id: str = Field(min_length=1, max_length=200)
+    org_id: str = Field(min_length=1, max_length=200)
+    role: Role
+
+
+class Usage(Contract):
+    spent_usd: float = Field(ge=0)
+    limit_usd: float = Field(gt=0)
+    resets_at: datetime
+
+
+@dataclass(frozen=True)
+class Charge:
+    operation: str  # embed, generate, stream, rerank, ingest
+    model: str
+    tokens_in: int
+    tokens_out: int
+    cost_usd: float
+    estimated: bool = (
+        False  # token counts guessed from text length (a stream cut off before its usage arrived)
+    )
+
+
+def prices() -> dict[str, tuple[float, float, float]]:
+    table = dict(DEFAULT_PRICES)
+    if raw := os.environ.get("MODEL_PRICES", "").strip():
+        table.update({model: (float(a), float(b), float(c)) for model, (a, b, c) in json.loads(raw).items()})
+    return table
+
+
+def cost(model: str, tokens_in: int, tokens_out: int = 0, cached_in: int = 0) -> float:
+    table = prices()
+    if model in table:
+        rate_in, rate_cached, rate_out = table[model]
+    else:
+        log.warning(json.dumps({"service": "ai-core", "error_category": "unpriced_model", "model": model}))
+        rate_in = rate_cached = max(p[0] for p in table.values())
+        rate_out = max(p[2] for p in table.values())
+    cached_in = min(cached_in, tokens_in)
+    return ((tokens_in - cached_in) * rate_in + cached_in * rate_cached + tokens_out * rate_out) / 1_000_000
+
+
+def estimate_tokens(text: str) -> int:
+    """About four characters a token: for a stream that ended without OpenAI's usage numbers."""
+    return (len(text) + 3) // 4
+
+
+def limit(role: Role) -> float:
+    if role == "teacher":
+        return float(os.environ.get("SPEND_LIMIT_TEACHER_USD") or 10)
+    return float(os.environ.get("SPEND_LIMIT_STUDENT_USD") or 5)
+
+
+def timezone() -> str:
+    return os.environ.get("SPEND_TIMEZONE") or "Asia/Singapore"
+
+
+class Ledger(Protocol):
+    async def today(self, billed: Billed) -> Usage: ...
+
+    async def record(self, billed: Billed, charge: Charge, correlation_id: str) -> None: ...
+
+    async def ping(self) -> None: ...
+
+    async def close(self) -> None: ...
+
+
+class PostgresLedger:
+    def __init__(self, pool: AsyncConnectionPool[Any]) -> None:
+        self.pool = pool
+
+    @classmethod
+    async def open(cls, url: str) -> "PostgresLedger":
+        pool: AsyncConnectionPool[Any] = AsyncConnectionPool(
+            url,
+            min_size=1,
+            max_size=8,
+            timeout=5,
+            open=False,
+            kwargs={"row_factory": dict_row, "options": "-c statement_timeout=10000"},
+        )
+        await pool.open(wait=True, timeout=15)
+        async with pool.connection() as conn:
+            await conn.execute(MIGRATION)
+        return cls(pool)
+
+    async def today(self, billed: Billed) -> Usage:
+        # The day boundary is computed by PostgreSQL, which carries the time zone database.
+        async with self.pool.connection() as conn:
+            cur = await conn.execute(
+                """WITH day AS (SELECT date_trunc('day', now() AT TIME ZONE %(tz)s) AT TIME ZONE %(tz)s AS start)
+                SELECT coalesce(sum(u.cost_usd), 0)::float8 AS spent, (day.start + interval '1 day') AS resets_at
+                FROM day LEFT JOIN usage u ON u.org_id=%(org)s AND u.user_id=%(user)s AND u.created_at>=day.start
+                GROUP BY day.start""",
+                {"tz": timezone(), "org": billed.org_id, "user": billed.user_id},
+            )
+            row = await cur.fetchone()
+        assert row is not None
+        return Usage(
+            spent_usd=round(row["spent"], 6), limit_usd=limit(billed.role), resets_at=row["resets_at"]
+        )
+
+    async def record(self, billed: Billed, charge: Charge, correlation_id: str) -> None:
+        async with self.pool.connection() as conn:
+            await conn.execute(
+                """INSERT INTO usage(org_id,user_id,role,operation,model,tokens_in,tokens_out,cost_usd,estimated,
+                correlation_id) VALUES(%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)""",
+                (
+                    billed.org_id,
+                    billed.user_id,
+                    billed.role,
+                    charge.operation,
+                    charge.model,
+                    charge.tokens_in,
+                    charge.tokens_out,
+                    charge.cost_usd,
+                    charge.estimated,
+                    correlation_id,
+                ),
+            )
+
+    async def ping(self) -> None:
+        async with self.pool.connection() as conn:
+            await conn.execute("SELECT 1")
+
+    async def close(self) -> None:
+        await self.pool.close()
+
+
+def over_limit(usage: Usage) -> bool:
+    return usage.spent_usd >= usage.limit_usd
+
+
+def limit_reached(usage: Usage) -> Exception:
+    """429 with the numbers, so the caller can say when the allowance comes back."""
+    error = failure(
+        429,
+        "AI_SPEND_LIMIT",
+        f"Today's AI allowance of ${usage.limit_usd:.2f} is used up. It resets at {usage.resets_at.isoformat()}.",
+    )
+    assert isinstance(error.detail, dict)
+    error.detail.update(
+        spent_usd=usage.spent_usd, limit_usd=usage.limit_usd, resets_at=usage.resets_at.isoformat()
+    )
+    return error

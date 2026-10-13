@@ -378,6 +378,75 @@
           }
         }
       }
+    },
+    "/v1/usage": {
+      "get": {
+        "summary": "Usage",
+        "description": "The caller's AI spend today against their daily allowance, from ai-core's ledger.",
+        "operationId": "usage_v1_usage_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Usage"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not Found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Unprocessable Content",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Service Unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
     }
   },
   "components": {
@@ -686,6 +755,34 @@
           "threads"
         ],
         "title": "ThreadList"
+      },
+      "Usage": {
+        "properties": {
+          "spent_usd": {
+            "type": "number",
+            "minimum": 0.0,
+            "title": "Spent Usd"
+          },
+          "limit_usd": {
+            "type": "number",
+            "exclusiveMinimum": 0.0,
+            "title": "Limit Usd"
+          },
+          "resets_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Resets At"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "spent_usd",
+          "limit_usd",
+          "resets_at"
+        ],
+        "title": "Usage",
+        "description": "The caller's AI spend today (chat, search and, for teachers, indexing their uploads), their daily limit\nand when the day resets."
       }
     }
   }

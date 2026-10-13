@@ -1842,6 +1842,44 @@
                 }
               }
             }
+          },
+          "429": {
+            "description": "The caller's daily AI allowance is used up (ADR 0003)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "const": "AI_SPEND_LIMIT"
+                        },
+                        "message": {
+                          "type": "string",
+                          "minLength": 1
+                        },
+                        "resets_at": {
+                          "type": "string",
+                          "format": "date-time"
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message",
+                        "resets_at"
+                      ],
+                      "additionalProperties": false
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
           }
         },
         "requestBody": {

@@ -295,3 +295,41 @@ def test_no_anonymous_access() -> None:
     client = TestClient(app)
     assert client.post("/v1/threads", json={"classroom_id": ROOM}).status_code == 401
     assert client.get("/v1/threads").status_code == 401
+
+
+LIMIT = {"error": {"code": "AI_SPEND_LIMIT", "message": "x", "resets_at": "2026-10-14T00:00:00+08:00"}}
+
+
+def test_model_calls_are_billed_to_the_user(api: TestClient, fakes: Fakes) -> None:
+    fakes.results = RESULTS
+    fakes.replies += [rewrite("q"), chat_stream(["One [S1]."])]
+    post(api, thread(api, "t1"), "q", user="t1")
+    billed = [call["billed_to"] for call in fakes.calls("/v1/inference")]
+    assert billed == [{"user_id": "t1", "org_id": billed[0]["org_id"], "role": "teacher"}] * 2
+
+
+def test_a_used_up_allowance_ends_the_turn_before_searching(
+    api: TestClient, fakes: Fakes, store: MemoryStore
+) -> None:
+    fakes.replies.append(httpx.Response(429, json=LIMIT))
+    tid = thread(api)
+    assert post(api, tid, "q") == [
+        ("error", {"code": "AI_SPEND_LIMIT", "message": "You've used today's AI allowance.",
+                   "resets_at": "2026-10-14T00:00:00+08:00"})
+    ]  # fmt: skip
+    assert fakes.calls("/v1/search") == [] and saved(store, tid)["outcome"] == "error"
+
+
+def test_a_used_up_allowance_during_search(api: TestClient, fakes: Fakes) -> None:
+    fakes.replies.append(rewrite("q"))
+    fakes.search_status = 429
+    fakes.search_error = LIMIT
+    events = post(api, thread(api), "q")
+    assert events[-1][0] == "error" and events[-1][1]["code"] == "AI_SPEND_LIMIT"
+
+
+def test_usage(api: TestClient, fakes: Fakes) -> None:
+    resp = api.get("/v1/usage", headers=as_user("s1"))
+    assert resp.status_code == 200 and resp.json()["limit_usd"] == 5.0
+    [(_, _, request)] = [r for r in fakes.requests if r[0] == "/v1/usage"]
+    assert request.url.params["user_id"] == "s1" and request.url.params["role"] == "student"

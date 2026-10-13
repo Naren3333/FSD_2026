@@ -292,11 +292,18 @@ services:
       FIGURE_MODEL: gpt-6-luna
       RERANKER_MODEL: rerank-3
       AI_CORE_CACHE_DIR: /var/cache/ai-core
+      # Per-user daily AI spend (ADR 0003). Run scripts/upgrade_local.py if .env predates this database.
+      DATABASE_URL: postgresql://aicore:${AICORE_DB_PASSWORD:?Run scripts/upgrade_local.py}@postgres:5432/aicore?sslmode=disable
+      SPEND_LIMIT_STUDENT_USD: '5'
+      SPEND_LIMIT_TEACHER_USD: '10'
+      SPEND_TIMEZONE: Asia/Singapore
     volumes:
       - ai-core-cache:/var/cache/ai-core
     depends_on:
       keycloak:
         condition: service_started
+      postgres:
+        condition: service_healthy
     init: true
     restart: on-failure:3
     stop_grace_period: 45s

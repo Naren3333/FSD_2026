@@ -5,6 +5,7 @@ import os
 import tempfile
 from collections.abc import AsyncIterator, Callable, Iterator
 from dataclasses import replace
+from datetime import UTC, datetime
 from pathlib import Path
 
 import httpx2
@@ -17,6 +18,7 @@ from openai import AsyncOpenAI
 import openai_client
 import rerank
 import settings
+import spend
 from learning_transport import actor
 import main
 from ingest import VisionConfig
@@ -52,6 +54,46 @@ def test_settings(monkeypatch: pytest.MonkeyPatch) -> settings.Settings:
 
 
 SERVICE_CLAIMS = {"sub": "content-indexer", "org_id": "test-org", "realm_access": {"roles": ["ai-client"]}}
+BILLED = {"user_id": "student-1", "org_id": "test-org", "role": "student"}
+BILLED_PARAMS = {"billed_user": "teacher-1", "billed_org": "test-org", "billed_role": "teacher"}
+
+
+class MemoryLedger:
+    """Test double for the Postgres usage ledger: charges kept in a list, a fixed reset time, and `already`
+    pre-spent dollars per user. Never wired in the application."""
+
+    def __init__(self) -> None:
+        self.charges: list[tuple[spend.Billed, spend.Charge]] = []
+        self.already: dict[str, float] = {}
+        self.broken = False
+
+    async def today(self, billed: spend.Billed) -> spend.Usage:
+        if self.broken:
+            raise ConnectionError("ledger down")
+        spent = self.already.get(billed.user_id, 0.0) + sum(
+            c.cost_usd for b, c in self.charges if b.user_id == billed.user_id
+        )
+        return spend.Usage(
+            spent_usd=spent, limit_usd=spend.limit(billed.role), resets_at=datetime(2026, 10, 14, tzinfo=UTC)
+        )
+
+    async def record(self, billed: spend.Billed, charge: spend.Charge, correlation_id: str) -> None:
+        self.charges.append((billed, charge))
+
+    async def ping(self) -> None:
+        if self.broken:
+            raise ConnectionError("ledger down")
+
+    async def close(self) -> None:
+        pass
+
+
+@pytest.fixture(autouse=True)
+def ledger() -> Iterator[MemoryLedger]:
+    """A fresh in-memory ledger for every test; the lifespan keeps a ledger it finds instead of opening Postgres."""
+    app.state.ledger = fake = MemoryLedger()
+    yield fake
+    del app.state.ledger
 
 
 @pytest.fixture
@@ -467,7 +509,10 @@ def post(
     client: TestClient, data: bytes, *, title: str = "Biology", content_type: str = "application/pdf"
 ) -> Response:
     return client.post(
-        "/v1/ingest", params={"title": title}, content=data, headers={"content-type": content_type}
+        "/v1/ingest",
+        params={"title": title, **BILLED_PARAMS},
+        content=data,
+        headers={"content-type": content_type},
     )
 
 

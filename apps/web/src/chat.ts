@@ -1,10 +1,11 @@
-import { Component, Input, OnChanges, inject, signal } from '@angular/core';
+import { Component, EventEmitter, Input, OnChanges, Output, inject, signal } from '@angular/core';
 import { FormControl, FormGroup, ReactiveFormsModule, Validators } from '@angular/forms';
 import { Api, ChatMessage, Citation, StreamEvent, Thread } from './api';
 import { ActionState, FieldComponent, StatusComponent } from './shared';
 import { NgTemplateOutlet } from '@angular/common';
 import { Inline, markdown } from './markdown';
 import { pages } from './sse';
+import { resetTime } from './usage';
 
 export const MAX_QUESTION = 1000;
 const OUTCOME_NOTES: Record<string, string> = {
@@ -31,6 +32,8 @@ const OUTCOME_NOTES: Record<string, string> = {
 export class ChatComponent implements OnChanges {
   readonly api=inject(Api);readonly state=new ActionState();readonly max=MAX_QUESTION;readonly notes=OUTCOME_NOTES;
   @Input() classroomId='';
+  /** Fires when a turn ends, however it ended, so the AI use meter can catch up. */
+  @Output() readonly turnEnded=new EventEmitter<void>();
   readonly threads=signal<Thread[]>([]);readonly active=signal<Thread|null>(null);readonly messages=signal<ChatMessage[]>([]);
   readonly threadsLoading=signal(false);readonly messagesLoading=signal(false);readonly streaming=signal(false);readonly announcement=signal('');readonly tried=signal(false);
   readonly figures=signal<Record<string,string>>({});readonly figureErrors=signal<Record<string,string>>({});
@@ -62,13 +65,13 @@ export class ChatComponent implements OnChanges {
           if(event.event==='token')update({content:(current?.content||'')+String(event.data['text']??'')});
           else if(event.event==='citations')update({citations:(event.data['citations'] as Citation[])||[]});
           else if(event.event==='done')update({outcome:event.data['outcome'] as ChatMessage['outcome']});
-          else if(event.event==='error'){update({outcome:'error'});failure=String(event.data['message']||'The assistant could not answer. Retry later.');}
+          else if(event.event==='error'){update({outcome:'error'});failure=String(event.data['message']||'The assistant could not answer. Retry later.');if(event.data['code']==='AI_SPEND_LIMIT'&&typeof event.data['resets_at']==='string')failure+=` It resets at ${resetTime(event.data['resets_at'])}.`;}
         });
       }catch(error){
         if(!started){this.messages.update(list=>list.filter(m=>m.id!==answer.id&&m.id!=='asked'));this.announcement.set('');throw error;}
         if(!this.controller?.signal.aborted)failure=error instanceof Error?error.message:'The answer stopped. Retry later.';
         update({outcome:this.controller?.signal.aborted?'interrupted':'error'});
-      }finally{this.streaming.set(false);this.streamingId='';this.controller=null;}
+      }finally{this.streaming.set(false);this.streamingId='';this.controller=null;this.turnEnded.emit();}
       const done=this.messages().find(m=>m.id===answer.id);
       this.announcement.set(done?.outcome==='answered'?'Answer complete.':done?.outcome==='interrupted'?'Answer stopped.':done?.outcome==='no_results'?'No matching material found.':'');
       await this.sync(thread);

@@ -8,7 +8,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from ingest import costs, vision
-from conftest import FakeOpenAI, ingested, make_pdf, page_key0, textbook
+from conftest import BILLED_PARAMS, FakeOpenAI, ingested, make_pdf, page_key0, textbook
 
 MODEL = "vision-model"
 EMPTY = '{"tables": [], "figures": []}'
@@ -156,7 +156,7 @@ def test_a_provider_error_is_recorded_as_an_error(
     assert (
         api.post(
             "/v1/ingest",
-            params={"title": "T"},
+            params={"title": "T", **BILLED_PARAMS},
             content=textbook(),
             headers={"content-type": "application/pdf"},
         ).status_code

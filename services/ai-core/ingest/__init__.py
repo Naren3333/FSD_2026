@@ -88,9 +88,9 @@ async def ingest(path: Path, title: str, vision_cfg: VisionConfig | None) -> Ing
         raise IngestFailure("NO_TEXT_LAYER", "No text to index")
     texts = [embed_text(title, c) for c in chunks]
     with costs.stage("embed"):
-        vectors, _ = await openai_client.embed(texts)
+        vectors, embed_tokens = await openai_client.embed(texts)
     if record:
-        record.embed_inputs = len(chunks)
+        record.embed_inputs, record.embed_tokens = len(chunks), embed_tokens
     crops = {f.image: f.png for page in document.figures for f in page}
     figures = {c.image: crops[c.image] for c in chunks if c.image and c.image in crops}
     chunks = [c if c.image in figures else replace(c, image=None) for c in chunks]

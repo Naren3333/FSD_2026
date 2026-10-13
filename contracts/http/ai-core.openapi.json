@@ -49,6 +49,142 @@
         }
       }
     },
+    "/v1/usage": {
+      "get": {
+        "summary": "Usage Today",
+        "description": "A user's spend today, their daily limit and when it resets, for a service showing it to that user.",
+        "operationId": "usage_today_v1_usage_get",
+        "parameters": [
+          {
+            "name": "user_id",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 200,
+              "title": "User Id"
+            }
+          },
+          {
+            "name": "org_id",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 200,
+              "title": "Org Id"
+            }
+          },
+          {
+            "name": "role",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "enum": [
+                "student",
+                "teacher"
+              ],
+              "type": "string",
+              "title": "Role"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Usage"
+                }
+              }
+            }
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "413": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Content Too Large"
+          },
+          "415": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Unsupported Media Type"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Unprocessable Content"
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Too Many Requests"
+          },
+          "502": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Bad Gateway"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        }
+      }
+    },
     "/v1/inference": {
       "post": {
         "summary": "Execute",
@@ -116,6 +252,16 @@
           },
           "422": {
             "description": "Unprocessable Content",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Too Many Requests",
             "content": {
               "application/json": {
                 "schema": {
@@ -222,6 +368,16 @@
               }
             }
           },
+          "429": {
+            "description": "Too Many Requests",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
           "502": {
             "description": "Bad Gateway",
             "content": {
@@ -248,7 +404,7 @@
     "/v1/ingest": {
       "post": {
         "summary": "Ingest Pdf",
-        "description": "One PDF (the raw body) \u2192 chunks with embeddings and the figure crops they point at. Stateless: the caller\nstores the result. A document problem is a `failed` outcome; a provider outage is an error to retry.",
+        "description": "One PDF (the raw body) \u2192 chunks with embeddings and the figure crops they point at. Stateless: the caller\nstores the result. A document problem is a `failed` outcome; a provider outage is an error to retry. The\nmodel calls are charged to `billed_user` (the teacher who uploaded the document), whatever the outcome.",
         "operationId": "ingest_pdf_v1_ingest_post",
         "parameters": [
           {
@@ -260,6 +416,41 @@
               "minLength": 1,
               "maxLength": 300,
               "title": "Title"
+            }
+          },
+          {
+            "name": "billed_user",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 200,
+              "title": "Billed User"
+            }
+          },
+          {
+            "name": "billed_org",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 200,
+              "title": "Billed Org"
+            }
+          },
+          {
+            "name": "billed_role",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "enum": [
+                "student",
+                "teacher"
+              ],
+              "type": "string",
+              "title": "Billed Role"
             }
           }
         ],
@@ -324,6 +515,16 @@
             },
             "description": "Unprocessable Content"
           },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Too Many Requests"
+          },
           "502": {
             "content": {
               "application/json": {
@@ -361,6 +562,39 @@
   },
   "components": {
     "schemas": {
+      "Billed": {
+        "properties": {
+          "user_id": {
+            "type": "string",
+            "maxLength": 200,
+            "minLength": 1,
+            "title": "User Id"
+          },
+          "org_id": {
+            "type": "string",
+            "maxLength": 200,
+            "minLength": 1,
+            "title": "Org Id"
+          },
+          "role": {
+            "type": "string",
+            "enum": [
+              "student",
+              "teacher"
+            ],
+            "title": "Role"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "user_id",
+          "org_id",
+          "role"
+        ],
+        "title": "Billed",
+        "description": "The user a call is made for. Callers are trusted service accounts (role ai-client) that took this from the\nuser's verified token: it decides whose allowance pays, never what the call may read."
+      },
       "ErrorBody": {
         "properties": {
           "code": {
@@ -741,12 +975,16 @@
             "const": "default",
             "title": "Model Profile",
             "default": "default"
+          },
+          "billed_to": {
+            "$ref": "#/components/schemas/Billed"
           }
         },
         "additionalProperties": false,
         "type": "object",
         "required": [
-          "operation"
+          "operation",
+          "billed_to"
         ],
         "title": "RequestContract",
         "description": "`embed` takes `input`. `generate` takes `input` (one user message) or `messages`; with `response_schema`\nthe reply is JSON in that strict schema, and with `stream` it arrives as server-sent events."
@@ -767,13 +1005,17 @@
             "maxItems": 100,
             "minItems": 1,
             "title": "Documents"
+          },
+          "billed_to": {
+            "$ref": "#/components/schemas/Billed"
           }
         },
         "additionalProperties": false,
         "type": "object",
         "required": [
           "query",
-          "documents"
+          "documents",
+          "billed_to"
         ],
         "title": "RerankRequest"
       },
@@ -875,6 +1117,33 @@
           "model_version"
         ],
         "title": "ResponseContract"
+      },
+      "Usage": {
+        "properties": {
+          "spent_usd": {
+            "type": "number",
+            "minimum": 0.0,
+            "title": "Spent Usd"
+          },
+          "limit_usd": {
+            "type": "number",
+            "exclusiveMinimum": 0.0,
+            "title": "Limit Usd"
+          },
+          "resets_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Resets At"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "spent_usd",
+          "limit_usd",
+          "resets_at"
+        ],
+        "title": "Usage"
       }
     }
   }

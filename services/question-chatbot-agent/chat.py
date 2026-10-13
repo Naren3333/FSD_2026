@@ -65,6 +65,8 @@ def sse(event: str, data: dict[str, Any]) -> str:
 
 def error_of(e: UpstreamError) -> tuple[str, str]:
     """The `error` event for a failed upstream call: a code the browser can act on and a safe message."""
+    if e.code == "AI_SPEND_LIMIT":
+        return "AI_SPEND_LIMIT", "You've used today's AI allowance."
     if e.service == "content":
         if e.status in (401, 403):
             return "FORBIDDEN", "You no longer have access to this classroom's materials."
@@ -88,8 +90,10 @@ class Turn:
         correlation: str,
         content: str,
         history: list[dict[str, str]],
+        billed_to: dict[str, str],
     ) -> None:
         self.services, self.store, self.settings, self.pending = services, store, settings, pending
+        self.billed_to = billed_to  # whose daily AI allowance pays for this turn's model calls
         self.thread, self.authorization, self.correlation = thread, authorization, correlation
         self.content, self.history = content, history
         self.started = time.perf_counter()
@@ -108,6 +112,7 @@ class Turn:
 
     async def events(self) -> AsyncIterator[str]:
         error: tuple[str, str] | None = None
+        resets_at: str | None = None
         try:
             async for frame in self._answer():
                 yield frame
@@ -119,7 +124,7 @@ class Turn:
             raise
         except UpstreamError as e:
             log.warning("thread %s: %s", self.thread["id"], e)
-            error = error_of(e)
+            error, resets_at = error_of(e), e.resets_at
         except Exception:
             log.exception("thread %s: chat turn failed", self.thread["id"])
             error = ("INTERNAL_ERROR", "The answer failed.")
@@ -130,7 +135,10 @@ class Turn:
             yield sse("done", {"message_id": message_id, "outcome": self.outcome})
         else:
             await self._save("error")
-            yield sse("error", {"code": error[0], "message": error[1]})
+            data: dict[str, Any] = {"code": error[0], "message": error[1]}
+            if resets_at:
+                data["resets_at"] = resets_at
+            yield sse("error", data)
 
     async def _answer(self) -> AsyncIterator[str]:
         """Small talk gets a short reply without documents; an off-topic message, no results, or a top score under
@@ -167,7 +175,9 @@ class Turn:
                 role, self._fitting(), self.history, self.content
             )
         self.rewriter = CitationRewriter(tag_map)
-        async for item in self.services.stream(messages, self.settings.answer_max_tokens, self.correlation):
+        async for item in self.services.stream(
+            messages, self.settings.answer_max_tokens, self.correlation, self.billed_to
+        ):
             if isinstance(item, Done):
                 self.model, self.usage_tokens = item.model, item.usage_tokens
             elif out := self.rewriter.feed(item):
@@ -200,6 +210,7 @@ class Turn:
                 prompts.REWRITE_SCHEMA,
                 prompts.QUERY_REWRITE,
                 self.correlation,
+                self.billed_to,
             )
             out = json.loads(output)
             query, on_topic, small_talk = (
@@ -208,7 +219,7 @@ class Turn:
                 bool(out["is_small_talk"]),
             )
         except UpstreamError as e:
-            if error_of(e)[0] == "AI_UNAVAILABLE":
+            if error_of(e)[0] in ("AI_UNAVAILABLE", "AI_SPEND_LIMIT"):
                 raise
             log.warning(
                 "thread %s: query rewrite failed, searching the raw message: %s", self.thread["id"], e

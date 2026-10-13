@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"learning/platform"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -70,12 +71,12 @@ func TestBackoffDoublesToThirtyMinutes(t *testing.T) {
 }
 
 func TestTransient(t *testing.T) {
-	for _, err := range []error{&aiError{0, "UNREACHABLE"}, &aiError{503, "AI_PROVIDER_NOT_CONFIGURED"}, &aiError{502, "AI_PROVIDER_FAILED"}, &aiError{429, ""}, &aiError{401, ""}, errors.New("storage down")} {
+	for _, err := range []error{&aiError{Status: 0, Code: "UNREACHABLE"}, &aiError{Status: 503, Code: "AI_PROVIDER_NOT_CONFIGURED"}, &aiError{Status: 502, Code: "AI_PROVIDER_FAILED"}, &aiError{Status: 429, Code: ""}, &aiError{Status: 401, Code: ""}, errors.New("storage down")} {
 		if !transient(err) {
 			t.Fatalf("%v should be retried", err)
 		}
 	}
-	for _, err := range []error{&aiError{422, "VALIDATION_ERROR"}, &aiError{413, "PAYLOAD_TOO_LARGE"}, &aiError{403, "FORBIDDEN"}} {
+	for _, err := range []error{&aiError{Status: 422, Code: "VALIDATION_ERROR"}, &aiError{Status: 413, Code: "PAYLOAD_TOO_LARGE"}, &aiError{Status: 403, Code: "FORBIDDEN"}} {
 		if transient(err) {
 			t.Fatalf("%v will fail again", err)
 		}
@@ -182,7 +183,7 @@ func TestIngestSendsThePDFAndDecodesFigures(t *testing.T) {
 	}
 	ai := f.client()
 	for i := 0; i < 2; i++ {
-		result, err := ai.ingest(t.Context(), "Biology & more", strings.NewReader("%PDF-1.7"), 8)
+		result, err := ai.ingest(t.Context(), "Biology & more", strings.NewReader("%PDF-1.7"), 8, testBilled)
 		if err != nil || result.Outcome != "indexed" || string(result.Figures[0].PNG) != "png" {
 			t.Fatalf("%+v %v", result, err)
 		}
@@ -199,16 +200,16 @@ func TestErrorsCarryStatusAndCodeAndRefusedTokensAreDropped(t *testing.T) {
 		w.Write([]byte(`{"error":{"code":"UNAUTHENTICATED","message":"x"}}`))
 	}
 	ai := f.client()
-	_, err := ai.ingest(t.Context(), "t", strings.NewReader("x"), 1)
+	_, err := ai.ingest(t.Context(), "t", strings.NewReader("x"), 1, testBilled)
 	if e, ok := err.(*aiError); !ok || e.Status != 401 || e.Code != "UNAUTHENTICATED" || !transient(err) {
 		t.Fatalf("%v", err)
 	}
-	ai.ingest(t.Context(), "t", strings.NewReader("x"), 1)
+	ai.ingest(t.Context(), "t", strings.NewReader("x"), 1, testBilled)
 	if f.tokens.Load() != 2 {
 		t.Fatalf("a refused token was reused")
 	}
 	f.Close()
-	if _, err = ai.ingest(t.Context(), "t", strings.NewReader("x"), 1); !transient(err) {
+	if _, err = ai.ingest(t.Context(), "t", strings.NewReader("x"), 1, testBilled); !transient(err) {
 		t.Fatalf("ai-core down is not retried: %v", err)
 	}
 }
@@ -218,7 +219,43 @@ func TestRerankRejectsAShortScoreList(t *testing.T) {
 	f.scores = func(w http.ResponseWriter, r *http.Request) {
 		json.NewEncoder(w).Encode(map[string]any{"scores": []float64{0.5}})
 	}
-	if _, err := f.client().rerank(t.Context(), "q", []string{"a", "b"}); err == nil {
+	if _, err := f.client().rerank(t.Context(), "q", []string{"a", "b"}, testBilled); err == nil {
 		t.Fatal("scores for 1 of 2 documents accepted")
+	}
+}
+
+// testBilled is the user test calls to ai-core are made for.
+var testBilled = billed{"teacher-1", "org", "teacher"}
+
+func TestTheBilledUserIsSentAndTheSpendLimitIsRecognised(t *testing.T) {
+	f := newFakeAICore(t)
+	f.ingest = func(w http.ResponseWriter, r *http.Request) {
+		q := r.URL.Query()
+		if q.Get("billed_user") != "teacher-1" || q.Get("billed_org") != "org" || q.Get("billed_role") != "teacher" {
+			w.WriteHeader(422)
+			return
+		}
+		w.WriteHeader(429)
+		w.Write([]byte(`{"error":{"code":"AI_SPEND_LIMIT","message":"used up","resets_at":"2026-10-14T00:00:00+08:00"}}`))
+	}
+	_, err := f.client().ingest(t.Context(), "t", strings.NewReader("x"), 1, testBilled)
+	limit, ok := spendLimit(err)
+	if !ok || limit.Message != "used up" || limit.ResetsAt.IsZero() {
+		t.Fatalf("%#v", err)
+	}
+	if _, ok = spendLimit(&aiError{Status: 429, Code: "RATE_LIMITED"}); ok {
+		t.Fatal("a provider rate limit is not the user's allowance")
+	}
+}
+
+func TestCallerAllowance(t *testing.T) {
+	var c platform.Claims
+	c.Subject, c.Org, c.Realm.Roles = "u", "org", []string{"student"}
+	if caller(c).Role != "student" {
+		t.Fatal("student billed as teacher")
+	}
+	c.Realm.Roles = []string{"teacher", "student"}
+	if caller(c).Role != "teacher" {
+		t.Fatal("teacher billed as student")
 	}
 }

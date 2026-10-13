@@ -4,17 +4,26 @@ import json
 
 import httpx2
 import pytest
-from conftest import SERVICE_CLAIMS, FakeOpenAI, FakeReranker, chat_response, chat_stream, embedding_response
+from conftest import (
+    BILLED,
+    SERVICE_CLAIMS,
+    FakeOpenAI,
+    FakeReranker,
+    chat_response,
+    chat_stream,
+    embedding_response,
+)
 from fastapi.testclient import TestClient
 from learning_transport import actor
 
 from main import app
 
-EMBED = {"operation": "embed", "input": "Authorized material"}
-GENERATE = {"operation": "generate", "input": "Say hello"}
+EMBED = {"operation": "embed", "input": "Authorized material", "billed_to": BILLED}
+GENERATE = {"operation": "generate", "input": "Say hello", "billed_to": BILLED}
 RERANK = {
     "query": "photosynthesis stages",
     "documents": ["light reactions", "the Calvin cycle", "cell walls"],
+    "billed_to": BILLED,
 }
 SCHEMA = {
     "type": "object",
@@ -66,6 +75,7 @@ def test_generate_from_messages_with_a_schema(api: TestClient, openai_fake: Fake
         "messages": messages,
         "response_schema": SCHEMA,
         "schema_name": "rewrite.v1",
+        "billed_to": BILLED,
     }
     resp = api.post("/v1/inference", json=body)
     assert resp.status_code == 200 and json.loads(resp.json()["output"]) == {
@@ -145,7 +155,14 @@ def test_rerank(api: TestClient, reranker_fake: FakeReranker) -> None:
     reranker_fake.handler = scores
     resp = api.post("/v1/rerank", json=RERANK)
     assert resp.json() == {"scores": [0.9, 0.5, 0.1], "model_version": "rerank-test", "usage_tokens": 42}
-    assert reranker_fake.requests == [{**RERANK, "model": "rerank-test", "truncation": True}]
+    assert reranker_fake.requests == [
+        {
+            "query": RERANK["query"],
+            "documents": RERANK["documents"],
+            "model": "rerank-test",
+            "truncation": True,
+        }
+    ]
 
 
 @pytest.mark.parametrize(

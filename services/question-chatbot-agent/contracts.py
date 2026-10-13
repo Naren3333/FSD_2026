@@ -55,3 +55,12 @@ class Message(Contract):
 
 class MessageList(Contract):
     messages: list[Message]
+
+
+class Usage(Contract):
+    """The caller's AI spend today (chat, search and, for teachers, indexing their uploads), their daily limit
+    and when the day resets."""
+
+    spent_usd: float = Field(ge=0)
+    limit_usd: float = Field(gt=0)
+    resets_at: datetime

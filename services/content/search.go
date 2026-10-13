@@ -127,8 +127,12 @@ func (s server) search(w http.ResponseWriter, r *http.Request) {
 		}
 		f.docTypes = []string{"teaching_material"}
 	}
-	result, err := s.runSearch(r.Context(), f, req.Query, topK, rerank)
+	result, err := s.runSearch(r.Context(), f, req.Query, topK, rerank, caller(platform.Actor(r)))
 	if err != nil {
+		if limit, ok := spendLimit(err); ok {
+			platform.JSON(w, 429, map[string]any{"error": map[string]any{"code": limit.Code, "message": limit.Message, "resets_at": limit.ResetsAt}})
+			return
+		}
 		if _, ok := err.(*aiError); ok {
 			platform.Error(w, 503, "SEARCH_UNAVAILABLE", "Search is unavailable right now; retry later.")
 			return
@@ -139,7 +143,7 @@ func (s server) search(w http.ResponseWriter, r *http.Request) {
 	platform.JSON(w, 200, result)
 }
 
-func (s server) runSearch(ctx context.Context, f filter, query string, topK int, rerank bool) (searchResponse, error) {
+func (s server) runSearch(ctx context.Context, f filter, query string, topK int, rerank bool, who billed) (searchResponse, error) {
 	started := time.Now()
 	// The keyword leg needs no vector, so it runs while the query is embedded.
 	type legResult struct {
@@ -151,7 +155,7 @@ func (s server) runSearch(ctx context.Context, f filter, query string, topK int,
 		rows, err := s.keywordLeg(ctx, f, query)
 		keyword <- legResult{rows, err}
 	}()
-	vector, model, err := s.embedQuery(ctx, query)
+	vector, model, err := s.embedQuery(ctx, query, who)
 	if err != nil {
 		<-keyword
 		return searchResponse{}, err
@@ -167,7 +171,9 @@ func (s server) runSearch(ctx context.Context, f filter, query string, topK int,
 	hits := distinct(fuse(vectorRows, k.rows))
 	fallback := false
 	if rerank && len(hits) > 0 {
-		fallback = !s.rerankHits(ctx, query, hits)
+		if fallback, err = s.rerankHits(ctx, query, hits, who); err != nil {
+			return searchResponse{}, err
+		}
 	}
 	if len(hits) > topK {
 		hits = hits[:topK]
@@ -190,7 +196,7 @@ type cachedVector struct {
 	model  string
 }
 
-func (s server) embedQuery(ctx context.Context, query string) ([]float32, string, error) {
+func (s server) embedQuery(ctx context.Context, query string, who billed) ([]float32, string, error) {
 	queryCache.Lock()
 	cached, ok := queryCache.entries[query]
 	queryCache.Unlock()
@@ -199,7 +205,7 @@ func (s server) embedQuery(ctx context.Context, query string) ([]float32, string
 	}
 	ctx, cancel := context.WithTimeout(ctx, embedTimeout)
 	defer cancel()
-	vector, model, err := s.ai.embed(ctx, query)
+	vector, model, err := s.ai.embed(ctx, query, who)
 	if err != nil {
 		return nil, "", err
 	}
@@ -317,25 +323,28 @@ func distinct(hits []hit) []hit {
 	return out
 }
 
-// rerankHits reorders hits by ai-core's rerank scores and reports whether it could; on failure the RRF order
-// stays.
-func (s server) rerankHits(ctx context.Context, query string, hits []hit) bool {
+// rerankHits reorders hits by ai-core's rerank scores and reports whether it fell back: on failure the RRF order
+// stays. A user over their daily AI allowance is an error, not a fallback.
+func (s server) rerankHits(ctx context.Context, query string, hits []hit, who billed) (bool, error) {
 	ctx, cancel := context.WithTimeout(ctx, rerankTimeout)
 	defer cancel()
 	documents := make([]string, len(hits))
 	for i, h := range hits {
 		documents[i] = passageText(h.Title, h.SectionPath, h.Content)
 	}
-	scores, err := s.ai.rerank(ctx, query, documents)
+	scores, err := s.ai.rerank(ctx, query, documents, who)
+	if _, ok := spendLimit(err); ok {
+		return false, err
+	}
 	if err != nil {
 		slog.Warn("rerank_fallback", "error", err.Error())
-		return false
+		return true, nil
 	}
 	for i := range hits {
 		hits[i].Score = scores[i]
 	}
 	sort.SliceStable(hits, func(i, j int) bool { return hits[i].Score > hits[j].Score })
-	return true
+	return false, nil
 }
 
 // passageText is what the reranker scores: the title, the chunk's deepest heading and its content, as ai-core's

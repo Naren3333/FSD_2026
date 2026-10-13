@@ -3,6 +3,7 @@ from uuid import UUID
 
 from learning_transport import Contract
 from pydantic import Field, model_validator
+from spend import Billed
 
 
 class SourceReference(Contract):
@@ -29,6 +30,7 @@ class RequestContract(Contract):
     schema_name: str | None = Field(default=None, pattern=r"^[A-Za-z0-9_.-]{1,64}$")
     stream: bool = False
     model_profile: Literal["default"] = "default"
+    billed_to: Billed  # whose daily AI allowance pays for the call (ADR 0003)
 
     @model_validator(mode="after")
     def one_input(self) -> Self:
@@ -58,6 +60,7 @@ class ResponseContract(Contract):
 class RerankRequest(Contract):
     query: str = Field(min_length=1, max_length=2000)
     documents: list[str] = Field(min_length=1, max_length=100)
+    billed_to: Billed
 
     @model_validator(mode="after")
     def bounded(self) -> Self:

@@ -28,7 +28,7 @@ docker compose down
 3. Add a curriculum skill and create an assessment.
 4. As the student, select the classroom and submit the assessment.
 5. As the teacher, review and finalize the grade, then view Learning performance.
-6. As the teacher, upload a PDF under Teaching materials and wait for it to show as indexed. Then, as the teacher or the student, ask about it under Ask the materials. Each provider call costs money on your API keys.
+6. As the teacher, upload a PDF under Teaching materials and wait for it to show as indexed. Then, as the teacher or the student, ask about it under Ask the materials. Each provider call costs money on your API keys. Each user has a daily AI allowance ($5 for a student, $10 for a teacher), shown in the header.
 
 ## Development
 
