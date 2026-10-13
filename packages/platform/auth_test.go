@@ -5,13 +5,14 @@ import (
 	"crypto/rand"
 	"crypto/rsa"
 	"encoding/json"
-	"github.com/coreos/go-oidc/v3/oidc"
-	"github.com/go-jose/go-jose/v4"
-	"github.com/go-jose/go-jose/v4/jwt"
 	"net/http"
 	"net/http/httptest"
 	"testing"
 	"time"
+
+	"github.com/coreos/go-oidc/v3/oidc"
+	"github.com/go-jose/go-jose/v4"
+	"github.com/go-jose/go-jose/v4/jwt"
 )
 
 func TestRealJWTValidation(t *testing.T) {
@@ -25,7 +26,7 @@ func TestRealJWTValidation(t *testing.T) {
 	defer jwks.Close()
 	issuer := "https://identity.example.test/realms/learning"
 	verifier := oidc.NewVerifier(issuer, oidc.NewRemoteKeySet(context.Background(), jwks.URL), &oidc.Config{ClientID: "learning", SupportedSigningAlgs: []string{"RS256"}})
-	a := &App{Mux: http.NewServeMux(), verifier: verifier}
+	a := &App{Mux: http.NewServeMux(), auth: &Authenticator{verifier}}
 	a.Mux.HandleFunc("GET /private", func(w http.ResponseWriter, r *http.Request) {
 		JSON(w, 200, map[string]string{"subject": Actor(r).Subject})
 	})

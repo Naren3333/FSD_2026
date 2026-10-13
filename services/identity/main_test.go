@@ -32,18 +32,18 @@ func TestDecideRelation(t *testing.T) {
 		student string
 		want    string
 	}{
-		{"owner", claims("teacher-1", "teacher"), "org", "", relationTeacher},
-		{"owner asking about an enrolled student", claims("teacher-1", "teacher"), "org", "student-1", relationTeacher},
+		{"owner", claims("teacher-1", "teacher"), "org", "", platform.RelationTeacher},
+		{"owner asking about an enrolled student", claims("teacher-1", "teacher"), "org", "student-1", platform.RelationTeacher},
 		{"owner asking about a stranger", claims("teacher-1", "teacher"), "org", "stranger", ""},
 		{"another teacher", claims("teacher-2", "teacher"), "org", "", ""},
-		{"enrolled student", claims("student-1", "student"), "org", "", relationStudent},
-		{"enrolled student for themselves", claims("student-1", "student"), "org", "student-1", relationStudent},
+		{"enrolled student", claims("student-1", "student"), "org", "", platform.RelationStudent},
+		{"enrolled student for themselves", claims("student-1", "student"), "org", "student-1", platform.RelationStudent},
 		{"student asking about someone else", claims("student-1", "student"), "org", "dual", ""},
 		{"student not enrolled", claims("stranger", "student"), "org", "", ""},
 		{"other organization", claims("teacher-1", "teacher"), "elsewhere", "", ""},
 		// A teacher enrolled as a student elsewhere is only a student there: no answer keys, rubrics or finalizing.
-		{"dual-role account enrolled in another teacher's class", claims("dual", "teacher", "student"), "org", "", relationStudent},
-		{"dual-role account that owns the class", claims("teacher-1", "teacher", "student"), "org", "", relationTeacher},
+		{"dual-role account enrolled in another teacher's class", claims("dual", "teacher", "student"), "org", "", platform.RelationStudent},
+		{"dual-role account that owns the class", claims("teacher-1", "teacher", "student"), "org", "", platform.RelationTeacher},
 	}
 	for _, tc := range cases {
 		got, err := decide(tc.caller, tc.org, "teacher-1", tc.student, lookup)

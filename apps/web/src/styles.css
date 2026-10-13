@@ -215,18 +215,24 @@ form button {
   display: grid;
   gap: 6px;
 }
-.sidebar nav button {
+.sidebar nav a {
+  display: flex;
+  align-items: center;
+  min-height: 44px;
+  border-radius: 6px;
   text-align: left;
   font-size: 0.9rem;
   color: #d4e0e7;
   background: transparent;
   padding: 12px 10px;
   font-weight: 400;
+  text-decoration: none;
 }
-.sidebar nav button:hover {
+.sidebar nav a:hover {
   background: #294459;
+  color: #d4e0e7;
 }
-.sidebar nav button.active {
+.sidebar nav a.active {
   background: #345267;
   color: white;
   box-shadow: inset 3px 0 #91d4d2;
@@ -558,10 +564,10 @@ dialog::backdrop {
     overflow-x: auto;
     gap: 8px;
   }
-  .sidebar nav button {
+  .sidebar nav a {
     flex-shrink: 0;
   }
-  .sidebar nav button.active {
+  .sidebar nav a.active {
     box-shadow: inset 0 -3px #91d4d2;
   }
   main {
@@ -624,7 +630,7 @@ dialog::backdrop {
   .badge {
     border: 1px solid ButtonText;
   }
-  .sidebar nav button.active {
+  .sidebar nav a.active {
     outline: 2px solid Highlight;
   }
 }

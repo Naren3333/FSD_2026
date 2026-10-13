@@ -1,7 +1,6 @@
 package platform
 
 import (
-	"context"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -27,20 +26,19 @@ func TestRoles(t *testing.T) {
 }
 
 // identityStub answers every access check with the given status and body.
-func identityStub(t *testing.T, status int, body string) *App {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+func identityStub(t *testing.T, status int, body string) *Identity {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(status)
 		_, _ = w.Write([]byte(body))
 	}))
 	t.Cleanup(server.Close)
-	t.Setenv("IDENTITY_URL", server.URL)
-	return &App{Client: server.Client()}
+	return NewIdentity(server.URL, server.Client())
 }
 
 func asTeacher(r *http.Request) *http.Request {
 	var c Claims
 	c.Subject, c.Org, c.Realm.Roles = "dual", "org", []string{"teacher", "student"}
-	return r.WithContext(context.WithValue(r.Context(), claimsKey, c))
+	return r.WithContext(WithClaims(r.Context(), c))
 }
 
 const classroom = "6f1c5d2e-8a4b-4c3d-9e2f-1a2b3c4d5e6f"

@@ -10,10 +10,20 @@ import (
 	"github.com/jackc/pgx/v5"
 )
 
-type server struct{ *platform.App }
+// server answers Curriculum's HTTP routes from its store.
+type server struct{ store store }
+
+func (s server) routes(mux *http.ServeMux) {
+	mux.HandleFunc("GET /v1/nodes", s.list)
+	mux.HandleFunc("GET /v1/nodes/{id}", s.get)
+	mux.HandleFunc("POST /v1/nodes", s.create)
+	mux.HandleFunc("PATCH /v1/nodes/{id}", s.rename)
+	mux.HandleFunc("DELETE /v1/nodes/{id}", s.archive)
+	mux.HandleFunc("POST /v1/skills/{id}/prerequisites", s.addPrerequisite)
+}
 
 func (s server) list(w http.ResponseWriter, r *http.Request) {
-	result, err := s.listNodes(r.Context(), platform.Actor(r).Org)
+	result, err := s.store.listNodes(r.Context(), platform.Actor(r).Org)
 	if err != nil {
 		platform.Fail(w, err)
 		return
@@ -26,7 +36,7 @@ func (s server) get(w http.ResponseWriter, r *http.Request) {
 		platform.Error(w, 404, "NOT_FOUND", "Node not found.")
 		return
 	}
-	v, err := s.findNode(r.Context(), platform.Actor(r).Org, r.PathValue("id"))
+	v, err := s.store.findNode(r.Context(), platform.Actor(r).Org, r.PathValue("id"))
 	if errors.Is(err, pgx.ErrNoRows) {
 		platform.Error(w, 404, "NOT_FOUND", "Node not found.")
 		return
@@ -52,14 +62,14 @@ func (s server) create(w http.ResponseWriter, r *http.Request) {
 	}
 	org := platform.Actor(r).Org
 	if v.Parent != nil {
-		kind, err := s.findKind(r.Context(), org, *v.Parent)
+		kind, err := s.store.findKind(r.Context(), org, *v.Parent)
 		if err != nil || expectedParent[v.Kind] != kind {
 			platform.Error(w, 422, "INVALID_PARENT", "Parent must be the preceding curriculum level in your organization.")
 			return
 		}
 	}
 	id := uuid.NewString()
-	if err := s.insertNode(r.Context(), id, org, v.Kind, strings.TrimSpace(v.Name), v.Parent); err != nil {
+	if err := s.store.insertNode(r.Context(), id, org, v.Kind, strings.TrimSpace(v.Name), v.Parent); err != nil {
 		platform.Fail(w, err)
 		return
 	}
@@ -80,7 +90,7 @@ func (s server) rename(w http.ResponseWriter, r *http.Request) {
 		platform.Error(w, 422, "VALIDATION_ERROR", "Provide an identifier and a name of 1–160 characters.")
 		return
 	}
-	updated, err := s.renameNode(r.Context(), platform.Actor(r).Org, r.PathValue("id"), strings.TrimSpace(v.Name))
+	updated, err := s.store.renameNode(r.Context(), platform.Actor(r).Org, r.PathValue("id"), strings.TrimSpace(v.Name))
 	if err != nil {
 		platform.Fail(w, err)
 		return
@@ -100,7 +110,7 @@ func (s server) archive(w http.ResponseWriter, r *http.Request) {
 		platform.Error(w, 404, "NOT_FOUND", "Node not found.")
 		return
 	}
-	archived, err := s.archiveNode(r.Context(), platform.Actor(r).Org, r.PathValue("id"))
+	archived, err := s.store.archiveNode(r.Context(), platform.Actor(r).Org, r.PathValue("id"))
 	if err != nil {
 		platform.Fail(w, err)
 		return
@@ -127,7 +137,7 @@ func (s server) addPrerequisite(w http.ResponseWriter, r *http.Request) {
 		platform.Error(w, 422, "INVALID_PREREQUISITE", "Choose a different skill.")
 		return
 	}
-	result, err := s.insertPrerequisite(r.Context(), platform.Actor(r).Org, id, input.Prerequisite)
+	result, err := s.store.insertPrerequisite(r.Context(), platform.Actor(r).Org, id, input.Prerequisite)
 	if err != nil {
 		platform.Fail(w, err)
 		return

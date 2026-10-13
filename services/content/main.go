@@ -3,10 +3,9 @@
 package main
 
 import (
+	"context"
 	"embed"
 	"learning/platform"
-	"log/slog"
-	"os"
 	"time"
 )
 
@@ -14,27 +13,16 @@ import (
 var migrations embed.FS
 
 func main() {
-	a, err := platform.New("content", migrations, platform.EventMigration)
-	if err != nil {
-		slog.Error("startup_failed", "error", err.Error())
-		os.Exit(1)
-	}
-	store, err := newStorage()
-	if err != nil {
-		os.Exit(1)
-	}
-	s := server{a, store, newAICore()}
-	a.Checks = append(a.Checks, s.store.check)
-	a.Mux.HandleFunc("POST /v1/documents", s.upload)
-	a.Mux.HandleFunc("GET /v1/documents", s.list)
-	a.Mux.HandleFunc("GET /v1/documents/{id}", s.get)
-	a.Mux.HandleFunc("GET /v1/documents/{id}/original", s.original)
-	a.Mux.HandleFunc("GET /v1/documents/{id}/figures/{image}", s.figure)
-	a.Mux.HandleFunc("POST /v1/documents/{id}/reindex", s.reindex)
-	a.Mux.HandleFunc("POST /v1/search", s.search)
-	// Two indexing workers: ai-core ingests two PDFs at once.
-	x := indexer{a.DB, store, s.ai, 2 * time.Second}
-	if err = a.Run(a.Outbox, x.run, x.run); err != nil {
-		os.Exit(1)
-	}
+	platform.Serve("content", migrations, platform.EventMigration, func(a *platform.App) ([]func(context.Context), error) {
+		files, err := newStorage()
+		if err != nil {
+			return nil, err
+		}
+		ai := newAICore()
+		a.Checks = append(a.Checks, files.check)
+		server{store: pgStore{a.DB}, access: a.Identity(), files: files, ai: ai}.routes(a.Mux)
+		// Two indexing workers: ai-core ingests two PDFs at once.
+		x := indexer{a.DB, files, ai, 2 * time.Second}
+		return []func(context.Context){platform.Outbox{DB: a.DB}.Run, x.run, x.run}, nil
+	})
 }

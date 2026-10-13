@@ -8,7 +8,16 @@ import (
 	"github.com/google/uuid"
 )
 
-type server struct{ *platform.App }
+// server answers Identity's HTTP routes from its store.
+type server struct{ store store }
+
+func (s server) routes(mux *http.ServeMux) {
+	mux.HandleFunc("POST /v1/me", s.register)
+	mux.HandleFunc("GET /v1/classrooms", s.list)
+	mux.HandleFunc("POST /v1/classrooms", s.create)
+	mux.HandleFunc("GET /v1/classrooms/{id}/access", s.access)
+	mux.HandleFunc("POST /v1/classrooms/{id}/enrollments", s.enroll)
+}
 
 func (s server) register(w http.ResponseWriter, r *http.Request) {
 	c := platform.Actor(r)
@@ -19,7 +28,7 @@ func (s server) register(w http.ResponseWriter, r *http.Request) {
 		platform.Error(w, 403, "FORBIDDEN", "An application role is required.")
 		return
 	}
-	if err := s.registerUser(r.Context(), c.Org, c.Subject, role); err != nil {
+	if err := s.store.registerUser(r.Context(), c.Org, c.Subject, role); err != nil {
 		platform.Fail(w, err)
 		return
 	}
@@ -55,7 +64,7 @@ func (s server) create(w http.ResponseWriter, r *http.Request) {
 	}
 	c := platform.Actor(r)
 	id := uuid.NewString()
-	if err := s.insertClassroom(r.Context(), id, strings.TrimSpace(input.Name), c.Org, c.Subject); err != nil {
+	if err := s.store.insertClassroom(r.Context(), id, strings.TrimSpace(input.Name), c.Org, c.Subject); err != nil {
 		platform.Error(w, 409, "PROFILE_REQUIRED", "Complete sign-in registration before creating a classroom.")
 		return
 	}
@@ -64,7 +73,7 @@ func (s server) create(w http.ResponseWriter, r *http.Request) {
 
 func (s server) list(w http.ResponseWriter, r *http.Request) {
 	c := platform.Actor(r)
-	result, err := s.listClassrooms(r.Context(), c.Org, c.Subject, c.Has("teacher"))
+	result, err := s.store.listClassrooms(r.Context(), c.Org, c.Subject, c.Has("teacher"))
 	if err != nil {
 		platform.Fail(w, err)
 		return
@@ -83,7 +92,7 @@ func (s server) enroll(w http.ResponseWriter, r *http.Request) {
 		platform.Fail(w, err)
 		return
 	}
-	if relation != relationTeacher {
+	if relation != platform.RelationTeacher {
 		platform.Error(w, 403, "FORBIDDEN", "Only the classroom teacher may enroll students.")
 		return
 	}
@@ -93,7 +102,7 @@ func (s server) enroll(w http.ResponseWriter, r *http.Request) {
 	if !platform.Decode(w, r, &input) {
 		return
 	}
-	exists, err := s.studentExists(r.Context(), input.Student, c.Org)
+	exists, err := s.store.studentExists(r.Context(), input.Student, c.Org)
 	if err != nil {
 		platform.Fail(w, err)
 		return
@@ -102,7 +111,7 @@ func (s server) enroll(w http.ResponseWriter, r *http.Request) {
 		platform.Error(w, 422, "INVALID_STUDENT", "Student must first sign in to this organization.")
 		return
 	}
-	if err = s.insertEnrollment(r.Context(), id, input.Student); err != nil {
+	if err = s.store.insertEnrollment(r.Context(), id, input.Student); err != nil {
 		platform.Fail(w, err)
 		return
 	}

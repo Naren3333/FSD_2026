@@ -12,6 +12,14 @@ import (
 	"github.com/minio/minio-go/v7/pkg/credentials"
 )
 
+// documentFiles is what the handlers need from object storage: originals and figure crops, and removing an
+// original whose database row was never committed.
+type documentFiles interface {
+	objects
+	removeOrphan(documentID, key string)
+}
+
+// storage is the S3-compatible bucket holding originals and figure crops.
 type storage struct {
 	client *minio.Client
 	bucket string

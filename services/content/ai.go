@@ -31,6 +31,17 @@ func newAICore() *aiCore {
 	}
 }
 
+// searchModels is what search needs from ai-core: query embeddings and reranking, billed to the searching user.
+type searchModels interface {
+	embed(ctx context.Context, text string, who billed) ([]float32, string, error)
+	rerank(ctx context.Context, query string, documents []string, who billed) ([]float64, error)
+}
+
+// ingester turns a PDF into chunks with embeddings and the figure crops they point at.
+type ingester interface {
+	ingest(ctx context.Context, title string, pdf io.Reader, size int64, who billed) (ingestResult, error)
+}
+
 // aiError is a non-200 answer from ai-core, or a failure to reach it (Status 0). Message and ResetsAt are set
 // for AI_SPEND_LIMIT: the user's daily AI allowance is used up until ResetsAt.
 type aiError struct {

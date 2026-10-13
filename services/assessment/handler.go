@@ -10,7 +10,20 @@ import (
 	"github.com/jackc/pgx/v5"
 )
 
-type server struct{ *platform.App }
+// server answers Assessment's HTTP routes: assessments and submissions in its store, classroom access from
+// Identity and skills from Curriculum.
+type server struct {
+	store  store
+	access platform.ClassroomAccess
+	skills skills
+}
+
+func (s server) routes(mux *http.ServeMux) {
+	mux.HandleFunc("POST /v1/assessments", s.create)
+	mux.HandleFunc("GET /v1/assessments", s.list)
+	mux.HandleFunc("GET /v1/assessments/{id}", s.get)
+	mux.HandleFunc("POST /v1/assessments/{id}/submissions", s.submit)
+}
 
 func (s server) create(w http.ResponseWriter, r *http.Request) {
 	if !platform.Teacher(w, r) {
@@ -24,13 +37,13 @@ func (s server) create(w http.ResponseWriter, r *http.Request) {
 		platform.Error(w, 422, "VALIDATION_ERROR", err.Error())
 		return
 	}
-	if !s.TeacherOf(w, r, v.Classroom) {
+	if !s.access.TeacherOf(w, r, v.Classroom) {
 		return
 	}
 	checked := map[string]bool{}
 	for i, q := range v.Questions {
 		if !checked[q.Skill] {
-			switch s.checkSkill(r, q.Skill) {
+			switch s.skills.check(r, q.Skill) {
 			case skillUnavailable:
 				platform.Error(w, 503, "DEPENDENCY_UNAVAILABLE", "Curriculum unavailable.")
 				return
@@ -43,7 +56,7 @@ func (s server) create(w http.ResponseWriter, r *http.Request) {
 		v.Questions[i].ID = uuid.NewString()
 	}
 	v.ID = uuid.NewString()
-	if err := s.insertAssessment(r.Context(), platform.Actor(r).Org, v); err != nil {
+	if err := s.store.insertAssessment(r.Context(), platform.Actor(r).Org, v); err != nil {
 		platform.Fail(w, err)
 		return
 	}
@@ -52,10 +65,10 @@ func (s server) create(w http.ResponseWriter, r *http.Request) {
 
 func (s server) list(w http.ResponseWriter, r *http.Request) {
 	id := r.URL.Query().Get("classroom_id")
-	if !s.Access(w, r, id, "") {
+	if !s.access.Access(w, r, id, "") {
 		return
 	}
-	result, err := s.listAssessments(r.Context(), platform.Actor(r).Org, id)
+	result, err := s.store.listAssessments(r.Context(), platform.Actor(r).Org, id)
 	if err != nil {
 		platform.Fail(w, err)
 		return
@@ -64,7 +77,7 @@ func (s server) list(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s server) get(w http.ResponseWriter, r *http.Request) {
-	v, err := s.findAssessment(r.Context(), platform.Actor(r).Org, r.PathValue("id"))
+	v, err := s.store.findAssessment(r.Context(), platform.Actor(r).Org, r.PathValue("id"))
 	if errors.Is(err, pgx.ErrNoRows) {
 		platform.Error(w, 404, "NOT_FOUND", "Assessment not found.")
 		return
@@ -73,7 +86,7 @@ func (s server) get(w http.ResponseWriter, r *http.Request) {
 		platform.Fail(w, err)
 		return
 	}
-	relation, ok := s.Relation(w, r, v.Classroom, "")
+	relation, ok := s.access.Relation(w, r, v.Classroom, "")
 	if !ok {
 		return
 	}
@@ -91,7 +104,7 @@ func (s server) submit(w http.ResponseWriter, r *http.Request) {
 		platform.Error(w, 403, "FORBIDDEN", "Only enrolled students may submit.")
 		return
 	}
-	v, err := s.findAssessment(r.Context(), c.Org, r.PathValue("id"))
+	v, err := s.store.findAssessment(r.Context(), c.Org, r.PathValue("id"))
 	if errors.Is(err, pgx.ErrNoRows) {
 		platform.Error(w, 404, "NOT_FOUND", "Assessment not found.")
 		return
@@ -100,7 +113,7 @@ func (s server) submit(w http.ResponseWriter, r *http.Request) {
 		platform.Fail(w, err)
 		return
 	}
-	if !s.Access(w, r, v.Classroom, c.Subject) {
+	if !s.access.Access(w, r, v.Classroom, c.Subject) {
 		return
 	}
 	var input struct {
@@ -119,7 +132,7 @@ func (s server) submit(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	id := uuid.NewString()
-	inserted, err := s.insertSubmission(r.Context(), id, v, c.Org, c.Subject, data, input.Answers)
+	inserted, err := s.store.insertSubmission(r.Context(), id, v, c.Org, c.Subject, data, input.Answers)
 	if err != nil {
 		platform.Fail(w, err)
 		return

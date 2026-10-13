@@ -16,10 +16,23 @@ import (
 	"github.com/jackc/pgx/v5"
 )
 
+// server answers Content's HTTP routes: documents and chunks in its store, originals and figure crops in object
+// storage, classroom access from Identity, and query embeddings and reranking from ai-core.
 type server struct {
-	*platform.App
-	store storage
-	ai    *aiCore
+	store  store
+	access platform.ClassroomAccess
+	files  documentFiles
+	ai     searchModels
+}
+
+func (s server) routes(mux *http.ServeMux) {
+	mux.HandleFunc("POST /v1/documents", s.upload)
+	mux.HandleFunc("GET /v1/documents", s.list)
+	mux.HandleFunc("GET /v1/documents/{id}", s.get)
+	mux.HandleFunc("GET /v1/documents/{id}/original", s.original)
+	mux.HandleFunc("GET /v1/documents/{id}/figures/{image}", s.figure)
+	mux.HandleFunc("POST /v1/documents/{id}/reindex", s.reindex)
+	mux.HandleFunc("POST /v1/search", s.search)
 }
 
 // visible reports whether a caller with this classroom relation may see a document of this type: students see
@@ -30,11 +43,8 @@ func visible(relation, docType string) bool {
 }
 
 func (s server) upload(w http.ResponseWriter, r *http.Request) {
-	if !platform.Teacher(w, r) {
-		return
-	}
 	classroom := r.URL.Query().Get("classroom_id")
-	if !s.TeacherOf(w, r, classroom) {
+	if !s.access.TeacherOf(w, r, classroom) {
 		return
 	}
 	title := strings.TrimSpace(r.URL.Query().Get("title"))
@@ -70,7 +80,7 @@ func (s server) upload(w http.ResponseWriter, r *http.Request) {
 	key := platform.Actor(r).Org + "/" + id + "/1"
 	sum := sha256.Sum256(data)
 	hash := hex.EncodeToString(sum[:])
-	if err = s.store.put(r.Context(), key, data, kind); err != nil {
+	if err = s.files.put(r.Context(), key, data, kind); err != nil {
 		platform.Error(w, 503, "STORAGE_UNAVAILABLE", "Upload storage is unavailable; retry later.")
 		return
 	}
@@ -78,10 +88,10 @@ func (s server) upload(w http.ResponseWriter, r *http.Request) {
 	commitAttempted := false
 	defer func() {
 		if !stored && !commitAttempted {
-			s.store.removeOrphan(id, key)
+			s.files.removeOrphan(id, key)
 		}
 	}()
-	commitAttempted, err = s.insertDocument(r.Context(), id, classroom, platform.Actor(r).Org, platform.Actor(r).Subject, title, kind, key, hash, status, docType, chunks)
+	commitAttempted, err = s.store.insertDocument(r.Context(), id, classroom, platform.Actor(r).Org, platform.Actor(r).Subject, title, kind, key, hash, status, docType, chunks)
 	if err != nil {
 		platform.Fail(w, err)
 		return
@@ -92,11 +102,11 @@ func (s server) upload(w http.ResponseWriter, r *http.Request) {
 
 func (s server) list(w http.ResponseWriter, r *http.Request) {
 	classroom := r.URL.Query().Get("classroom_id")
-	relation, ok := s.Relation(w, r, classroom, "")
+	relation, ok := s.access.Relation(w, r, classroom, "")
 	if !ok {
 		return
 	}
-	result, err := s.listDocuments(r.Context(), platform.Actor(r).Org, classroom, relation == platform.RelationTeacher)
+	result, err := s.store.listDocuments(r.Context(), platform.Actor(r).Org, classroom, relation == platform.RelationTeacher)
 	if err != nil {
 		platform.Fail(w, err)
 		return
@@ -109,7 +119,7 @@ func (s server) get(w http.ResponseWriter, r *http.Request) {
 		platform.Error(w, 404, "NOT_FOUND", "Document not found.")
 		return
 	}
-	v, data, err := s.findDocument(r.Context(), platform.Actor(r).Org, r.PathValue("id"))
+	v, data, err := s.store.findDocument(r.Context(), platform.Actor(r).Org, r.PathValue("id"))
 	if errors.Is(err, pgx.ErrNoRows) {
 		platform.Error(w, 404, "NOT_FOUND", "Document not found.")
 		return
@@ -118,7 +128,7 @@ func (s server) get(w http.ResponseWriter, r *http.Request) {
 		platform.Fail(w, err)
 		return
 	}
-	relation, ok := s.Relation(w, r, v.Classroom, "")
+	relation, ok := s.access.Relation(w, r, v.Classroom, "")
 	if !ok {
 		return
 	}
@@ -138,7 +148,7 @@ func (s server) original(w http.ResponseWriter, r *http.Request) {
 		platform.Error(w, 404, "NOT_FOUND", "Document not found.")
 		return
 	}
-	classroom, key, kind, docType, err := s.findOriginal(r.Context(), platform.Actor(r).Org, r.PathValue("id"))
+	classroom, key, kind, docType, err := s.store.findOriginal(r.Context(), platform.Actor(r).Org, r.PathValue("id"))
 	if errors.Is(err, pgx.ErrNoRows) {
 		platform.Error(w, 404, "NOT_FOUND", "Document not found.")
 		return
@@ -147,7 +157,7 @@ func (s server) original(w http.ResponseWriter, r *http.Request) {
 		platform.Fail(w, err)
 		return
 	}
-	relation, ok := s.Relation(w, r, classroom, "")
+	relation, ok := s.access.Relation(w, r, classroom, "")
 	if !ok {
 		return
 	}
@@ -165,7 +175,7 @@ func (s server) figure(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	org := platform.Actor(r).Org
-	v, err := s.findIndexed(r.Context(), org, r.PathValue("id"), r.PathValue("image"))
+	v, err := s.store.findIndexed(r.Context(), org, r.PathValue("id"), r.PathValue("image"))
 	if errors.Is(err, pgx.ErrNoRows) {
 		platform.Error(w, 404, "NOT_FOUND", "Figure not found.")
 		return
@@ -174,7 +184,7 @@ func (s server) figure(w http.ResponseWriter, r *http.Request) {
 		platform.Fail(w, err)
 		return
 	}
-	relation, ok := s.Relation(w, r, v.Classroom, "")
+	relation, ok := s.access.Relation(w, r, v.Classroom, "")
 	if !ok {
 		return
 	}
@@ -195,7 +205,7 @@ func (s server) reindex(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	org := platform.Actor(r).Org
-	v, _, err := s.findDocument(r.Context(), org, r.PathValue("id"))
+	v, _, err := s.store.findDocument(r.Context(), org, r.PathValue("id"))
 	if errors.Is(err, pgx.ErrNoRows) {
 		platform.Error(w, 404, "NOT_FOUND", "Document not found.")
 		return
@@ -204,14 +214,14 @@ func (s server) reindex(w http.ResponseWriter, r *http.Request) {
 		platform.Fail(w, err)
 		return
 	}
-	if !s.TeacherOf(w, r, v.Classroom) {
+	if !s.access.TeacherOf(w, r, v.Classroom) {
 		return
 	}
 	if v.Type != "application/pdf" {
 		platform.Error(w, 409, "NOT_INDEXABLE", "Only PDFs are indexed.")
 		return
 	}
-	queued, err := s.queueIndex(r.Context(), org, v.ID)
+	queued, err := s.store.queueIndex(r.Context(), org, v.ID)
 	if err != nil {
 		platform.Fail(w, err)
 		return
@@ -220,7 +230,7 @@ func (s server) reindex(w http.ResponseWriter, r *http.Request) {
 		platform.Error(w, 409, "ALREADY_INDEXING", "The document is already being indexed.")
 		return
 	}
-	v, _, err = s.findDocument(r.Context(), org, v.ID)
+	v, _, err = s.store.findDocument(r.Context(), org, v.ID)
 	if err != nil {
 		platform.Fail(w, err)
 		return
@@ -229,7 +239,7 @@ func (s server) reindex(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s server) send(w http.ResponseWriter, r *http.Request, key, kind, disposition string) {
-	object, size, err := s.store.open(r.Context(), key)
+	object, size, err := s.files.open(r.Context(), key)
 	if err != nil {
 		platform.Error(w, 503, "STORAGE_UNAVAILABLE", "Original file is unavailable.")
 		return
