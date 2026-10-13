@@ -1,0 +1,6 @@
+<div class="feedback" [attr.aria-busy]="state.busy()">
+  <p role="status" aria-live="polite">{{ state.busy() ? 'Working…' : state.message() }}</p>
+  @if (state.error()) {
+    <p role="alert" class="error">{{ state.error() }}</p>
+  }
+</div>
