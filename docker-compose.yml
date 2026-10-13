@@ -129,6 +129,7 @@ services:
       KONG_ADMIN_LISTEN: 'off'
       KONG_PROXY_ACCESS_LOG: 'off'
       KONG_PROXY_ERROR_LOG: /dev/stderr
+      KONG_DNS_VALID_TTL: '5'  # re-resolve services every 5 s, so a recreated container is found without restarting Kong
     ports:
     - 127.0.0.1:8000:8000
     volumes:
