@@ -1745,3 +1745,175 @@
   style: vague
   query: the security scan in our pipeline flags lots of issues that aren't real, is that normal
   expect: [{title: Automation and Deployment, page: 20}]
+
+# ==== Off-wording batch (2026-10-13) ====
+# Simulated like the batch above, but phrased away from the slides' own words: slang, shorthand, half-remembered
+# terms and symptoms instead of names. Still not real student questions. Holdout, labelled from the PDF text before
+# any run; unanswerable ones were checked against every document the asking user can see.
+- id: off-clean-up-messy-code
+  origin: simulated
+  split: holdout
+  as: s1
+  style: vague
+  query: my code works but it's super messy, can i clean it up without changing what it does
+  expect: [{title: "Code Review, Refactoring and Pair Programming", page: 11},
+           {title: "Code Review, Refactoring and Pair Programming", page: 12}]
+- id: off-same-put-twice
+  origin: simulated
+  split: holdout
+  as: s1
+  style: vague
+  query: if i send the same PUT request twice does anything bad happen
+  expect: [{title: Software Design, page: 23}]
+- id: off-raw-sql-instead
+  origin: simulated
+  split: holdout
+  as: s1
+  style: vague
+  query: should i just write raw sql instead of using jpa
+  expect: [{title: Persistence, page: 10}, {title: Persistence, page: 7}]
+- id: off-test-names
+  origin: simulated
+  split: holdout
+  as: s1
+  style: vague
+  query: what should i call my test methods
+  expect: [{title: Software Testing, page: 16}]
+- id: off-aaa
+  origin: simulated
+  split: holdout
+  as: s1
+  style: typo
+  query: arange act asert??
+  expect: [{title: Software Testing, page: 15}, {title: Software Testing Revision Notes, page: 1}]
+- id: off-one-person-knows
+  origin: simulated
+  split: holdout
+  as: s1
+  style: vague
+  query: is it bad if only one person on the team understands part of the code
+  expect: [{title: "Code Review, Refactoring and Pair Programming", page: 7},
+           {title: "Code Review, Refactoring and Pair Programming", page: 6}]
+- id: off-magic-numbers
+  origin: simulated
+  split: holdout
+  as: s1
+  style: typo
+  query: magic numbrs what r they
+  expect: [{title: "Code Review, Refactoring and Pair Programming", page: 23}]
+- id: off-copy-paste-twice
+  origin: simulated
+  split: holdout
+  as: s1
+  style: vague
+  query: when should i stop copy pasting code and make it a function
+  expect: [{title: "Code Review, Refactoring and Pair Programming", page: 13},
+           {title: "Code Review, Refactoring and Pair Programming", page: 15}]
+- id: off-subclass-ignores-parent
+  origin: simulated
+  split: holdout
+  as: s1
+  style: vague
+  query: my subclass doesn't use half the methods it inherits, is that a problem
+  expect: [{title: "Code Review, Refactoring and Pair Programming", page: 20},
+           {title: "Code Review, Refactoring and Pair Programming", page: 21}]
+- id: off-burndown-goes-up
+  origin: simulated
+  split: holdout
+  as: s1
+  style: vague
+  query: why would our release burndown go up instead of down
+  expect: [{title: "User Stories, Estimation and Planning", page: 38}]
+- id: off-how-many-nines
+  origin: simulated
+  split: holdout
+  as: s1
+  style: vague
+  query: what does "how many nines" mean
+  expect: [{title: "User Stories, Estimation and Planning", page: 13}]
+- id: off-review-vs-pairing
+  origin: simulated
+  split: holdout
+  as: s1
+  style: multi
+  query: if we pair program do we still need code reviews
+  expect: [{title: "Code Review, Refactoring and Pair Programming", page: 37},
+           {title: "Code Review, Refactoring and Pair Programming", page: 26}]
+- id: off-s2-hide-errors
+  origin: simulated
+  split: holdout
+  as: s2
+  style: vague
+  query: how do i stop my api from showing users the raw exception when something breaks
+  expect: [{title: Basic Security, page: 11}]
+- id: off-s2-who-vs-what
+  origin: simulated
+  split: holdout
+  as: s2
+  style: vague
+  query: difference between checking who someone is and checking what they're allowed to do
+  expect: [{title: Basic Security, page: 12}, {title: Basic Security, page: 22}]
+- id: off-s2-token-expired
+  origin: simulated
+  split: holdout
+  as: s2
+  style: vague
+  query: my access token expired, how do i get a new one without logging in again
+  expect: [{title: Basic Security, page: 26}]
+- id: off-s2-image-too-big
+  origin: simulated
+  split: holdout
+  as: s2
+  style: vague
+  query: why is my docker image so huge and how do i shrink it
+  expect: [{title: Automation and Deployment, page: 11}]
+- id: off-s2-where-to-test
+  origin: simulated
+  split: holdout
+  as: s2
+  style: vague
+  query: where are we supposed to test before real users see it
+  expect: [{title: Automation and Deployment, page: 18}]
+- id: off-s2-hypervisor
+  origin: simulated
+  split: holdout
+  as: s2
+  style: typo
+  query: hypervisr what does it do
+  expect: [{title: Automation and Deployment, page: 5}, {title: Automation and Deployment, page: 7}]
+# Unanswerable: close to the course, but nothing the asking user can see covers them.
+- id: off-unans-detached-head
+  origin: simulated
+  split: holdout
+  as: s1
+  style: vague
+  query: git says i'm in detached head, what do i do
+  unanswerable: true
+- id: off-unans-lazy-loading
+  origin: simulated
+  split: holdout
+  as: s1
+  style: clean
+  query: lazy vs eager loading in jpa
+  unanswerable: true
+- id: off-unans-selenium
+  origin: simulated
+  split: holdout
+  as: s1
+  style: clean
+  query: how do i write selenium tests for the frontend
+  unanswerable: true
+- id: off-unans-websocket
+  origin: simulated
+  split: holdout
+  as: s1
+  style: vague
+  query: how do i push live updates from the server to the browser, like a chat
+  unanswerable: true
+- id: off-unans-s2-user-story
+  origin: simulated
+  split: holdout
+  as: s2
+  style: clean
+  query: what makes a good user story
+  unanswerable: true
