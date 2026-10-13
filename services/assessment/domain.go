@@ -3,17 +3,7 @@ package main
 import (
 	"errors"
 	"learning/platform"
-	"regexp"
-	"slices"
 	"strings"
-)
-
-var decimal = regexp.MustCompile(`^-?[0-9]{1,12}(\.[0-9]{1,8})?$`)
-
-// Question types.
-const (
-	typeMultipleChoice = "multiple_choice"
-	typeNumerical      = "numerical"
 )
 
 // Assessment limits.
@@ -41,6 +31,19 @@ type Assessment struct {
 	Title     string     `json:"title"`
 	Questions []Question `json:"questions"`
 }
+
+// Summary is an assessment in a classroom's list.
+type Summary struct {
+	ID    string `json:"id"`
+	Title string `json:"title"`
+}
+
+// Submission is one student's answers to an assessment, by question id.
+type Submission struct {
+	ID, Org, Student string
+	Answers          map[string]string
+}
+
 type PublicQuestion struct {
 	ID      string   `json:"id"`
 	Prompt  string   `json:"prompt"`
@@ -71,38 +74,13 @@ func (q Question) validate() error {
 	if strings.TrimSpace(q.Prompt) == "" || len(q.Prompt) > maxPrompt || !platform.ID(q.Skill) {
 		return errors.New("each question needs a prompt and curriculum skill")
 	}
-	switch q.Type {
-	case typeMultipleChoice:
-		return q.validateMultipleChoice()
-	case typeNumerical:
-		if !decimal.MatchString(q.Answer) || !decimal.MatchString(q.Tolerance) || strings.HasPrefix(q.Tolerance, "-") || len(q.Options) > 0 {
-			return errors.New("numerical answers require decimal answer and nonnegative decimal tolerance, without options")
-		}
-		return nil
-	default:
+	kind, ok := questionKinds[q.Type]
+	if !ok {
 		return errors.New("unsupported question type")
 	}
+	return kind.validate(q)
 }
 
-func (q Question) validateMultipleChoice() error {
-	if len(q.Options) < minOptions || len(q.Options) > maxOptions {
-		return errors.New("multiple choice needs 2–8 options")
-	}
-	seen := map[string]bool{}
-	for _, o := range q.Options {
-		if strings.TrimSpace(o) == "" || len(o) > maxAnswer || seen[o] {
-			return errors.New("options must be unique nonempty values")
-		}
-		seen[o] = true
-	}
-	if !seen[q.Answer] {
-		return errors.New("answer must match one option")
-	}
-	if q.Tolerance != "" {
-		return errors.New("multiple choice has no tolerance")
-	}
-	return nil
-}
 func (v Assessment) Public() PublicAssessment {
 	p := PublicAssessment{v.ID, v.Classroom, v.Title, []PublicQuestion{}}
 	for _, q := range v.Questions {
@@ -110,19 +88,16 @@ func (v Assessment) Public() PublicAssessment {
 	}
 	return p
 }
+
+// validateAnswers reports whether answers has exactly one acceptable answer for every question.
 func validateAnswers(v Assessment, answers map[string]string) bool {
 	if len(answers) != len(v.Questions) {
 		return false
 	}
 	for _, q := range v.Questions {
 		answer, exists := answers[q.ID]
-		if !exists || len(answer) > maxAnswer {
-			return false
-		}
-		if q.Type == typeNumerical && !decimal.MatchString(answer) {
-			return false
-		}
-		if q.Type == typeMultipleChoice && !slices.Contains(q.Options, answer) {
+		kind, known := questionKinds[q.Type]
+		if !exists || !known || len(answer) > maxAnswer || !kind.accepts(q, answer) {
 			return false
 		}
 	}

@@ -36,12 +36,12 @@ func (m *memoryStore) insertAssessment(_ context.Context, _ string, v Assessment
 	return nil
 }
 
-func (m *memoryStore) listAssessments(context.Context, string, string) ([]map[string]string, error) {
+func (m *memoryStore) listAssessments(context.Context, string, string) ([]Summary, error) {
 	return nil, nil
 }
 
-func (m *memoryStore) insertSubmission(_ context.Context, _ string, v Assessment, _, student string, _ []byte, _ map[string]string) (bool, error) {
-	key := v.ID + "/" + student
+func (m *memoryStore) insertSubmission(_ context.Context, v Assessment, sub Submission) (bool, error) {
+	key := v.ID + "/" + sub.Student
 	if m.submitted[key] {
 		return false, nil
 	}
