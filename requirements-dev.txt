@@ -9,3 +9,7 @@ ruff==0.12.7
 mypy==1.17.1
 jsonschema==4.25.1
 PyYAML==6.0.2
+openai==3.29.0
+httpx2==2.13.1
+pymupdf==1.28.2
+tiktoken==0.14.0

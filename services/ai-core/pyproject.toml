@@ -9,4 +9,7 @@ disallow_untyped_defs = true
 module = ["confluent_kafka.*"]
 ignore_missing_imports = true
 [tool.pytest.ini_options]
-testpaths = ["."]
+testpaths = ["tests"]
+pythonpath = ["."]
+markers = ["live: calls the real OpenAI or Voyage API (opt-in: pytest -m live)"]
+addopts = "-m 'not live'"

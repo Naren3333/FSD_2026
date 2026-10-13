@@ -277,6 +277,17 @@ services:
       OIDC_ISSUER: http://localhost:8081/realms/learning
       OIDC_JWKS_URL: http://keycloak:8080/realms/learning/protocol/openid-connect/certs
       OIDC_AUDIENCE: learning
+      # Provider keys exist only in ai-core (ADR 0002). Unset: ai-core answers 503 AI_PROVIDER_NOT_CONFIGURED.
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      VOYAGE_API_KEY: ${VOYAGE_API_KEY:-}
+      EMBEDDING_MODEL: text-embedding-3-small
+      CHAT_MODEL: gpt-6-luna
+      TABLE_VISION_MODEL: gpt-5.4-mini
+      FIGURE_MODEL: gpt-6-luna
+      RERANKER_MODEL: rerank-3
+      AI_CORE_CACHE_DIR: /var/cache/ai-core
+    volumes:
+      - ai-core-cache:/var/cache/ai-core
     depends_on:
       keycloak:
         condition: service_started
@@ -338,5 +349,6 @@ volumes:
   keycloak-data: {}
   kafka-data: {}
   seaweedfs-data: {}
+  ai-core-cache: {}
   kong-config: {}
 

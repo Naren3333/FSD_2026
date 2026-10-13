@@ -39,7 +39,7 @@ DESIGN.md / UX-CONTRACT.md          UI design and behavioral ownership
 
 ## AI contracts and future interfaces
 
-The private AI Service exposes `/v1/inference`; Question Generation exposes `/v1/question_generation`; Student Performance exposes `/v1/performance_interpretation`; Question Chatbot exposes `/v1/grounded_question_answering`. Each checks authentication and the `ai-client` role, validates its request, and returns HTTP 501 with `AI_CAPABILITY_NOT_IMPLEMENTED` and a capability name. Normal users do not receive the internal role. No agent route is published by Kong and none has a database.
+Since ADR 0002 the private AI Service (ai-core) is implemented: `/v1/ingest`, `/v1/inference` and `/v1/rerank`, for callers with the `ai-client` role; see "fsd_test integration" below. Originally it exposed only a 501 `/v1/inference`. Question Generation exposes `/v1/question_generation`; Student Performance exposes `/v1/performance_interpretation`; Question Chatbot exposes `/v1/grounded_question_answering`. Each checks authentication and the `ai-client` role, validates its request, and returns HTTP 501 with `AI_CAPABILITY_NOT_IMPLEMENTED` and a capability name. Normal users do not receive the internal role. No agent route is published by Kong and none has a database.
 
 OpenAPI defines request and future response schemas (questions/keys/explanations/provenance, evidence-backed observations/interventions, answers/citations/insufficient evidence, provider-independent generation/embedding output). Content declares future embedding-version and authorized-retrieval ports. These are **interfaces only**. Tests replace verified claims with clearly scoped test doubles for placeholder behavior; runtime code never registers those doubles. Separate auth tests exercise real RSA signature, expiry, issuer and audience verification.
 
@@ -72,6 +72,11 @@ Final verification on 2026-09-28:
 - The premium UI strict audit passed with zero findings. Desktop/mobile screenshots are generated under `apps/web/test-results/` and ignored by Git.
 
 Non-fatal tool warnings included a third-party AnyIO deprecation and pytest cache-write permissions; test assertions and quality commands still completed successfully. No hosted CI run, live Neon test or production deployment has been performed. Earlier failures were fixed rather than suppressed: unavailable MinIO Docker Hub images, Angular/Vitest peer-version mismatch, test-runner suite discovery, source-based Python type resolution, sandbox compiler path access, duplicate DOM IDs, duplicate grading status announcements, and mobile grid overflow. Unsaved-state checks now use actual form state rather than rendered CSS classes, and closing the grading dialog clears its draft consistently.
+
+## fsd_test integration (ADR 0002)
+
+- **Stage 1, foundations:** pgvector Postgres image, numbered Go migrations, Keycloak service accounts, SeaweedFS storage. Verified on a Windows desktop with Docker 29.1.3: `docker compose up -d --build`, `wait_ready.py` (all ten ready), `integration.py` and `check.py` passed.
+- **Stage 2, ai-core:** fsd_test's ingest pipeline (PyMuPDF parsing, vision pass for tables, figures and OCR, chunker), OpenAI client and Voyage rerank, ported into ai-core as stateless endpoints. 214 ported and new tests run against mock providers: Ruff, mypy and pytest passed. The tiktoken `cl100k_base` file is committed under `services/ai-core/tiktoken/` (OpenAI's published file; tiktoken checks its SHA-256) so ingest and tests never download it. In the Docker stack (sandbox, Docker 29.8.2) `wait_ready.py`, `integration.py` and the full `check.py` passed; inside the ai-core container the committed tokenizer loads offline, a PDF parses and chunks, and `/v1/ingest` and `/v1/rerank` accept a real `content-indexer` token and answer `503 AI_PROVIDER_NOT_CONFIGURED` without keys. No real OpenAI or Voyage call has been made yet.
 
 ## Incomplete requirements and risks
 

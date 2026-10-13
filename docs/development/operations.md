@@ -8,11 +8,15 @@ If you have no local data you want to keep, back up `.env`, then run `docker com
 
 Document storage moved from MinIO to SeaweedFS (volume `seaweedfs-data`). Documents in an old `minio-data` volume are not migrated; re-upload them, or copy them out with any S3 client before removing that volume.
 
+ai-core reads `OPENAI_API_KEY` and `VOYAGE_API_KEY` from `.env`. A new setup writes them empty; an older `.env` needs the two lines added by hand. Without them ai-core starts and answers `503 AI_PROVIDER_NOT_CONFIGURED`, and the integration test accepts that.
+
 The Postgres image also changed from Alpine to Debian (pgvector), so text-index collations differ. Recreating the volume is the clean path. Keeping data means reindexing every database (`REINDEX DATABASE <name>;` as each owner) after the switch, plus adding the clients and extension by hand.
 
 ## Health and logs
 
-Each application exposes `/health/live` and `/health/ready` on its private port 8080. Persistent apps check PostgreSQL; Content also checks the document bucket; Grading marks readiness unavailable after its consumer stops; Analytics checks its database and consumer state. AI placeholders need only valid authentication configuration; no model-provider dependency or API key is required. A readiness probe is a dependency snapshot, not proof of fresh analytical results.
+Each application exposes `/health/live` and `/health/ready` on its private port 8080. Persistent apps check PostgreSQL; Content also checks the document bucket; Grading marks readiness unavailable after its consumer stops; Analytics checks its database and consumer state. The three AI placeholders need only valid authentication configuration. ai-core's readiness reports whether the OpenAI and Voyage keys are set, without calling either (a paid probe on every check would cost money and latency); a provider outage shows per request as `502 AI_PROVIDER_FAILED`.
+
+ai-core keeps one disk cache, the `ai-core-cache` volume: vision-model answers keyed by page content, model and prompt version, so re-indexing an unchanged document makes no vision calls. It holds no business records and can be deleted at any time; the next ingest repopulates it at the cost of new model calls. A readiness probe is a dependency snapshot, not proof of fresh analytical results.
 
 Go uses JSON slog and Python emits JSON application telemetry. Request IDs and correlation IDs are returned in headers; correlation IDs flow across authorization HTTP requests and event envelopes. Tokens, bodies and student answers are not logged. Third-party server/broker startup diagnostics may use their own format. Extend these boundaries with OpenTelemetry HTTP/Kafka propagation and trace exporters in a later milestone; no tracing collector is installed.
 

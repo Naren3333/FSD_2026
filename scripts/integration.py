@@ -139,9 +139,9 @@ def main() -> None:
     assert migrations == "1", migrations
     vector = docker("exec", "-T", "postgres", "psql", "-U", "content", "-d", "content", "-At", "-c", "SELECT count(*) FROM pg_extension WHERE extname='vector'").stdout.strip()
     assert vector == "1", "pgvector is not installed in Content's database"
-    # Service accounts reach the private AI service (still 501 until implemented); people do not.
+    # Service accounts reach the private AI service (200 with provider keys, 503 without); people do not.
     for client_id in ["content-indexer", "question-chatbot-agent"]:
-        assert ai_core_status(service_token(client_id)) == 501
+        assert ai_core_status(service_token(client_id)) in (200, 503)
     assert ai_core_status(student.headers["Authorization"].removeprefix("Bearer ")) == 403
     print("PASS: gateway auth, classroom isolation, curriculum, S3 upload/extraction, answer-key secrecy, submissions, draft grading, teacher finalization, Kafka analytics, consumer restart, duplicate event and business-key idempotency, student privacy, database isolation, numbered migrations, pgvector, AI service accounts.")
 

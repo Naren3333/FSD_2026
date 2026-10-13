@@ -22,7 +22,7 @@ flowchart LR
   Kafka --> Analytics
   Content -->|outbox: uploaded| Kafka
   subgraph Private stateless applications
-    AI[AI core: 501]
+    AI[AI core: ingest, embed, generate, rerank]
     QG[Question generation: 501]
     SP[Performance interpretation: 501]
     QC[Grounded chatbot: 501]
@@ -60,6 +60,6 @@ flowchart LR
   Inference -. grounded answer + citations .-> Student
 ```
 
-All dashed steps are future work. Content's `ports.go` defines retrieval/indexing interfaces; no implementation is registered. Four private Python applications define versioned input/output contracts and return `AI_CAPABILITY_NOT_IMPLEMENTED` (501) after authentication, role checking and validation. They do not access business data, call providers, or use test doubles in runtime code. The agent contracts carry untrusted references; accepting a syntactically valid reference is not authorization to retrieve it.
+All dashed steps are future work. Content's `ports.go` defines retrieval/indexing interfaces; no implementation is registered. Since ADR 0002, ai-core implements `/v1/ingest` (PDF bytes in; chunks, vectors and figure crops out), `/v1/inference` (embed, generate, structured or streamed generation) and `/v1/rerank`, statelessly: the caller stores the results. Provider failures are errors (502/503), never placeholder output. The other three private Python applications define versioned input/output contracts and return `AI_CAPABILITY_NOT_IMPLEMENTED` (501) after authentication, role checking and validation. None accesses business data or uses test doubles in runtime code. The agent contracts carry untrusted references; accepting a syntactically valid reference is not authorization to retrieve it.
 
 Future pgvector migration: enable the extension with a Neon migration role; add Content-owned embeddings keyed by document/revision/chunk and model/chunker/dimensions; build a new index alongside the old one; validate real coverage and access filtering; switch the active version atomically. Emit `content.indexed.v1` only after real indexing commits. Keep deleted/revised content out of retrieval and preserve citation provenance. No such topic is currently created or published.

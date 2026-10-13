@@ -1,2 +1,4 @@
 # Keep LF in the working tree on every OS: gofmt, shell scripts and container init files expect it.
 * text=auto eol=lf
+# tiktoken checks this file against its published SHA-256: never convert its line endings.
+services/ai-core/tiktoken/* -text

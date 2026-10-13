@@ -74,8 +74,38 @@
               }
             }
           },
-          "501": {
-            "description": "Not Implemented",
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "Content Too Large",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "415": {
+            "description": "Unsupported Media Type",
             "content": {
               "application/json": {
                 "schema": {
@@ -85,12 +115,243 @@
             }
           },
           "422": {
-            "description": "Validation Error",
+            "description": "Unprocessable Content",
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
+                  "$ref": "#/components/schemas/ErrorResponse"
                 }
+              }
+            }
+          },
+          "502": {
+            "description": "Bad Gateway",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Service Unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/rerank": {
+      "post": {
+        "summary": "Rerank Documents",
+        "operationId": "rerank_documents_v1_rerank_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RerankRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RerankResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "Content Too Large",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "415": {
+            "description": "Unsupported Media Type",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Unprocessable Content",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "Bad Gateway",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Service Unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/ingest": {
+      "post": {
+        "summary": "Ingest Pdf",
+        "description": "One PDF (the raw body) \u2192 chunks with embeddings and the figure crops they point at. Stateless: the caller\nstores the result. A document problem is a `failed` outcome; a provider outage is an error to retry.",
+        "operationId": "ingest_pdf_v1_ingest_post",
+        "parameters": [
+          {
+            "name": "title",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 300,
+              "title": "Title"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IngestResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "413": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Content Too Large"
+          },
+          "415": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Unsupported Media Type"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Unprocessable Content"
+          },
+          "502": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Bad Gateway"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/pdf": {
+              "schema": {
+                "type": "string",
+                "format": "binary"
               }
             }
           }
@@ -143,18 +404,262 @@
         ],
         "title": "ErrorResponse"
       },
-      "HTTPValidationError": {
+      "IngestChunk": {
         "properties": {
-          "detail": {
+          "ordinal": {
+            "type": "integer",
+            "minimum": 0.0,
+            "title": "Ordinal"
+          },
+          "content": {
+            "type": "string",
+            "title": "Content"
+          },
+          "embed_text": {
+            "type": "string",
+            "title": "Embed Text"
+          },
+          "section_path": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Section Path"
+          },
+          "page_start": {
+            "type": "integer",
+            "minimum": 1.0,
+            "title": "Page Start"
+          },
+          "page_end": {
+            "type": "integer",
+            "minimum": 1.0,
+            "title": "Page End"
+          },
+          "token_count": {
+            "type": "integer",
+            "minimum": 0.0,
+            "title": "Token Count"
+          },
+          "kind": {
+            "type": "string",
+            "enum": [
+              "text",
+              "table",
+              "figure"
+            ],
+            "title": "Kind"
+          },
+          "source": {
+            "type": "string",
+            "enum": [
+              "pdf",
+              "vision"
+            ],
+            "title": "Source"
+          },
+          "image": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Image"
+          },
+          "label": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Label"
+          },
+          "cites": {
             "items": {
-              "$ref": "#/components/schemas/ValidationError"
+              "type": "string"
             },
             "type": "array",
-            "title": "Detail"
+            "title": "Cites"
+          },
+          "embedding": {
+            "items": {
+              "type": "number"
+            },
+            "type": "array",
+            "title": "Embedding"
           }
         },
+        "additionalProperties": false,
         "type": "object",
-        "title": "HTTPValidationError"
+        "required": [
+          "ordinal",
+          "content",
+          "embed_text",
+          "section_path",
+          "page_start",
+          "page_end",
+          "token_count",
+          "kind",
+          "source",
+          "image",
+          "label",
+          "cites",
+          "embedding"
+        ],
+        "title": "IngestChunk"
+      },
+      "IngestFigure": {
+        "properties": {
+          "image": {
+            "type": "string",
+            "pattern": "^[a-f0-9]{16}\\.png$",
+            "title": "Image"
+          },
+          "png_base64": {
+            "type": "string",
+            "title": "Png Base64"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "image",
+          "png_base64"
+        ],
+        "title": "IngestFigure"
+      },
+      "IngestResponse": {
+        "properties": {
+          "outcome": {
+            "type": "string",
+            "enum": [
+              "indexed",
+              "failed"
+            ],
+            "title": "Outcome"
+          },
+          "failure_reason": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "NO_TEXT_LAYER",
+                  "ENCRYPTED",
+                  "CORRUPT"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Failure Reason"
+          },
+          "failure_detail": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Failure Detail"
+          },
+          "page_count": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "minimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Page Count"
+          },
+          "ocr_page_count": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "minimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ocr Page Count"
+          },
+          "embedding_model": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Embedding Model"
+          },
+          "chunks": {
+            "items": {
+              "$ref": "#/components/schemas/IngestChunk"
+            },
+            "type": "array",
+            "title": "Chunks",
+            "default": []
+          },
+          "figures": {
+            "items": {
+              "$ref": "#/components/schemas/IngestFigure"
+            },
+            "type": "array",
+            "title": "Figures",
+            "default": []
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "outcome"
+        ],
+        "title": "IngestResponse",
+        "description": "`failed` is the document's own problem (ENCRYPTED, CORRUPT, NO_TEXT_LAYER) and retrying will not help.\nProvider outages are errors instead, for the caller to retry."
+      },
+      "Message": {
+        "properties": {
+          "role": {
+            "type": "string",
+            "enum": [
+              "system",
+              "user",
+              "assistant"
+            ],
+            "title": "Role"
+          },
+          "content": {
+            "type": "string",
+            "maxLength": 60000,
+            "minLength": 1,
+            "title": "Content"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "role",
+          "content"
+        ],
+        "title": "Message"
       },
       "RequestContract": {
         "properties": {
@@ -167,26 +672,144 @@
             "title": "Operation"
           },
           "input": {
-            "type": "string",
-            "maxLength": 20000,
-            "minLength": 1,
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 20000,
+                "minLength": 1
+              },
+              {
+                "type": "null"
+              }
+            ],
             "title": "Input"
+          },
+          "messages": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/components/schemas/Message"
+                },
+                "type": "array",
+                "maxItems": 50,
+                "minItems": 1
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Messages"
+          },
+          "max_tokens": {
+            "type": "integer",
+            "maximum": 8000.0,
+            "minimum": 1.0,
+            "title": "Max Tokens",
+            "default": 1000
+          },
+          "response_schema": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Response Schema"
+          },
+          "schema_name": {
+            "anyOf": [
+              {
+                "type": "string",
+                "pattern": "^[A-Za-z0-9_.-]{1,64}$"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Schema Name"
+          },
+          "stream": {
+            "type": "boolean",
+            "title": "Stream",
+            "default": false
           },
           "model_profile": {
             "type": "string",
-            "maxLength": 100,
-            "minLength": 1,
-            "title": "Model Profile"
+            "const": "default",
+            "title": "Model Profile",
+            "default": "default"
           }
         },
         "additionalProperties": false,
         "type": "object",
         "required": [
-          "operation",
-          "input",
-          "model_profile"
+          "operation"
         ],
-        "title": "RequestContract"
+        "title": "RequestContract",
+        "description": "`embed` takes `input`. `generate` takes `input` (one user message) or `messages`; with `response_schema`\nthe reply is JSON in that strict schema, and with `stream` it arrives as server-sent events."
+      },
+      "RerankRequest": {
+        "properties": {
+          "query": {
+            "type": "string",
+            "maxLength": 2000,
+            "minLength": 1,
+            "title": "Query"
+          },
+          "documents": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "maxItems": 100,
+            "minItems": 1,
+            "title": "Documents"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "query",
+          "documents"
+        ],
+        "title": "RerankRequest"
+      },
+      "RerankResponse": {
+        "properties": {
+          "scores": {
+            "items": {
+              "type": "number"
+            },
+            "type": "array",
+            "title": "Scores"
+          },
+          "model_version": {
+            "type": "string",
+            "title": "Model Version"
+          },
+          "usage_tokens": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "minimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Usage Tokens"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "scores",
+          "model_version"
+        ],
+        "title": "RerankResponse"
       },
       "ResponseContract": {
         "properties": {
@@ -223,51 +846,35 @@
             "title": "Model Version"
           },
           "usage_tokens": {
-            "type": "integer",
-            "minimum": 0.0,
+            "anyOf": [
+              {
+                "type": "integer",
+                "minimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
             "title": "Usage Tokens"
+          },
+          "finish_reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Finish Reason"
           }
         },
         "additionalProperties": false,
         "type": "object",
         "required": [
-          "model_version",
-          "usage_tokens"
+          "model_version"
         ],
         "title": "ResponseContract"
-      },
-      "ValidationError": {
-        "properties": {
-          "loc": {
-            "items": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "integer"
-                }
-              ]
-            },
-            "type": "array",
-            "title": "Location"
-          },
-          "msg": {
-            "type": "string",
-            "title": "Message"
-          },
-          "type": {
-            "type": "string",
-            "title": "Error Type"
-          }
-        },
-        "type": "object",
-        "required": [
-          "loc",
-          "msg",
-          "type"
-        ],
-        "title": "ValidationError"
       }
     }
   }

@@ -37,7 +37,9 @@ def main() -> None:
     realm = {"realm": "learning", "enabled": True, "sslRequired": "none", "registrationAllowed": False, "roles": {"realm": [{"name": r} for r in ["teacher", "student", "ai-client"]]}, "users": users,
              "clients": [{"clientId": "learning-web", "publicClient": True, "standardFlowEnabled": True, "directAccessGrantsEnabled": False, "redirectUris": ["http://localhost:4200/*"], "webOrigins": ["http://localhost:4200"], "attributes": {"pkce.code.challenge.method": "S256"}, "protocolMappers": mappers}, {"clientId": "learning-e2e", "publicClient": True, "standardFlowEnabled": False, "directAccessGrantsEnabled": True, "protocolMappers": mappers}, *service_clients]}
     (local / "learning-realm.json").write_text(json.dumps(realm, indent=2), encoding="utf-8")
-    (ROOT / ".env").write_text("# Generated local development secrets. Never commit.\n" + "\n".join(f"{k}={v}" for k, v in values.items()) + "\n", encoding="utf-8")
+    # Provider keys are the developer's own: left empty here, and ai-core answers 503 until they are set.
+    providers = "\n# AI provider keys, used only by ai-core (ADR 0002). Fill in by hand.\nOPENAI_API_KEY=\nVOYAGE_API_KEY=\n"
+    (ROOT / ".env").write_text("# Generated local development secrets. Never commit.\n" + "\n".join(f"{k}={v}" for k, v in values.items()) + "\n" + providers, encoding="utf-8")
     print("Created .env and .local infrastructure configuration. Local user passwords are in .env.")
 
 
