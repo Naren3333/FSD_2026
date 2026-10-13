@@ -149,13 +149,9 @@
                             point can be on any of these pages.
                           </p>
                         }
-                        <div
-                          class="passage"
-                          tabindex="0"
-                          [attr.aria-label]="'Passage from ' + source.title + ', ' + pageText(source)"
-                        >
-                          {{ source.content }}
-                        </div>
+                        <!-- One line: the passage keeps its own line breaks (pre-wrap), so no whitespace around it. -->
+                        <!-- prettier-ignore -->
+                        <div class="passage" tabindex="0" [attr.aria-label]="'Passage from ' + source.title + ', ' + pageText(source)">{{ source.content }}</div>
                         <button type="button" class="secondary open-page" (click)="openPage(source)">
                           Open the PDF at page {{ source.page_start }}
                         </button>
@@ -238,14 +234,9 @@
         <code>{{ run.text }}</code>
       }
       @case ('ref') {
-        <a
-          class="cite"
-          [href]="'#' + sourceId(message, run.ref)"
-          (click)="jump($event, message, run.ref)"
-          [attr.aria-label]="'Source ' + run.ref"
-        >
-          [{{ run.ref }}]
-        </a>
+        <!-- One line: whitespace inside the link would show around the citation number. -->
+        <!-- prettier-ignore -->
+        <a class="cite" [href]="'#' + sourceId(message, run.ref)" (click)="jump($event, message, run.ref)" [attr.aria-label]="'Source ' + run.ref">[{{ run.ref }}]</a>
       }
       @default {
         <span>{{ run.text }}</span>
