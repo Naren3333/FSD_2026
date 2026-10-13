@@ -18,6 +18,13 @@ import (
 type server struct {
 	*platform.App
 	store storage
+	ai    *aiCore
+}
+
+// visible reports whether the caller may see a document of this type once classroom access is settled: students
+// see teaching material only.
+func visible(r *http.Request, docType string) bool {
+	return docType == "teaching_material" || platform.Actor(r).Has("teacher")
 }
 
 func (s server) upload(w http.ResponseWriter, r *http.Request) {
@@ -33,14 +40,26 @@ func (s server) upload(w http.ResponseWriter, r *http.Request) {
 		platform.Error(w, 422, "VALIDATION_ERROR", "Title must contain 1–160 characters.")
 		return
 	}
-	r.Body = http.MaxBytesReader(w, r.Body, 5<<20)
+	docType := r.URL.Query().Get("doc_type")
+	if docType == "" {
+		docType = "teaching_material"
+	}
+	if !docTypes[docType] {
+		platform.Error(w, 422, "VALIDATION_ERROR", "doc_type must be teaching_material, rubric or marking_scheme.")
+		return
+	}
+	r.Body = http.MaxBytesReader(w, r.Body, maxPDF)
 	data, err := io.ReadAll(r.Body)
 	if err != nil {
-		platform.Error(w, 413, "UPLOAD_TOO_LARGE", "Documents must be no larger than 5 MiB.")
+		platform.Error(w, 413, "UPLOAD_TOO_LARGE", "PDFs must be no larger than 50 MiB and text documents 5 MiB.")
 		return
 	}
 	kind := strings.Split(r.Header.Get("Content-Type"), ";")[0]
 	chunks, status, err := extract(data, kind)
+	if err == errTooLarge {
+		platform.Error(w, 413, "UPLOAD_TOO_LARGE", "PDFs must be no larger than 50 MiB and text documents 5 MiB.")
+		return
+	}
 	if err != nil {
 		platform.Error(w, 422, "UNSUPPORTED_DOCUMENT", err.Error())
 		return
@@ -60,13 +79,13 @@ func (s server) upload(w http.ResponseWriter, r *http.Request) {
 			s.store.removeOrphan(id, key)
 		}
 	}()
-	commitAttempted, err = s.insertDocument(r.Context(), id, classroom, platform.Actor(r).Org, platform.Actor(r).Subject, title, kind, key, hash, status, chunks)
+	commitAttempted, err = s.insertDocument(r.Context(), id, classroom, platform.Actor(r).Org, platform.Actor(r).Subject, title, kind, key, hash, status, docType, chunks)
 	if err != nil {
 		platform.Fail(w, err)
 		return
 	}
 	stored = true
-	platform.JSON(w, 201, Document{id, classroom, title, kind, status, 1, hash, chunks})
+	platform.JSON(w, 201, Document{ID: id, Classroom: classroom, Title: title, Type: kind, Status: status, Revision: 1, SHA: hash, DocType: docType, Chunks: chunks})
 }
 
 func (s server) list(w http.ResponseWriter, r *http.Request) {
@@ -74,7 +93,7 @@ func (s server) list(w http.ResponseWriter, r *http.Request) {
 	if !s.Access(w, r, classroom, "") {
 		return
 	}
-	result, err := s.listDocuments(r.Context(), platform.Actor(r).Org, classroom)
+	result, err := s.listDocuments(r.Context(), platform.Actor(r).Org, classroom, platform.Actor(r).Has("teacher"))
 	if err != nil {
 		platform.Fail(w, err)
 		return
@@ -99,6 +118,10 @@ func (s server) get(w http.ResponseWriter, r *http.Request) {
 	if !s.Access(w, r, v.Classroom, "") {
 		return
 	}
+	if !visible(r, v.DocType) {
+		platform.Error(w, 404, "NOT_FOUND", "Document not found.")
+		return
+	}
 	if err = json.Unmarshal(data, &v.Chunks); err != nil {
 		platform.Fail(w, err)
 		return
@@ -111,7 +134,7 @@ func (s server) original(w http.ResponseWriter, r *http.Request) {
 		platform.Error(w, 404, "NOT_FOUND", "Document not found.")
 		return
 	}
-	classroom, key, kind, err := s.findOriginal(r.Context(), platform.Actor(r).Org, r.PathValue("id"))
+	classroom, key, kind, docType, err := s.findOriginal(r.Context(), platform.Actor(r).Org, r.PathValue("id"))
 	if err == pgx.ErrNoRows {
 		platform.Error(w, 404, "NOT_FOUND", "Document not found.")
 		return
@@ -123,6 +146,83 @@ func (s server) original(w http.ResponseWriter, r *http.Request) {
 	if !s.Access(w, r, classroom, "") {
 		return
 	}
+	if !visible(r, docType) {
+		platform.Error(w, 404, "NOT_FOUND", "Document not found.")
+		return
+	}
+	s.send(w, r, key, kind, "attachment")
+}
+
+// figure serves a figure crop that a search result points at.
+func (s server) figure(w http.ResponseWriter, r *http.Request) {
+	if !platform.ID(r.PathValue("id")) || !figureName.MatchString(r.PathValue("image")) {
+		platform.Error(w, 404, "NOT_FOUND", "Figure not found.")
+		return
+	}
+	org := platform.Actor(r).Org
+	v, err := s.findIndexed(r.Context(), org, r.PathValue("id"), r.PathValue("image"))
+	if err == pgx.ErrNoRows {
+		platform.Error(w, 404, "NOT_FOUND", "Figure not found.")
+		return
+	}
+	if err != nil {
+		platform.Fail(w, err)
+		return
+	}
+	if !s.Access(w, r, v.Classroom, "") {
+		return
+	}
+	if !visible(r, v.DocType) {
+		platform.Error(w, 404, "NOT_FOUND", "Figure not found.")
+		return
+	}
+	s.send(w, r, figureKey(org, v.ID, r.PathValue("image")), "image/png", "inline")
+}
+
+// reindex queues a PDF for indexing again: after a failure, or a PDF uploaded before indexing existed.
+func (s server) reindex(w http.ResponseWriter, r *http.Request) {
+	if !platform.Teacher(w, r) {
+		return
+	}
+	if !platform.ID(r.PathValue("id")) {
+		platform.Error(w, 404, "NOT_FOUND", "Document not found.")
+		return
+	}
+	org := platform.Actor(r).Org
+	v, _, err := s.findDocument(r.Context(), org, r.PathValue("id"))
+	if err == pgx.ErrNoRows {
+		platform.Error(w, 404, "NOT_FOUND", "Document not found.")
+		return
+	}
+	if err != nil {
+		platform.Fail(w, err)
+		return
+	}
+	if !s.Access(w, r, v.Classroom, "") {
+		return
+	}
+	if v.Type != "application/pdf" {
+		platform.Error(w, 409, "NOT_INDEXABLE", "Only PDFs are indexed.")
+		return
+	}
+	queued, err := s.queueIndex(r.Context(), org, v.ID)
+	if err != nil {
+		platform.Fail(w, err)
+		return
+	}
+	if !queued {
+		platform.Error(w, 409, "ALREADY_INDEXING", "The document is already being indexed.")
+		return
+	}
+	v, _, err = s.findDocument(r.Context(), org, v.ID)
+	if err != nil {
+		platform.Fail(w, err)
+		return
+	}
+	platform.JSON(w, 202, v)
+}
+
+func (s server) send(w http.ResponseWriter, r *http.Request, key, kind, disposition string) {
 	object, size, err := s.store.open(r.Context(), key)
 	if err != nil {
 		platform.Error(w, 503, "STORAGE_UNAVAILABLE", "Original file is unavailable.")
@@ -130,7 +230,7 @@ func (s server) original(w http.ResponseWriter, r *http.Request) {
 	}
 	defer object.Close()
 	w.Header().Set("Content-Type", kind)
-	w.Header().Set("Content-Disposition", "attachment")
+	w.Header().Set("Content-Disposition", disposition)
 	w.Header().Set("X-Content-Type-Options", "nosniff")
 	w.Header().Set("Content-Length", fmt.Sprint(size))
 	if _, err = io.Copy(w, object); err != nil {

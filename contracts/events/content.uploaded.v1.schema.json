@@ -47,7 +47,8 @@
         "status": {
           "enum": [
             "extracted",
-            "extraction_unsupported"
+            "extraction_unsupported",
+            "indexing"
           ]
         }
       },

@@ -1,7 +1,7 @@
 name: learning-foundation
 services:
   postgres:
-    # Postgres 17 with pgvector, for Content's future embeddings index (docs/decisions/0002-ai-integration.md)
+    # Postgres 17 with pgvector, for Content's chunk embeddings (docs/decisions/0002-ai-integration.md)
     image: pgvector/pgvector:0.8.1-pg17
     environment:
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Run scripts/setup.py}
@@ -66,7 +66,7 @@ services:
     - /bin/sh
     - -ec
     command:
-    - for topic in content.uploaded.v1 assessment.submitted.v1 grading.finalized.v1
+    - for topic in content.uploaded.v1 content.indexed.v1 assessment.submitted.v1 grading.finalized.v1
       assessment.submitted.v1.dlq grading.finalized.v1.dlq; do /opt/kafka/bin/kafka-topics.sh
       --bootstrap-server kafka:9092 --create --if-not-exists --topic $$topic --partitions
       3 --replication-factor 1; done
@@ -193,6 +193,11 @@ services:
       S3_SECRET_KEY: ${S3_CONTENT_PASSWORD}
       S3_BUCKET: documents
       S3_SECURE: 'false'
+      # The indexing worker and search call ai-core as the content-indexer service account (ADR 0002).
+      AI_CORE_URL: http://ai-core:8080
+      AI_TOKEN_URL: http://keycloak:8080/realms/learning/protocol/openid-connect/token
+      AI_CLIENT_ID: content-indexer
+      AI_CLIENT_SECRET: ${CONTENT_INDEXER_CLIENT_SECRET:?Run scripts/setup.py}
     depends_on:
       keycloak:
         condition: service_started

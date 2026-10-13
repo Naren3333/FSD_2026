@@ -3,7 +3,16 @@ package main
 import (
 	"errors"
 	"strings"
+	"time"
 	"unicode/utf8"
+)
+
+// Document types. Students see teaching material only; rubrics and marking schemes stay with teachers.
+var docTypes = map[string]bool{"teaching_material": true, "rubric": true, "marking_scheme": true}
+
+const (
+	maxPDF  = 50 << 20
+	maxText = 5 << 20
 )
 
 type Document struct {
@@ -14,7 +23,14 @@ type Document struct {
 	Status    string  `json:"status"`
 	Revision  int     `json:"revision"`
 	SHA       string  `json:"sha256"`
+	DocType   string  `json:"doc_type"`
 	Chunks    []Chunk `json:"chunks,omitempty"`
+	// Set for PDFs once indexing ends: indexed (searchable) or failed with a reason.
+	PageCount      *int       `json:"page_count,omitempty"`
+	ChunkCount     *int       `json:"chunk_count,omitempty"`
+	EmbeddingModel *string    `json:"embedding_model,omitempty"`
+	IndexedAt      *time.Time `json:"indexed_at,omitempty"`
+	FailureReason  *string    `json:"failure_reason,omitempty"`
 }
 
 type Chunk struct {
@@ -24,12 +40,18 @@ type Chunk struct {
 	End     int    `json:"end_character"`
 }
 
+var errTooLarge = errors.New("text documents must be no larger than 5 MiB")
+
+// extract chunks a text document. A PDF is only checked here: it is indexed asynchronously.
 func extract(data []byte, kind string) ([]Chunk, string, error) {
 	if kind == "application/pdf" {
 		if !strings.HasPrefix(string(data), "%PDF-") {
 			return nil, "", errors.New("file is not a PDF")
 		}
-		return []Chunk{}, "extraction_unsupported", nil
+		return []Chunk{}, "indexing", nil // the indexing worker sends it to ai-core
+	}
+	if len(data) > maxText {
+		return nil, "", errTooLarge
 	}
 	if kind != "text/plain" || !utf8.Valid(data) || strings.ContainsRune(string(data), 0) {
 		return nil, "", errors.New("upload UTF-8 plain text or a valid PDF")

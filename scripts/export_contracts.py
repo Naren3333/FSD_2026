@@ -29,7 +29,14 @@ assessment = obj({"id": UUID, "classroom_id": UUID, "title": TEXT, "questions": 
 public_assessment = {**assessment, "properties": {**assessment["properties"], "questions": array(public_question, 1, 50)}}
 evidence = obj({"question_id": UUID, "skill_id": UUID, "correct": {"type": "boolean"}, "awarded": {"type": "integer", "minimum": 0, "maximum": 1}, "possible": {"const": 1}})
 chunk = obj({"ordinal": {"type": "integer", "minimum": 0}, "text": TEXT, "start_character": {"type": "integer", "minimum": 0}, "end_character": {"type": "integer", "minimum": 1}})
-document = obj({"id": UUID, "classroom_id": UUID, "title": TEXT, "mime_type": {"enum": ["text/plain", "application/pdf"]}, "status": {"enum": ["extracted", "extraction_unsupported"]}, "revision": {"type": "integer", "minimum": 1}, "sha256": {"type": "string", "pattern": "^[a-f0-9]{64}$"}, "chunks": array(chunk, maximum=10000)}, ["id", "classroom_id", "title", "mime_type", "status", "revision", "sha256"])
+DOC_TYPE = {"enum": ["teaching_material", "rubric", "marking_scheme"]}
+FIGURE = {"type": "string", "pattern": "^[a-f0-9]{16}\\.png$"}
+document = obj({"id": UUID, "classroom_id": UUID, "title": TEXT, "mime_type": {"enum": ["text/plain", "application/pdf"]}, "status": {"enum": ["extracted", "extraction_unsupported", "indexing", "indexed", "failed"]}, "revision": {"type": "integer", "minimum": 1}, "sha256": {"type": "string", "pattern": "^[a-f0-9]{64}$"}, "doc_type": DOC_TYPE, "chunks": array(chunk, maximum=10000), "page_count": {"type": "integer", "minimum": 0}, "chunk_count": {"type": "integer", "minimum": 0}, "embedding_model": TEXT, "indexed_at": {"type": "string", "format": "date-time"}, "failure_reason": {"enum": ["NO_TEXT_LAYER", "ENCRYPTED", "CORRUPT", "AI_UNAVAILABLE", "INTERNAL"]}}, ["id", "classroom_id", "title", "mime_type", "status", "revision", "sha256", "doc_type"])
+NULLABLE_TEXT = {"type": ["string", "null"]}
+related = obj({"chunk_id": UUID, "kind": {"enum": ["table", "figure", "text"]}, "label": NULLABLE_TEXT, "page_start": {"type": "integer", "minimum": 1}, "image": {"type": ["string", "null"], "pattern": FIGURE["pattern"]}, "content": TEXT})
+search_hit = obj({"chunk_id": UUID, "document_id": UUID, "title": TEXT, "doc_type": DOC_TYPE, "section_path": NULLABLE_TEXT, "page_start": {"type": "integer", "minimum": 1}, "page_end": {"type": "integer", "minimum": 1}, "content": TEXT, "kind": {"enum": ["text", "table", "figure"]}, "source": {"enum": ["pdf", "vision"]}, "image": {"type": ["string", "null"], "pattern": FIGURE["pattern"]}, "score": {"type": "number"}, "related": array(related)})
+search_request = obj({"classroom_id": UUID, "query": {"type": "string", "minLength": 1, "maxLength": 1000}, "top_k": {"type": "integer", "minimum": 1, "maximum": 30, "default": 8}, "rerank": {"type": "boolean", "default": True}, "document_ids": array(UUID), "doc_types": array(DOC_TYPE, maximum=3)}, ["classroom_id", "query"])
+search_response = obj({"results": array(search_hit, maximum=30), "rerank_fallback": {"type": "boolean"}})
 classroom = obj({"id": UUID, "name": TEXT, "teacher_id": TEXT})
 node = obj({"id": UUID, "kind": {"enum": ["subject", "course", "unit", "topic", "skill", "objective"]}, "name": TEXT, "parent_id": {"type": ["string", "null"], "format": "uuid"}})
 evaluation = obj({"id": UUID, "assessment_id": UUID, "classroom_id": UUID, "student_id": TEXT, "status": {"enum": ["draft", "finalized"]}, "evidence": array(evidence, 1, 50)})
@@ -48,7 +55,7 @@ def operation(method, path, body, response, code=200, query=()):
 operations = {
     "identity": [operation("POST", "/v1/me", obj({}), obj({"id": TEXT, "org_id": TEXT, "role": {"enum": ["teacher", "student"]}})), operation("GET", "/v1/classrooms", None, array(classroom)), operation("POST", "/v1/classrooms", obj({"name": {"type": "string", "minLength": 1, "maxLength": 120}}), classroom, 201), operation("GET", "/v1/classrooms/{id}/access", None, obj({"allowed": {"const": True}}), query=["student_id"]), operation("POST", "/v1/classrooms/{id}/enrollments", obj({"student_id": TEXT}), obj({"student_id": TEXT, "classroom_id": UUID}))],
     "curriculum": [operation("GET", "/v1/nodes", None, array(node, maximum=200)), operation("GET", "/v1/nodes/{id}", None, node), operation("POST", "/v1/nodes", obj({k: v for k, v in node["properties"].items() if k != "id"}, ["kind", "name"]), node, 201), operation("PATCH", "/v1/nodes/{id}", obj({"name": TEXT}), obj({"id": UUID, "name": TEXT})), operation("DELETE", "/v1/nodes/{id}", None, None, 204), operation("POST", "/v1/skills/{id}/prerequisites", obj({"prerequisite_id": UUID}), obj({"skill_id": UUID, "prerequisite_id": UUID}))],
-    "content": [operation("GET", "/v1/documents", None, array(document), query=["classroom_id"]), operation("GET", "/v1/documents/{id}", None, document), operation("POST", "/v1/documents", None, document, 201, query=["classroom_id", "title"])],
+    "content": [operation("GET", "/v1/documents", None, array(document), query=["classroom_id"]), operation("GET", "/v1/documents/{id}", None, document), operation("POST", "/v1/documents", None, document, 201, query=["classroom_id", "title"]), operation("POST", "/v1/documents/{id}/reindex", None, document, 202), operation("POST", "/v1/search", search_request, search_response)],
     "assessment": [operation("GET", "/v1/assessments", None, array(obj({"id": UUID, "title": TEXT})), query=["classroom_id"]), operation("POST", "/v1/assessments", obj({"classroom_id": UUID, "title": {"type": "string", "minLength": 1, "maxLength": 160}, "questions": array(question_input, 1, 50)}), assessment, 201), operation("GET", "/v1/assessments/{id}", None, {"oneOf": [assessment, public_assessment]}), operation("POST", "/v1/assessments/{id}/submissions", obj({"answers": {"type": "object", "additionalProperties": TEXT}}), obj({"id": UUID, "status": {"const": "submitted"}}), 201)],
     "grading": [operation("GET", "/v1/evaluations", None, array(evaluation), query=["classroom_id"]), operation("POST", "/v1/evaluations/{id}/finalize", obj({"reason": {"type": "string", "minLength": 1, "maxLength": 1000}, "overrides": {"type": "object", "additionalProperties": {"type": "integer", "minimum": 0, "maximum": 1}}}, ["reason"]), evaluation)],
 }
@@ -57,14 +64,19 @@ for name, routes in operations.items():
     for path, method, op in routes:
         paths.setdefault(path, {})[method] = op
     if name == "content":
-        paths["/v1/documents"]["post"]["requestBody"] = {"required": True, "content": {kind: {"schema": {"type": "string", "format": "binary", "maxLength": 5242880}} for kind in ["text/plain", "application/pdf"]}}
+        upload = paths["/v1/documents"]["post"]
+        upload["requestBody"] = {"required": True, "content": {kind: {"schema": {"type": "string", "format": "binary", "maxLength": size}} for kind, size in [("text/plain", 5242880), ("application/pdf", 52428800)]}}
+        upload["parameters"].append({"name": "doc_type", "in": "query", "required": False, "schema": {**DOC_TYPE, "default": "teaching_material"}})
+        upload["responses"]["413"] = {"description": "Too large", "content": {"application/json": {"schema": error}}}
+        paths["/v1/documents/{id}/figures/{image}"] = {"get": {"parameters": [{"name": "id", "in": "path", "required": True, "schema": UUID}, {"name": "image", "in": "path", "required": True, "schema": FIGURE}], "responses": {"200": {"description": "A figure crop a search result points at", "content": {"image/png": {"schema": {"type": "string", "format": "binary"}}}}, "404": {"description": "Not found", "content": {"application/json": {"schema": error}}}}}}
         paths["/v1/documents/{id}/original"] = {"get": {"parameters": [{"name": "id", "in": "path", "required": True, "schema": UUID}], "responses": {"200": {"description": "Authorized original file", "content": {"application/octet-stream": {"schema": {"type": "string", "format": "binary"}}}}}}}
     for path in ["/health/live", "/health/ready"]:
         paths[path] = {"get": {"security": [], "responses": {"200": {"description": "Healthy"}, "503": {"description": "Essential dependency unavailable"}}}}
     save(f"contracts/http/{name}.openapi.json", {"openapi": "3.1.0", "info": {"title": name, "version": "1.0.0"}, "security": [{"bearerAuth": []}], "components": {"securitySchemes": {"bearerAuth": {"type": "http", "scheme": "bearer", "bearerFormat": "JWT"}}}, "paths": paths})
 
 payloads = {
-    "content.uploaded.v1": obj({"document_id": UUID, "classroom_id": UUID, "org_id": TEXT, "revision": {"type": "integer", "minimum": 1}, "status": {"enum": ["extracted", "extraction_unsupported"]}}),
+    "content.uploaded.v1": obj({"document_id": UUID, "classroom_id": UUID, "org_id": TEXT, "revision": {"type": "integer", "minimum": 1}, "status": {"enum": ["extracted", "extraction_unsupported", "indexing"]}}),
+    "content.indexed.v1": obj({"document_id": UUID, "classroom_id": UUID, "org_id": TEXT, "revision": {"type": "integer", "minimum": 1}, "doc_type": DOC_TYPE, "page_count": {"type": "integer", "minimum": 0}, "chunk_count": {"type": "integer", "minimum": 1}, "embedding_model": TEXT}),
     "assessment.submitted.v1": obj({"submission_id": UUID, "assessment_id": UUID, "classroom_id": UUID, "org_id": TEXT, "student_id": TEXT, "questions": array(question, 1, 50), "answers": {"type": "object", "additionalProperties": TEXT}}),
     "grading.finalized.v1": obj({"evaluation_id": UUID, "assessment_id": UUID, "classroom_id": UUID, "org_id": TEXT, "student_id": TEXT, "evidence": array(evidence, 1, 50)}),
 }
@@ -76,4 +88,4 @@ env = dict(os.environ, PYTHONPATH=str(ROOT/"packages/python-platform"))
 for name in ["analytics", "ai-core", "question-generation-agent", "student-performance-agent", "question-chatbot-agent"]:
     data = subprocess.check_output([sys.executable, "-c", "import json; from main import app; print(json.dumps(app.openapi()))"], cwd=ROOT/"services"/name, env=env, text=True)
     save(f"contracts/http/{name}.openapi.json", json.loads(data))
-print("Exported ten HTTP contracts and three implemented event schemas.")
+print(f"Exported ten HTTP contracts and {len(payloads)} implemented event schemas.")

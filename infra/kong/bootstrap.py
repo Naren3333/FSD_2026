@@ -17,7 +17,7 @@ else:
 public_key = "-----BEGIN PUBLIC KEY-----\n" + realm["public_key"] + "\n-----END PUBLIC KEY-----"
 config = {
     "_format_version": "3.0",
-    "services": [{"name": name, "url": f"http://{name}:8080/v1", "connect_timeout": 5000, "read_timeout": 20000, "write_timeout": 20000, "routes": [{"name": name, "paths": [f"/api/{name}"], "strip_path": True}]} for name in ["identity", "curriculum", "content", "assessment", "grading", "analytics"]],
+    "services": [{"name": name, "url": f"http://{name}:8080/v1", "connect_timeout": 5000, "read_timeout": 20000, "write_timeout": 20000, "routes": [{"name": name, "paths": [f"/api/{name}"], "strip_path": True, **({"plugins": [{"name": "request-size-limiting", "config": {"allowed_payload_size": 51}}]} if name == "content" else {})}]} for name in ["identity", "curriculum", "content", "assessment", "grading", "analytics"]],
     "consumers": [{"username": "keycloak", "jwt_secrets": [{"key": "http://localhost:8081/realms/learning", "algorithm": "RS256", "rsa_public_key": public_key}]}],
     "plugins": [
         {"name": "jwt", "config": {"claims_to_verify": ["exp"], "header_names": ["authorization"], "uri_param_names": [], "cookie_names": []}},

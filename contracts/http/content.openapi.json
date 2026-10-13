@@ -64,7 +64,10 @@
                       "status": {
                         "enum": [
                           "extracted",
-                          "extraction_unsupported"
+                          "extraction_unsupported",
+                          "indexing",
+                          "indexed",
+                          "failed"
                         ]
                       },
                       "revision": {
@@ -74,6 +77,13 @@
                       "sha256": {
                         "type": "string",
                         "pattern": "^[a-f0-9]{64}$"
+                      },
+                      "doc_type": {
+                        "enum": [
+                          "teaching_material",
+                          "rubric",
+                          "marking_scheme"
+                        ]
                       },
                       "chunks": {
                         "type": "array",
@@ -107,6 +117,31 @@
                         },
                         "minItems": 0,
                         "maxItems": 10000
+                      },
+                      "page_count": {
+                        "type": "integer",
+                        "minimum": 0
+                      },
+                      "chunk_count": {
+                        "type": "integer",
+                        "minimum": 0
+                      },
+                      "embedding_model": {
+                        "type": "string",
+                        "minLength": 1
+                      },
+                      "indexed_at": {
+                        "type": "string",
+                        "format": "date-time"
+                      },
+                      "failure_reason": {
+                        "enum": [
+                          "NO_TEXT_LAYER",
+                          "ENCRYPTED",
+                          "CORRUPT",
+                          "AI_UNAVAILABLE",
+                          "INTERNAL"
+                        ]
                       }
                     },
                     "required": [
@@ -116,7 +151,8 @@
                       "mime_type",
                       "status",
                       "revision",
-                      "sha256"
+                      "sha256",
+                      "doc_type"
                     ],
                     "additionalProperties": false
                   },
@@ -352,6 +388,19 @@
               "type": "string",
               "minLength": 1
             }
+          },
+          {
+            "name": "doc_type",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "enum": [
+                "teaching_material",
+                "rubric",
+                "marking_scheme"
+              ],
+              "default": "teaching_material"
+            }
           }
         ],
         "responses": {
@@ -383,7 +432,10 @@
                     "status": {
                       "enum": [
                         "extracted",
-                        "extraction_unsupported"
+                        "extraction_unsupported",
+                        "indexing",
+                        "indexed",
+                        "failed"
                       ]
                     },
                     "revision": {
@@ -393,6 +445,13 @@
                     "sha256": {
                       "type": "string",
                       "pattern": "^[a-f0-9]{64}$"
+                    },
+                    "doc_type": {
+                      "enum": [
+                        "teaching_material",
+                        "rubric",
+                        "marking_scheme"
+                      ]
                     },
                     "chunks": {
                       "type": "array",
@@ -426,6 +485,31 @@
                       },
                       "minItems": 0,
                       "maxItems": 10000
+                    },
+                    "page_count": {
+                      "type": "integer",
+                      "minimum": 0
+                    },
+                    "chunk_count": {
+                      "type": "integer",
+                      "minimum": 0
+                    },
+                    "embedding_model": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "indexed_at": {
+                      "type": "string",
+                      "format": "date-time"
+                    },
+                    "failure_reason": {
+                      "enum": [
+                        "NO_TEXT_LAYER",
+                        "ENCRYPTED",
+                        "CORRUPT",
+                        "AI_UNAVAILABLE",
+                        "INTERNAL"
+                      ]
                     }
                   },
                   "required": [
@@ -435,7 +519,1120 @@
                     "mime_type",
                     "status",
                     "revision",
-                    "sha256"
+                    "sha256",
+                    "doc_type"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthenticated",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "minLength": 1
+                        },
+                        "message": {
+                          "type": "string",
+                          "minLength": 1
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message"
+                      ],
+                      "additionalProperties": false
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "minLength": 1
+                        },
+                        "message": {
+                          "type": "string",
+                          "minLength": 1
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message"
+                      ],
+                      "additionalProperties": false
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "minLength": 1
+                        },
+                        "message": {
+                          "type": "string",
+                          "minLength": 1
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message"
+                      ],
+                      "additionalProperties": false
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "State conflict",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "minLength": 1
+                        },
+                        "message": {
+                          "type": "string",
+                          "minLength": 1
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message"
+                      ],
+                      "additionalProperties": false
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "minLength": 1
+                        },
+                        "message": {
+                          "type": "string",
+                          "minLength": 1
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message"
+                      ],
+                      "additionalProperties": false
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Dependency unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "minLength": 1
+                        },
+                        "message": {
+                          "type": "string",
+                          "minLength": 1
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message"
+                      ],
+                      "additionalProperties": false
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "Too large",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "minLength": 1
+                        },
+                        "message": {
+                          "type": "string",
+                          "minLength": 1
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message"
+                      ],
+                      "additionalProperties": false
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "text/plain": {
+              "schema": {
+                "type": "string",
+                "format": "binary",
+                "maxLength": 5242880
+              }
+            },
+            "application/pdf": {
+              "schema": {
+                "type": "string",
+                "format": "binary",
+                "maxLength": 52428800
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/documents/{id}": {
+      "get": {
+        "operationId": "GET_v1_documents_id",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "id": {
+                      "type": "string",
+                      "format": "uuid"
+                    },
+                    "classroom_id": {
+                      "type": "string",
+                      "format": "uuid"
+                    },
+                    "title": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "mime_type": {
+                      "enum": [
+                        "text/plain",
+                        "application/pdf"
+                      ]
+                    },
+                    "status": {
+                      "enum": [
+                        "extracted",
+                        "extraction_unsupported",
+                        "indexing",
+                        "indexed",
+                        "failed"
+                      ]
+                    },
+                    "revision": {
+                      "type": "integer",
+                      "minimum": 1
+                    },
+                    "sha256": {
+                      "type": "string",
+                      "pattern": "^[a-f0-9]{64}$"
+                    },
+                    "doc_type": {
+                      "enum": [
+                        "teaching_material",
+                        "rubric",
+                        "marking_scheme"
+                      ]
+                    },
+                    "chunks": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "ordinal": {
+                            "type": "integer",
+                            "minimum": 0
+                          },
+                          "text": {
+                            "type": "string",
+                            "minLength": 1
+                          },
+                          "start_character": {
+                            "type": "integer",
+                            "minimum": 0
+                          },
+                          "end_character": {
+                            "type": "integer",
+                            "minimum": 1
+                          }
+                        },
+                        "required": [
+                          "ordinal",
+                          "text",
+                          "start_character",
+                          "end_character"
+                        ],
+                        "additionalProperties": false
+                      },
+                      "minItems": 0,
+                      "maxItems": 10000
+                    },
+                    "page_count": {
+                      "type": "integer",
+                      "minimum": 0
+                    },
+                    "chunk_count": {
+                      "type": "integer",
+                      "minimum": 0
+                    },
+                    "embedding_model": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "indexed_at": {
+                      "type": "string",
+                      "format": "date-time"
+                    },
+                    "failure_reason": {
+                      "enum": [
+                        "NO_TEXT_LAYER",
+                        "ENCRYPTED",
+                        "CORRUPT",
+                        "AI_UNAVAILABLE",
+                        "INTERNAL"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "id",
+                    "classroom_id",
+                    "title",
+                    "mime_type",
+                    "status",
+                    "revision",
+                    "sha256",
+                    "doc_type"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthenticated",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "minLength": 1
+                        },
+                        "message": {
+                          "type": "string",
+                          "minLength": 1
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message"
+                      ],
+                      "additionalProperties": false
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "minLength": 1
+                        },
+                        "message": {
+                          "type": "string",
+                          "minLength": 1
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message"
+                      ],
+                      "additionalProperties": false
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "minLength": 1
+                        },
+                        "message": {
+                          "type": "string",
+                          "minLength": 1
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message"
+                      ],
+                      "additionalProperties": false
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "State conflict",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "minLength": 1
+                        },
+                        "message": {
+                          "type": "string",
+                          "minLength": 1
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message"
+                      ],
+                      "additionalProperties": false
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "minLength": 1
+                        },
+                        "message": {
+                          "type": "string",
+                          "minLength": 1
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message"
+                      ],
+                      "additionalProperties": false
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Dependency unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "minLength": 1
+                        },
+                        "message": {
+                          "type": "string",
+                          "minLength": 1
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message"
+                      ],
+                      "additionalProperties": false
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/documents/{id}/reindex": {
+      "post": {
+        "operationId": "POST_v1_documents_id_reindex",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "202": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "id": {
+                      "type": "string",
+                      "format": "uuid"
+                    },
+                    "classroom_id": {
+                      "type": "string",
+                      "format": "uuid"
+                    },
+                    "title": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "mime_type": {
+                      "enum": [
+                        "text/plain",
+                        "application/pdf"
+                      ]
+                    },
+                    "status": {
+                      "enum": [
+                        "extracted",
+                        "extraction_unsupported",
+                        "indexing",
+                        "indexed",
+                        "failed"
+                      ]
+                    },
+                    "revision": {
+                      "type": "integer",
+                      "minimum": 1
+                    },
+                    "sha256": {
+                      "type": "string",
+                      "pattern": "^[a-f0-9]{64}$"
+                    },
+                    "doc_type": {
+                      "enum": [
+                        "teaching_material",
+                        "rubric",
+                        "marking_scheme"
+                      ]
+                    },
+                    "chunks": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "ordinal": {
+                            "type": "integer",
+                            "minimum": 0
+                          },
+                          "text": {
+                            "type": "string",
+                            "minLength": 1
+                          },
+                          "start_character": {
+                            "type": "integer",
+                            "minimum": 0
+                          },
+                          "end_character": {
+                            "type": "integer",
+                            "minimum": 1
+                          }
+                        },
+                        "required": [
+                          "ordinal",
+                          "text",
+                          "start_character",
+                          "end_character"
+                        ],
+                        "additionalProperties": false
+                      },
+                      "minItems": 0,
+                      "maxItems": 10000
+                    },
+                    "page_count": {
+                      "type": "integer",
+                      "minimum": 0
+                    },
+                    "chunk_count": {
+                      "type": "integer",
+                      "minimum": 0
+                    },
+                    "embedding_model": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "indexed_at": {
+                      "type": "string",
+                      "format": "date-time"
+                    },
+                    "failure_reason": {
+                      "enum": [
+                        "NO_TEXT_LAYER",
+                        "ENCRYPTED",
+                        "CORRUPT",
+                        "AI_UNAVAILABLE",
+                        "INTERNAL"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "id",
+                    "classroom_id",
+                    "title",
+                    "mime_type",
+                    "status",
+                    "revision",
+                    "sha256",
+                    "doc_type"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthenticated",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "minLength": 1
+                        },
+                        "message": {
+                          "type": "string",
+                          "minLength": 1
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message"
+                      ],
+                      "additionalProperties": false
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "minLength": 1
+                        },
+                        "message": {
+                          "type": "string",
+                          "minLength": 1
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message"
+                      ],
+                      "additionalProperties": false
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "minLength": 1
+                        },
+                        "message": {
+                          "type": "string",
+                          "minLength": 1
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message"
+                      ],
+                      "additionalProperties": false
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "State conflict",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "minLength": 1
+                        },
+                        "message": {
+                          "type": "string",
+                          "minLength": 1
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message"
+                      ],
+                      "additionalProperties": false
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "minLength": 1
+                        },
+                        "message": {
+                          "type": "string",
+                          "minLength": 1
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message"
+                      ],
+                      "additionalProperties": false
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Dependency unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "minLength": 1
+                        },
+                        "message": {
+                          "type": "string",
+                          "minLength": 1
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message"
+                      ],
+                      "additionalProperties": false
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/search": {
+      "post": {
+        "operationId": "POST_v1_search",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "results": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "chunk_id": {
+                            "type": "string",
+                            "format": "uuid"
+                          },
+                          "document_id": {
+                            "type": "string",
+                            "format": "uuid"
+                          },
+                          "title": {
+                            "type": "string",
+                            "minLength": 1
+                          },
+                          "doc_type": {
+                            "enum": [
+                              "teaching_material",
+                              "rubric",
+                              "marking_scheme"
+                            ]
+                          },
+                          "section_path": {
+                            "type": [
+                              "string",
+                              "null"
+                            ]
+                          },
+                          "page_start": {
+                            "type": "integer",
+                            "minimum": 1
+                          },
+                          "page_end": {
+                            "type": "integer",
+                            "minimum": 1
+                          },
+                          "content": {
+                            "type": "string",
+                            "minLength": 1
+                          },
+                          "kind": {
+                            "enum": [
+                              "text",
+                              "table",
+                              "figure"
+                            ]
+                          },
+                          "source": {
+                            "enum": [
+                              "pdf",
+                              "vision"
+                            ]
+                          },
+                          "image": {
+                            "type": [
+                              "string",
+                              "null"
+                            ],
+                            "pattern": "^[a-f0-9]{16}\\.png$"
+                          },
+                          "score": {
+                            "type": "number"
+                          },
+                          "related": {
+                            "type": "array",
+                            "items": {
+                              "type": "object",
+                              "properties": {
+                                "chunk_id": {
+                                  "type": "string",
+                                  "format": "uuid"
+                                },
+                                "kind": {
+                                  "enum": [
+                                    "table",
+                                    "figure",
+                                    "text"
+                                  ]
+                                },
+                                "label": {
+                                  "type": [
+                                    "string",
+                                    "null"
+                                  ]
+                                },
+                                "page_start": {
+                                  "type": "integer",
+                                  "minimum": 1
+                                },
+                                "image": {
+                                  "type": [
+                                    "string",
+                                    "null"
+                                  ],
+                                  "pattern": "^[a-f0-9]{16}\\.png$"
+                                },
+                                "content": {
+                                  "type": "string",
+                                  "minLength": 1
+                                }
+                              },
+                              "required": [
+                                "chunk_id",
+                                "kind",
+                                "label",
+                                "page_start",
+                                "image",
+                                "content"
+                              ],
+                              "additionalProperties": false
+                            },
+                            "minItems": 0,
+                            "maxItems": 100
+                          }
+                        },
+                        "required": [
+                          "chunk_id",
+                          "document_id",
+                          "title",
+                          "doc_type",
+                          "section_path",
+                          "page_start",
+                          "page_end",
+                          "content",
+                          "kind",
+                          "source",
+                          "image",
+                          "score",
+                          "related"
+                        ],
+                        "additionalProperties": false
+                      },
+                      "minItems": 0,
+                      "maxItems": 30
+                    },
+                    "rerank_fallback": {
+                      "type": "boolean"
+                    }
+                  },
+                  "required": [
+                    "results",
+                    "rerank_fallback"
                   ],
                   "additionalProperties": false
                 }
@@ -650,27 +1847,64 @@
         "requestBody": {
           "required": true,
           "content": {
-            "text/plain": {
+            "application/json": {
               "schema": {
-                "type": "string",
-                "format": "binary",
-                "maxLength": 5242880
-              }
-            },
-            "application/pdf": {
-              "schema": {
-                "type": "string",
-                "format": "binary",
-                "maxLength": 5242880
+                "type": "object",
+                "properties": {
+                  "classroom_id": {
+                    "type": "string",
+                    "format": "uuid"
+                  },
+                  "query": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 1000
+                  },
+                  "top_k": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 30,
+                    "default": 8
+                  },
+                  "rerank": {
+                    "type": "boolean",
+                    "default": true
+                  },
+                  "document_ids": {
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "format": "uuid"
+                    },
+                    "minItems": 0,
+                    "maxItems": 100
+                  },
+                  "doc_types": {
+                    "type": "array",
+                    "items": {
+                      "enum": [
+                        "teaching_material",
+                        "rubric",
+                        "marking_scheme"
+                      ]
+                    },
+                    "minItems": 0,
+                    "maxItems": 3
+                  }
+                },
+                "required": [
+                  "classroom_id",
+                  "query"
+                ],
+                "additionalProperties": false
               }
             }
           }
         }
       }
     },
-    "/v1/documents/{id}": {
+    "/v1/documents/{id}/figures/{image}": {
       "get": {
-        "operationId": "GET_v1_documents_id",
         "parameters": [
           {
             "name": "id",
@@ -680,268 +1914,31 @@
               "type": "string",
               "format": "uuid"
             }
+          },
+          {
+            "name": "image",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^[a-f0-9]{16}\\.png$"
+            }
           }
         ],
         "responses": {
           "200": {
-            "description": "Success",
+            "description": "A figure crop a search result points at",
             "content": {
-              "application/json": {
+              "image/png": {
                 "schema": {
-                  "type": "object",
-                  "properties": {
-                    "id": {
-                      "type": "string",
-                      "format": "uuid"
-                    },
-                    "classroom_id": {
-                      "type": "string",
-                      "format": "uuid"
-                    },
-                    "title": {
-                      "type": "string",
-                      "minLength": 1
-                    },
-                    "mime_type": {
-                      "enum": [
-                        "text/plain",
-                        "application/pdf"
-                      ]
-                    },
-                    "status": {
-                      "enum": [
-                        "extracted",
-                        "extraction_unsupported"
-                      ]
-                    },
-                    "revision": {
-                      "type": "integer",
-                      "minimum": 1
-                    },
-                    "sha256": {
-                      "type": "string",
-                      "pattern": "^[a-f0-9]{64}$"
-                    },
-                    "chunks": {
-                      "type": "array",
-                      "items": {
-                        "type": "object",
-                        "properties": {
-                          "ordinal": {
-                            "type": "integer",
-                            "minimum": 0
-                          },
-                          "text": {
-                            "type": "string",
-                            "minLength": 1
-                          },
-                          "start_character": {
-                            "type": "integer",
-                            "minimum": 0
-                          },
-                          "end_character": {
-                            "type": "integer",
-                            "minimum": 1
-                          }
-                        },
-                        "required": [
-                          "ordinal",
-                          "text",
-                          "start_character",
-                          "end_character"
-                        ],
-                        "additionalProperties": false
-                      },
-                      "minItems": 0,
-                      "maxItems": 10000
-                    }
-                  },
-                  "required": [
-                    "id",
-                    "classroom_id",
-                    "title",
-                    "mime_type",
-                    "status",
-                    "revision",
-                    "sha256"
-                  ],
-                  "additionalProperties": false
-                }
-              }
-            }
-          },
-          "401": {
-            "description": "Unauthenticated",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "properties": {
-                    "error": {
-                      "type": "object",
-                      "properties": {
-                        "code": {
-                          "type": "string",
-                          "minLength": 1
-                        },
-                        "message": {
-                          "type": "string",
-                          "minLength": 1
-                        }
-                      },
-                      "required": [
-                        "code",
-                        "message"
-                      ],
-                      "additionalProperties": false
-                    }
-                  },
-                  "required": [
-                    "error"
-                  ],
-                  "additionalProperties": false
-                }
-              }
-            }
-          },
-          "403": {
-            "description": "Forbidden",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "properties": {
-                    "error": {
-                      "type": "object",
-                      "properties": {
-                        "code": {
-                          "type": "string",
-                          "minLength": 1
-                        },
-                        "message": {
-                          "type": "string",
-                          "minLength": 1
-                        }
-                      },
-                      "required": [
-                        "code",
-                        "message"
-                      ],
-                      "additionalProperties": false
-                    }
-                  },
-                  "required": [
-                    "error"
-                  ],
-                  "additionalProperties": false
+                  "type": "string",
+                  "format": "binary"
                 }
               }
             }
           },
           "404": {
             "description": "Not found",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "properties": {
-                    "error": {
-                      "type": "object",
-                      "properties": {
-                        "code": {
-                          "type": "string",
-                          "minLength": 1
-                        },
-                        "message": {
-                          "type": "string",
-                          "minLength": 1
-                        }
-                      },
-                      "required": [
-                        "code",
-                        "message"
-                      ],
-                      "additionalProperties": false
-                    }
-                  },
-                  "required": [
-                    "error"
-                  ],
-                  "additionalProperties": false
-                }
-              }
-            }
-          },
-          "409": {
-            "description": "State conflict",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "properties": {
-                    "error": {
-                      "type": "object",
-                      "properties": {
-                        "code": {
-                          "type": "string",
-                          "minLength": 1
-                        },
-                        "message": {
-                          "type": "string",
-                          "minLength": 1
-                        }
-                      },
-                      "required": [
-                        "code",
-                        "message"
-                      ],
-                      "additionalProperties": false
-                    }
-                  },
-                  "required": [
-                    "error"
-                  ],
-                  "additionalProperties": false
-                }
-              }
-            }
-          },
-          "422": {
-            "description": "Validation error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "properties": {
-                    "error": {
-                      "type": "object",
-                      "properties": {
-                        "code": {
-                          "type": "string",
-                          "minLength": 1
-                        },
-                        "message": {
-                          "type": "string",
-                          "minLength": 1
-                        }
-                      },
-                      "required": [
-                        "code",
-                        "message"
-                      ],
-                      "additionalProperties": false
-                    }
-                  },
-                  "required": [
-                    "error"
-                  ],
-                  "additionalProperties": false
-                }
-              }
-            }
-          },
-          "503": {
-            "description": "Dependency unavailable",
             "content": {
               "application/json": {
                 "schema": {
