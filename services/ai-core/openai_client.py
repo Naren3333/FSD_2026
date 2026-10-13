@@ -9,6 +9,7 @@ only around create(), before the first token: a retry after it would repeat text
 """
 
 import asyncio
+import functools
 import logging
 import random
 from collections.abc import AsyncGenerator, Awaitable, Callable
@@ -17,6 +18,7 @@ from typing import Any, cast
 
 import openai
 from openai import AsyncOpenAI
+
 from settings import get_settings
 
 log = logging.getLogger("ai-core.openai_client")
@@ -32,7 +34,7 @@ _sleep = asyncio.sleep  # tests patch this
 _client: AsyncOpenAI | None = None
 
 
-class NotConfigured(Exception):
+class NotConfiguredError(Exception):
     """OPENAI_API_KEY is unset. The process still starts; only the calls fail."""
 
 
@@ -53,7 +55,7 @@ def get_client() -> AsyncOpenAI:
     if _client is None:
         key = get_settings().openai_api_key
         if key is None:
-            raise NotConfigured("OPENAI_API_KEY is not set")
+            raise NotConfiguredError("OPENAI_API_KEY is not set")
         _client = AsyncOpenAI(api_key=key, max_retries=0, timeout=TIMEOUT)
     return _client
 
@@ -69,7 +71,8 @@ async def embed(texts: list[str]) -> tuple[list[list[float]], int]:
     for start in range(0, len(texts), EMBED_BATCH):
         batch = texts[start : start + EMBED_BATCH]
         # encoding_format left unset: the SDK then requests base64 and decodes it to floats itself.
-        result = await _call(lambda: client.embeddings.create(model=model, input=batch, timeout=TIMEOUT))
+        create = functools.partial(client.embeddings.create, model=model, input=batch, timeout=TIMEOUT)
+        result = await _call(create)
         # Place by OpenAI's index rather than trusting the order of `data`.
         placed: list[list[float]] = [[] for _ in batch]
         for item in result.data:

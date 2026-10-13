@@ -1,19 +1,21 @@
-from pathlib import Path
 import json
 import logging
 import os
 import threading
+from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
-from typing import Any, AsyncIterator
+from pathlib import Path
+from typing import Any
 from uuid import UUID
 
 import httpx
 from confluent_kafka import Consumer, KafkaException, Producer
 from fastapi import Depends, Request
+from learning_transport import actor, application, failure
 from psycopg.rows import dict_row
 from psycopg_pool import ConnectionPool
 from pydantic import ValidationError
-from learning_transport import actor, application, failure
+
 from domain import Event, PerformanceResponse, summarize
 
 MIGRATION = (Path(__file__).parent / "migrations/001_init.sql").read_text()
@@ -83,6 +85,27 @@ def consume(pool: ConnectionPool[Any], stop: threading.Event, connected: threadi
             return
 
 
+def parse_event(value: bytes | None) -> Event | None:
+    """The event, or None when the message does not match the contract."""
+    try:
+        return Event.model_validate_json(value or b"")
+    except (ValidationError, ValueError):
+        return None
+
+
+def dead_letter(producer: Producer, msg: Any) -> None:
+    """Send an unreadable message to the dead-letter topic, raising unless the broker confirmed it."""
+    delivery_errors: list[Any] = []
+
+    def delivered(error: Any, _: Any) -> None:
+        if error:
+            delivery_errors.append(error)
+
+    producer.produce("grading.finalized.v1.dlq", key=msg.key(), value=msg.value(), on_delivery=delivered)
+    if producer.flush(12) or delivery_errors:
+        raise RuntimeError("Dead-letter delivery failed")
+
+
 def consume_session(pool: ConnectionPool[Any], stop: threading.Event, connected: threading.Event) -> bool:
     """One consumer session; returns whether it committed anything."""
     progressed = False
@@ -108,18 +131,9 @@ def consume_session(pool: ConnectionPool[Any], stop: threading.Event, connected:
                 continue
             if msg.error():
                 raise KafkaException(msg.error())
-            try:
-                event = Event.model_validate_json(msg.value())
-            except (ValidationError, ValueError):
-                delivery_errors: list[Any] = []
-                producer.produce(
-                    "grading.finalized.v1.dlq",
-                    key=msg.key(),
-                    value=msg.value(),
-                    on_delivery=lambda error, _: delivery_errors.append(error) if error else None,
-                )
-                if producer.flush(12) or delivery_errors:
-                    raise RuntimeError("Dead-letter delivery failed")
+            event = parse_event(msg.value())
+            if event is None:
+                dead_letter(producer, msg)
                 logger.error(
                     json.dumps(
                         {"service": "analytics", "error_category": "invalid_event", "dead_lettered": True}

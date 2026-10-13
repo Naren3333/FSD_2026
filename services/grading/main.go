@@ -1,3 +1,5 @@
+// Command grading is the Grading service: draft scores computed from submissions, which a classroom's teacher
+// reviews and finalizes.
 package main
 
 import (

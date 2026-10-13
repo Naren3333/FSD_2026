@@ -54,9 +54,7 @@ def actor(request: Request) -> dict[str, Any]:
             options={"require": ["exp", "iat", "sub", "org_id"]},
         )
     except (jwt.PyJWTError, jwt.PyJWKClientError):
-        raise failure(
-            401, "UNAUTHENTICATED", "The session is invalid or expired."
-        ) from None
+        raise failure(401, "UNAUTHENTICATED", "The session is invalid or expired.") from None
     if not claims.get("sub") or not claims.get("org_id"):
         raise failure(401, "UNAUTHENTICATED", "Identity claims are missing.")
     return dict(claims)
@@ -97,9 +95,7 @@ def application(name: str, **kwargs: Any) -> FastAPI:
         return JSONResponse(status_code=error.status_code, content={"error": detail})
 
     @app.exception_handler(RequestValidationError)
-    async def validation_error(
-        request: Request, error: RequestValidationError
-    ) -> JSONResponse:
+    async def validation_error(request: Request, error: RequestValidationError) -> JSONResponse:
         # Never include Pydantic's input value: it can contain confidential documents.
         return JSONResponse(
             status_code=422,
@@ -152,9 +148,7 @@ def application(name: str, **kwargs: Any) -> FastAPI:
                     "correlation_id": correlation,
                     "duration_ms": round((time.monotonic() - start) * 1000),
                     "status": response.status_code,
-                    "error_category": "http_error"
-                    if response.status_code >= 400
-                    else None,
+                    "error_category": "http_error" if response.status_code >= 400 else None,
                 }
             )
         )

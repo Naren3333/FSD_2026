@@ -4,6 +4,7 @@ No DB, no OpenAI: the vision pass's results are given directly."""
 from pathlib import Path
 
 import pymupdf
+from conftest import make_table_pdf
 
 from ingest import embed_text
 from ingest.chunker import CONTINUED, MAX_TOKENS, TRANSCRIBED, chunk_paras, encoding
@@ -12,7 +13,6 @@ from ingest.parse import Block, _join_continued, read_pages
 from ingest.strings import clean_cell, unligature
 from ingest.tables import Table, _header_rows, markdown, page_tables
 from ingest.vision import PageVision, SeenTable
-from conftest import make_table_pdf
 
 HEADER = ["Criterion", "Band 4", "Band 2"]
 RUBRIC = [
@@ -235,8 +235,10 @@ def test_a_value_moved_to_the_wrong_column_is_rejected(tmp_path: Path) -> None:
 def test_a_rejected_table_is_laid_out_once_and_read_as_pdf_text(tmp_path: Path, openai_fake) -> None:
     import asyncio
     import json
-    from ingest import rescue
+
     from test_vision import chat_reply
+
+    from ingest import rescue
 
     data, box = make_table_pdf(SPARSE_HEADER, SPARSE, ruled=False)
     path = tmp_path / "t.pdf"

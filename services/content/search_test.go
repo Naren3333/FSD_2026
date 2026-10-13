@@ -141,7 +141,7 @@ func newFakeAICore(t *testing.T) *fakeAICore {
 	f.Server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/token" {
 			if r.PostFormValue("client_id") != "content-indexer" || r.PostFormValue("client_secret") != "secret" {
-				w.WriteHeader(401)
+				w.WriteHeader(http.StatusUnauthorized)
 				return
 			}
 			f.tokens.Add(1)
@@ -149,7 +149,7 @@ func newFakeAICore(t *testing.T) *fakeAICore {
 			return
 		}
 		if r.Header.Get("Authorization") == "" {
-			w.WriteHeader(401)
+			w.WriteHeader(http.StatusUnauthorized)
 			return
 		}
 		switch r.URL.Path {
@@ -176,7 +176,7 @@ func TestIngestSendsThePDFAndDecodesFigures(t *testing.T) {
 	f.ingest = func(w http.ResponseWriter, r *http.Request) {
 		body, _ := io.ReadAll(r.Body)
 		if r.Header.Get("Content-Type") != "application/pdf" || string(body) != "%PDF-1.7" || r.URL.Query().Get("title") != "Biology & more" || r.Header.Get("Authorization") != "Bearer token-1" {
-			w.WriteHeader(400)
+			w.WriteHeader(http.StatusBadRequest)
 			return
 		}
 		json.NewEncoder(w).Encode(map[string]any{"outcome": "indexed", "figures": []map[string]string{{"image": "0123456789abcdef.png", "png_base64": "cG5n"}}})
@@ -196,12 +196,13 @@ func TestIngestSendsThePDFAndDecodesFigures(t *testing.T) {
 func TestErrorsCarryStatusAndCodeAndRefusedTokensAreDropped(t *testing.T) {
 	f := newFakeAICore(t)
 	f.ingest = func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(401)
+		w.WriteHeader(http.StatusUnauthorized)
 		w.Write([]byte(`{"error":{"code":"UNAUTHENTICATED","message":"x"}}`))
 	}
 	ai := f.client()
 	_, err := ai.ingest(t.Context(), "t", strings.NewReader("x"), 1, testBilled)
-	if e, ok := err.(*aiError); !ok || e.Status != 401 || e.Code != "UNAUTHENTICATED" || !transient(err) {
+	var e *aiError
+	if !errors.As(err, &e) || e.Status != 401 || e.Code != "UNAUTHENTICATED" || !transient(err) {
 		t.Fatalf("%v", err)
 	}
 	ai.ingest(t.Context(), "t", strings.NewReader("x"), 1, testBilled)
@@ -232,10 +233,10 @@ func TestTheBilledUserIsSentAndTheSpendLimitIsRecognised(t *testing.T) {
 	f.ingest = func(w http.ResponseWriter, r *http.Request) {
 		q := r.URL.Query()
 		if q.Get("billed_user") != "teacher-1" || q.Get("billed_org") != "org" || q.Get("billed_role") != "teacher" {
-			w.WriteHeader(422)
+			w.WriteHeader(http.StatusUnprocessableEntity)
 			return
 		}
-		w.WriteHeader(429)
+		w.WriteHeader(http.StatusTooManyRequests)
 		w.Write([]byte(`{"error":{"code":"AI_SPEND_LIMIT","message":"used up","resets_at":"2026-10-14T00:00:00+08:00"}}`))
 	}
 	_, err := f.client().ingest(t.Context(), "t", strings.NewReader("x"), 1, testBilled)

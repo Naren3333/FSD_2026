@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"learning/platform"
@@ -43,8 +44,8 @@ func (e *aiError) Error() string { return fmt.Sprintf("ai-core %d %s", e.Status,
 
 // spendLimit reports whether err is ai-core refusing because the billed user's daily allowance is used up.
 func spendLimit(err error) (*aiError, bool) {
-	e, ok := err.(*aiError)
-	if ok && e.Status == 429 && e.Code == "AI_SPEND_LIMIT" {
+	var e *aiError
+	if errors.As(err, &e) && e.Status == http.StatusTooManyRequests && e.Code == "AI_SPEND_LIMIT" {
 		return e, true
 	}
 	return nil, false
@@ -70,11 +71,15 @@ func caller(c platform.Claims) billed {
 // transient reports whether a later retry may succeed: ai-core or its provider being down, slow, rate limited or
 // not configured yet, or our token being refused. Anything else (a 4xx about the request) will fail again.
 func transient(err error) bool {
-	e, ok := err.(*aiError)
-	if !ok {
+	var e *aiError
+	if !errors.As(err, &e) {
 		return true
 	}
-	return e.Status == 0 || e.Status == 401 || e.Status == 408 || e.Status == 429 || e.Status >= 500
+	switch e.Status {
+	case 0, http.StatusUnauthorized, http.StatusRequestTimeout, http.StatusTooManyRequests:
+		return true
+	}
+	return e.Status >= http.StatusInternalServerError
 }
 
 type ingestChunk struct {
@@ -156,7 +161,7 @@ func (a *aiCore) call(ctx context.Context, path, contentType string, body io.Rea
 	if err != nil {
 		return &aiError{Code: "TOKEN_UNAVAILABLE"}
 	}
-	req, err := http.NewRequestWithContext(ctx, "POST", a.base+path, body)
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, a.base+path, body)
 	if err != nil {
 		return err
 	}
@@ -169,7 +174,7 @@ func (a *aiCore) call(ctx context.Context, path, contentType string, body io.Rea
 		return &aiError{Code: "UNREACHABLE"}
 	}
 	defer res.Body.Close()
-	if res.StatusCode != 200 {
+	if res.StatusCode != http.StatusOK {
 		var e struct {
 			Error struct {
 				Code     string    `json:"code"`
@@ -178,7 +183,7 @@ func (a *aiCore) call(ctx context.Context, path, contentType string, body io.Rea
 			} `json:"error"`
 		}
 		_ = json.NewDecoder(io.LimitReader(res.Body, 1<<16)).Decode(&e)
-		if res.StatusCode == 401 {
+		if res.StatusCode == http.StatusUnauthorized {
 			a.tokens.reset()
 		}
 		return &aiError{res.StatusCode, e.Error.Code, e.Error.Message, e.Error.ResetsAt}
@@ -205,7 +210,7 @@ func (t *tokenSource) get(ctx context.Context) (string, error) {
 		return t.token, nil
 	}
 	form := url.Values{"grant_type": {"client_credentials"}, "client_id": {t.id}, "client_secret": {t.secret}}
-	req, err := http.NewRequestWithContext(ctx, "POST", t.url, strings.NewReader(form.Encode()))
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, t.url, strings.NewReader(form.Encode()))
 	if err != nil {
 		return "", err
 	}
@@ -219,7 +224,7 @@ func (t *tokenSource) get(ctx context.Context) (string, error) {
 		AccessToken string `json:"access_token"`
 		ExpiresIn   int    `json:"expires_in"`
 	}
-	if res.StatusCode != 200 || json.NewDecoder(res.Body).Decode(&body) != nil || body.AccessToken == "" {
+	if res.StatusCode != http.StatusOK || json.NewDecoder(res.Body).Decode(&body) != nil || body.AccessToken == "" {
 		return "", fmt.Errorf("token endpoint answered %d", res.StatusCode)
 	}
 	t.token, t.expires = body.AccessToken, time.Now().Add(time.Duration(body.ExpiresIn)*time.Second-30*time.Second)

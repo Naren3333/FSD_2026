@@ -5,10 +5,10 @@ import json
 from pathlib import Path
 
 import pytest
+from conftest import BILLED_PARAMS, FakeOpenAI, ingested, make_pdf, page_key0, textbook
 from fastapi.testclient import TestClient
 
 from ingest import costs, vision
-from conftest import BILLED_PARAMS, FakeOpenAI, ingested, make_pdf, page_key0, textbook
 
 MODEL = "vision-model"
 EMPTY = '{"tables": [], "figures": []}'
@@ -123,7 +123,7 @@ def written(monkeypatch: pytest.MonkeyPatch) -> list[dict]:
 
 def test_every_ingest_logs_its_record(
     api: TestClient,
-    embeddings: FakeOpenAI,  # noqa: F811
+    embeddings: FakeOpenAI,
     written: list[dict],
 ) -> None:
     doc = ingested(api, textbook(), title="Cells")
@@ -140,7 +140,7 @@ def test_every_ingest_logs_its_record(
 
 def test_a_failed_ingest_records_its_reason(
     api: TestClient,
-    embeddings: FakeOpenAI,  # noqa: F811
+    embeddings: FakeOpenAI,
     written: list[dict],
 ) -> None:
     doc = ingested(api, make_pdf(password="secret"))

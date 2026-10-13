@@ -31,7 +31,6 @@ from itertools import zip_longest
 from pathlib import Path
 
 import tiktoken
-
 from ingest.headings import Para
 from ingest.tables import markdown_lines
 
@@ -186,7 +185,7 @@ def _table_chunks(enc: tiktoken.Encoding, para: Para) -> list[Chunk]:
         - sum(_tokens(enc, h) + 1 for h in head)
     )
     rows: list[tuple[tuple[str, ...], str]] = []
-    for row, line in zip(table.rows, row_lines):
+    for row, line in zip(table.rows, row_lines, strict=False):
         ids = enc.encode(line)
         if len(ids) <= budget:
             rows.append((row, line))

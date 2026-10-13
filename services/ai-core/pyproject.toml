@@ -1,6 +1,5 @@
 [tool.ruff]
-line-length = 110
-target-version = "py312"
+extend = "../../ruff.toml"
 [tool.mypy]
 python_version = "3.12"
 check_untyped_defs = true

@@ -6,9 +6,9 @@ from pathlib import Path
 
 import pymupdf
 import pytest
+from conftest import FakeOpenAI, make_pdf, page_key0
 
 from ingest import vision
-from conftest import FakeOpenAI, make_pdf, page_key0
 
 MODEL = "vision-model"
 

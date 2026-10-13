@@ -40,18 +40,18 @@ import os
 import re
 import time
 import uuid
-from dataclasses import dataclass, field, replace
 from collections.abc import Awaitable, Callable, Sequence
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Any
 
 import openai
 import pymupdf
 
+import openai_client
 import pdf
 from ingest import costs
 from ingest.strings import clean_cell, unligature
-import openai_client
 
 log = logging.getLogger("ai-core.ingest.vision")
 
@@ -339,6 +339,34 @@ def center_in(w: Sequence[Any], box: Box) -> bool:
 _slots: dict[tuple[asyncio.AbstractEventLoop, str], asyncio.Semaphore] = {}
 
 
+@dataclass(frozen=True)
+class PageRef:
+    """One page of the PDF being looked at: the file, the page's index, and where its model answers are cached."""
+
+    path: Path
+    number: int
+    key: str  # page_key: what the page shows
+    cache_dir: Path
+
+    def cache(self, model: str, kind: str = "page") -> Path:
+        return cache_file(self.cache_dir, model, self.key, kind)
+
+    def render(self, clip: Box | None = None, sharp: bool = False) -> Awaitable[bytes]:
+        return pdf.in_thread(_render, self.path, self.number, clip, sharp)
+
+    def __str__(self) -> str:
+        return f"{self.path.name} page {self.number + 1}"
+
+
+@dataclass(frozen=True)
+class VisionModels:
+    """Which model makes each kind of call; None turns that kind off."""
+
+    page: str
+    figure: str | None = None  # describes figures
+    ocr: str | None = None  # transcribes pages without a text layer
+
+
 def _semaphore(name: str = "page", size: int = CONCURRENCY) -> asyncio.Semaphore:
     """One limit per event loop: the service has one, but scripts and tests run several in turn."""
     loop = asyncio.get_running_loop()
@@ -389,9 +417,10 @@ async def see_pages(
     with its transcript."""
     sizes, words, keys, texts = await pdf.in_thread(_layout, path, max_pages)
     results: list[PageVision | None] = [None] * len(sizes)
+    models = VisionModels(model, figure_model, ocr_model)
     seen = await asyncio.gather(
         *(
-            _see_page(path, keys[n], n, sizes[n], words[n], model, cache_dir, figure_model, ocr_model, texts)
+            _see_page(PageRef(path, n, keys[n], cache_dir), sizes[n], words[n], models, texts)
             for n in range(min(max_pages, len(sizes)))
         )
     )
@@ -536,29 +565,19 @@ def _render(path: Path, number: int, clip: Box | None = None, sharp: bool = Fals
 
 
 async def _see_page(
-    path: Path,
-    key: str,
-    number: int,
+    page: PageRef,
     size: tuple[float, float],
     words: list[Word],
-    model: str,
-    cache_dir: Path,
-    figure_model: str | None,
-    ocr_model: str | None = None,
+    models: VisionModels,
     texts: Sequence[Sequence[str]] = (),
 ) -> PageVision | None:
     width, height = size
     # a page without a text layer is transcribed whole, before (and whatever becomes of) the page call
-    ocr = ocr_model is not None and not has_text_layer(words)
     transcript = (
-        await _transcribed_page(path, key, number, ocr_model, cache_dir) if ocr and ocr_model else None
+        await _transcribed_page(page, models.ocr) if models.ocr and not has_text_layer(words) else None
     )
     try:
-        raw = await cached(
-            cache_file(cache_dir, model, key),
-            lambda: ask(PROMPT, lambda: pdf.in_thread(_render, path, number), model),
-            "page",
-        )
+        raw = await cached(page.cache(models.page), lambda: ask(PROMPT, page.render, models.page), "page")
         tables = [
             t
             for d in raw.get("tables") or []
@@ -569,32 +588,29 @@ async def _see_page(
             for d in raw.get("figures") or []
             if isinstance(d, dict) and (f := SeenFigure.from_json(d, width, height))
         ]
-        if (
-            transcript is not None
-        ):  # the transcript has the page's tables; a figure the size of the page is the scan
+        if transcript is not None:
+            # the transcript has the page's tables; a figure the size of the page is the scan
             tables = []
             figures = [f for f in figures if area(f.bbox) < FULL_PAGE_SHARE * width * height]
         # a picture of a table has no text to read, whatever style the model gives it: transcribe it instead
         tables = [
-            await _with_transcript(path, key, number, i, t, model, cache_dir) if _is_picture(t, words) else t
+            await _with_transcript(page, i, t, models.page) if _is_picture(t, words) else t
             for i, t in enumerate(tables)
         ]
     except Exception as e:  # never fail the ingest over vision
-        log.warning("vision failed for %s page %d, falling back to lines: %s", path.name, number + 1, e)
+        log.warning("vision failed for %s, falling back to lines: %s", page, e)
         return None if transcript is None else PageVision(transcript=transcript)
-    if figure_model:
-        contexts = [figure_context(texts, f.caption, number) for f in figures]
+    if models.figure:
+        contexts = [figure_context(texts, f.caption, page.number) for f in figures]
         todo = [i for i, f in enumerate(figures) if describable(f, tables, width * height, contexts[i])]
         if todo:
-            graphics, lines = await pdf.in_thread(geometry, path, number)
+            graphics, lines = await pdf.in_thread(geometry, page.path, page.number)
             boxes = [f.bbox for f in figures]
             for i in todo:
                 blockers = [t.bbox for t in tables] + [b for j, b in enumerate(boxes) if j != i]
                 figures[i] = replace(figures[i], bbox=snap(figures[i].bbox, graphics, lines, blockers, size))
         figures = [
-            await _described(path, key, number, i, f, words, figure_model, cache_dir, contexts[i])
-            if i in todo
-            else f
+            await _described(page, i, f, words, models.figure, contexts[i]) if i in todo else f
             for i, f in enumerate(figures)
         ]
     return PageVision(tables, figures, transcript)
@@ -698,23 +714,21 @@ def has_text_layer(words: list[Word]) -> bool:
     return sum(len(w[4]) for w in words) >= MIN_PAGE_CHARS
 
 
-async def _transcribed_page(
-    path: Path, key: str, number: int, model: str, cache_dir: Path
-) -> tuple[SeenText, ...] | None:
+async def _transcribed_page(page: PageRef, model: str) -> tuple[SeenText, ...] | None:
     """The page's text as the OCR model reads it, or None if the call fails (the page then has no text)."""
     try:
         raw = await cached(
-            cache_file(cache_dir, model, key, f"ocr-v{OCR_PROMPT_VERSION}"),
+            page.cache(model, f"ocr-v{OCR_PROMPT_VERSION}"),
             lambda: ask(
                 OCR_PROMPT,
-                lambda: pdf.in_thread(_render, path, number, None, True),
+                lambda: page.render(sharp=True),
                 model,
                 _semaphore("figure", FIGURE_CONCURRENCY),
             ),
             "ocr",
         )
     except Exception as e:
-        log.warning("page %d of %s not transcribed: %s", number + 1, path.name, e)
+        log.warning("%s not transcribed: %s", page, e)
         return None
     return tuple(b for d in raw.get("blocks") or [] if isinstance(d, dict) and (b := SeenText.from_json(d)))
 
@@ -733,21 +747,13 @@ def describable(f: SeenFigure, tables: list[SeenTable], page_area: float, contex
 
 
 async def _described(
-    path: Path,
-    key: str,
-    number: int,
-    i: int,
-    f: SeenFigure,
-    words: list[Word],
-    model: str,
-    cache_dir: Path,
-    context: str = "",
+    page: PageRef, i: int, f: SeenFigure, words: list[Word], model: str, context: str = ""
 ) -> SeenFigure:
     """The figure with its description, crop and PDF words; unchanged (so not indexed) if the call fails or
     the model finds nothing useful in it."""
     inside = " ".join(w[4] for w in words if center_in(w, pad(f.bbox)))
     try:
-        png = await pdf.in_thread(_render, path, number, pad(f.bbox))
+        png = await page.render(pad(f.bbox))
         caption = f' (caption: "{f.caption}")' if f.caption else ""
         prompt = DESCRIBE_PROMPT.format(
             type=f.type or "figure",
@@ -759,12 +765,12 @@ async def _described(
         # document may be cited differently): both name the answer, so neither can be reused for another
         what = hashlib.sha256(f"{[round(v, 1) for v in f.bbox]}|{context}".encode()).hexdigest()[:8]
         raw = await cached(
-            cache_file(cache_dir, model, key, f"f{i}-d{DESCRIBE_PROMPT_VERSION}-{what}"),
+            page.cache(model, f"f{i}-d{DESCRIBE_PROMPT_VERSION}-{what}"),
             lambda: ask(prompt, png, model, _semaphore("figure", FIGURE_CONCURRENCY)),
             "describe",
         )
     except Exception as e:
-        log.warning("figure %d on %s page %d not described: %s", i + 1, path.name, number + 1, e)
+        log.warning("figure %d on %s not described: %s", i + 1, page, e)
         return f
     description = " ".join(str(raw.get("description") or "").split())
     if raw.get("useful") is False or not description:
@@ -772,7 +778,7 @@ async def _described(
     values = tuple(
         v
         for v in (
-            " ".join(str(x).split()) for x in raw.get("key_values") or [] if isinstance(x, (str, int, float))
+            " ".join(str(x).split()) for x in raw.get("key_values") or [] if isinstance(x, str | int | float)
         )
         if v
     )
@@ -785,12 +791,10 @@ def _is_picture(t: SeenTable, words: list[Word]) -> bool:
     return t.style == "image" or inside < MIN_TEXT_WORDS
 
 
-async def _with_transcript(
-    path: Path, key: str, number: int, i: int, t: SeenTable, model: str, cache_dir: Path
-) -> SeenTable:
+async def _with_transcript(page: PageRef, i: int, t: SeenTable, model: str) -> SeenTable:
     raw = await cached(
-        cache_file(cache_dir, model, key, f"t{i}-v{TRANSCRIBE_PROMPT_VERSION}"),
-        lambda: ask(TRANSCRIBE_PROMPT, lambda: pdf.in_thread(_render, path, number, pad(t.bbox)), model),
+        page.cache(model, f"t{i}-v{TRANSCRIBE_PROMPT_VERSION}"),
+        lambda: ask(TRANSCRIBE_PROMPT, lambda: page.render(pad(t.bbox)), model),
         "transcribe",
     )
     rows = [tuple(clean_cell(c) for c in row) for row in raw.get("rows") or [] if isinstance(row, list)]

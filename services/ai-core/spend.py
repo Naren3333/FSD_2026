@@ -15,9 +15,9 @@ from pathlib import Path
 from typing import Any, Literal, Protocol
 
 from learning_transport import Contract, failure
-from pydantic import Field
 from psycopg.rows import dict_row
 from psycopg_pool import AsyncConnectionPool
+from pydantic import Field
 
 log = logging.getLogger("ai-core.spend")
 

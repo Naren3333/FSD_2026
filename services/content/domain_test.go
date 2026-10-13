@@ -1,6 +1,7 @@
 package main
 
 import (
+	"errors"
 	"strings"
 	"testing"
 )
@@ -22,7 +23,7 @@ func TestPDFHonestStatus(t *testing.T) {
 	}
 }
 func TestTextLimit(t *testing.T) {
-	if _, _, err := extract([]byte(strings.Repeat("a", maxText+1)), "text/plain"); err != errTooLarge {
+	if _, _, err := extract([]byte(strings.Repeat("a", maxText+1)), "text/plain"); !errors.Is(err, errTooLarge) {
 		t.Fatal("text over 5 MiB accepted")
 	}
 }

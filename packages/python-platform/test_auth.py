@@ -7,6 +7,7 @@ import pytest
 from cryptography.hazmat.primitives.asymmetric import rsa
 from fastapi import HTTPException
 from starlette.requests import Request
+
 import learning_transport as transport
 
 
@@ -16,9 +17,7 @@ def test_real_jwt_validation(monkeypatch: Any) -> None:
     monkeypatch.setattr(
         transport,
         "keyset",
-        lambda: SimpleNamespace(
-            get_signing_key_from_jwt=lambda _: SimpleNamespace(key=key.public_key())
-        ),
+        lambda: SimpleNamespace(get_signing_key_from_jwt=lambda _: SimpleNamespace(key=key.public_key())),
     )
     monkeypatch.setenv("OIDC_ISSUER", "https://identity.example.test")
     monkeypatch.setenv("OIDC_AUDIENCE", "learning")

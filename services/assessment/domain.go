@@ -43,38 +43,46 @@ func (v Assessment) Validate() error {
 		return errors.New("provide a classroom, title, and 1–50 questions")
 	}
 	for _, q := range v.Questions {
-		if strings.TrimSpace(q.Prompt) == "" || len(q.Prompt) > 2000 || !platform.ID(q.Skill) {
-			return errors.New("each question needs a prompt and curriculum skill")
+		if err := q.validate(); err != nil {
+			return err
 		}
-		switch q.Type {
-		case "multiple_choice":
-			if len(q.Options) < 2 || len(q.Options) > 8 {
-				return errors.New("multiple choice needs 2–8 options")
-			}
-			found := false
-			seen := map[string]bool{}
-			for _, o := range q.Options {
-				if strings.TrimSpace(o) == "" || len(o) > 500 || seen[o] {
-					return errors.New("options must be unique nonempty values")
-				}
-				seen[o] = true
-				if o == q.Answer {
-					found = true
-				}
-			}
-			if !found {
-				return errors.New("answer must match one option")
-			}
-			if q.Tolerance != "" {
-				return errors.New("multiple choice has no tolerance")
-			}
-		case "numerical":
-			if !decimal.MatchString(q.Answer) || !decimal.MatchString(q.Tolerance) || strings.HasPrefix(q.Tolerance, "-") || len(q.Options) > 0 {
-				return errors.New("numerical answers require decimal answer and nonnegative decimal tolerance, without options")
-			}
-		default:
-			return errors.New("unsupported question type")
+	}
+	return nil
+}
+
+func (q Question) validate() error {
+	if strings.TrimSpace(q.Prompt) == "" || len(q.Prompt) > 2000 || !platform.ID(q.Skill) {
+		return errors.New("each question needs a prompt and curriculum skill")
+	}
+	switch q.Type {
+	case "multiple_choice":
+		return q.validateMultipleChoice()
+	case "numerical":
+		if !decimal.MatchString(q.Answer) || !decimal.MatchString(q.Tolerance) || strings.HasPrefix(q.Tolerance, "-") || len(q.Options) > 0 {
+			return errors.New("numerical answers require decimal answer and nonnegative decimal tolerance, without options")
 		}
+		return nil
+	default:
+		return errors.New("unsupported question type")
+	}
+}
+
+func (q Question) validateMultipleChoice() error {
+	if len(q.Options) < 2 || len(q.Options) > 8 {
+		return errors.New("multiple choice needs 2–8 options")
+	}
+	seen := map[string]bool{}
+	for _, o := range q.Options {
+		if strings.TrimSpace(o) == "" || len(o) > 500 || seen[o] {
+			return errors.New("options must be unique nonempty values")
+		}
+		seen[o] = true
+	}
+	if !seen[q.Answer] {
+		return errors.New("answer must match one option")
+	}
+	if q.Tolerance != "" {
+		return errors.New("multiple choice has no tolerance")
 	}
 	return nil
 }

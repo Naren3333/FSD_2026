@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"learning/platform"
 	"log/slog"
@@ -91,29 +92,10 @@ func (s server) search(w http.ResponseWriter, r *http.Request) {
 	if !platform.Decode(w, r, &req) {
 		return
 	}
-	req.Query = strings.TrimSpace(req.Query)
-	topK, rerank := 8, true
-	if req.TopK != nil {
-		topK = *req.TopK
-	}
-	if req.Rerank != nil {
-		rerank = *req.Rerank
-	}
-	if req.Query == "" || utf8.RuneCountInString(req.Query) > maxQuery || topK < 1 || topK > rrfKeep || len(req.DocumentIDs) > 100 {
-		platform.Error(w, 422, "VALIDATION_ERROR", "Send a query of 1–1000 characters, top_k 1–30 and at most 100 document ids.")
+	topK, rerank, problem := req.normalize()
+	if problem != "" {
+		platform.Error(w, 422, "VALIDATION_ERROR", problem)
 		return
-	}
-	for _, id := range req.DocumentIDs {
-		if !platform.ID(id) {
-			platform.Error(w, 422, "VALIDATION_ERROR", "Document ids must be UUIDs.")
-			return
-		}
-	}
-	for _, t := range req.DocTypes {
-		if !docTypes[t] {
-			platform.Error(w, 422, "VALIDATION_ERROR", "Unknown document type.")
-			return
-		}
 	}
 	relation, ok := s.Relation(w, r, req.Classroom, "")
 	if !ok {
@@ -129,18 +111,52 @@ func (s server) search(w http.ResponseWriter, r *http.Request) {
 	}
 	result, err := s.runSearch(r.Context(), f, req.Query, topK, rerank, caller(platform.Actor(r)))
 	if err != nil {
-		if limit, ok := spendLimit(err); ok {
-			platform.JSON(w, 429, map[string]any{"error": map[string]any{"code": limit.Code, "message": limit.Message, "resets_at": limit.ResetsAt}})
-			return
-		}
-		if _, ok := err.(*aiError); ok {
-			platform.Error(w, 503, "SEARCH_UNAVAILABLE", "Search is unavailable right now; retry later.")
-			return
-		}
-		platform.Fail(w, err)
+		searchFailed(w, err)
 		return
 	}
 	platform.JSON(w, 200, result)
+}
+
+// normalize trims the query and applies the defaults (top 8, reranked). It returns a message when the request is
+// out of bounds.
+func (req *searchRequest) normalize() (topK int, rerank bool, problem string) {
+	req.Query = strings.TrimSpace(req.Query)
+	topK, rerank = 8, true
+	if req.TopK != nil {
+		topK = *req.TopK
+	}
+	if req.Rerank != nil {
+		rerank = *req.Rerank
+	}
+	if req.Query == "" || utf8.RuneCountInString(req.Query) > maxQuery || topK < 1 || topK > rrfKeep || len(req.DocumentIDs) > 100 {
+		return 0, false, "Send a query of 1–1000 characters, top_k 1–30 and at most 100 document ids."
+	}
+	for _, id := range req.DocumentIDs {
+		if !platform.ID(id) {
+			return 0, false, "Document ids must be UUIDs."
+		}
+	}
+	for _, t := range req.DocTypes {
+		if !docTypes[t] {
+			return 0, false, "Unknown document type."
+		}
+	}
+	return topK, rerank, ""
+}
+
+// searchFailed answers a failed search: the user's AI allowance is used up, ai-core is unavailable, or an
+// internal error.
+func searchFailed(w http.ResponseWriter, err error) {
+	if limit, ok := spendLimit(err); ok {
+		platform.JSON(w, 429, map[string]any{"error": map[string]any{"code": limit.Code, "message": limit.Message, "resets_at": limit.ResetsAt}})
+		return
+	}
+	var unavailable *aiError
+	if errors.As(err, &unavailable) {
+		platform.Error(w, 503, "SEARCH_UNAVAILABLE", "Search is unavailable right now; retry later.")
+		return
+	}
+	platform.Fail(w, err)
 }
 
 func (s server) runSearch(ctx context.Context, f filter, query string, topK int, rerank bool, who billed) (searchResponse, error) {
@@ -270,8 +286,8 @@ func fuse(vector, keyword []hit) []hit {
 		for i, row := range rows {
 			h, ok := byID[row.ChunkID]
 			if !ok {
-				copy := row
-				h = &copy
+				first := row
+				h = &first
 				byID[row.ChunkID] = h
 				order = append(order, row.ChunkID)
 			}

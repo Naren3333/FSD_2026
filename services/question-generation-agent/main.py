@@ -1,9 +1,12 @@
 import os
+from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
-from typing import Any, AsyncIterator
+from typing import Any
+
 from fastapi import Depends
 from fastapi.responses import JSONResponse
 from learning_transport import ErrorResponse, actor, application, require_role, unavailable
+
 from contracts import RequestContract, ResponseContract
 
 

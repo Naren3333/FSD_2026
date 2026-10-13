@@ -47,7 +47,7 @@ func (s server) finalize(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	classroom, err := s.findClassroom(r.Context(), platform.Actor(r).Org, r.PathValue("id"))
-	if err == pgx.ErrNoRows {
+	if errors.Is(err, pgx.ErrNoRows) {
 		platform.Error(w, 404, "NOT_FOUND", "Evaluation not found.")
 		return
 	}

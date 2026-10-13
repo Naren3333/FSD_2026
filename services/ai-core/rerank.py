@@ -16,11 +16,11 @@ RERANK_TIMEOUT = 2.0
 _client: httpx2.AsyncClient | None = None
 
 
-class RerankNotConfigured(Exception):
+class RerankNotConfiguredError(Exception):
     """VOYAGE_API_KEY is unset."""
 
 
-class RerankFailed(Exception):
+class RerankError(Exception):
     """Voyage timed out, answered with an error, or sent a body without a score for every document."""
 
 
@@ -29,7 +29,7 @@ def get_client() -> httpx2.AsyncClient:
     if _client is None:
         settings = get_settings()
         if settings.voyage_api_key is None:
-            raise RerankNotConfigured("VOYAGE_API_KEY is not set")
+            raise RerankNotConfiguredError("VOYAGE_API_KEY is not set")
         _client = httpx2.AsyncClient(
             base_url=settings.voyage_base_url,
             timeout=RERANK_TIMEOUT,
@@ -58,14 +58,14 @@ async def rerank(query: str, documents: list[str]) -> tuple[list[float], int | N
         for item in body["data"]:
             scores[int(item["index"])] = float(item["relevance_score"])
     except httpx2.TimeoutException:
-        raise RerankFailed(f"timed out after {RERANK_TIMEOUT:.1f}s") from None
+        raise RerankError(f"timed out after {RERANK_TIMEOUT:.1f}s") from None
     except httpx2.HTTPStatusError as e:
-        raise RerankFailed(f"HTTP {e.response.status_code}") from None
+        raise RerankError(f"HTTP {e.response.status_code}") from None
     except Exception as e:  # unreachable, or a body that isn't Voyage's shape
-        raise RerankFailed(f"{type(e).__name__}") from None
+        raise RerankError(f"{type(e).__name__}") from None
     missing = scores.count(None)
     if missing:
-        raise RerankFailed(f"{missing} of {len(documents)} documents have no score")
+        raise RerankError(f"{missing} of {len(documents)} documents have no score")
     tokens = body.get("usage", {}).get("total_tokens")
     log.info("rerank: model=%s documents=%d tokens=%s", model, len(documents), tokens)
     return [s for s in scores if s is not None], tokens if isinstance(tokens, int) else None

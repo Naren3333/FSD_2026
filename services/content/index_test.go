@@ -250,7 +250,7 @@ func TestAnOutageIsRetriedThenFailsTheDocument(t *testing.T) {
 	f := newFixture(t)
 	id := f.upload("teaching_material")
 	f.ai.ingest = func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(503)
+		w.WriteHeader(http.StatusServiceUnavailable)
 		w.Write([]byte(`{"error":{"code":"AI_PROVIDER_NOT_CONFIGURED","message":"x"}}`))
 	}
 	f.runAll()
@@ -337,7 +337,7 @@ func TestSearchFusesRerankRelatedAndAccess(t *testing.T) {
 	if len(other.Results) != 0 {
 		t.Fatal("another classroom's chunks were returned")
 	}
-	f.ai.scores = func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(502) }
+	f.ai.scores = func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(http.StatusBadGateway) }
 	fallback, err := f.s.runSearch(ctx, all, "leaves", 2, true, testBilled)
 	if err != nil || !fallback.RerankFallback || len(fallback.Results) != 2 || fallback.Results[0].ChunkID != plain.Results[0].ChunkID {
 		t.Fatalf("fallback: %v", err)

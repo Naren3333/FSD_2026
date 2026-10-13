@@ -13,6 +13,7 @@ import logging
 import time
 from collections.abc import AsyncIterator
 from contextlib import aclosing
+from dataclasses import dataclass
 from typing import Any
 
 from fastapi.responses import StreamingResponse
@@ -76,6 +77,18 @@ def error_of(e: UpstreamError) -> tuple[str, str]:
     return "AI_PROVIDER_FAILED", "The model could not answer. Try again."
 
 
+@dataclass(frozen=True)
+class TurnRequest:
+    """What the user asked, in which thread, and on whose behalf."""
+
+    thread: dict[str, Any]
+    authorization: str  # the user's own bearer token, for Content search
+    correlation: str
+    content: str
+    history: list[dict[str, str]]
+    billed_to: dict[str, str]  # whose daily AI allowance pays for this turn's model calls
+
+
 class Turn:
     """One answer: runs the pipeline, yields SSE frames and saves the assistant message."""
 
@@ -85,17 +98,16 @@ class Turn:
         store: Store,
         settings: Settings,
         pending: set[asyncio.Task[Any]],
-        thread: dict[str, Any],
-        authorization: str,
-        correlation: str,
-        content: str,
-        history: list[dict[str, str]],
-        billed_to: dict[str, str],
+        request: TurnRequest,
     ) -> None:
         self.services, self.store, self.settings, self.pending = services, store, settings, pending
-        self.billed_to = billed_to  # whose daily AI allowance pays for this turn's model calls
-        self.thread, self.authorization, self.correlation = thread, authorization, correlation
-        self.content, self.history = content, history
+        self.billed_to = request.billed_to
+        self.thread, self.authorization, self.correlation = (
+            request.thread,
+            request.authorization,
+            request.correlation,
+        )
+        self.content, self.history = request.content, request.history
         self.started = time.perf_counter()
         self.parts: list[str] = []
         self.results: list[dict[str, Any]] = []

@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"learning/platform"
 
 	"github.com/jackc/pgx/v5"
@@ -22,7 +23,7 @@ func (s server) relation(ctx context.Context, c platform.Claims, classroom, stud
 		return "", nil
 	}
 	org, teacher, err := s.findClassroomOwner(ctx, classroom)
-	if err == pgx.ErrNoRows {
+	if errors.Is(err, pgx.ErrNoRows) {
 		return "", nil
 	}
 	if err != nil {

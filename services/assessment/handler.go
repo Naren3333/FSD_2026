@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/json"
+	"errors"
 	"learning/platform"
 	"net/http"
 
@@ -29,12 +30,7 @@ func (s server) create(w http.ResponseWriter, r *http.Request) {
 	checked := map[string]bool{}
 	for i, q := range v.Questions {
 		if !checked[q.Skill] {
-			status, err := s.checkSkill(r, q.Skill)
-			if err != nil {
-				platform.Fail(w, err)
-				return
-			}
-			switch status {
+			switch s.checkSkill(r, q.Skill) {
 			case skillUnavailable:
 				platform.Error(w, 503, "DEPENDENCY_UNAVAILABLE", "Curriculum unavailable.")
 				return
@@ -69,7 +65,7 @@ func (s server) list(w http.ResponseWriter, r *http.Request) {
 
 func (s server) get(w http.ResponseWriter, r *http.Request) {
 	v, err := s.findAssessment(r.Context(), platform.Actor(r).Org, r.PathValue("id"))
-	if err == pgx.ErrNoRows {
+	if errors.Is(err, pgx.ErrNoRows) {
 		platform.Error(w, 404, "NOT_FOUND", "Assessment not found.")
 		return
 	}
@@ -96,7 +92,7 @@ func (s server) submit(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	v, err := s.findAssessment(r.Context(), c.Org, r.PathValue("id"))
-	if err == pgx.ErrNoRows {
+	if errors.Is(err, pgx.ErrNoRows) {
 		platform.Error(w, 404, "NOT_FOUND", "Assessment not found.")
 		return
 	}

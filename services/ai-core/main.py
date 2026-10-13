@@ -8,9 +8,13 @@ import tempfile
 from collections.abc import AsyncGenerator, AsyncIterator, Coroutine
 from contextlib import asynccontextmanager
 from pathlib import Path
-from typing import Any, NoReturn, TypeVar
+from typing import Any, NoReturn
 
 import openai
+from fastapi import Depends, Query, Request
+from fastapi.responses import StreamingResponse
+from learning_transport import ErrorResponse, actor, application, failure, require_role
+
 import openai_client
 import rerank
 import spend
@@ -23,10 +27,7 @@ from contracts import (
     RerankResponse,
     ResponseContract,
 )
-from fastapi import Depends, Query, Request
-from fastapi.responses import StreamingResponse
-from ingest import IngestFailure, costs, ingest, vision_config
-from learning_transport import ErrorResponse, actor, application, failure, require_role
+from ingest import IngestError, costs, ingest, vision_config
 from settings import get_settings
 
 log = logging.getLogger("ai-core")
@@ -34,7 +35,6 @@ log = logging.getLogger("ai-core")
 MAX_PDF_BYTES = 50 * 1024 * 1024
 INGEST_CONCURRENCY = 2  # PDFs at once; more callers wait for a slot
 DISCONNECT_POLL = 2.0  # seconds between checks that an ingest's caller is still there
-T = TypeVar("T")
 ERRORS: dict[int | str, dict[str, Any]] = {
     code: {"model": ErrorResponse} for code in (401, 403, 413, 415, 422, 429, 502, 503)
 }
@@ -84,7 +84,7 @@ async def ready(request: Request) -> dict[str, str]:
 
 def provider_error(error: Exception) -> NoReturn:
     """Provider failures as errors the caller can retry or fall back on; never a made-up result."""
-    if isinstance(error, openai_client.NotConfigured | rerank.RerankNotConfigured):
+    if isinstance(error, openai_client.NotConfiguredError | rerank.RerankNotConfiguredError):
         raise failure(503, "AI_PROVIDER_NOT_CONFIGURED", "The AI provider is not configured.")
     if isinstance(error, openai_client.StructuredOutputError):
         raise failure(502, "AI_OUTPUT_REJECTED", "The model did not return a usable reply.")
@@ -96,10 +96,10 @@ def provider_error(error: Exception) -> NoReturn:
 
 PROVIDER_ERRORS = (
     openai.OpenAIError,
-    openai_client.NotConfigured,
+    openai_client.NotConfiguredError,
     openai_client.StructuredOutputError,
-    rerank.RerankNotConfigured,
-    rerank.RerankFailed,
+    rerank.RerankNotConfiguredError,
+    rerank.RerankError,
 )
 
 
@@ -343,7 +343,7 @@ async def ingest_pdf(
     assert _ingest_slots is not None
     try:
         openai_client.get_client()  # without a key every model call would fail: refuse before any work
-    except openai_client.NotConfigured as error:
+    except openai_client.NotConfiguredError as error:
         provider_error(error)
     await allowance(request, billed)
     with tempfile.TemporaryDirectory(prefix="ingest-") as folder:
@@ -356,12 +356,12 @@ async def ingest_pdf(
             try:
                 result = await unless_disconnected(request, _ingest(path, title))
                 record.outcome = "indexed"
-            except IngestFailure as e:
+            except IngestError as e:
                 record.outcome, record.failure_reason = "failed", e.reason
                 return IngestResponse(outcome="failed", failure_reason=e.reason, failure_detail=str(e)[:2000])  # type: ignore[arg-type]
             except PROVIDER_ERRORS as error:
                 provider_error(error)
-            except CallerGone:
+            except CallerGoneError:
                 record.outcome = "abandoned"
                 log.info(json.dumps({"service": "ai-core", "event": "ingest_abandoned"}))
                 raise failure(
@@ -428,11 +428,11 @@ async def _ingest(path: Path, title: str) -> Any:
             return await ingest(path, title, vision_config(get_settings()))
 
 
-class CallerGone(Exception):
+class CallerGoneError(Exception):
     """The caller hung up before the work finished."""
 
 
-async def unless_disconnected(
+async def unless_disconnected[T](
     request: Request, work: Coroutine[Any, Any, T], poll: float = DISCONNECT_POLL
 ) -> T:
     """Await `work`, cancelling it if the caller disconnects first. Content gives up on an ingest after 20 minutes
@@ -445,7 +445,7 @@ async def unless_disconnected(
                 task.cancel()
                 with contextlib.suppress(asyncio.CancelledError):
                     await task
-                raise CallerGone()
+                raise CallerGoneError()
         return task.result()
     finally:
         task.cancel()

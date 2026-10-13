@@ -4,6 +4,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"learning/platform"
@@ -57,7 +58,7 @@ func (s server) upload(w http.ResponseWriter, r *http.Request) {
 	}
 	kind := strings.Split(r.Header.Get("Content-Type"), ";")[0]
 	chunks, status, err := extract(data, kind)
-	if err == errTooLarge {
+	if errors.Is(err, errTooLarge) {
 		platform.Error(w, 413, "UPLOAD_TOO_LARGE", "PDFs must be no larger than 50 MiB and text documents 5 MiB.")
 		return
 	}
@@ -109,7 +110,7 @@ func (s server) get(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	v, data, err := s.findDocument(r.Context(), platform.Actor(r).Org, r.PathValue("id"))
-	if err == pgx.ErrNoRows {
+	if errors.Is(err, pgx.ErrNoRows) {
 		platform.Error(w, 404, "NOT_FOUND", "Document not found.")
 		return
 	}
@@ -138,7 +139,7 @@ func (s server) original(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	classroom, key, kind, docType, err := s.findOriginal(r.Context(), platform.Actor(r).Org, r.PathValue("id"))
-	if err == pgx.ErrNoRows {
+	if errors.Is(err, pgx.ErrNoRows) {
 		platform.Error(w, 404, "NOT_FOUND", "Document not found.")
 		return
 	}
@@ -165,7 +166,7 @@ func (s server) figure(w http.ResponseWriter, r *http.Request) {
 	}
 	org := platform.Actor(r).Org
 	v, err := s.findIndexed(r.Context(), org, r.PathValue("id"), r.PathValue("image"))
-	if err == pgx.ErrNoRows {
+	if errors.Is(err, pgx.ErrNoRows) {
 		platform.Error(w, 404, "NOT_FOUND", "Figure not found.")
 		return
 	}
@@ -195,7 +196,7 @@ func (s server) reindex(w http.ResponseWriter, r *http.Request) {
 	}
 	org := platform.Actor(r).Org
 	v, _, err := s.findDocument(r.Context(), org, r.PathValue("id"))
-	if err == pgx.ErrNoRows {
+	if errors.Is(err, pgx.ErrNoRows) {
 		platform.Error(w, 404, "NOT_FOUND", "Document not found.")
 		return
 	}

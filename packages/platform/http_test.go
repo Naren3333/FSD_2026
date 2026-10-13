@@ -11,7 +11,7 @@ import (
 func TestStrictJSON(t *testing.T) {
 	for _, body := range []string{`{"extra":1}`, `{} {}`, `null []`} {
 		w := httptest.NewRecorder()
-		r := httptest.NewRequest("POST", "/", strings.NewReader(body))
+		r := httptest.NewRequest(http.MethodPost, "/", strings.NewReader(body))
 		var value struct{}
 		if Decode(w, r, &value) {
 			t.Fatalf("accepted %s", body)
@@ -62,7 +62,7 @@ func TestTeacherOfNeedsTheTeacherRelation(t *testing.T) {
 	for _, tc := range cases {
 		a := identityStub(t, tc.status, tc.body)
 		w := httptest.NewRecorder()
-		if got := a.TeacherOf(w, asTeacher(httptest.NewRequest("GET", "/", nil)), classroom); got != tc.allow || (!got && w.Code != tc.code) {
+		if got := a.TeacherOf(w, asTeacher(httptest.NewRequest(http.MethodGet, "/", nil)), classroom); got != tc.allow || (!got && w.Code != tc.code) {
 			t.Errorf("%d %s: allowed %v, status %d", tc.status, tc.body, got, w.Code)
 		}
 	}
@@ -70,7 +70,7 @@ func TestTeacherOfNeedsTheTeacherRelation(t *testing.T) {
 
 func TestRelationReportsStudent(t *testing.T) {
 	a := identityStub(t, 200, `{"allowed":true,"relation":"student"}`)
-	relation, ok := a.Relation(httptest.NewRecorder(), asTeacher(httptest.NewRequest("GET", "/", nil)), classroom, "")
+	relation, ok := a.Relation(httptest.NewRecorder(), asTeacher(httptest.NewRequest(http.MethodGet, "/", nil)), classroom, "")
 	if !ok || relation != RelationStudent {
 		t.Fatalf("got %q %v", relation, ok)
 	}

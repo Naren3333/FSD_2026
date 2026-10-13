@@ -13,7 +13,7 @@ from fastapi import Depends, Query, Request
 from learning_transport import ErrorResponse, actor, application, failure
 
 import config
-from chat import HISTORY_TURNS, SSEResponse, Turn
+from chat import HISTORY_TURNS, SSEResponse, Turn, TurnRequest
 from clients import Services, UpstreamError, billed
 from contracts import MessageList, NewMessage, NewThread, Thread, ThreadList, Usage
 from store import PostgresStore, Store
@@ -123,18 +123,16 @@ async def post_message(
     store = store_of(request)
     thread = await owned_thread(store, claims, thread_id)
     history = await store.start_turn(str(thread_id), body.content, HISTORY_TURNS)
-    turn = Turn(
-        request.app.state.services,
-        store,
-        request.app.state.settings,
-        request.app.state.pending,
-        thread,
-        request.headers["authorization"],
-        request.state.correlation_id,
-        body.content,
-        history,
-        billed(claims),
+    asked = TurnRequest(
+        thread=thread,
+        authorization=request.headers["authorization"],
+        correlation=request.state.correlation_id,
+        content=body.content,
+        history=history,
+        billed_to=billed(claims),
     )
+    state = request.app.state
+    turn = Turn(state.services, store, state.settings, state.pending, asked)
     return SSEResponse(turn.events())
 
 
