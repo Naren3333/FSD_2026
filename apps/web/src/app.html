@@ -14,16 +14,10 @@
     </a>
     <p class="sidebar-label">Teaching & learning</p>
     <nav aria-label="Workspace">
-      @for (item of sections; track item.key) {
-        @if (item.key !== 'review' || api.profile()?.role === 'teacher') {
-          <button
-            [class.active]="section() === item.key"
-            [attr.aria-current]="section() === item.key ? 'page' : null"
-            (click)="show(item.key)"
-          >
-            {{ item.label }}
-          </button>
-        }
+      @for (section of sections(); track section.path) {
+        <a [routerLink]="section.path" routerLinkActive="active" ariaCurrentWhenActive="page">
+          {{ section.label }}
+        </a>
       }
     </nav>
     <div class="sidebar-footer">
@@ -39,7 +33,7 @@
   <main id="workspace">
     <header class="topbar">
       <span class="workspace-label">LEARNING WORKSPACE</span>
-      @if (api.profile(); as profile) {
+      @if (session.profile(); as profile) {
         <div class="account">
           <span>{{ profile.role === 'teacher' ? 'Teacher' : 'Student' }} · {{ profile.org_id }}</span>
           <button class="secondary" (click)="logout()">Sign out</button>
@@ -48,19 +42,21 @@
         <button (click)="login()" [disabled]="state.busy()">Sign in</button>
       }
     </header>
-    @if (api.profile(); as profile) {
+    @if (session.profile(); as profile) {
       <div class="context-bar">
         <div>
           <label for="active-classroom">Current classroom</label>
           <select
             id="active-classroom"
-            [value]="classroomId()"
+            [value]="context.classroomId()"
             (change)="selectClassroom($event)"
             [disabled]="hasUnsaved()"
           >
             <option value="">Choose a classroom</option>
-            @for (room of classrooms(); track room.id) {
-              <option [value]="room.id" [selected]="room.id === classroomId()">{{ room.name }}</option>
+            @for (room of context.classrooms(); track room.id) {
+              <option [value]="room.id" [selected]="room.id === context.classroomId()">
+                {{ room.name }}
+              </option>
             }
           </select>
         </div>
@@ -75,19 +71,7 @@
         {{ hasUnsaved() ? 'Finish or clear your current form before changing classrooms.' : '' }}
       </p>
       <app-status [state]="state" />
-      <div [hidden]="section() !== 'classrooms'">
-        <app-classrooms [classrooms]="classrooms()" [classroomId]="classroomId()" (refresh)="load()" />
-      </div>
-      <div [hidden]="section() !== 'curriculum'"><app-curriculum /></div>
-      <div [hidden]="section() !== 'materials'"><app-materials [classroomId]="classroomId()" /></div>
-      <div [hidden]="section() !== 'chat'">
-        <app-chat [classroomId]="classroomId()" (turnEnded)="usage?.refresh()" />
-      </div>
-      <div [hidden]="section() !== 'assessments'"><app-assessments [classroomId]="classroomId()" /></div>
-      @if (profile.role === 'teacher') {
-        <div [hidden]="section() !== 'review'"><app-review [classroomId]="classroomId()" /></div>
-      }
-      <div [hidden]="section() !== 'performance'"><app-performance [classroomId]="classroomId()" /></div>
+      <router-outlet />
     } @else {
       <section class="welcome">
         <p class="eyebrow">A clearer picture of learning</p>

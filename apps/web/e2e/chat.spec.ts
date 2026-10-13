@@ -43,7 +43,7 @@ test('teacher uploads materials and an enrolled student asks the real assistant'
   await page.getByLabel('Student ID', { exact: true }).filter({ visible: true }).fill(studentId);
   await page.getByRole('button', { name: 'Enroll student', exact: true }).click();
   await expect(page.getByText('Student enrolled.', { exact: true })).toBeVisible();
-  await page.getByRole('button', { name: 'Teaching materials', exact: true }).click();
+  await page.getByRole('link', { name: 'Teaching materials', exact: true }).click();
   await page.getByLabel('Document title').fill('Notes ' + suffix);
   await page.getByLabel('Educational file').setInputFiles({
     name: 'notes.txt',
@@ -72,7 +72,7 @@ test('teacher uploads materials and an enrolled student asks the real assistant'
   // The student sees teaching material only, and asks with their own access.
   await student.getByRole('button', { name: 'Refresh classrooms' }).click();
   await student.getByLabel('Current classroom').selectOption({ label: 'Chat ' + suffix });
-  await student.getByRole('button', { name: 'Teaching materials', exact: true }).click();
+  await student.getByRole('link', { name: 'Teaching materials', exact: true }).click();
   await expect(student.locator('.record').filter({ hasText: 'Notes ' + suffix })).toBeVisible();
   await expect(student.getByText('Rubric ' + suffix)).toHaveCount(0);
   await expect(student.getByRole('button', { name: /Index document|Retry indexing/ })).toHaveCount(0);
@@ -82,7 +82,7 @@ test('teacher uploads materials and an enrolled student asks the real assistant'
 });
 
 async function answerHonestly(page: Page) {
-  await page.getByRole('button', { name: 'Ask the materials', exact: true }).click();
+  await page.getByRole('link', { name: 'Ask the materials', exact: true }).click();
   await expect(page.getByText('No conversations yet. Ask a question to start one.')).toBeVisible();
   await page.getByRole('button', { name: 'Send question', exact: true }).click();
   await expect(page.getByLabel('Your question')).toHaveAttribute('aria-invalid', 'true');
@@ -180,7 +180,7 @@ test('chat streams cited answers, loads figures and reports failures', async ({ 
     route.fulfill({ contentType: 'image/png', body: PNG }),
   );
 
-  await page.getByRole('button', { name: 'Ask the materials', exact: true }).click();
+  await page.getByRole('link', { name: 'Ask the materials', exact: true }).click();
   await page.getByLabel('Your question').fill('What do plants make?');
   await page.getByRole('button', { name: 'Send question', exact: true }).click();
   await expect(page.getByRole('status').filter({ hasText: 'Answer complete.' })).toBeVisible();
