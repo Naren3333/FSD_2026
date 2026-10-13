@@ -1,7 +1,6 @@
 package platform
 
 import (
-	"context"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -11,7 +10,7 @@ import (
 func TestStrictJSON(t *testing.T) {
 	for _, body := range []string{`{"extra":1}`, `{} {}`, `null []`} {
 		w := httptest.NewRecorder()
-		r := httptest.NewRequest("POST", "/", strings.NewReader(body))
+		r := httptest.NewRequest(http.MethodPost, "/", strings.NewReader(body))
 		var value struct{}
 		if Decode(w, r, &value) {
 			t.Fatalf("accepted %s", body)
@@ -27,20 +26,19 @@ func TestRoles(t *testing.T) {
 }
 
 // identityStub answers every access check with the given status and body.
-func identityStub(t *testing.T, status int, body string) *App {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+func identityStub(t *testing.T, status int, body string) *Identity {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(status)
 		_, _ = w.Write([]byte(body))
 	}))
 	t.Cleanup(server.Close)
-	t.Setenv("IDENTITY_URL", server.URL)
-	return &App{Client: server.Client()}
+	return NewIdentity(server.URL, server.Client())
 }
 
 func asTeacher(r *http.Request) *http.Request {
 	var c Claims
 	c.Subject, c.Org, c.Realm.Roles = "dual", "org", []string{"teacher", "student"}
-	return r.WithContext(context.WithValue(r.Context(), claimsKey, c))
+	return r.WithContext(WithClaims(r.Context(), c))
 }
 
 const classroom = "6f1c5d2e-8a4b-4c3d-9e2f-1a2b3c4d5e6f"
@@ -62,7 +60,7 @@ func TestTeacherOfNeedsTheTeacherRelation(t *testing.T) {
 	for _, tc := range cases {
 		a := identityStub(t, tc.status, tc.body)
 		w := httptest.NewRecorder()
-		if got := a.TeacherOf(w, asTeacher(httptest.NewRequest("GET", "/", nil)), classroom); got != tc.allow || (!got && w.Code != tc.code) {
+		if got := a.TeacherOf(w, asTeacher(httptest.NewRequest(http.MethodGet, "/", nil)), classroom); got != tc.allow || (!got && w.Code != tc.code) {
 			t.Errorf("%d %s: allowed %v, status %d", tc.status, tc.body, got, w.Code)
 		}
 	}
@@ -70,7 +68,7 @@ func TestTeacherOfNeedsTheTeacherRelation(t *testing.T) {
 
 func TestRelationReportsStudent(t *testing.T) {
 	a := identityStub(t, 200, `{"allowed":true,"relation":"student"}`)
-	relation, ok := a.Relation(httptest.NewRecorder(), asTeacher(httptest.NewRequest("GET", "/", nil)), classroom, "")
+	relation, ok := a.Relation(httptest.NewRecorder(), asTeacher(httptest.NewRequest(http.MethodGet, "/", nil)), classroom, "")
 	if !ok || relation != RelationStudent {
 		t.Fatalf("got %q %v", relation, ok)
 	}

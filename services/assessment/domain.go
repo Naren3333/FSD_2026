@@ -3,11 +3,19 @@ package main
 import (
 	"errors"
 	"learning/platform"
-	"regexp"
+	"slices"
 	"strings"
 )
 
-var decimal = regexp.MustCompile(`^-?[0-9]{1,12}(\.[0-9]{1,8})?$`)
+// Assessment limits.
+const (
+	maxTitle     = 160
+	maxQuestions = 50
+	maxPrompt    = 2000
+	minOptions   = 2
+	maxOptions   = 8
+	maxAnswer    = 500 // also the longest option
+)
 
 type Question struct {
 	ID        string   `json:"id"`
@@ -24,6 +32,19 @@ type Assessment struct {
 	Title     string     `json:"title"`
 	Questions []Question `json:"questions"`
 }
+
+// Summary is an assessment in a classroom's list.
+type Summary struct {
+	ID    string `json:"id"`
+	Title string `json:"title"`
+}
+
+// Submission is one student's answers to an assessment, by question id.
+type Submission struct {
+	ID, Org, Student string
+	Answers          map[string]string
+}
+
 type PublicQuestion struct {
 	ID      string   `json:"id"`
 	Prompt  string   `json:"prompt"`
@@ -39,45 +60,39 @@ type PublicAssessment struct {
 }
 
 func (v Assessment) Validate() error {
-	if !platform.ID(v.Classroom) || strings.TrimSpace(v.Title) == "" || len(v.Title) > 160 || len(v.Questions) < 1 || len(v.Questions) > 50 {
+	if !platform.ID(v.Classroom) || strings.TrimSpace(v.Title) == "" || len(v.Title) > maxTitle || len(v.Questions) < 1 || len(v.Questions) > maxQuestions {
 		return errors.New("provide a classroom, title, and 1–50 questions")
 	}
 	for _, q := range v.Questions {
-		if strings.TrimSpace(q.Prompt) == "" || len(q.Prompt) > 2000 || !platform.ID(q.Skill) {
-			return errors.New("each question needs a prompt and curriculum skill")
-		}
-		switch q.Type {
-		case "multiple_choice":
-			if len(q.Options) < 2 || len(q.Options) > 8 {
-				return errors.New("multiple choice needs 2–8 options")
-			}
-			found := false
-			seen := map[string]bool{}
-			for _, o := range q.Options {
-				if strings.TrimSpace(o) == "" || len(o) > 500 || seen[o] {
-					return errors.New("options must be unique nonempty values")
-				}
-				seen[o] = true
-				if o == q.Answer {
-					found = true
-				}
-			}
-			if !found {
-				return errors.New("answer must match one option")
-			}
-			if q.Tolerance != "" {
-				return errors.New("multiple choice has no tolerance")
-			}
-		case "numerical":
-			if !decimal.MatchString(q.Answer) || !decimal.MatchString(q.Tolerance) || strings.HasPrefix(q.Tolerance, "-") || len(q.Options) > 0 {
-				return errors.New("numerical answers require decimal answer and nonnegative decimal tolerance, without options")
-			}
-		default:
-			return errors.New("unsupported question type")
+		if err := q.validate(); err != nil {
+			return err
 		}
 	}
 	return nil
 }
+
+func (q Question) validate() error {
+	if strings.TrimSpace(q.Prompt) == "" || len(q.Prompt) > maxPrompt || !platform.ID(q.Skill) {
+		return errors.New("each question needs a prompt and curriculum skill")
+	}
+	kind, ok := questionKinds[q.Type]
+	if !ok {
+		return errors.New("unsupported question type")
+	}
+	return kind.validate(q)
+}
+
+// skillIDs are the distinct skills the questions assess.
+func (v Assessment) skillIDs() []string {
+	var ids []string
+	for _, q := range v.Questions {
+		if !slices.Contains(ids, q.Skill) {
+			ids = append(ids, q.Skill)
+		}
+	}
+	return ids
+}
+
 func (v Assessment) Public() PublicAssessment {
 	p := PublicAssessment{v.ID, v.Classroom, v.Title, []PublicQuestion{}}
 	for _, q := range v.Questions {
@@ -85,28 +100,17 @@ func (v Assessment) Public() PublicAssessment {
 	}
 	return p
 }
+
+// validateAnswers reports whether answers has exactly one acceptable answer for every question.
 func validateAnswers(v Assessment, answers map[string]string) bool {
 	if len(answers) != len(v.Questions) {
 		return false
 	}
 	for _, q := range v.Questions {
 		answer, exists := answers[q.ID]
-		if !exists || len(answer) > 500 {
+		kind, known := questionKinds[q.Type]
+		if !exists || !known || len(answer) > maxAnswer || !kind.accepts(q, answer) {
 			return false
-		}
-		if q.Type == "numerical" && !decimal.MatchString(answer) {
-			return false
-		}
-		if q.Type == "multiple_choice" {
-			found := false
-			for _, o := range q.Options {
-				if answer == o {
-					found = true
-				}
-			}
-			if !found {
-				return false
-			}
 		}
 	}
 	return true

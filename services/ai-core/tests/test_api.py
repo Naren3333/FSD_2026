@@ -119,8 +119,9 @@ def test_provider_failure_and_missing_key(api: TestClient, openai_fake: FakeOpen
     openai_fake.reply(500, json={"error": {"message": "boom"}}, times=3)
     assert error(api.post("/v1/inference", json=EMBED)) == (502, "AI_PROVIDER_FAILED")
 
-    import openai_client
     from conftest import configured
+
+    import openai_client
 
     monkeypatch.setattr(openai_client, "_client", None)
     monkeypatch.setattr(openai_client, "get_settings", lambda: configured(openai_api_key=None))
@@ -186,8 +187,9 @@ def test_rerank_failures_are_errors_never_scores(
 
 
 def test_rerank_without_a_key(api: TestClient, monkeypatch) -> None:
-    import rerank
     from conftest import configured
+
+    import rerank
 
     monkeypatch.setattr(rerank, "_client", None)
     monkeypatch.setattr(rerank, "get_settings", lambda: configured(voyage_api_key=None))
@@ -207,7 +209,10 @@ def test_no_anonymous_or_people_access(path: str, body: dict) -> None:
     client = TestClient(app)
     assert client.post(path, json=body).status_code == 401
     for role in ("student", "teacher"):
-        app.dependency_overrides[actor] = lambda: {**SERVICE_CLAIMS, "realm_access": {"roles": [role]}}
+        app.dependency_overrides[actor] = lambda role=role: {
+            **SERVICE_CLAIMS,
+            "realm_access": {"roles": [role]},
+        }
         try:
             assert client.post(path, json=body).status_code == 403
         finally:

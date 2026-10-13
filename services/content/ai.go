@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"learning/platform"
@@ -30,6 +31,17 @@ func newAICore() *aiCore {
 	}
 }
 
+// searchModels is what search needs from ai-core: query embeddings and reranking, billed to the searching user.
+type searchModels interface {
+	embed(ctx context.Context, text string, who billed) ([]float32, string, error)
+	rerank(ctx context.Context, query string, documents []string, who billed) ([]float64, error)
+}
+
+// ingester turns a PDF into chunks with embeddings and the figure crops they point at.
+type ingester interface {
+	ingest(ctx context.Context, title string, pdf io.Reader, size int64, who billed) (ingestResult, error)
+}
+
 // aiError is a non-200 answer from ai-core, or a failure to reach it (Status 0). Message and ResetsAt are set
 // for AI_SPEND_LIMIT: the user's daily AI allowance is used up until ResetsAt.
 type aiError struct {
@@ -43,8 +55,8 @@ func (e *aiError) Error() string { return fmt.Sprintf("ai-core %d %s", e.Status,
 
 // spendLimit reports whether err is ai-core refusing because the billed user's daily allowance is used up.
 func spendLimit(err error) (*aiError, bool) {
-	e, ok := err.(*aiError)
-	if ok && e.Status == 429 && e.Code == "AI_SPEND_LIMIT" {
+	var e *aiError
+	if errors.As(err, &e) && e.Status == http.StatusTooManyRequests && e.Code == "AI_SPEND_LIMIT" {
 		return e, true
 	}
 	return nil, false
@@ -70,11 +82,15 @@ func caller(c platform.Claims) billed {
 // transient reports whether a later retry may succeed: ai-core or its provider being down, slow, rate limited or
 // not configured yet, or our token being refused. Anything else (a 4xx about the request) will fail again.
 func transient(err error) bool {
-	e, ok := err.(*aiError)
-	if !ok {
+	var e *aiError
+	if !errors.As(err, &e) {
 		return true
 	}
-	return e.Status == 0 || e.Status == 401 || e.Status == 408 || e.Status == 429 || e.Status >= 500
+	switch e.Status {
+	case 0, http.StatusUnauthorized, http.StatusRequestTimeout, http.StatusTooManyRequests:
+		return true
+	}
+	return e.Status >= http.StatusInternalServerError
 }
 
 type ingestChunk struct {
@@ -114,7 +130,7 @@ type ingestResult struct {
 func (a *aiCore) ingest(ctx context.Context, title string, pdf io.Reader, size int64, who billed) (ingestResult, error) {
 	var out ingestResult
 	query := url.Values{"title": {title}, "billed_user": {who.UserID}, "billed_org": {who.OrgID}, "billed_role": {who.Role}}
-	err := a.call(ctx, "/v1/ingest?"+query.Encode(), "application/pdf", pdf, size, &out)
+	err := a.call(ctx, "/v1/ingest?"+query.Encode(), mimePDF, pdf, size, &out)
 	return out, err
 }
 
@@ -156,7 +172,7 @@ func (a *aiCore) call(ctx context.Context, path, contentType string, body io.Rea
 	if err != nil {
 		return &aiError{Code: "TOKEN_UNAVAILABLE"}
 	}
-	req, err := http.NewRequestWithContext(ctx, "POST", a.base+path, body)
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, a.base+path, body)
 	if err != nil {
 		return err
 	}
@@ -169,7 +185,7 @@ func (a *aiCore) call(ctx context.Context, path, contentType string, body io.Rea
 		return &aiError{Code: "UNREACHABLE"}
 	}
 	defer res.Body.Close()
-	if res.StatusCode != 200 {
+	if res.StatusCode != http.StatusOK {
 		var e struct {
 			Error struct {
 				Code     string    `json:"code"`
@@ -178,7 +194,7 @@ func (a *aiCore) call(ctx context.Context, path, contentType string, body io.Rea
 			} `json:"error"`
 		}
 		_ = json.NewDecoder(io.LimitReader(res.Body, 1<<16)).Decode(&e)
-		if res.StatusCode == 401 {
+		if res.StatusCode == http.StatusUnauthorized {
 			a.tokens.reset()
 		}
 		return &aiError{res.StatusCode, e.Error.Code, e.Error.Message, e.Error.ResetsAt}
@@ -205,7 +221,7 @@ func (t *tokenSource) get(ctx context.Context) (string, error) {
 		return t.token, nil
 	}
 	form := url.Values{"grant_type": {"client_credentials"}, "client_id": {t.id}, "client_secret": {t.secret}}
-	req, err := http.NewRequestWithContext(ctx, "POST", t.url, strings.NewReader(form.Encode()))
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, t.url, strings.NewReader(form.Encode()))
 	if err != nil {
 		return "", err
 	}
@@ -219,7 +235,7 @@ func (t *tokenSource) get(ctx context.Context) (string, error) {
 		AccessToken string `json:"access_token"`
 		ExpiresIn   int    `json:"expires_in"`
 	}
-	if res.StatusCode != 200 || json.NewDecoder(res.Body).Decode(&body) != nil || body.AccessToken == "" {
+	if res.StatusCode != http.StatusOK || json.NewDecoder(res.Body).Decode(&body) != nil || body.AccessToken == "" {
 		return "", fmt.Errorf("token endpoint answered %d", res.StatusCode)
 	}
 	t.token, t.expires = body.AccessToken, time.Now().Add(time.Duration(body.ExpiresIn)*time.Second-30*time.Second)

@@ -32,7 +32,7 @@ docker compose down
 
 ## Development
 
-Host checks also require Go 1.25+ and Node 22.12+. Create and activate a Python virtual environment, then run:
+Host checks also require Go 1.25+, Node 22.12+ and golangci-lint v2.14 (`go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.14.0`). Lint rules live in `ruff.toml` and `.golangci.yml` at the repository root. Create and activate a Python virtual environment, then run:
 
 ```sh
 python -m pip install -r requirements-dev.txt
@@ -47,6 +47,8 @@ npm run test:e2e
 ```
 
 Integration and browser tests require the Docker stack to be running.
+
+`check.py` fails on unformatted web code; run `npm run format` in `apps/web` to fix it. Component templates live in `.html` files next to their components.
 
 ## Current scope
 

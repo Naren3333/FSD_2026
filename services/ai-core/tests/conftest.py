@@ -13,14 +13,14 @@ import pymupdf
 import pytest
 from fastapi.testclient import TestClient
 from httpx import Response
+from learning_transport import actor
 from openai import AsyncOpenAI
 
+import main
 import openai_client
 import rerank
 import settings
 import spend
-from learning_transport import actor
-import main
 from ingest import VisionConfig
 from main import app
 
@@ -48,7 +48,7 @@ def configured(**overrides: object) -> settings.Settings:
 def test_settings(monkeypatch: pytest.MonkeyPatch) -> settings.Settings:
     """Every module sees test settings: keys set, vision on, the cache in a fresh temp folder."""
     current = configured(cache_dir=Path(tempfile.mkdtemp(prefix="ai-core-cache-")))
-    for module in ("settings", "openai_client", "rerank", "ingest", "main"):
+    for module in ("settings", "openai_client", "rerank", "ingest", "main", "spend", "billing"):
         monkeypatch.setattr(f"{module}.get_settings", lambda: current)
     return current
 
@@ -114,7 +114,7 @@ def make_pdf(
     password: str | None = None,
     paragraphs: list[list[str]] | None = None,
 ) -> bytes:
-    """A small text PDF built with PyMuPDF (RAG_PLAN R8). Each page's text includes its number.
+    """A small text PDF built with PyMuPDF. Each page's text includes its number.
     With `paragraphs`, page i holds paragraphs[i], one text block each, instead."""
     doc = pymupdf.open()
     for i in range(len(paragraphs) if paragraphs is not None else pages):
@@ -466,8 +466,8 @@ def fake_embeddings(request: httpx2.Request) -> httpx2.Response:
 
 
 def page_key0(path: Path) -> str:
-    """The vision cache key of a PDF's first page (RAG_PLAN Iteration 14: the cache is keyed by page content)."""
-    from ingest.vision import page_key
+    """The vision cache key of a PDF's first page (The cache is keyed by page content)."""
+    from ingest.pages import page_key
 
     with pymupdf.open(path) as doc:
         return page_key(doc[0])

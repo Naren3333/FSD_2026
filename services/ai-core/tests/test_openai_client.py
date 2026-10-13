@@ -4,8 +4,8 @@ Ported from fsd_test's shared tests."""
 import httpx2
 import openai
 import pytest
-
 from conftest import chat_response, chat_stream, configured, embedding_response
+
 import openai_client
 from openai_client import StructuredOutputError, Usage
 
@@ -113,7 +113,7 @@ async def test_timeout_is_not_retried(openai_fake):
 def test_missing_key_raises_not_configured(monkeypatch):
     monkeypatch.setattr(openai_client, "_client", None)
     monkeypatch.setattr(openai_client, "get_settings", lambda: configured(openai_api_key=None))
-    with pytest.raises(openai_client.NotConfigured):
+    with pytest.raises(openai_client.NotConfiguredError):
         openai_client.get_client()
 
 

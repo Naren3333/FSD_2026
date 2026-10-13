@@ -3,7 +3,9 @@ package main
 import (
 	"encoding/json"
 	"learning/platform"
+	"log/slog"
 	"net/http"
+	"sync"
 )
 
 type skillStatus int
@@ -14,27 +16,54 @@ const (
 	skillUnavailable
 )
 
-// checkSkill asks the curriculum service whether the node exists and is a skill.
-// A non-nil error means the request could not even be built.
-func (s server) checkSkill(r *http.Request, skill string) (skillStatus, error) {
-	req, err := http.NewRequestWithContext(r.Context(), "GET", platform.Required("CURRICULUM_URL")+"/v1/nodes/"+skill, nil)
+// skills checks that a node is a skill in the caller's curriculum.
+type skills interface {
+	check(r *http.Request, skill string) skillStatus
+}
+
+// checkAll checks every skill at once and reports the worst answer: unavailable if Curriculum couldn't answer for
+// any of them, otherwise invalid if any is not a skill.
+func checkAll(r *http.Request, s skills, ids []string) skillStatus {
+	statuses := make([]skillStatus, len(ids))
+	var wg sync.WaitGroup
+	for i, id := range ids {
+		wg.Go(func() { statuses[i] = s.check(r, id) })
+	}
+	wg.Wait()
+	worst := skillValid
+	for _, status := range statuses {
+		worst = max(worst, status)
+	}
+	return worst
+}
+
+// curriculum asks the Curriculum service, forwarding the caller's token.
+type curriculum struct {
+	base   string
+	client *http.Client
+}
+
+// check asks the curriculum service whether the node exists and is a skill.
+func (c curriculum) check(r *http.Request, skill string) skillStatus {
+	req, err := http.NewRequestWithContext(r.Context(), http.MethodGet, c.base+"/v1/nodes/"+skill, nil)
 	if err != nil {
-		return skillInvalid, err
+		slog.Error("curriculum_request_invalid", "error", err.Error())
+		return skillUnavailable
 	}
 	req.Header.Set("Authorization", r.Header.Get("Authorization"))
 	req.Header.Set("X-Correlation-ID", platform.Correlation(r.Context()))
-	res, err := s.Client.Do(req)
+	res, err := c.client.Do(req)
 	if err != nil {
-		return skillUnavailable, nil
+		return skillUnavailable
 	}
 	var node struct {
 		ID   string `json:"id"`
 		Kind string `json:"kind"`
 	}
-	err = json.NewDecoder(res.Body).Decode(&node)
+	decoded := json.NewDecoder(res.Body).Decode(&node) == nil
 	res.Body.Close()
-	if res.StatusCode != 200 || err != nil || node.Kind != "skill" {
-		return skillInvalid, nil
+	if res.StatusCode != http.StatusOK || !decoded || node.Kind != "skill" {
+		return skillInvalid
 	}
-	return skillValid, nil
+	return skillValid
 }

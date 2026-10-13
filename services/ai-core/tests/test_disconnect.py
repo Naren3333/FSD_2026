@@ -37,7 +37,7 @@ async def test_a_disconnected_caller_cancels_the_work() -> None:
             raise
         return "never"
 
-    with pytest.raises(main.CallerGone):
+    with pytest.raises(main.CallerGoneError):
         await main.unless_disconnected(FakeRequest(gone_after=2), work(), poll=0.005)
     assert cancelled.is_set()
 

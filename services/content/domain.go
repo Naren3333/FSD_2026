@@ -2,17 +2,41 @@ package main
 
 import (
 	"errors"
+	"fmt"
 	"strings"
 	"time"
 	"unicode/utf8"
 )
 
 // Document types. Students see teaching material only; rubrics and marking schemes stay with teachers.
-var docTypes = map[string]bool{"teaching_material": true, "rubric": true, "marking_scheme": true}
+const (
+	docTeachingMaterial = "teaching_material"
+	docRubric           = "rubric"
+	docMarkingScheme    = "marking_scheme"
+)
+
+var docTypes = map[string]bool{docTeachingMaterial: true, docRubric: true, docMarkingScheme: true}
+
+// Document statuses: a text file is extracted on upload; a PDF is indexing until ai-core's result is indexed or
+// failed.
+const (
+	statusExtracted = "extracted"
+	statusIndexing  = "indexing"
+	statusIndexed   = "indexed"
+	statusFailed    = "failed"
+)
+
+// Media types Content accepts and serves.
+const (
+	mimePDF  = "application/pdf"
+	mimeText = "text/plain"
+	mimePNG  = "image/png"
+)
 
 const (
-	maxPDF  = 50 << 20
-	maxText = 5 << 20
+	maxPDF   = 50 << 20
+	maxText  = 5 << 20
+	maxTitle = 160
 )
 
 type Document struct {
@@ -33,6 +57,18 @@ type Document struct {
 	FailureReason  *string    `json:"failure_reason,omitempty"`
 }
 
+// newDocument is an upload about to be stored: the document plus who owns it and where its original is.
+type newDocument struct {
+	Document
+	Org, Owner, Key string
+}
+
+// storedDocument is a document with the object key of its original.
+type storedDocument struct {
+	Document
+	Key string
+}
+
 type Chunk struct {
 	Ordinal int    `json:"ordinal"`
 	Text    string `json:"text"`
@@ -40,20 +76,20 @@ type Chunk struct {
 	End     int    `json:"end_character"`
 }
 
-var errTooLarge = errors.New("text documents must be no larger than 5 MiB")
+var errTooLarge = fmt.Errorf("text documents must be no larger than %d MiB", maxText>>20)
 
 // extract chunks a text document. A PDF is only checked here: it is indexed asynchronously.
 func extract(data []byte, kind string) ([]Chunk, string, error) {
-	if kind == "application/pdf" {
+	if kind == mimePDF {
 		if !strings.HasPrefix(string(data), "%PDF-") {
 			return nil, "", errors.New("file is not a PDF")
 		}
-		return []Chunk{}, "indexing", nil // the indexing worker sends it to ai-core
+		return []Chunk{}, statusIndexing, nil // the indexing worker sends it to ai-core
 	}
 	if len(data) > maxText {
 		return nil, "", errTooLarge
 	}
-	if kind != "text/plain" || !utf8.Valid(data) || strings.ContainsRune(string(data), 0) {
+	if kind != mimeText || !utf8.Valid(data) || strings.ContainsRune(string(data), 0) {
 		return nil, "", errors.New("upload UTF-8 plain text or a valid PDF")
 	}
 	runes := []rune(string(data))
@@ -68,5 +104,5 @@ func extract(data []byte, kind string) ([]Chunk, string, error) {
 		}
 		chunks = append(chunks, Chunk{len(chunks), string(runes[start:end]), start, end})
 	}
-	return chunks, "extracted", nil
+	return chunks, statusExtracted, nil
 }

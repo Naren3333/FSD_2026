@@ -1,0 +1,113 @@
+<a class="skip-link" href="#workspace">Skip to workspace</a>
+<div class="app-shell">
+  <aside class="sidebar">
+    <a href="/" class="brand">
+      <span class="brand-symbol" aria-hidden="true">
+        L
+        <span>↗</span>
+      </span>
+      <span>
+        Learning
+        <br />
+        <strong>Ledger</strong>
+      </span>
+    </a>
+    <p class="sidebar-label">Teaching & learning</p>
+    <nav aria-label="Workspace">
+      @for (section of sections(); track section.path) {
+        <a [routerLink]="section.path" routerLinkActive="active" ariaCurrentWhenActive="page">
+          {{ section.label }}
+        </a>
+      }
+    </nav>
+    <div class="sidebar-footer">
+      <span class="status-dot"></span>
+      Foundation milestone
+      <p>
+        Real learning evidence.
+        <br />
+        Document chat answers from indexed PDFs.
+      </p>
+    </div>
+  </aside>
+  <main id="workspace">
+    <header class="topbar">
+      <span class="workspace-label">LEARNING WORKSPACE</span>
+      @if (session.profile(); as profile) {
+        <div class="account">
+          <span>{{ profile.role === 'teacher' ? 'Teacher' : 'Student' }} · {{ profile.org_id }}</span>
+          <button class="secondary" (click)="logout()">Sign out</button>
+        </div>
+      } @else {
+        <button (click)="login()" [disabled]="state.busy()">Sign in</button>
+      }
+    </header>
+    @if (session.profile(); as profile) {
+      <div class="context-bar">
+        <div>
+          <label for="active-classroom">Current classroom</label>
+          <select
+            id="active-classroom"
+            [value]="context.classroomId()"
+            (change)="selectClassroom($event)"
+            [disabled]="hasUnsaved()"
+          >
+            <option value="">Choose a classroom</option>
+            @for (room of context.classrooms(); track room.id) {
+              <option [value]="room.id" [selected]="room.id === context.classroomId()">
+                {{ room.name }}
+              </option>
+            }
+          </select>
+        </div>
+        <div class="identity-note">
+          <span>Your ID</span>
+          <code>{{ profile.id }}</code>
+          <small>Share this ID with your teacher for enrollment.</small>
+        </div>
+        <app-usage />
+      </div>
+      <p class="draft-note">
+        {{ hasUnsaved() ? 'Finish or clear your current form before changing classrooms.' : '' }}
+      </p>
+      <app-status [state]="state" />
+      <router-outlet />
+    } @else {
+      <section class="welcome">
+        <p class="eyebrow">A clearer picture of learning</p>
+        <h1>
+          Every next step starts
+          <br />
+          with
+          <em>real evidence.</em>
+        </h1>
+        <p>
+          Bring your classroom, teaching materials and assessments into one focused workspace. Review the
+          work. Understand the progress.
+        </p>
+        <button (click)="login()" [disabled]="state.busy()">
+          Sign in to your workspace
+          <span aria-hidden="true">→</span>
+        </button>
+        <div class="learning-rail">
+          <span>Classroom</span>
+          <span>Materials</span>
+          <span>Assessment</span>
+          <span>Evidence</span>
+        </div>
+        <aside class="ai-notice">
+          <span class="badge">Foundation milestone</span>
+          <p>
+            Classroom tools, evidence-based grading and document chat with cited sources are available.
+            AI-generated questions and feedback are not implemented yet.
+          </p>
+        </aside>
+      </section>
+      <app-status [state]="state" />
+    }
+    <footer>
+      Learning Ledger
+      <span>Human review. Traceable evidence.</span>
+    </footer>
+  </main>
+</div>

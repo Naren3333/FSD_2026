@@ -9,6 +9,7 @@ only around create(), before the first token: a retry after it would repeat text
 """
 
 import asyncio
+import functools
 import logging
 import random
 from collections.abc import AsyncGenerator, Awaitable, Callable
@@ -17,6 +18,7 @@ from typing import Any, cast
 
 import openai
 from openai import AsyncOpenAI
+
 from settings import get_settings
 
 log = logging.getLogger("ai-core.openai_client")
@@ -32,7 +34,7 @@ _sleep = asyncio.sleep  # tests patch this
 _client: AsyncOpenAI | None = None
 
 
-class NotConfigured(Exception):
+class NotConfiguredError(Exception):
     """OPENAI_API_KEY is unset. The process still starts; only the calls fail."""
 
 
@@ -53,7 +55,7 @@ def get_client() -> AsyncOpenAI:
     if _client is None:
         key = get_settings().openai_api_key
         if key is None:
-            raise NotConfigured("OPENAI_API_KEY is not set")
+            raise NotConfiguredError("OPENAI_API_KEY is not set")
         _client = AsyncOpenAI(api_key=key, max_retries=0, timeout=TIMEOUT)
     return _client
 
@@ -69,7 +71,8 @@ async def embed(texts: list[str]) -> tuple[list[list[float]], int]:
     for start in range(0, len(texts), EMBED_BATCH):
         batch = texts[start : start + EMBED_BATCH]
         # encoding_format left unset: the SDK then requests base64 and decodes it to floats itself.
-        result = await _call(lambda: client.embeddings.create(model=model, input=batch, timeout=TIMEOUT))
+        create = functools.partial(client.embeddings.create, model=model, input=batch, timeout=TIMEOUT)
+        result = await call(create)
         # Place by OpenAI's index rather than trusting the order of `data`.
         placed: list[list[float]] = [[] for _ in batch]
         for item in result.data:
@@ -89,7 +92,7 @@ async def embed(texts: list[str]) -> tuple[list[list[float]], int]:
 async def stream_chat(messages: list[Any], max_tokens: int) -> AsyncGenerator[str | Usage, None]:
     """Text deltas in order, then one Usage. Breaking out early closes the HTTP stream."""
     client, settings = get_client(), get_settings()
-    stream = await _call(
+    stream = await call(
         lambda: client.chat.completions.create(
             model=settings.chat_model,
             messages=messages,
@@ -146,7 +149,7 @@ async def generate(
             "type": "json_schema",
             "json_schema": {"name": (name or "reply").replace(".", "_"), "strict": True, "schema": schema},
         }
-    result = await _call(
+    result = await call(
         lambda: client.chat.completions.create(
             model=settings.chat_model,
             messages=messages,
@@ -178,7 +181,8 @@ async def generate(
     return Completion(choice.message.content or "", usage, choice.finish_reason)
 
 
-async def _call[T](fn: Callable[[], Awaitable[T]]) -> T:
+async def call[T](fn: Callable[[], Awaitable[T]]) -> T:
+    """Run one SDK call with this module's retries (see the module docstring)."""
     for attempt in range(1, MAX_ATTEMPTS + 1):
         try:
             return await fn()
@@ -193,6 +197,14 @@ async def _call[T](fn: Callable[[], Awaitable[T]]) -> T:
             )
             await _sleep(delay)
     raise AssertionError("unreachable")
+
+
+def deterministic_options(model: str) -> dict[str, Any]:
+    """Request options for repeatable answers: low reasoning effort for reasoning models, otherwise temperature 0
+    (reasoning models reject a temperature)."""
+    if model.startswith(("gpt-5", "gpt-6", "o")):
+        return {"reasoning_effort": "low"}
+    return {"temperature": 0}
 
 
 def _retryable(exc: openai.OpenAIError) -> bool:

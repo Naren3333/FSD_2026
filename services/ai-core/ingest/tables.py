@@ -1,4 +1,4 @@
-"""Table extraction (PLAN.md §6.1 ingest step 2, RAG_PLAN Iteration 10). Blocking: runs while parsing.
+"""Table extraction. Blocking: runs while parsing.
 
 The vision pass (ingest.vision) says where each table is and what it looks like; the cells are read from
 the PDF's own text layer inside each box, and a grid that doesn't match the model's description stays prose:
@@ -9,22 +9,23 @@ from the vision pass and are marked source="vision".
 A page without a vision result falls back to find_tables "lines", which the table audit found has no
 false positives.
 
-A table no method could read may come with a layout from ingest.rescue (Iteration 14): the model's
+A table no method could read may come with a layout from ingest.rescue: the model's
 arrangement of the PDF's own words into cells, checked here (`verify_layout`) before it was accepted. It is used
 only when every method fails, and is source "pdf": its cells are the text layer's words.
 """
 
 import re
 import unicodedata
-from dataclasses import dataclass, field
 from collections.abc import Sequence
-from itertools import zip_longest
+from dataclasses import dataclass, field
+from itertools import pairwise, zip_longest
 from typing import Any
 
 import pymupdf
 
+from ingest.geometry import area, center_in, overlap, pad
 from ingest.strings import clean_cell, join_lines, unligature
-from ingest.vision import MIN_TEXT_WORDS, SeenTable, area, center_in, overlap, pad
+from ingest.vision import MIN_TEXT_WORDS, SeenTable
 
 Box = tuple[float, float, float, float]
 
@@ -137,6 +138,44 @@ def _ruled(page: pymupdf.Page, clip: Box, s: SeenTable, lines: list) -> dict | N
     return _grid(best) if best else None
 
 
+def _free_columns(rows: list[dict], x0: float, width: int) -> list[int]:
+    """For each 1pt column of x from x0, how many rows have no word over it."""
+    free = [0] * width
+    for r in rows:
+        used = [False] * width
+        for w in r["words"]:
+            for x in range(max(0, int(w[0] - x0) - 1), min(width, int(w[2] - x0) + 1)):
+                used[x] = True
+        for x in range(width):
+            free[x] += not used[x]
+    return free
+
+
+def _gaps(free: list[int], need: float) -> list[tuple[int, int, int]]:
+    """(width, start, end) of each run of columns free in at least `need` rows."""
+    gaps, start = [], None
+    for x in range(len(free) + 1):
+        if x < len(free) and free[x] >= need:
+            start = x if start is None else start
+        elif start is not None:
+            gaps.append((x - start, start, x))
+            start = None
+    return gaps
+
+
+def _split_rows(rows: list[dict], cuts: list[float], ncols: int) -> list[dict]:
+    """Each row's words put into `ncols` cells at the x positions in `cuts`."""
+    cells = []
+    for r in rows:
+        cols: list[list[str]] = [[] for _ in range(ncols)]
+        for w in r["words"]:
+            cols[sum(1 for c in cuts if (w[0] + w[2]) / 2 > c)].append(w[4])
+        cells.append(
+            {"cells": [unligature(" ".join(c)) for c in cols], "top": r["top"], "bottom": r["bottom"]}
+        )
+    return cells
+
+
 def _aligned(page: pymupdf.Page, clip: Box, s: SeenTable) -> dict | None:
     """Rows from text lines and the model's number of columns, split where (nearly) every row has
     whitespace. For tables without vertical lines, where find_tables "text" splits cells apart."""
@@ -150,22 +189,7 @@ def _aligned(page: pymupdf.Page, clip: Box, s: SeenTable) -> dict | None:
     width = int(x1 - x0)
     if width <= 0:
         return None
-    free = [0] * width  # rows with no word over each 1pt column of x
-    for r in rows:
-        used = [False] * width
-        for w in r["words"]:
-            for x in range(max(0, int(w[0] - x0) - 1), min(width, int(w[2] - x0) + 1)):
-                used[x] = True
-        for x in range(width):
-            free[x] += not used[x]
-    need = GUTTER_ROWS * len(rows)
-    gaps, start = [], None
-    for x in range(width + 1):
-        if x < width and free[x] >= need:
-            start = x if start is None else start
-        elif start is not None:
-            gaps.append((x - start, start, x))
-            start = None
+    gaps = _gaps(_free_columns(rows, x0, width), GUTTER_ROWS * len(rows))
 
     # a gutter has words on both sides in many rows; the ragged right edge of a wrapped text column doesn't
     def sides(a: float, b: float) -> int:
@@ -180,18 +204,12 @@ def _aligned(page: pymupdf.Page, clip: Box, s: SeenTable) -> dict | None:
     )
     if len(gaps) < s.cols - 1:
         return None
-    cuts = [x0 + (a + b) / 2 for _, a, b in gaps]
-    cells = []
-    for r in rows:
-        cols: list[list[str]] = [[] for _ in range(s.cols)]
-        for w in r["words"]:
-            cols[sum(1 for c in cuts if (w[0] + w[2]) / 2 > c)].append(w[4])
-        cells.append(
-            {"cells": [unligature(" ".join(c)) for c in cols], "top": r["top"], "bottom": r["bottom"]}
-        )
+    cells = _split_rows(rows, [x0 + (a + b) / 2 for _, a, b in gaps], s.cols)
     lines = _header_lines(page, (x0, rows[0]["top"], x1, rows[-1]["bottom"]), cells)
     if lines:  # a rule under the header (booktabs' midrule): everything above it is header
-        header = tuple(" ".join(x for x in col if x) for col in zip(*(c["cells"] for c in cells[:lines])))
+        header = tuple(
+            " ".join(x for x in col if x) for col in zip(*(c["cells"] for c in cells[:lines]), strict=False)
+        )
         body = [tuple(r) for r in _merge_wrapped(cells[lines:])]
         merged: list[Sequence[str]] = [list(header), *body]
     else:
@@ -237,7 +255,7 @@ def _trim_prose(rows: list[dict], cols: int) -> list[dict]:
     def prose(r: dict) -> bool:
         ws = r["words"]
         height = max(w[3] - w[1] for w in ws)
-        gap = max((b[0] - a[2] for a, b in zip(ws, ws[1:])), default=0.0)
+        gap = max((b[0] - a[2] for a, b in pairwise(ws)), default=0.0)
         return (
             len(ws) >= PROSE_WORDS
             and gap < GAP_FACTOR * height
@@ -308,7 +326,7 @@ def _merge_wrapped(rows: list[dict]) -> list[list[str]]:
     carries on a cell of running text (without that, the rows of a group under one row label, "Finetune":
     5 models each with numbers, would collapse into one). Its first cell must be empty too, unless the
     table spaces its rows apart: then a tight line is a wrapped line in every column."""
-    gaps = [b["top"] - a["bottom"] for a, b in zip(rows, rows[1:])]
+    gaps = [b["top"] - a["bottom"] for a, b in pairwise(rows)]
     height = sorted(r["bottom"] - r["top"] for r in rows)[len(rows) // 2] if rows else 0.0
     spaced = any(g < WRAP_GAP * height for g in gaps) and any(g >= ROW_GAP * height for g in gaps)
     out: list[list[str]] = []
@@ -319,7 +337,9 @@ def _merge_wrapped(rows: list[dict]) -> list[list[str]]:
             c and len(out[-1][i].split()) >= WRAP_MIN_WORDS for i, c in enumerate(r["cells"])
         )
         if out and len(out) > 1 and tight and running and (spaced or not r["cells"][0]):
-            out[-1] = [join_lines(a, b) if a and b else a or b for a, b in zip(out[-1], r["cells"])]
+            out[-1] = [
+                join_lines(a, b) if a and b else a or b for a, b in zip(out[-1], r["cells"], strict=False)
+            ]
         else:
             out.append(list(r["cells"]))
         prev = r
@@ -405,9 +425,8 @@ def _fill_down(rows: list[tuple[str, ...]], raw: list[list]) -> list[tuple[str, 
     """A merged cell in the first column (a row group, e.g. a rubric criterion) is repeated down its rows."""
     out: list[tuple[str, ...]] = []
     for i, row in enumerate(rows):
-        if i and out and raw[i] and raw[i][0] is None and row and not row[0]:
-            row = (out[-1][0], *row[1:])
-        out.append(row)
+        merged = i and out and raw[i] and raw[i][0] is None and row and not row[0]
+        out.append((out[-1][0], *row[1:]) if merged else row)
     return out
 
 
@@ -452,8 +471,8 @@ def verify_layout(
     # a word hyphenated over two lines, or set as two (a footnote mark: "Unicoder-VL" + "a" for "Unicoder-VLᵃ")
     known = (
         set(box)
-        | {a[:-1] + b for a, b in zip(box, box[1:]) if a.endswith("-")}
-        | {a + b for a, b in zip(box, box[1:])}
+        | {a[:-1] + b for a, b in pairwise(box) if a.endswith("-")}
+        | {a + b for a, b in pairwise(box)}
     )
     used = [_token(w) for c in cells for w in c.split()]
     used = [w for w in used if w]

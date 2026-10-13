@@ -24,8 +24,8 @@ def clean_cell(cell: object) -> str:
     if cell is None:
         return ""
     text = ""
-    for line in unligature(str(cell)).splitlines():
-        line = " ".join(line.split())
+    for raw in unligature(str(cell)).splitlines():
+        line = " ".join(raw.split())
         if line:
             text = join_lines(text, line) if text else line
     return text

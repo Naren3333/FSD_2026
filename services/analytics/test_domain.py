@@ -1,6 +1,8 @@
 from uuid import uuid4
+
 import pytest
 from pydantic import ValidationError
+
 from domain import Evidence, SkillMetric, summarize
 
 
@@ -28,7 +30,7 @@ def test_response_contract_rejects_invented_accuracy():
 
 
 def test_consumer_restart_backoff():
-    from main import RESTART_FIRST, RESTART_MAX, restart_wait
+    from consumer import RESTART_FIRST, RESTART_MAX, restart_wait
 
     assert restart_wait(None, False) == RESTART_FIRST
     assert restart_wait(RESTART_FIRST, False) == 2 * RESTART_FIRST

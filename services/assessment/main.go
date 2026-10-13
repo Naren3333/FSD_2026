@@ -1,27 +1,20 @@
+// Command assessment is the Assessment service: immutable quizzes and student submissions, published as
+// assessment.submitted events.
 package main
 
 import (
+	"context"
 	"embed"
 	"learning/platform"
-	"log/slog"
-	"os"
 )
 
 //go:embed migrations/*.sql
 var migrations embed.FS
 
 func main() {
-	a, err := platform.New("assessment", migrations, platform.EventMigration)
-	if err != nil {
-		slog.Error("startup_failed", "error", err.Error())
-		os.Exit(1)
-	}
-	s := server{a}
-	a.Mux.HandleFunc("POST /v1/assessments", s.create)
-	a.Mux.HandleFunc("GET /v1/assessments", s.list)
-	a.Mux.HandleFunc("GET /v1/assessments/{id}", s.get)
-	a.Mux.HandleFunc("POST /v1/assessments/{id}/submissions", s.submit)
-	if err = a.Run(a.Outbox); err != nil {
-		os.Exit(1)
-	}
+	platform.Serve("assessment", migrations, platform.EventMigration, func(a *platform.App) ([]func(context.Context), error) {
+		s := server{store: pgStore{a.DB}, access: a.Identity(), skills: curriculum{platform.Required("CURRICULUM_URL"), a.Client}}
+		s.routes(a.Mux)
+		return []func(context.Context){platform.Outbox{DB: a.DB}.Run}, nil
+	})
 }

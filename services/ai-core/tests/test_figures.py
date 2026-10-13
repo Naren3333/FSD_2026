@@ -1,4 +1,4 @@
-"""Figures (fsd_test RAG_PLAN Iteration 11): description, the parser, the chunker and /v1/ingest's crops.
+"""Figures: description, the parser, the chunker and /v1/ingest's crops.
 The tests give the vision pass's results directly, use the mock OpenAI transport, or stub the vision pass."""
 
 import asyncio
@@ -9,15 +9,15 @@ from pathlib import Path
 
 import pymupdf
 import pytest
+from conftest import FIGURE_LABELS, FakeOpenAI, ingested, make_figure_pdf, page_key0, with_vision
 from fastapi.testclient import TestClient
 
-from ingest import VisionConfig, vision
+from ingest import VisionConfig, figure_context, prompts, snap, vision, vision_calls
 from ingest.chunker import DESCRIBED, chunk_paras
 from ingest.figures import image_name
 from ingest.headings import outline
 from ingest.parse import read_pages
 from ingest.vision import PageVision, SeenFigure, SeenTable
-from conftest import FIGURE_LABELS, FakeOpenAI, ingested, make_figure_pdf, page_key0, with_vision
 
 SHA = "cd" * 32
 DESCRIPTION = "Three boxes in a row: the encoder feeds attention, which feeds the decoder."
@@ -91,7 +91,7 @@ def test_a_figure_that_is_a_table_is_not_described() -> None:
 def see_with_figures(tmp_path: Path, page_answer: dict) -> list:
     data, box = make_figure_pdf()
     path, cache = write(tmp_path, data), tmp_path / "cache"
-    entry = vision.cache_file(cache, "page-model", page_key0(path))
+    entry = vision_calls.cache_file(cache, "page-model", page_key0(path))
     entry.parent.mkdir(parents=True)
     entry.write_text(json.dumps(page_answer), encoding="utf-8")
     return asyncio.run(
@@ -129,9 +129,9 @@ def test_a_figure_is_described_from_its_crop_and_words(tmp_path: Path, openai_fa
     assert (
         request["model"] == "figure-model" and "Encoder Attention Decoder" in prompt and "Figure 1" in prompt
     )
-    key = page_key0(tmp_path / "f.pdf")[: vision.KEY_CHARS]
+    key = page_key0(tmp_path / "f.pdf")[: vision_calls.KEY_CHARS]
     assert list(
-        (tmp_path / "cache" / "figure-model").glob(f"pg-{key}-f0-d{vision.DESCRIBE_PROMPT_VERSION}-*.json")
+        (tmp_path / "cache" / "figure-model").glob(f"pg-{key}-f0-d{prompts.DESCRIBE_PROMPT_VERSION}-*.json")
     )
 
 
@@ -231,7 +231,7 @@ def test_a_new_crop_gets_a_new_name(api: TestClient, embeddings: FakeOpenAI, fig
     assert [f["image"] for f in doc["figures"]] == [new["image"]]
 
 
-# ---- snapping a figure's box to its content (RAG_PLAN Iteration 14, Step 5)
+# ---- snapping a figure's box to its content
 
 PAGE = (612.0, 792.0)
 CHART = (
@@ -264,14 +264,14 @@ def chart_lines() -> list:
 
 
 def test_a_chart_box_grows_to_its_labels_and_axis_title() -> None:
-    snapped = vision.snap(CHART, [], chart_lines(), [(324.0, 68.0, 518.0, 243.0)], PAGE)
+    snapped = snap.snap(CHART, [], chart_lines(), [(324.0, 68.0, 518.0, 243.0)], PAGE)
     assert snapped == (55.0, 67.0, 289.0, 268.0)
 
 
 def test_snapping_leaves_out_headers_captions_and_the_neighbours_labels() -> None:
-    snapped = vision.snap(CHART, [], chart_lines(), [(324.0, 68.0, 518.0, 243.0)], PAGE)
+    snapped = snap.snap(CHART, [], chart_lines(), [(324.0, 68.0, 518.0, 243.0)], PAGE)
     assert snapped[1] > 57.0 and snapped[3] < 280.0 and snapped[2] < 304.0
-    alone = vision.snap(
+    alone = snap.snap(
         CHART, [], chart_lines(), [], PAGE
     )  # with no figure beside it, the axis title is its own
     assert alone[2] == 316.0
@@ -280,15 +280,15 @@ def test_snapping_leaves_out_headers_captions_and_the_neighbours_labels() -> Non
 def test_snapping_takes_in_the_drawings_it_mostly_covers_but_not_backgrounds() -> None:
     legend = (260.0, 100.0, 300.0, 140.0)  # 3/4 inside the (padded) box
     background = (0.0, 0.0, 612.0, 792.0)
-    assert vision.snap(CHART, [legend, background], [], [], PAGE) == (73.0, 67.0, 300.0, 243.0)
+    assert snap.snap(CHART, [legend, background], [], [], PAGE) == (73.0, 67.0, 300.0, 243.0)
 
 
 def test_snapping_grows_at_most_snap_grow_a_side() -> None:
     far = (CHART[0], CHART[1], CHART[2] + 100, CHART[3])  # mostly inside, but 100pt past the edge
-    assert vision.snap(CHART, [far], [], [], PAGE) == CHART
+    assert snap.snap(CHART, [far], [], [], PAGE) == CHART
 
 
-# ---- figure context and the photo gate (RAG_PLAN Iteration 14, Step 6)
+# ---- figure context and the photo gate
 
 PAPER = [
     [
@@ -305,12 +305,12 @@ PAPER = [
 
 
 def test_a_figure_gets_the_sentences_that_cite_it() -> None:
-    context = vision.figure_context(PAPER, "Figure 7: The data efficiency of zero-shot transfer", 1)
+    context = figure_context.figure_context(PAPER, "Figure 7: The data efficiency of zero-shot transfer", 1)
     assert context.startswith("As Fig. 7 shows")  # its own page first; the caption line doesn't count
     assert "In Figure 7, we show how many labeled examples per class" in context
     assert "(Figure 7) in Section 6." in context and "Other results follow" not in context
-    assert vision.figure_context(PAPER, "A chart of efficiency", 1) == ""  # no number, no context
-    assert vision.figure_context(PAPER, "Figure 3: Something else", 1) == ""
+    assert figure_context.figure_context(PAPER, "A chart of efficiency", 1) == ""  # no number, no context
+    assert figure_context.figure_context(PAPER, "Figure 3: Something else", 1) == ""
 
 
 def test_a_photo_is_described_only_with_a_caption_or_a_citation() -> None:
@@ -328,7 +328,7 @@ def test_the_context_goes_into_the_prompt_and_the_cache_name(tmp_path: Path, ope
     doc[0].insert_text((60, 800), "The encoder and decoder of Figure 1 each stack six layers.", fontsize=11)
     path = write(tmp_path, doc.tobytes())
     cache = tmp_path / "cache"
-    entry = vision.cache_file(cache, "page-model", page_key0(path))
+    entry = vision_calls.cache_file(cache, "page-model", page_key0(path))
     entry.parent.mkdir(parents=True)
     entry.write_text(json.dumps(figure_answer(box)), encoding="utf-8")
     asyncio.run(
@@ -339,4 +339,4 @@ def test_the_context_goes_into_the_prompt_and_the_cache_name(tmp_path: Path, ope
     [request] = openai_fake.requests
     prompt = request["messages"][0]["content"][0]["text"]
     assert "<context>The encoder and decoder of Figure 1 each stack six layers.</context>" in prompt
-    assert list(cache.glob(f"figure-model/*-f0-d{vision.DESCRIBE_PROMPT_VERSION}-*.json"))
+    assert list(cache.glob(f"figure-model/*-f0-d{prompts.DESCRIBE_PROMPT_VERSION}-*.json"))

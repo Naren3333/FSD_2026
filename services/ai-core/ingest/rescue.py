@@ -1,4 +1,4 @@
-"""Tables every extraction method rejected, laid out by the model from the PDF's own words (RAG_PLAN Iteration 14).
+"""Tables every extraction method rejected, laid out by the model from the PDF's own words.
 Async; runs after the vision pass, before parsing.
 
 The vision pass says where a table is; ingest.tables reads its cells from the text layer and keeps the grid
@@ -20,24 +20,12 @@ import pymupdf
 
 import pdf
 from ingest import tables as extraction
-from ingest.vision import (
-    FIGURE_CONCURRENCY,
-    MIN_TEXT_WORDS,
-    UNTRUSTED,
-    PageVision,
-    SeenTable,
-    Word,
-    _render,
-    _semaphore,
-    ask,
-    cache_file,
-    cached,
-    center_in,
-    pad,
-    page_key,
-    visible_words,
-)
+from ingest.geometry import Word, center_in, pad
+from ingest.pages import page_key, visible_words
+from ingest.prompts import UNTRUSTED
 from ingest.strings import clean_cell
+from ingest.vision import MIN_TEXT_WORDS, PageRef, PageVision, SeenTable
+from ingest.vision_calls import FIGURE_CONCURRENCY, _semaphore, ask, cached
 
 log = logging.getLogger("ai-core.ingest.rescue")
 
@@ -64,7 +52,7 @@ async def rescue_tables(
         page = out[number]
         assert page is not None  # _rejected only lists tables the vision pass saw
         table = page.tables[i]
-        layout = await _laid_out(path, key, number, i, table, words, model, cache_dir)
+        layout = await _laid_out(PageRef(path, number, key, cache_dir), i, table, words, model)
         if layout is not None:
             tables = list(page.tables)
             tables[i] = replace(table, layout=layout)
@@ -91,36 +79,29 @@ def _rejected(path: Path, seen: list[PageVision | None]) -> list[tuple[int, str,
 
 
 async def _laid_out(
-    path: Path,
-    key: str,
-    number: int,
-    i: int,
-    table: SeenTable,
-    words: list[Word],
-    model: str,
-    cache_dir: Path,
+    page: PageRef, i: int, table: SeenTable, words: list[Word], model: str
 ) -> tuple[tuple[str, ...] | None, tuple[tuple[str, ...], ...]] | None:
     """The model's layout of the table, if it passes `verify_layout`; None otherwise (also when the call fails)."""
     text = [w[4] for w in words]
     prompt = LAYOUT_PROMPT.format(words=" ".join(text[:MAX_LAYOUT_WORDS]))
     try:
         raw = await cached(
-            cache_file(cache_dir, model, key, f"t{i}-layout-v{LAYOUT_PROMPT_VERSION}"),
+            page.cache(model, f"t{i}-layout-v{LAYOUT_PROMPT_VERSION}"),
             lambda: ask(
                 prompt,
-                lambda: pdf.in_thread(_render, path, number, pad(table.bbox)),
+                lambda: page.render(pad(table.bbox)),
                 model,
                 _semaphore("figure", FIGURE_CONCURRENCY),
             ),
             "layout",
         )
     except Exception as e:
-        log.warning("table %d on %s page %d not laid out: %s", i + 1, path.name, number + 1, e)
+        log.warning("table %d on %s not laid out: %s", i + 1, page, e)
         return None
     header = tuple(clean_cell(c) for c in raw.get("header") or ()) or None
     rows = tuple(tuple(clean_cell(c) for c in row) for row in raw.get("rows") or [] if isinstance(row, list))
     problem = extraction.verify_layout(header, rows, words, table)
     if problem:
-        log.info("table %d on %s page %d stays prose: %s", i + 1, path.name, number + 1, problem)
+        log.info("table %d on %s stays prose: %s", i + 1, page, problem)
         return None
     return header, rows

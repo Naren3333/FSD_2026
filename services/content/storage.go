@@ -7,11 +7,20 @@ import (
 	"io"
 	"learning/platform"
 	"log/slog"
+	"time"
 
 	"github.com/minio/minio-go/v7"
 	"github.com/minio/minio-go/v7/pkg/credentials"
 )
 
+// documentFiles is what the handlers need from object storage: originals and figure crops, and removing an
+// original whose database row was never committed.
+type documentFiles interface {
+	objects
+	removeOrphan(documentID, key string)
+}
+
+// storage is the S3-compatible bucket holding originals and figure crops.
 type storage struct {
 	client *minio.Client
 	bucket string
@@ -44,7 +53,7 @@ func (s storage) put(ctx context.Context, key string, data []byte, contentType s
 
 // removeOrphan deletes an object whose database row was never committed.
 func (s storage) removeOrphan(documentID, key string) {
-	cleanup, cancel := context.WithTimeout(context.Background(), 5e9)
+	cleanup, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	if err := s.client.RemoveObject(cleanup, s.bucket, key, minio.RemoveObjectOptions{}); err != nil {
 		slog.Error("orphan_object_cleanup_failed", "document_id", documentID)

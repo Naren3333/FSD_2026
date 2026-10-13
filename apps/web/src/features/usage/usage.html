@@ -1,0 +1,29 @@
+<div class="usage" [attr.aria-busy]="loading()">
+  <span class="usage-label" id="usage-label">AI use today</span>
+  @if (usage(); as u) {
+    <meter
+      min="0"
+      [max]="u.limit_usd"
+      [value]="u.spent_usd"
+      [attr.low]="u.limit_usd * 0.8"
+      [attr.high]="u.limit_usd * 0.95"
+      [attr.optimum]="0"
+      aria-labelledby="usage-label usage-text"
+    ></meter>
+    <span id="usage-text">{{ spentText(u) }} of {{ limitText(u) }}</span>
+    @if (u.spent_usd >= u.limit_usd) {
+      <small class="error">
+        Today’s allowance is used up. The assistant and PDF indexing resume at {{ resets(u) }}.
+      </small>
+    } @else {
+      <small>Resets at {{ resets(u) }}.</small>
+    }
+  } @else if (loading()) {
+    <small>Checking…</small>
+  } @else if (failed()) {
+    <small class="error">AI use could not be loaded.</small>
+  }
+  <button type="button" class="secondary usage-refresh" (click)="refresh()" [disabled]="loading()">
+    Refresh AI use
+  </button>
+</div>

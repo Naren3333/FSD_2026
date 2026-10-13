@@ -1,14 +1,15 @@
-"""PDF parsing, header/footer stripping and the ingest failure reasons (RAG_PLAN Iterations 4 and 6).
+"""PDF parsing, header/footer stripping and the ingest failure reasons.
 No DB, no OpenAI."""
 
 from pathlib import Path
 
 import pymupdf
 import pytest
+from conftest import make_mixed_pdf, make_pdf, make_structured_pdf
 
 from ingest.parse import (
     Block,
-    IngestFailure,
+    IngestError,
     Pages,
     _blocks,
     _columns,
@@ -17,7 +18,6 @@ from ingest.parse import (
     reading_key,
 )
 from ingest.tables import Table
-from conftest import make_mixed_pdf, make_pdf, make_structured_pdf
 
 
 def write(tmp_path: Path, data: bytes) -> Path:
@@ -27,7 +27,7 @@ def write(tmp_path: Path, data: bytes) -> Path:
 
 
 def failure(path: Path) -> str:
-    with pytest.raises(IngestFailure) as e:
+    with pytest.raises(IngestError) as e:
         read_pages(path)
     return e.value.reason
 
@@ -207,7 +207,7 @@ def test_a_short_block_on_its_own_line_stays_a_block() -> None:
     ]
 
 
-# ---- ligatures (RAG_PLAN Iteration 14, Step 1)
+# ---- ligatures
 
 LIGATURE_TEXT = (
     "The data eﬃciency of zero-shot transfer varies widely, and ﬁne-tuning on the ﬂow of"
@@ -266,7 +266,7 @@ def test_a_caption_line_is_stripped_when_the_model_changes_its_punctuation(tmp_p
     assert not any("Figure 7" in b.text for b in kept)
 
 
-# ---- two columns (RAG_PLAN Iteration 14, Step 4)
+# ---- two columns
 
 COLUMN_TEXT = "Attention lets every position look at every other position in one step, so paths stay short."
 
@@ -276,7 +276,7 @@ def column_page() -> list[Block]:
     left = [Block(f"L{n} {COLUMN_TEXT}", 10, False, 100 + 50 * n, 136 + 50 * n, 50, 290) for n in range(4)]
     right = [Block(f"R{n} {COLUMN_TEXT}", 10, False, 100 + 50 * n, 136 + 50 * n, 310, 550) for n in range(4)]
     return [Block("Model architecture", 14, True, 60, 76, 50, 550)] + [
-        b for pair in zip(left, right) for b in pair
+        b for pair in zip(left, right, strict=False) for b in pair
     ]
 
 

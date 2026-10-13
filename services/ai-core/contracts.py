@@ -3,6 +3,7 @@ from uuid import UUID
 
 from learning_transport import Contract
 from pydantic import Field, model_validator
+
 from spend import Billed
 
 
@@ -106,5 +107,5 @@ class IngestResponse(Contract):
     page_count: int | None = Field(default=None, ge=0)
     ocr_page_count: int | None = Field(default=None, ge=0)
     embedding_model: str | None = None
-    chunks: list[IngestChunk] = []
-    figures: list[IngestFigure] = []
+    chunks: list[IngestChunk] = Field(default_factory=list)
+    figures: list[IngestFigure] = Field(default_factory=list)

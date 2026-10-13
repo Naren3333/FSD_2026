@@ -9,7 +9,6 @@ A change to a prompt's wording is a new version (student_tutor.v2, …), so save
 
 import html
 import re
-
 from typing import Any
 
 STUDENT_TUTOR = "student_tutor.v2"  # v2: holds the Socratic rule under pushback (Iter 5)

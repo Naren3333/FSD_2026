@@ -12,8 +12,6 @@ a reindex never renames an image the live chunks still point at.
 
 Scans: a page without a text layer is transcribed by the vision pass (OCR); its text chunks are source "vision".
 NO_TEXT_LAYER is left for scans with OCR off, or whose transcripts come back empty.
-
-The module docstrings mention fsd_test's RAG_PLAN iterations: they record why each rule exists.
 """
 
 import logging
@@ -25,12 +23,12 @@ import pdf
 from ingest import costs, rescue, vision
 from ingest.chunker import PATH_SEPARATOR, Chunk, chunk_paras
 from ingest.headings import outline
-from ingest.parse import Document, IngestFailure, open_checked, read_pages
+from ingest.parse import Document, IngestError, open_checked, read_pages
 from settings import Settings, get_settings
 
 log = logging.getLogger("ai-core.ingest")
 
-__all__ = ["IngestFailure", "IngestResult", "VisionConfig", "ingest", "passage_text", "vision_config"]
+__all__ = ["IngestError", "IngestResult", "VisionConfig", "ingest", "passage_text", "vision_config"]
 
 
 @dataclass(frozen=True)
@@ -71,7 +69,7 @@ class IngestResult:
 
 
 async def ingest(path: Path, title: str, vision_cfg: VisionConfig | None) -> IngestResult:
-    """The document's chunks and vectors. Raises IngestFailure for a PDF that cannot be indexed (its reason is
+    """The document's chunks and vectors. Raises IngestError for a PDF that cannot be indexed (its reason is
     the document's), and anything else (a provider outage) for the caller to retry. Call inside
     costs.recording() to get the ingest's cost record."""
     record = costs.current()
@@ -85,7 +83,7 @@ async def ingest(path: Path, title: str, vision_cfg: VisionConfig | None) -> Ing
     if record:
         record.pages, record.chunks = len(document.pages), len(chunks)
     if not chunks:
-        raise IngestFailure("NO_TEXT_LAYER", "No text to index")
+        raise IngestError("NO_TEXT_LAYER", "No text to index")
     texts = [embed_text(title, c) for c in chunks]
     with costs.stage("embed"):
         vectors, embed_tokens = await openai_client.embed(texts)

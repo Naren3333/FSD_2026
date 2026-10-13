@@ -2,11 +2,13 @@ package main
 
 import (
 	"errors"
-	"math/big"
-	"regexp"
 )
 
-var decimal = regexp.MustCompile(`^-?[0-9]{1,12}(\.[0-9]{1,8})?$`)
+// Evaluation statuses: a draft until the classroom's teacher finalizes it.
+const (
+	statusDraft     = "draft"
+	statusFinalized = "finalized"
+)
 
 var (
 	errScoreOutOfBounds = errors.New("override score out of bounds")
@@ -57,34 +59,20 @@ func applyOverrides(evidence []Evidence, overrides map[string]int) error {
 	return nil
 }
 
+// evaluate scores one answer: a whole mark when its question's kind says it is correct.
 func evaluate(q Question, answer string) (Evidence, error) {
 	e := Evidence{Question: q.ID, Skill: q.Skill, Possible: 1}
-	switch q.Type {
-	case "multiple_choice":
-		e.Correct = answer == q.Answer
-	case "numerical":
-		if !decimal.MatchString(answer) || !decimal.MatchString(q.Answer) || !decimal.MatchString(q.Tolerance) {
-			return e, errors.New("invalid decimal")
-		}
-		a, ok := new(big.Rat).SetString(answer)
-		if !ok {
-			return e, errors.New("invalid answer")
-		}
-		b, ok := new(big.Rat).SetString(q.Answer)
-		if !ok {
-			return e, errors.New("invalid key")
-		}
-		t, ok := new(big.Rat).SetString(q.Tolerance)
-		if !ok || t.Sign() < 0 {
-			return e, errors.New("invalid tolerance")
-		}
-		delta := new(big.Rat).Abs(new(big.Rat).Sub(a, b))
-		e.Correct = delta.Cmp(t) <= 0
-	default:
+	kind, ok := questionKinds[q.Type]
+	if !ok {
 		return e, errors.New("unsupported question type")
 	}
-	if e.Correct {
-		e.Awarded = 1
+	correct, err := kind.correct(q, answer)
+	if err != nil {
+		return e, err
+	}
+	e.Correct = correct
+	if correct {
+		e.Awarded = e.Possible
 	}
 	return e, nil
 }

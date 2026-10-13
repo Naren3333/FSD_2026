@@ -8,4 +8,7 @@ type Classroom struct {
 	Teacher string `json:"teacher_id"`
 }
 
-func validName(name string) bool { return strings.TrimSpace(name) != "" && len(name) <= 120 }
+// maxName is the longest classroom name, in bytes.
+const maxName = 120
+
+func validName(name string) bool { return strings.TrimSpace(name) != "" && len(name) <= maxName }

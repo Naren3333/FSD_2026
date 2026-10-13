@@ -101,7 +101,7 @@ func newFixture(t *testing.T) *fixture {
 	db := testDB(t)
 	f := &fixture{t: t, db: db, store: &memoryStore{objects: map[string][]byte{}}, ai: newFakeAICore(t), org: "org-1", room: uuid.NewString()}
 	f.x = indexer{db, f.store, f.ai.client(), 0}
-	f.s = server{App: &platform.App{DB: db}, ai: f.ai.client()}
+	f.s = server{store: pgStore{db}, ai: f.ai.client()}
 	f.ai.ingest = f.reply(indexedResult())
 	f.ai.scores = func(w http.ResponseWriter, r *http.Request) {
 		var body struct{ Documents []string }
@@ -143,7 +143,13 @@ func (f *fixture) upload(docType string) string {
 	id := uuid.NewString()
 	key := f.org + "/" + id + "/1"
 	f.store.put(context.Background(), key, []byte("%PDF-1.7"), "application/pdf")
-	_, err := f.s.insertDocument(context.Background(), id, f.room, f.org, "teacher", "Biology", "application/pdf", key, strings.Repeat("a", 64), "indexing", docType, []Chunk{})
+	d := newDocument{
+		Document: Document{ID: id, Classroom: f.room, Title: "Biology", Type: mimePDF, Status: statusIndexing, Revision: 1, SHA: strings.Repeat("a", 64), DocType: docType, Chunks: []Chunk{}},
+		Org:      f.org,
+		Owner:    "teacher",
+		Key:      key,
+	}
+	_, err := f.s.store.insertDocument(context.Background(), d)
 	if err != nil {
 		f.t.Fatal(err)
 	}
@@ -250,7 +256,7 @@ func TestAnOutageIsRetriedThenFailsTheDocument(t *testing.T) {
 	f := newFixture(t)
 	id := f.upload("teaching_material")
 	f.ai.ingest = func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(503)
+		w.WriteHeader(http.StatusServiceUnavailable)
 		w.Write([]byte(`{"error":{"code":"AI_PROVIDER_NOT_CONFIGURED","message":"x"}}`))
 	}
 	f.runAll()
@@ -277,10 +283,10 @@ func TestAnUnreadablePDFFailsWithItsReasonAndReindexRecovers(t *testing.T) {
 	id := f.upload("teaching_material")
 	f.runAll()
 	ctx := context.Background()
-	if queued, err := f.s.queueIndex(ctx, f.org, id); err != nil || !queued {
+	if queued, err := f.s.store.queueIndex(ctx, f.org, id); err != nil || !queued {
 		t.Fatalf("reindex: %v %v", queued, err)
 	}
-	if queued, _ := f.s.queueIndex(ctx, f.org, id); queued {
+	if queued, _ := f.s.store.queueIndex(ctx, f.org, id); queued {
 		t.Fatal("a document already indexing was queued twice")
 	}
 	if got := f.value("SELECT count(*) FROM document_chunks"); got != "2" {
@@ -292,7 +298,7 @@ func TestAnUnreadablePDFFailsWithItsReasonAndReindexRecovers(t *testing.T) {
 		t.Fatal(got)
 	}
 	f.ai.ingest = f.reply(indexedResult())
-	f.s.queueIndex(ctx, f.org, id)
+	f.s.store.queueIndex(ctx, f.org, id)
 	f.runAll()
 	if got := f.value("SELECT status||' '||(failure_reason IS NULL) FROM documents WHERE id=$1", id); got != "indexed true" {
 		t.Fatal(got)
@@ -302,6 +308,13 @@ func TestAnUnreadablePDFFailsWithItsReasonAndReindexRecovers(t *testing.T) {
 func TestSearchFusesRerankRelatedAndAccess(t *testing.T) {
 	f := newFixture(t)
 	notes := f.upload("teaching_material")
+	f.runAll()
+	// The rubric's passages differ from the notes': search keeps one copy of identical text (see distinct).
+	rubric := indexedResult()
+	for i := range rubric.Chunks {
+		rubric.Chunks[i].Content = "Rubric. " + rubric.Chunks[i].Content
+	}
+	f.ai.ingest = f.reply(rubric)
 	f.upload("rubric")
 	f.runAll()
 	ctx := context.Background()
@@ -337,7 +350,7 @@ func TestSearchFusesRerankRelatedAndAccess(t *testing.T) {
 	if len(other.Results) != 0 {
 		t.Fatal("another classroom's chunks were returned")
 	}
-	f.ai.scores = func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(502) }
+	f.ai.scores = func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(http.StatusBadGateway) }
 	fallback, err := f.s.runSearch(ctx, all, "leaves", 2, true, testBilled)
 	if err != nil || !fallback.RerankFallback || len(fallback.Results) != 2 || fallback.Results[0].ChunkID != plain.Results[0].ChunkID {
 		t.Fatalf("fallback: %v", err)

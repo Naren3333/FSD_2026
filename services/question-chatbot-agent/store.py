@@ -5,7 +5,7 @@ import json
 from pathlib import Path
 from typing import Any, Protocol
 
-from psycopg.rows import dict_row
+from learning_transport.db import open_async_pool
 from psycopg.types.json import Jsonb
 from psycopg_pool import AsyncConnectionPool
 
@@ -38,18 +38,7 @@ class PostgresStore:
 
     @classmethod
     async def open(cls, url: str) -> "PostgresStore":
-        pool: AsyncConnectionPool[Any] = AsyncConnectionPool(
-            url,
-            min_size=1,
-            max_size=8,
-            timeout=5,
-            open=False,
-            kwargs={"row_factory": dict_row, "options": "-c statement_timeout=10000"},
-        )
-        await pool.open(wait=True, timeout=15)
-        async with pool.connection() as conn:
-            await conn.execute(MIGRATION)
-        return cls(pool)
+        return cls(await open_async_pool(url, MIGRATION))
 
     async def close(self) -> None:
         await self.pool.close()

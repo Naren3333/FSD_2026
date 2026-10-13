@@ -2,13 +2,13 @@ package main
 
 import (
 	"context"
-	"fmt"
+	"errors"
 	"learning/platform"
 	"log/slog"
 	"net/http"
+	"slices"
 	"sort"
 	"strings"
-	"sync"
 	"time"
 	"unicode/utf8"
 
@@ -91,8 +91,36 @@ func (s server) search(w http.ResponseWriter, r *http.Request) {
 	if !platform.Decode(w, r, &req) {
 		return
 	}
+	topK, rerank, problem := req.normalize()
+	if problem != "" {
+		platform.Invalid(w, problem)
+		return
+	}
+	relation, ok := s.access.Relation(w, r, req.Classroom, "")
+	if !ok {
+		return
+	}
+	f := filter{platform.Actor(r).Org, req.Classroom, req.DocTypes, req.DocumentIDs}
+	if relation != platform.RelationTeacher {
+		if len(f.docTypes) > 0 && !slices.Contains(f.docTypes, docTeachingMaterial) {
+			platform.JSON(w, http.StatusOK, searchResponse{Results: []hit{}})
+			return
+		}
+		f.docTypes = []string{docTeachingMaterial}
+	}
+	result, err := s.runSearch(r.Context(), f, req.Query, topK, rerank, caller(platform.Actor(r)))
+	if err != nil {
+		searchFailed(w, err)
+		return
+	}
+	platform.JSON(w, http.StatusOK, result)
+}
+
+// normalize trims the query and applies the defaults (top 8, reranked). It returns a message when the request is
+// out of bounds.
+func (req *searchRequest) normalize() (topK int, rerank bool, problem string) {
 	req.Query = strings.TrimSpace(req.Query)
-	topK, rerank := 8, true
+	topK, rerank = 8, true
 	if req.TopK != nil {
 		topK = *req.TopK
 	}
@@ -100,47 +128,34 @@ func (s server) search(w http.ResponseWriter, r *http.Request) {
 		rerank = *req.Rerank
 	}
 	if req.Query == "" || utf8.RuneCountInString(req.Query) > maxQuery || topK < 1 || topK > rrfKeep || len(req.DocumentIDs) > 100 {
-		platform.Error(w, 422, "VALIDATION_ERROR", "Send a query of 1–1000 characters, top_k 1–30 and at most 100 document ids.")
-		return
+		return 0, false, "Send a query of 1–1000 characters, top_k 1–30 and at most 100 document ids."
 	}
 	for _, id := range req.DocumentIDs {
 		if !platform.ID(id) {
-			platform.Error(w, 422, "VALIDATION_ERROR", "Document ids must be UUIDs.")
-			return
+			return 0, false, "Document ids must be UUIDs."
 		}
 	}
 	for _, t := range req.DocTypes {
 		if !docTypes[t] {
-			platform.Error(w, 422, "VALIDATION_ERROR", "Unknown document type.")
-			return
+			return 0, false, "Unknown document type."
 		}
 	}
-	relation, ok := s.Relation(w, r, req.Classroom, "")
-	if !ok {
+	return topK, rerank, ""
+}
+
+// searchFailed answers a failed search: the user's AI allowance is used up, ai-core is unavailable, or an
+// internal error.
+func searchFailed(w http.ResponseWriter, err error) {
+	if limit, ok := spendLimit(err); ok {
+		platform.ErrorWith(w, http.StatusTooManyRequests, limit.Code, limit.Message, map[string]any{"resets_at": limit.ResetsAt})
 		return
 	}
-	f := filter{platform.Actor(r).Org, req.Classroom, req.DocTypes, req.DocumentIDs}
-	if relation != platform.RelationTeacher {
-		if len(f.docTypes) > 0 && !contains(f.docTypes, "teaching_material") {
-			platform.JSON(w, 200, searchResponse{Results: []hit{}})
-			return
-		}
-		f.docTypes = []string{"teaching_material"}
-	}
-	result, err := s.runSearch(r.Context(), f, req.Query, topK, rerank, caller(platform.Actor(r)))
-	if err != nil {
-		if limit, ok := spendLimit(err); ok {
-			platform.JSON(w, 429, map[string]any{"error": map[string]any{"code": limit.Code, "message": limit.Message, "resets_at": limit.ResetsAt}})
-			return
-		}
-		if _, ok := err.(*aiError); ok {
-			platform.Error(w, 503, "SEARCH_UNAVAILABLE", "Search is unavailable right now; retry later.")
-			return
-		}
-		platform.Fail(w, err)
+	var unavailable *aiError
+	if errors.As(err, &unavailable) {
+		platform.Error(w, http.StatusServiceUnavailable, "SEARCH_UNAVAILABLE", "Search is unavailable right now; retry later.")
 		return
 	}
-	platform.JSON(w, 200, result)
+	platform.Fail(w, err)
 }
 
 func (s server) runSearch(ctx context.Context, f filter, query string, topK int, rerank bool, who billed) (searchResponse, error) {
@@ -152,7 +167,7 @@ func (s server) runSearch(ctx context.Context, f filter, query string, topK int,
 	}
 	keyword := make(chan legResult, 1)
 	go func() {
-		rows, err := s.keywordLeg(ctx, f, query)
+		rows, err := s.store.keywordLeg(ctx, f, query)
 		keyword <- legResult{rows, err}
 	}()
 	vector, model, err := s.embedQuery(ctx, query, who)
@@ -160,7 +175,7 @@ func (s server) runSearch(ctx context.Context, f filter, query string, topK int,
 		<-keyword
 		return searchResponse{}, err
 	}
-	vectorRows, err := s.vectorLeg(ctx, f, vector, model)
+	vectorRows, err := s.store.vectorLeg(ctx, f, vector, model)
 	k := <-keyword
 	if err == nil {
 		err = k.err
@@ -178,29 +193,15 @@ func (s server) runSearch(ctx context.Context, f filter, query string, topK int,
 	if len(hits) > topK {
 		hits = hits[:topK]
 	}
-	if err = s.attachRelated(ctx, f, hits); err != nil {
+	if err = s.store.attachRelated(ctx, f, hits); err != nil {
 		return searchResponse{}, err
 	}
 	slog.Info("search", "vector_hits", len(vectorRows), "keyword_hits", len(k.rows), "returned", len(hits), "rerank", rerank, "rerank_fallback", fallback, "duration_ms", time.Since(started).Milliseconds())
 	return searchResponse{hits, fallback}, nil
 }
 
-// queryCache keeps recent query vectors, so a repeated question costs no embedding call.
-var queryCache = struct {
-	sync.Mutex
-	entries map[string]cachedVector
-}{entries: map[string]cachedVector{}}
-
-type cachedVector struct {
-	vector []float32
-	model  string
-}
-
 func (s server) embedQuery(ctx context.Context, query string, who billed) ([]float32, string, error) {
-	queryCache.Lock()
-	cached, ok := queryCache.entries[query]
-	queryCache.Unlock()
-	if ok {
+	if cached, ok := s.vectors.get(query); ok {
 		return cached.vector, cached.model, nil
 	}
 	ctx, cancel := context.WithTimeout(ctx, embedTimeout)
@@ -209,43 +210,14 @@ func (s server) embedQuery(ctx context.Context, query string, who billed) ([]flo
 	if err != nil {
 		return nil, "", err
 	}
-	queryCache.Lock()
-	if len(queryCache.entries) >= 256 {
-		clear(queryCache.entries)
-	}
-	queryCache.entries[query] = cachedVector{vector, model}
-	queryCache.Unlock()
+	s.vectors.put(query, cachedVector{vector, model})
 	return vector, model, nil
 }
 
 const legColumns = "id,document_id,doc_type,section_path,page_start,page_end,content,kind,source,image,cites"
-const resultColumns = "r.id,r.document_id,(SELECT title FROM documents d WHERE d.id=r.document_id),r.doc_type,r.section_path,r.page_start,r.page_end,r.content,r.kind,r.source,r.image,r.cites"
 
-// vectorLeg compares only vectors from the query's embedding model. relaxed_order lets the filtered HNSW scan
-// continue until enough rows pass the filter; the outer ORDER BY makes the ranks exact.
-func (s server) vectorLeg(ctx context.Context, f filter, vector []float32, model string) ([]hit, error) {
-	tx, err := s.DB.Begin(ctx)
-	if err != nil {
-		return nil, err
-	}
-	defer tx.Rollback(ctx)
-	if _, err = tx.Exec(ctx, "SELECT set_config('hnsw.iterative_scan','relaxed_order',true), set_config('hnsw.ef_search',$1,true)", fmt.Sprint(efSearch)); err != nil {
-		return nil, err
-	}
-	rows, err := tx.Query(ctx, fmt.Sprintf("WITH r AS MATERIALIZED (SELECT %s, embedding <=> CAST($5::text AS vector) AS distance FROM document_chunks WHERE %s AND embedding_model=$6 ORDER BY distance LIMIT %d) SELECT %s FROM r ORDER BY r.distance, r.id", legColumns, filterSQL, legLimit, resultColumns), f.args(vectorText(vector), model)...)
-	if err != nil {
-		return nil, err
-	}
-	return scanHits(rows)
-}
-
-func (s server) keywordLeg(ctx context.Context, f filter, query string) ([]hit, error) {
-	rows, err := s.DB.Query(ctx, fmt.Sprintf("WITH r AS MATERIALIZED (SELECT %s, ts_rank_cd(tsv, q) AS rank FROM document_chunks, websearch_to_tsquery('english', $5) AS q WHERE tsv @@ q AND %s ORDER BY rank DESC, id LIMIT %d) SELECT %s FROM r ORDER BY r.rank DESC, r.id", legColumns, filterSQL, legLimit, resultColumns), f.args(query)...)
-	if err != nil {
-		return nil, err
-	}
-	return scanHits(rows)
-}
+// resultColumns are a leg's hits with their document's title; the legs select from r JOIN documents d.
+const resultColumns = "r.id,r.document_id,d.title,r.doc_type,r.section_path,r.page_start,r.page_end,r.content,r.kind,r.source,r.image,r.cites"
 
 func scanHits(rows pgx.Rows) ([]hit, error) {
 	defer rows.Close()
@@ -270,8 +242,8 @@ func fuse(vector, keyword []hit) []hit {
 		for i, row := range rows {
 			h, ok := byID[row.ChunkID]
 			if !ok {
-				copy := row
-				h = &copy
+				first := row
+				h = &first
 				byID[row.ChunkID] = h
 				order = append(order, row.ChunkID)
 			}
@@ -356,53 +328,4 @@ func passageText(title string, section *string, content string) string {
 		head += "\n" + parts[len(parts)-1]
 	}
 	return head + "\n\n" + content
-}
-
-// attachRelated adds, for each hit that cites labels, the figures and tables of its document with those labels,
-// under the same filter. No query runs when no hit cites anything.
-func (s server) attachRelated(ctx context.Context, f filter, hits []hit) error {
-	var citing []string
-	for _, h := range hits {
-		if len(h.cites) > 0 {
-			citing = append(citing, h.ChunkID)
-		}
-	}
-	if len(citing) == 0 {
-		return nil
-	}
-	rows, err := s.DB.Query(ctx, `WITH src AS (SELECT id, document_id, cites FROM document_chunks WHERE id=ANY($5::uuid[]))
-SELECT src.id, c.id, c.kind, c.label, c.page_start, c.image, c.content FROM src
-JOIN LATERAL (SELECT id, kind, label, page_start, image, content FROM document_chunks WHERE document_id=src.document_id AND label=ANY(src.cites) AND `+filterSQL+`) c ON true
-ORDER BY src.id, c.page_start, c.label`, f.args(citing)...)
-	if err != nil {
-		return err
-	}
-	defer rows.Close()
-	found := map[string][]related{}
-	for rows.Next() {
-		var from string
-		var rel related
-		if err = rows.Scan(&from, &rel.ChunkID, &rel.Kind, &rel.Label, &rel.PageStart, &rel.Image, &rel.Content); err != nil {
-			return err
-		}
-		found[from] = append(found[from], rel)
-	}
-	if err = rows.Err(); err != nil {
-		return err
-	}
-	for i := range hits {
-		if rel, ok := found[hits[i].ChunkID]; ok {
-			hits[i].Related = rel
-		}
-	}
-	return nil
-}
-
-func contains(values []string, want string) bool {
-	for _, v := range values {
-		if v == want {
-			return true
-		}
-	}
-	return false
 }

@@ -6,18 +6,18 @@ SPEND_LIMIT_TEACHER_USD (default 10), and the day starts at midnight in SPEND_TI
 The check happens before a call and the cost is recorded after it, so calls already running when a user reaches
 the cap still finish: the overshoot is at most the calls in flight."""
 
-import json
 import logging
-import os
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Literal, Protocol
 
 from learning_transport import Contract, failure
-from pydantic import Field
-from psycopg.rows import dict_row
+from learning_transport.db import open_async_pool
 from psycopg_pool import AsyncConnectionPool
+from pydantic import Field
+
+from settings import get_settings
 
 log = logging.getLogger("ai-core.spend")
 
@@ -63,10 +63,7 @@ class Charge:
 
 
 def prices() -> dict[str, tuple[float, float, float]]:
-    table = dict(DEFAULT_PRICES)
-    if raw := os.environ.get("MODEL_PRICES", "").strip():
-        table.update({model: (float(a), float(b), float(c)) for model, (a, b, c) in json.loads(raw).items()})
-    return table
+    return {**DEFAULT_PRICES, **get_settings().model_prices}
 
 
 def cost(model: str, tokens_in: int, tokens_out: int = 0, cached_in: int = 0) -> float:
@@ -74,7 +71,7 @@ def cost(model: str, tokens_in: int, tokens_out: int = 0, cached_in: int = 0) ->
     if model in table:
         rate_in, rate_cached, rate_out = table[model]
     else:
-        log.warning(json.dumps({"service": "ai-core", "error_category": "unpriced_model", "model": model}))
+        log.warning("unpriced_model", extra={"model": model})
         rate_in = rate_cached = max(p[0] for p in table.values())
         rate_out = max(p[2] for p in table.values())
     cached_in = min(cached_in, tokens_in)
@@ -87,13 +84,12 @@ def estimate_tokens(text: str) -> int:
 
 
 def limit(role: Role) -> float:
-    if role == "teacher":
-        return float(os.environ.get("SPEND_LIMIT_TEACHER_USD") or 10)
-    return float(os.environ.get("SPEND_LIMIT_STUDENT_USD") or 5)
+    settings = get_settings()
+    return settings.spend_limit_teacher_usd if role == "teacher" else settings.spend_limit_student_usd
 
 
 def timezone() -> str:
-    return os.environ.get("SPEND_TIMEZONE") or "Asia/Singapore"
+    return get_settings().spend_timezone
 
 
 class Ledger(Protocol):
@@ -112,18 +108,7 @@ class PostgresLedger:
 
     @classmethod
     async def open(cls, url: str) -> "PostgresLedger":
-        pool: AsyncConnectionPool[Any] = AsyncConnectionPool(
-            url,
-            min_size=1,
-            max_size=8,
-            timeout=5,
-            open=False,
-            kwargs={"row_factory": dict_row, "options": "-c statement_timeout=10000"},
-        )
-        await pool.open(wait=True, timeout=15)
-        async with pool.connection() as conn:
-            await conn.execute(MIGRATION)
-        return cls(pool)
+        return cls(await open_async_pool(url, MIGRATION))
 
     async def today(self, billed: Billed) -> Usage:
         # The day boundary is computed by PostgreSQL, which carries the time zone database.

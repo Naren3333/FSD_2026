@@ -1,4 +1,4 @@
-"""Headings and section paths from block styles (PLAN.md §6.1 ingest step 3).
+"""Headings and section paths from block styles.
 
 A heading is a short block that is clearly bigger than the body text, or bold at body size, and not a
 bullet point. Its level comes from its size: the biggest heading size in the document is level 0, the
@@ -8,7 +8,7 @@ one-off banner or callout) or only on the cover/title pages is body text. So a s
 become the top level, and a report's cover title doesn't sit above everything. Consecutive heading lines
 in the same style (a heading wrapped over two lines) are one heading.
 
-A PDF outline (bookmarks) with several levels, when its entries are found on the page (RAG_PLAN Iteration 14),
+A PDF outline (bookmarks) with several levels, when its entries are found on the page,
 takes over from the sizes: each entry's heading gets its outline level. Fonts don't always follow a document's
 structure (NIST's "1.1" and "1.2.1" are the same bold body size; GAO's summary headings are bigger than its
 sections). Headings the outline doesn't list are kept only when smaller than every listed one (subheadings below
@@ -130,7 +130,7 @@ def outline(
 
     paras: list[Para] = []
     stack: list[tuple[int, str]] = []
-    for page_no, (blocks, page_levels) in enumerate(zip(pages, levels), start=1):
+    for page_no, (blocks, page_levels) in enumerate(zip(pages, levels, strict=False), start=1):
         prev: Block | None = None  # the previous body block on this page, while paras[-1] is its Para
         prev_heading: Block | None = None  # the previous block, if it was a heading (paras[-1] is its Para)
         cols = columns[page_no - 1] if columns and page_no <= len(columns) else None
@@ -141,7 +141,7 @@ def outline(
             ],
             key=lambda r: reading_key(cols, r.bbox),
         )
-        for i, (block, level) in enumerate(zip(blocks, page_levels)):
+        for i, (block, level) in enumerate(zip(blocks, page_levels, strict=False)):
             here = reading_key(cols, (block.x0, block.top, block.x1, block.bottom))
             if waiting and reading_key(cols, waiting[0].bbox) <= here:
                 while waiting and reading_key(cols, waiting[0].bbox) <= here:
@@ -200,7 +200,7 @@ def _toc_levels(
     deepest = max(matched.values()) + 1
     level_below = {s: min(deepest + i, max(deepest, MAX_LEVELS - 1)) for i, s in enumerate(below)}
     levels: list[list[int | None]] = []
-    for p, (blocks, page_sizes) in enumerate(zip(pages, sizes)):
+    for p, page_sizes in enumerate(sizes[: len(pages)]):
         out: list[int | None] = []
         for i, s in enumerate(page_sizes):
             if (p, i) in matched:
