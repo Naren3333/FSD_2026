@@ -69,12 +69,13 @@ test('chat streams cited answers, loads figures and reports failures',async({pag
   const room=await page.getByLabel('Current classroom').inputValue();
   const thread={id:'44444444-4444-4444-8444-444444444444',classroom_id:room,role:'teacher',title:null as string|null,created_at:new Date().toISOString(),last_message_at:new Date().toISOString()};
   const citations=[{chunk_id:CHUNK,document_id:DOC,title:'Biology notes',page_start:3,page_end:3,kind:'text',source:'pdf',content:'Plants make glucose and oxygen.',image:null},{chunk_id:FIGURE,document_id:DOC,title:'Biology notes',page_start:4,page_end:5,kind:'figure',source:'vision',content:'A leaf cross-section.',image:'0123456789abcdef.png'}];
-  let saved:unknown[]=[];let reply=sse([['token',{text:'Glucose and oxygen '}],['token',{text:`[doc:${CHUNK}], see the leaf [doc:${FIGURE}].`}],['citations',{citations}],['done',{message_id:'m2',outcome:'answered'}]]);
+  let saved:unknown[]=[];const answerText=`Plants make:\n\n- **Glucose** [doc:${CHUNK}]\n- \`oxygen\`, see the leaf [doc:${FIGURE}].`;
+  let reply=sse([['token',{text:'Plants make:\n\n- **Glu'}],['token',{text:answerText.slice(21)}],['citations',{citations}],['done',{message_id:'m2',outcome:'answered'}]]);
   await page.route(url=>url.pathname==='/api/chatbot/threads',route=>route.request().method()==='POST'?route.fulfill({status:201,json:thread}):route.fulfill({json:{threads:thread.title?[thread]:[]}}));
   await page.route(`**/api/chatbot/threads/${thread.id}/messages`,async route=>{
     if(route.request().method()==='GET')return route.fulfill({json:{messages:saved}});
     const asked=route.request().postDataJSON().content as string;thread.title=asked;
-    const body=reply;saved=[{id:'m1',role:'user',content:asked,outcome:null,citations:null,created_at:thread.created_at},{id:'m2',role:'assistant',content:body.includes('error')?'':`Glucose and oxygen [doc:${CHUNK}], see the leaf [doc:${FIGURE}].`,outcome:body.includes('error')?'error':'answered',citations:body.includes('error')?null:citations,created_at:thread.created_at}];
+    const body=reply;saved=[{id:'m1',role:'user',content:asked,outcome:null,citations:null,created_at:thread.created_at},{id:'m2',role:'assistant',content:body.includes('error')?'':answerText,outcome:body.includes('error')?'error':'answered',citations:body.includes('error')?null:citations,created_at:thread.created_at}];
     return route.fulfill({headers:{'Content-Type':'text/event-stream'},body});
   });
   await page.route(`**/api/content/documents/${DOC}/figures/*`,route=>route.fulfill({contentType:'image/png',body:PNG}));
@@ -83,7 +84,8 @@ test('chat streams cited answers, loads figures and reports failures',async({pag
   await page.getByLabel('Your question').fill('What do plants make?');await page.getByRole('button',{name:'Send question',exact:true}).click();
   await expect(page.getByRole('status').filter({hasText:'Answer complete.'})).toBeVisible();
   const answer=page.locator('.turn.answer').last();
-  await expect(answer.locator('.turn-text')).toHaveText('Glucose and oxygen [1], see the leaf [2].');
+  await expect(answer.locator('.turn-text p')).toHaveText('Plants make:');await expect(answer.locator('.turn-text li')).toHaveText(['Glucose [1]','oxygen, see the leaf [2].']);
+  await expect(answer.locator('.turn-text strong')).toHaveText('Glucose');await expect(answer.locator('.turn-text code')).toHaveText('oxygen');await expect(answer.getByText('**')).toHaveCount(0);
   await expect(page.getByRole('button',{name:/What do plants make\?/})).toHaveAttribute('aria-current','true');
   await answer.getByRole('link',{name:'Source 2'}).click();
   const figure=answer.locator('.sources li').nth(1);await expect(figure).toBeFocused();
@@ -91,6 +93,7 @@ test('chat streams cited answers, loads figures and reports failures',async({pag
   await expect(figure.getByRole('img',{name:'Figure from Biology notes, pages 4–5'})).toBeVisible();
   await answer.locator('.sources summary').first().focus();await page.keyboard.press('Enter');
   await expect(answer.getByText('Plants make glucose and oxygen.')).toBeVisible();
+  await expect(answer.getByRole('button',{name:'Open the PDF at page 3'})).toBeVisible();await answer.screenshot({path:'test-results/chat-answer.png'});
 
   reply=sse([['error',{code:'AI_UNAVAILABLE',message:'The assistant is not available right now.'}]]);
   await page.getByLabel('Your question').fill('And then?');await page.getByLabel('Your question').press('Control+Enter');

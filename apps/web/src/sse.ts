@@ -21,27 +21,6 @@ export class SseParser {
   }
 }
 
-/** Text, or (ref > 0) the number of a cited source. */
-export interface Segment { text: string; ref: number }
-const TAG = /\[doc:([0-9a-f-]{36})\]/g;
-
-/** An answer's text with each `[doc:<chunk_id>]` replaced by the number of its citation. A tag without a citation
- * (the answer was interrupted before the citations arrived) is dropped rather than shown as a raw identifier. */
-export function segments(text: string, citations: Citation[]): Segment[] {
-  const numbers = new Map(citations.map((c, i) => [c.chunk_id, i + 1]));
-  const out: Segment[] = []; let last = 0;
-  for (const match of text.matchAll(TAG)) {
-    const before = text.slice(last, match.index);
-    if (before) out.push({text: before, ref: 0});
-    const ref = numbers.get(match[1]);
-    if (ref) out.push({text: '', ref});
-    last = match.index + match[0].length;
-  }
-  const rest = text.slice(last).replace(/\[doc:[0-9a-f-]{0,36}$/, ''); // a tag still arriving
-  if (rest) out.push({text: rest, ref: 0});
-  return out;
-}
-
 export function pages(c: Pick<Citation, 'page_start' | 'page_end'>): string {
   return c.page_start === c.page_end ? `page ${c.page_start}` : `pages ${c.page_start}–${c.page_end}`;
 }

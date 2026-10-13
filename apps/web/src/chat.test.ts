@@ -1,7 +1,8 @@
 import '@angular/compiler';
 import { describe, it, expect } from 'vitest';
 import type { Citation, DocumentRecord } from './api';
-import { SseParser, pages, segments } from './sse';
+import { SseParser, pages } from './sse';
+import { markdown } from './markdown';
 import { describe as describeDocument } from './materials';
 
 const A='11111111-1111-4111-8111-111111111111',B='22222222-2222-4222-8222-222222222222';
@@ -16,13 +17,21 @@ describe('SseParser',()=>{
   });
 });
 
-describe('segments',()=>{
-  it('numbers citations in citation order and drops tags without a citation',()=>{
-    expect(segments(`One [doc:${B}] two [doc:${A}][doc:${'3'.repeat(8)}-3333-4333-8333-333333333333].`,[cite(A),cite(B)])).toEqual([
-      {text:'One ',ref:0},{text:'',ref:2},{text:' two ',ref:0},{text:'',ref:1},{text:'.',ref:0}]);
+describe('markdown',()=>{
+  it('renders the answer subset as data, numbering citations by first use',()=>{
+    const text=`The materials cover:\n\n- **Processes:** how \`join()\` waits [doc:${B}].\n- *States* [doc:${A}][doc:${'3'.repeat(8)}-3333-4333-8333-333333333333]\n\n1. One\n2. Two`;
+    expect(markdown(text,[cite(A),cite(B)])).toEqual([
+      {kind:'p',items:[[{kind:'text',text:'The materials cover:',ref:0}]]},
+      {kind:'ul',items:[
+        [{kind:'strong',text:'Processes:',ref:0},{kind:'text',text:' how ',ref:0},{kind:'code',text:'join()',ref:0},{kind:'text',text:' waits ',ref:0},{kind:'ref',text:'',ref:2},{kind:'text',text:'.',ref:0}],
+        [{kind:'em',text:'States',ref:0},{kind:'text',text:' ',ref:0},{kind:'ref',text:'',ref:1}]]},
+      {kind:'ol',items:[[{kind:'text',text:'One',ref:0}],[{kind:'text',text:'Two',ref:0}]]}]);
   });
-  it('hides a tag that is still streaming',()=>{
-    expect(segments('Light [doc:1111',[])).toEqual([{text:'Light ',ref:0}]);
+  it('keeps identifiers and arithmetic literal, and hides a tag still streaming',()=>{
+    expect(markdown('Use snake_case_name and 2*3*4 [doc:1111',[])).toEqual([{kind:'p',items:[[{kind:'text',text:'Use snake_case_name and 2*3*4',ref:0}]]}]);
+  });
+  it('keeps code blocks verbatim and headings as blocks',()=>{
+    expect(markdown('## Steps\n```\nThread t = new Thread();\n**x**\n```',[])).toEqual([{kind:'h',items:[[{kind:'text',text:'Steps',ref:0}]]},{kind:'pre',items:[[{kind:'code',text:'Thread t = new Thread();\n**x**',ref:0}]]}]);
   });
   it('describes page ranges',()=>{expect(pages({page_start:4,page_end:4})).toBe('page 4');expect(pages(cite(A))).toBe('pages 2–3');});
 });
