@@ -25,3 +25,12 @@ def test_response_contract_rejects_invented_accuracy():
     assert SkillMetric.model_validate(metric).observed_accuracy == 1
     with pytest.raises(ValidationError):
         SkillMetric.model_validate({**metric, "observed_accuracy": 0.9})
+
+
+def test_consumer_restart_backoff():
+    from main import RESTART_FIRST, RESTART_MAX, restart_wait
+
+    assert restart_wait(None, False) == RESTART_FIRST
+    assert restart_wait(RESTART_FIRST, False) == 2 * RESTART_FIRST
+    assert restart_wait(RESTART_MAX, False) == RESTART_MAX
+    assert restart_wait(RESTART_MAX, True) == RESTART_FIRST

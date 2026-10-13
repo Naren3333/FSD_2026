@@ -30,9 +30,7 @@ func main() {
 		return platform.KafkaReady(ctx)
 	})
 	if err = a.Run(a.Outbox, func(ctx context.Context) {
-		consumerRunning.Store(true)
-		defer consumerRunning.Store(false)
-		a.Consume(ctx, "assessment.submitted.v1", consume)
+		a.Consume(ctx, "assessment.submitted.v1", consume, &consumerRunning)
 	}); err != nil {
 		os.Exit(1)
 	}

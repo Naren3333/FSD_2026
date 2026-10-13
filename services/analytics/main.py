@@ -53,7 +53,39 @@ def process(pool: ConnectionPool[Any], event: Event) -> None:
             )
 
 
+RESTART_FIRST, RESTART_MAX = 5.0, 60.0  # seconds a stopped consumer waits before its next session
+
+
+def restart_wait(previous: float | None, progressed: bool) -> float:
+    """How long to wait before the next session: the first wait after a session that made progress, otherwise
+    double the previous wait, up to a minute."""
+    if progressed or previous is None:
+        return RESTART_FIRST
+    return min(2 * previous, RESTART_MAX)
+
+
 def consume(pool: ConnectionPool[Any], stop: threading.Event, connected: threading.Event) -> None:
+    """Keep consuming until shutdown. A session that stops on an event it cannot store (the database is down, say)
+    or on a broker error is followed, after a backoff, by a new one from the last committed offset: the event is
+    retried rather than skipped, and the consumer never stays down while the process looks alive."""
+    wait: float | None = None
+    while not stop.is_set():
+        progressed = consume_session(pool, stop, connected)
+        if stop.is_set():
+            return
+        wait = restart_wait(wait, progressed)
+        logger.error(
+            json.dumps(
+                {"service": "analytics", "error_category": "consumer_restarting", "after_seconds": wait}
+            )
+        )
+        if stop.wait(wait):
+            return
+
+
+def consume_session(pool: ConnectionPool[Any], stop: threading.Event, connected: threading.Event) -> bool:
+    """One consumer session; returns whether it committed anything."""
+    progressed = False
     consumer = Consumer(
         {
             "bootstrap.servers": os.environ["KAFKA_BROKERS"],
@@ -94,6 +126,7 @@ def consume(pool: ConnectionPool[Any], stop: threading.Event, connected: threadi
                     )
                 )
                 consumer.commit(message=msg, asynchronous=False)
+                progressed = True
                 continue
             for attempt in range(5):
                 try:
@@ -112,13 +145,15 @@ def consume(pool: ConnectionPool[Any], stop: threading.Event, connected: threadi
                         )
                     )
                     if attempt == 4 or stop.wait(2**attempt):
-                        return
+                        return progressed
             consumer.commit(message=msg, asynchronous=False)
+            progressed = True
     except Exception:
         logger.error(json.dumps({"service": "analytics", "error_category": "consumer_stopped_uncommitted"}))
     finally:
         connected.clear()
         consumer.close()
+    return progressed
 
 
 @asynccontextmanager
