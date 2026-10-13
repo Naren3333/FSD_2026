@@ -12,3 +12,10 @@ __pycache__/
 *.test
 test-results/
 playwright-report/
+
+# Go binaries that `go build` writes next to each service
+/services/identity/identity
+/services/curriculum/curriculum
+/services/content/content
+/services/assessment/assessment
+/services/grading/grading

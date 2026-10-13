@@ -19,7 +19,7 @@ for name in ["packages/platform", *[f"services/{s}" for s in ["identity", "curri
     result = subprocess.run(["gofmt", "-l", *map(str, files)], env=env, capture_output=True, text=True, check=True)
     if result.stdout.strip():
         raise SystemExit("Go formatting required: " + result.stdout)
-    for command in [["go", "vet", "./..."], ["go", "test", "./..."], ["go", "build", "./..."]]:
+    for command in [["go", "vet", "./..."], ["go", "test", "./..."], ["go", "build", "-o", os.devnull, "./..."]]:
         run(command, cwd)
 run([sys.executable,"-m","pytest","-q"], ROOT/"packages/python-platform")
 for name in ["analytics", "ai-core", "question-generation-agent", "student-performance-agent", "question-chatbot-agent"]:

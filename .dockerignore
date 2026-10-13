@@ -10,3 +10,10 @@
 **/.ruff_cache
 **/*.exe
 **/.angular
+
+# Go binaries
+services/*/identity
+services/*/curriculum
+services/*/content
+services/*/assessment
+services/*/grading

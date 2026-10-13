@@ -27,6 +27,22 @@ def login(username: str, password_key: str) -> httpx.Client:
     return httpx.Client(base_url=BASE, headers={"Authorization": "Bearer " + res.json()["access_token"]}, timeout=25)
 
 
+def service_token(client_id: str) -> str:
+    secret = ENV[client_id.upper().replace("-", "_") + "_CLIENT_SECRET"]
+    res = httpx.post("http://localhost:8081/realms/learning/protocol/openid-connect/token", data={"client_id": client_id, "client_secret": secret, "grant_type": "client_credentials"}, timeout=15)
+    assert res.status_code == 200, f"Service account login failed for {client_id}: {res.status_code}"
+    return res.json()["access_token"]
+
+
+def ai_core_status(token: str) -> int:
+    """POST a valid embed request to the private ai-core from inside its own container (it has no published port)."""
+    script = ("import json,sys,urllib.request,urllib.error\n"
+              "req=urllib.request.Request('http://localhost:8080/v1/inference',data=json.dumps({'operation':'embed','input':'fractions','model_profile':'default'}).encode(),headers={'Authorization':'Bearer '+sys.stdin.read().strip(),'Content-Type':'application/json'})\n"
+              "try:\n print(urllib.request.urlopen(req,timeout=10).status)\n"
+              "except urllib.error.HTTPError as e:\n print(e.code)\n")
+    return int(docker("exec", "-T", "ai-core", "python", "-c", script, input=token).stdout.strip())
+
+
 def request(client: httpx.Client, method: str, path: str, status: int = 200, **kwargs: object):
     response = client.request(method, path, **kwargs)
     assert response.status_code == status, f"{method} {path}: expected {status}, got {response.status_code}: {response.text[:400]}"
@@ -119,7 +135,15 @@ def main() -> None:
     assert len(request(teacher, "GET", f"/grading/evaluations?classroom_id={room['id']}")) == 1
     isolation = docker("exec", "-T", "postgres", "psql", "-U", "identity", "-d", "grading", "-c", "SELECT 1", check=False)
     assert isolation.returncode != 0 and "permission denied" in isolation.stderr.lower()
-    print("PASS: gateway auth, classroom isolation, curriculum, S3 upload/extraction, answer-key secrecy, submissions, draft grading, teacher finalization, Kafka analytics, consumer restart, duplicate event and business-key idempotency, student privacy, database isolation.")
+    migrations = docker("exec", "-T", "postgres", "psql", "-U", "content", "-d", "content", "-At", "-c", "SELECT string_agg(version::text, ',' ORDER BY version) FROM schema_migrations").stdout.strip()
+    assert migrations == "1", migrations
+    vector = docker("exec", "-T", "postgres", "psql", "-U", "content", "-d", "content", "-At", "-c", "SELECT count(*) FROM pg_extension WHERE extname='vector'").stdout.strip()
+    assert vector == "1", "pgvector is not installed in Content's database"
+    # Service accounts reach the private AI service (still 501 until implemented); people do not.
+    for client_id in ["content-indexer", "question-chatbot-agent"]:
+        assert ai_core_status(service_token(client_id)) == 501
+    assert ai_core_status(student.headers["Authorization"].removeprefix("Bearer ")) == 403
+    print("PASS: gateway auth, classroom isolation, curriculum, S3 upload/extraction, answer-key secrecy, submissions, draft grading, teacher finalization, Kafka analytics, consumer restart, duplicate event and business-key idempotency, student privacy, database isolation, numbered migrations, pgvector, AI service accounts.")
 
 
 if __name__ == "__main__":

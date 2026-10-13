@@ -1,7 +1,8 @@
 name: learning-foundation
 services:
   postgres:
-    image: postgres:17.6-alpine
+    # Postgres 17 with pgvector, for Content's future embeddings index (docs/decisions/0002-ai-integration.md)
+    image: pgvector/pgvector:0.8.1-pg17
     environment:
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Run scripts/setup.py}
     volumes:
@@ -10,7 +11,8 @@ services:
     healthcheck:
       test:
       - CMD-SHELL
-      - pg_isready -U postgres
+      # Over TCP: the temporary server that runs the init scripts only listens on the socket
+      - pg_isready -h 127.0.0.1 -U postgres
       interval: 5s
       timeout: 3s
       retries: 20

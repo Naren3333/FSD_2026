@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"log/slog"
 	"net/http"
 	"os"
@@ -120,8 +121,14 @@ func (w *responseRecorder) Write(data []byte) (int, error) {
 	return w.ResponseWriter.Write(data)
 }
 
-func New(name, migration string) (*App, error) {
+// New connects to DATABASE_URL and applies the service's numbered migrations (migrations/NNN_name.sql
+// in the given file system, normally an embed.FS) plus bootstrap, under an advisory lock, before serving.
+func New(name string, migrations fs.FS, bootstrap string) (*App, error) {
 	slog.SetDefault(slog.New(slog.NewJSONHandler(os.Stdout, nil)).With("service", name))
+	ordered, err := Migrations(migrations)
+	if err != nil {
+		return nil, err
+	}
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
 	config, err := pgxpool.ParseConfig(Required("DATABASE_URL"))
@@ -152,7 +159,7 @@ func New(name, migration string) (*App, error) {
 	if _, err = tx.Exec(ctx, "SELECT pg_advisory_xact_lock(314159)"); err != nil {
 		return nil, err
 	}
-	if _, err = tx.Exec(ctx, migration); err != nil {
+	if err = migrate(ctx, tx, ordered, bootstrap); err != nil {
 		return nil, err
 	}
 	if err = tx.Commit(ctx); err != nil {

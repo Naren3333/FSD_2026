@@ -1,17 +1,17 @@
 package main
 
 import (
-	_ "embed"
+	"embed"
 	"learning/platform"
 	"log/slog"
 	"os"
 )
 
-//go:embed migrations/001_init.sql
-var migration string
+//go:embed migrations/*.sql
+var migrations embed.FS
 
 func main() {
-	a, err := platform.New("identity", migration)
+	a, err := platform.New("identity", migrations, "")
 	if err != nil {
 		slog.Error("startup_failed", "error", err.Error())
 		os.Exit(1)

@@ -37,7 +37,7 @@ Go domain files implement exact grading, assessment validation and text chunking
 
 Identity owns `organizations`, `users`, `classrooms`, `enrollments`. Curriculum owns `nodes`, `prerequisites`. Content owns `documents` including extracted chunks and SHA-256/source revision metadata, plus bucket objects. Assessment owns `assessments` with question snapshots and answer keys, and `submissions`. Grading owns `evaluations`, `audit`. Analytics owns its `evaluations`, `evidence` and `inbox` read model. Outbox/inbox tables are independently created in the application owner's database, not a shared event database.
 
-The first migration is non-destructive and idempotent. Go migrations are embedded from each service's `migrations/001_init.sql` and applied under a PostgreSQL advisory transaction lock. Future schema changes require numbered migrations and a dedicated runner before changing existing definitions; `CREATE TABLE IF NOT EXISTS` is not an upgrade mechanism. Production migrations should run with separate owner credentials; local app roles own only their own database.
+The first migration is non-destructive and idempotent. Go migrations are embedded from each service's `migrations/NNN_name.sql` files and applied in order under a PostgreSQL advisory transaction lock; each version runs once and is recorded in `schema_migrations` (versions must run 1..n without gaps, or startup fails). Schema changes go in a new numbered file, never an edit to an applied one; `CREATE TABLE IF NOT EXISTS` is not an upgrade mechanism. Production migrations should run with separate owner credentials; local app roles own only their own database.
 
 ## Security and state
 

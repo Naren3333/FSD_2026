@@ -1,5 +1,13 @@
 # Operations and recovery
 
+## Upgrading a local setup made before ADR 0002
+
+`scripts/setup.py` now also generates the AI service-account secrets (`CONTENT_INDEXER_CLIENT_SECRET`, `QUESTION_CHATBOT_AGENT_CLIENT_SECRET`), adds their Keycloak clients to the realm, and creates the `vector` extension in Content's database. It never overwrites an existing `.env`, and Keycloak and Postgres only import on an empty volume.
+
+If you have no local data you want to keep, back up `.env`, then run `docker compose down -v`, delete `.env` and `.local/`, rerun `python scripts/setup.py`, and run `docker compose up -d --build`. **This deletes every local database, upload and Keycloak user.**
+
+The Postgres image also changed from Alpine to Debian (pgvector), so text-index collations differ. Recreating the volume is the clean path. Keeping data means reindexing every database (`REINDEX DATABASE <name>;` as each owner) after the switch, plus adding the clients and extension by hand.
+
 ## Health and logs
 
 Each application exposes `/health/live` and `/health/ready` on its private port 8080. Persistent apps check PostgreSQL; Content also checks the document bucket; Grading marks readiness unavailable after its consumer stops; Analytics checks its database and consumer state. AI placeholders need only valid authentication configuration; no model-provider dependency or API key is required. A readiness probe is a dependency snapshot, not proof of fresh analytical results.
