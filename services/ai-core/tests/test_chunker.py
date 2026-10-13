@@ -1,4 +1,4 @@
-"""The structure-aware chunker (RAG_PLAN Iterations 4 and 6). No DB, no OpenAI."""
+"""The structure-aware chunker. No DB, no OpenAI."""
 
 from itertools import pairwise
 
@@ -185,7 +185,7 @@ def test_embed_text_uses_only_the_deepest_heading() -> None:
 
 
 def test_outline_sections_split_at_the_second_level() -> None:
-    """RAG_PLAN Iteration 14: an outline's top level is often a few parts; its sections bound chunks too."""
+    """An outline's top level is often a few parts; its sections bound chunks too."""
     from ingest.chunker import _sections
 
     paras = [
@@ -204,7 +204,7 @@ def test_outline_sections_split_at_the_second_level() -> None:
 
 
 def test_captions_give_labels_and_text_gives_citations() -> None:
-    """RAG_PLAN Iteration 14: what search uses to hand back the figure a paragraph mentions."""
+    """What search uses to hand back the figure a paragraph mentions."""
     from ingest.chunker import cited, label_of
 
     assert label_of("Fig. 7. The data efficiency") == "figure 7" and label_of("Table 2: Results") == "table 2"

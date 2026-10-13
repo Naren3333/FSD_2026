@@ -1,4 +1,4 @@
-"""The structure-aware chunker (PLAN.md §6.1 ingest step 4): paragraphs packed to at most MAX_TOKENS
+"""The structure-aware chunker: paragraphs packed to at most MAX_TOKENS
 with a little overlap, never across a top-level section.
 
 A chunk's section_path is the common prefix of the paths of the body paragraphs new to it (the overlap
@@ -19,7 +19,7 @@ inside the figure (the diagram labels taken out of the prose), so keyword search
 points at the stored crop by name (`image`).
 
 Tables and figures with a numbered caption carry its label ("figure 7", "table 2"), and text chunks the labels
-they mention (`cites`), so search can hand back the figure a paragraph is talking about (RAG_PLAN Iteration 14).
+they mention (`cites`), so search can hand back the figure a paragraph is talking about.
 Blocking (tiktoken): run it in a thread.
 """
 

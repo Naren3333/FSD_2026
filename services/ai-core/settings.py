@@ -1,7 +1,8 @@
 """ai-core settings, read once from the environment. Provider keys exist only here (ADR 0002)."""
 
+import json
 import os
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from functools import lru_cache
 from pathlib import Path
 
@@ -34,6 +35,19 @@ class Settings:
     ocr: bool
     # Model answers keyed by page content, so a reindex is free. Operational cache only, never business data.
     cache_dir: Path
+    # The daily AI allowance (ADR 0003): per role, with the day starting at midnight in spend_timezone.
+    spend_limit_student_usd: float = 5.0
+    spend_limit_teacher_usd: float = 10.0
+    spend_timezone: str = "Asia/Singapore"
+    # USD per million tokens (input, cached input, output) that override or add to spend.DEFAULT_PRICES.
+    model_prices: dict[str, tuple[float, float, float]] = field(default_factory=dict)
+
+
+def _prices(raw: str) -> dict[str, tuple[float, float, float]]:
+    """MODEL_PRICES: a JSON object of model name to [input, cached input, output] USD per million tokens."""
+    if not raw.strip():
+        return {}
+    return {model: (float(a), float(b), float(c)) for model, (a, b, c) in json.loads(raw).items()}
 
 
 @lru_cache
@@ -54,4 +68,8 @@ def get_settings() -> Settings:
         figure_model=env("FIGURE_MODEL") or "gpt-6-luna",
         ocr=_flag("OCR", True),
         cache_dir=Path(env("AI_CORE_CACHE_DIR") or "/var/cache/ai-core"),
+        spend_limit_student_usd=float(env("SPEND_LIMIT_STUDENT_USD") or 5),
+        spend_limit_teacher_usd=float(env("SPEND_LIMIT_TEACHER_USD") or 10),
+        spend_timezone=env("SPEND_TIMEZONE") or "Asia/Singapore",
+        model_prices=_prices(env("MODEL_PRICES") or ""),
     )
