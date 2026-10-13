@@ -1,6 +1,9 @@
 package main
 
-import "sync"
+import (
+	"container/list"
+	"sync"
+)
 
 // vectorCacheSize is how many query vectors are kept.
 const vectorCacheSize = 256
@@ -10,14 +13,22 @@ type cachedVector struct {
 	model  string
 }
 
-// vectorCache keeps recent query vectors, so a repeated question costs no embedding call. A nil cache keeps
-// nothing.
+// vectorCache keeps the most recently used query vectors, so a repeated question costs no embedding call. When it
+// is full the least recently used one makes room. A nil cache keeps nothing.
 type vectorCache struct {
 	mu      sync.Mutex
-	entries map[string]cachedVector
+	order   *list.List // of *vectorEntry, most recently used first
+	entries map[string]*list.Element
 }
 
-func newVectorCache() *vectorCache { return &vectorCache{entries: map[string]cachedVector{}} }
+type vectorEntry struct {
+	query string
+	value cachedVector
+}
+
+func newVectorCache() *vectorCache {
+	return &vectorCache{order: list.New(), entries: map[string]*list.Element{}}
+}
 
 func (c *vectorCache) get(query string) (cachedVector, bool) {
 	if c == nil {
@@ -25,8 +36,12 @@ func (c *vectorCache) get(query string) (cachedVector, bool) {
 	}
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	v, ok := c.entries[query]
-	return v, ok
+	e, ok := c.entries[query]
+	if !ok {
+		return cachedVector{}, false
+	}
+	c.order.MoveToFront(e)
+	return e.Value.(*vectorEntry).value, true
 }
 
 func (c *vectorCache) put(query string, v cachedVector) {
@@ -35,8 +50,15 @@ func (c *vectorCache) put(query string, v cachedVector) {
 	}
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	if len(c.entries) >= vectorCacheSize {
-		clear(c.entries)
+	if e, ok := c.entries[query]; ok {
+		e.Value.(*vectorEntry).value = v
+		c.order.MoveToFront(e)
+		return
 	}
-	c.entries[query] = v
+	if c.order.Len() >= vectorCacheSize {
+		oldest := c.order.Back()
+		c.order.Remove(oldest)
+		delete(c.entries, oldest.Value.(*vectorEntry).query)
+	}
+	c.entries[query] = c.order.PushFront(&vectorEntry{query, v})
 }
