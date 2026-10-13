@@ -101,7 +101,7 @@ func newFixture(t *testing.T) *fixture {
 	db := testDB(t)
 	f := &fixture{t: t, db: db, store: &memoryStore{objects: map[string][]byte{}}, ai: newFakeAICore(t), org: "org-1", room: uuid.NewString()}
 	f.x = indexer{db, f.store, f.ai.client(), 0}
-	f.s = server{App: &platform.App{DB: db}, ai: f.ai.client()}
+	f.s = server{store: pgStore{db}, ai: f.ai.client()}
 	f.ai.ingest = f.reply(indexedResult())
 	f.ai.scores = func(w http.ResponseWriter, r *http.Request) {
 		var body struct{ Documents []string }
@@ -143,7 +143,7 @@ func (f *fixture) upload(docType string) string {
 	id := uuid.NewString()
 	key := f.org + "/" + id + "/1"
 	f.store.put(context.Background(), key, []byte("%PDF-1.7"), "application/pdf")
-	_, err := f.s.insertDocument(context.Background(), id, f.room, f.org, "teacher", "Biology", "application/pdf", key, strings.Repeat("a", 64), "indexing", docType, []Chunk{})
+	_, err := f.s.store.insertDocument(context.Background(), id, f.room, f.org, "teacher", "Biology", "application/pdf", key, strings.Repeat("a", 64), "indexing", docType, []Chunk{})
 	if err != nil {
 		f.t.Fatal(err)
 	}
@@ -277,10 +277,10 @@ func TestAnUnreadablePDFFailsWithItsReasonAndReindexRecovers(t *testing.T) {
 	id := f.upload("teaching_material")
 	f.runAll()
 	ctx := context.Background()
-	if queued, err := f.s.queueIndex(ctx, f.org, id); err != nil || !queued {
+	if queued, err := f.s.store.queueIndex(ctx, f.org, id); err != nil || !queued {
 		t.Fatalf("reindex: %v %v", queued, err)
 	}
-	if queued, _ := f.s.queueIndex(ctx, f.org, id); queued {
+	if queued, _ := f.s.store.queueIndex(ctx, f.org, id); queued {
 		t.Fatal("a document already indexing was queued twice")
 	}
 	if got := f.value("SELECT count(*) FROM document_chunks"); got != "2" {
@@ -292,7 +292,7 @@ func TestAnUnreadablePDFFailsWithItsReasonAndReindexRecovers(t *testing.T) {
 		t.Fatal(got)
 	}
 	f.ai.ingest = f.reply(indexedResult())
-	f.s.queueIndex(ctx, f.org, id)
+	f.s.store.queueIndex(ctx, f.org, id)
 	f.runAll()
 	if got := f.value("SELECT status||' '||(failure_reason IS NULL) FROM documents WHERE id=$1", id); got != "indexed true" {
 		t.Fatal(got)

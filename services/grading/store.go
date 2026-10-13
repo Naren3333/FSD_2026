@@ -7,9 +7,20 @@ import (
 	"learning/platform"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgxpool"
 )
 
 var errAlreadyFinalized = errors.New("evaluation already finalized")
+
+// store is a classroom's draft and finalized evaluations, with their audit trail.
+type store interface {
+	listEvaluations(ctx context.Context, org, classroom string) ([]Evaluation, error)
+	findClassroom(ctx context.Context, org, id string) (string, error)
+	finalizeEvaluation(ctx context.Context, org, id, actor, reason string, overrides map[string]int) (Evaluation, error)
+}
+
+// pgStore is the store in the service's own Postgres database.
+type pgStore struct{ db *pgxpool.Pool }
 
 // insertEvaluation runs inside the event consumer's transaction.
 func insertEvaluation(ctx context.Context, tx pgx.Tx, v Submitted, evidence []byte) error {
@@ -17,8 +28,8 @@ func insertEvaluation(ctx context.Context, tx pgx.Tx, v Submitted, evidence []by
 	return err
 }
 
-func (s server) listEvaluations(ctx context.Context, org, classroom string) ([]Evaluation, error) {
-	rows, err := s.DB.Query(ctx, "SELECT id,assessment_id,classroom_id,student_id,status,evidence FROM evaluations WHERE classroom_id=$1 AND org_id=$2 ORDER BY created_at DESC LIMIT 100", classroom, org)
+func (p pgStore) listEvaluations(ctx context.Context, org, classroom string) ([]Evaluation, error) {
+	rows, err := p.db.Query(ctx, "SELECT id,assessment_id,classroom_id,student_id,status,evidence FROM evaluations WHERE classroom_id=$1 AND org_id=$2 ORDER BY created_at DESC LIMIT 100", classroom, org)
 	if err != nil {
 		return nil, err
 	}
@@ -41,9 +52,9 @@ func (s server) listEvaluations(ctx context.Context, org, classroom string) ([]E
 	return result, nil
 }
 
-func (s server) findClassroom(ctx context.Context, org, id string) (string, error) {
+func (p pgStore) findClassroom(ctx context.Context, org, id string) (string, error) {
 	var classroom string
-	err := s.DB.QueryRow(ctx, "SELECT classroom_id FROM evaluations WHERE id=$1 AND org_id=$2", id, org).Scan(&classroom)
+	err := p.db.QueryRow(ctx, "SELECT classroom_id FROM evaluations WHERE id=$1 AND org_id=$2", id, org).Scan(&classroom)
 	return classroom, err
 }
 
@@ -51,9 +62,9 @@ func (s server) findClassroom(ctx context.Context, org, id string) (string, erro
 // the audit entry and emits the finalized event in one transaction. It returns
 // errAlreadyFinalized, errScoreOutOfBounds or errUnknownQuestion for the
 // business failures; any other error is an infrastructure failure.
-func (s server) finalizeEvaluation(ctx context.Context, org, id, actor, reason string, overrides map[string]int) (Evaluation, error) {
+func (p pgStore) finalizeEvaluation(ctx context.Context, org, id, actor, reason string, overrides map[string]int) (Evaluation, error) {
 	var v Evaluation
-	tx, err := s.DB.Begin(ctx)
+	tx, err := p.db.Begin(ctx)
 	if err != nil {
 		return v, err
 	}

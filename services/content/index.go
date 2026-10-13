@@ -39,7 +39,7 @@ type objects interface {
 type indexer struct {
 	db    *pgxpool.Pool
 	store objects
-	ai    *aiCore
+	ai    ingester
 	poll  time.Duration
 }
 

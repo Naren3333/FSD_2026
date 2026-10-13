@@ -6,32 +6,44 @@ import (
 	"learning/platform"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgxpool"
 )
 
-func (s server) findAssessment(ctx context.Context, org, id string) (Assessment, error) {
+// store is a classroom's assessments and its students' submissions.
+type store interface {
+	findAssessment(ctx context.Context, org, id string) (Assessment, error)
+	insertAssessment(ctx context.Context, org string, v Assessment) error
+	listAssessments(ctx context.Context, org, classroomID string) ([]map[string]string, error)
+	insertSubmission(ctx context.Context, id string, v Assessment, org, studentID string, data []byte, answers map[string]string) (bool, error)
+}
+
+// pgStore is the store in the service's own Postgres database.
+type pgStore struct{ db *pgxpool.Pool }
+
+func (p pgStore) findAssessment(ctx context.Context, org, id string) (Assessment, error) {
 	var v Assessment
 	if !platform.ID(id) {
 		return v, pgx.ErrNoRows
 	}
 	var data []byte
-	err := s.DB.QueryRow(ctx, "SELECT id,classroom_id,title,questions FROM assessments WHERE id=$1 AND org_id=$2", id, org).Scan(&v.ID, &v.Classroom, &v.Title, &data)
+	err := p.db.QueryRow(ctx, "SELECT id,classroom_id,title,questions FROM assessments WHERE id=$1 AND org_id=$2", id, org).Scan(&v.ID, &v.Classroom, &v.Title, &data)
 	if err == nil {
 		err = json.Unmarshal(data, &v.Questions)
 	}
 	return v, err
 }
 
-func (s server) insertAssessment(ctx context.Context, org string, v Assessment) error {
+func (p pgStore) insertAssessment(ctx context.Context, org string, v Assessment) error {
 	data, err := json.Marshal(v.Questions)
 	if err != nil {
 		return err
 	}
-	_, err = s.DB.Exec(ctx, "INSERT INTO assessments(id,classroom_id,org_id,title,questions) VALUES($1,$2,$3,$4,$5)", v.ID, v.Classroom, org, v.Title, data)
+	_, err = p.db.Exec(ctx, "INSERT INTO assessments(id,classroom_id,org_id,title,questions) VALUES($1,$2,$3,$4,$5)", v.ID, v.Classroom, org, v.Title, data)
 	return err
 }
 
-func (s server) listAssessments(ctx context.Context, org, classroomID string) ([]map[string]string, error) {
-	rows, err := s.DB.Query(ctx, "SELECT id,title FROM assessments WHERE classroom_id=$1 AND org_id=$2 ORDER BY created_at DESC LIMIT 100", classroomID, org)
+func (p pgStore) listAssessments(ctx context.Context, org, classroomID string) ([]map[string]string, error) {
+	rows, err := p.db.Query(ctx, "SELECT id,title FROM assessments WHERE classroom_id=$1 AND org_id=$2 ORDER BY created_at DESC LIMIT 100", classroomID, org)
 	if err != nil {
 		return nil, err
 	}
@@ -53,8 +65,8 @@ func (s server) listAssessments(ctx context.Context, org, classroomID string) ([
 // insertSubmission stores the submission and emits the outbox event in one
 // transaction. It reports inserted=false (with a nil error) when the student
 // has already submitted this assessment.
-func (s server) insertSubmission(ctx context.Context, id string, v Assessment, org, studentID string, data []byte, answers map[string]string) (bool, error) {
-	tx, err := s.DB.Begin(ctx)
+func (p pgStore) insertSubmission(ctx context.Context, id string, v Assessment, org, studentID string, data []byte, answers map[string]string) (bool, error) {
+	tx, err := p.db.Begin(ctx)
 	if err != nil {
 		return false, err
 	}

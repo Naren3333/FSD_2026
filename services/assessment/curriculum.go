@@ -15,16 +15,27 @@ const (
 	skillUnavailable
 )
 
-// checkSkill asks the curriculum service whether the node exists and is a skill.
-func (s server) checkSkill(r *http.Request, skill string) skillStatus {
-	req, err := http.NewRequestWithContext(r.Context(), http.MethodGet, platform.Required("CURRICULUM_URL")+"/v1/nodes/"+skill, nil)
+// skills checks that a node is a skill in the caller's curriculum.
+type skills interface {
+	check(r *http.Request, skill string) skillStatus
+}
+
+// curriculum asks the Curriculum service, forwarding the caller's token.
+type curriculum struct {
+	base   string
+	client *http.Client
+}
+
+// check asks the curriculum service whether the node exists and is a skill.
+func (c curriculum) check(r *http.Request, skill string) skillStatus {
+	req, err := http.NewRequestWithContext(r.Context(), http.MethodGet, c.base+"/v1/nodes/"+skill, nil)
 	if err != nil {
 		slog.Error("curriculum_request_invalid", "error", err.Error())
 		return skillUnavailable
 	}
 	req.Header.Set("Authorization", r.Header.Get("Authorization"))
 	req.Header.Set("X-Correlation-ID", platform.Correlation(r.Context()))
-	res, err := s.Client.Do(req)
+	res, err := c.client.Do(req)
 	if err != nil {
 		return skillUnavailable
 	}

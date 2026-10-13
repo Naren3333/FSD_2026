@@ -3,7 +3,6 @@ package main
 import (
 	"context"
 	"errors"
-	"fmt"
 	"learning/platform"
 	"log/slog"
 	"net/http"
@@ -97,7 +96,7 @@ func (s server) search(w http.ResponseWriter, r *http.Request) {
 		platform.Error(w, 422, "VALIDATION_ERROR", problem)
 		return
 	}
-	relation, ok := s.Relation(w, r, req.Classroom, "")
+	relation, ok := s.access.Relation(w, r, req.Classroom, "")
 	if !ok {
 		return
 	}
@@ -168,7 +167,7 @@ func (s server) runSearch(ctx context.Context, f filter, query string, topK int,
 	}
 	keyword := make(chan legResult, 1)
 	go func() {
-		rows, err := s.keywordLeg(ctx, f, query)
+		rows, err := s.store.keywordLeg(ctx, f, query)
 		keyword <- legResult{rows, err}
 	}()
 	vector, model, err := s.embedQuery(ctx, query, who)
@@ -176,7 +175,7 @@ func (s server) runSearch(ctx context.Context, f filter, query string, topK int,
 		<-keyword
 		return searchResponse{}, err
 	}
-	vectorRows, err := s.vectorLeg(ctx, f, vector, model)
+	vectorRows, err := s.store.vectorLeg(ctx, f, vector, model)
 	k := <-keyword
 	if err == nil {
 		err = k.err
@@ -194,7 +193,7 @@ func (s server) runSearch(ctx context.Context, f filter, query string, topK int,
 	if len(hits) > topK {
 		hits = hits[:topK]
 	}
-	if err = s.attachRelated(ctx, f, hits); err != nil {
+	if err = s.store.attachRelated(ctx, f, hits); err != nil {
 		return searchResponse{}, err
 	}
 	slog.Info("search", "vector_hits", len(vectorRows), "keyword_hits", len(k.rows), "returned", len(hits), "rerank", rerank, "rerank_fallback", fallback, "duration_ms", time.Since(started).Milliseconds())
@@ -236,32 +235,6 @@ func (s server) embedQuery(ctx context.Context, query string, who billed) ([]flo
 
 const legColumns = "id,document_id,doc_type,section_path,page_start,page_end,content,kind,source,image,cites"
 const resultColumns = "r.id,r.document_id,(SELECT title FROM documents d WHERE d.id=r.document_id),r.doc_type,r.section_path,r.page_start,r.page_end,r.content,r.kind,r.source,r.image,r.cites"
-
-// vectorLeg compares only vectors from the query's embedding model. relaxed_order lets the filtered HNSW scan
-// continue until enough rows pass the filter; the outer ORDER BY makes the ranks exact.
-func (s server) vectorLeg(ctx context.Context, f filter, vector []float32, model string) ([]hit, error) {
-	tx, err := s.DB.Begin(ctx)
-	if err != nil {
-		return nil, err
-	}
-	defer tx.Rollback(ctx)
-	if _, err = tx.Exec(ctx, "SELECT set_config('hnsw.iterative_scan','relaxed_order',true), set_config('hnsw.ef_search',$1,true)", fmt.Sprint(efSearch)); err != nil {
-		return nil, err
-	}
-	rows, err := tx.Query(ctx, fmt.Sprintf("WITH r AS MATERIALIZED (SELECT %s, embedding <=> CAST($5::text AS vector) AS distance FROM document_chunks WHERE %s AND embedding_model=$6 ORDER BY distance LIMIT %d) SELECT %s FROM r ORDER BY r.distance, r.id", legColumns, filterSQL, legLimit, resultColumns), f.args(vectorText(vector), model)...)
-	if err != nil {
-		return nil, err
-	}
-	return scanHits(rows)
-}
-
-func (s server) keywordLeg(ctx context.Context, f filter, query string) ([]hit, error) {
-	rows, err := s.DB.Query(ctx, fmt.Sprintf("WITH r AS MATERIALIZED (SELECT %s, ts_rank_cd(tsv, q) AS rank FROM document_chunks, websearch_to_tsquery('english', $5) AS q WHERE tsv @@ q AND %s ORDER BY rank DESC, id LIMIT %d) SELECT %s FROM r ORDER BY r.rank DESC, r.id", legColumns, filterSQL, legLimit, resultColumns), f.args(query)...)
-	if err != nil {
-		return nil, err
-	}
-	return scanHits(rows)
-}
 
 func scanHits(rows pgx.Rows) ([]hit, error) {
 	defer rows.Close()
@@ -372,46 +345,6 @@ func passageText(title string, section *string, content string) string {
 		head += "\n" + parts[len(parts)-1]
 	}
 	return head + "\n\n" + content
-}
-
-// attachRelated adds, for each hit that cites labels, the figures and tables of its document with those labels,
-// under the same filter. No query runs when no hit cites anything.
-func (s server) attachRelated(ctx context.Context, f filter, hits []hit) error {
-	var citing []string
-	for _, h := range hits {
-		if len(h.cites) > 0 {
-			citing = append(citing, h.ChunkID)
-		}
-	}
-	if len(citing) == 0 {
-		return nil
-	}
-	rows, err := s.DB.Query(ctx, `WITH src AS (SELECT id, document_id, cites FROM document_chunks WHERE id=ANY($5::uuid[]))
-SELECT src.id, c.id, c.kind, c.label, c.page_start, c.image, c.content FROM src
-JOIN LATERAL (SELECT id, kind, label, page_start, image, content FROM document_chunks WHERE document_id=src.document_id AND label=ANY(src.cites) AND `+filterSQL+`) c ON true
-ORDER BY src.id, c.page_start, c.label`, f.args(citing)...)
-	if err != nil {
-		return err
-	}
-	defer rows.Close()
-	found := map[string][]related{}
-	for rows.Next() {
-		var from string
-		var rel related
-		if err = rows.Scan(&from, &rel.ChunkID, &rel.Kind, &rel.Label, &rel.PageStart, &rel.Image, &rel.Content); err != nil {
-			return err
-		}
-		found[from] = append(found[from], rel)
-	}
-	if err = rows.Err(); err != nil {
-		return err
-	}
-	for i := range hits {
-		if rel, ok := found[hits[i].ChunkID]; ok {
-			hits[i].Related = rel
-		}
-	}
-	return nil
 }
 
 func contains(values []string, want string) bool {
