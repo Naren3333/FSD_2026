@@ -258,6 +258,15 @@ def test_threads_need_classroom_access(api: TestClient, fakes: Fakes) -> None:
     assert access.headers["authorization"] == "Bearer s1"  # Identity decides, with the user's own token
 
 
+def test_a_removed_student_loses_their_threads(api: TestClient, fakes: Fakes, store: MemoryStore) -> None:
+    tid = thread(api, "s1")
+    fakes.access.discard(("Bearer s1", ROOM))
+    assert api.get(f"/v1/threads/{tid}/messages", headers=as_user("s1")).status_code == 403
+    resp = api.post(f"/v1/threads/{tid}/messages", json={"content": "q"}, headers=as_user("s1"))
+    assert resp.status_code == 403 and store.all(tid) == []
+    assert api.get("/v1/threads", params={"classroom_id": ROOM}, headers=as_user("s1")).status_code == 403
+
+
 def test_only_students_and_teachers(api: TestClient) -> None:
     assert api.post("/v1/threads", json={"classroom_id": ROOM}, headers=as_user("x1")).status_code == 403
     assert api.get("/v1/threads", headers=as_user("x1")).status_code == 403

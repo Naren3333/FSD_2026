@@ -69,6 +69,27 @@ async def owned_thread(store: Store, claims: Claims, thread_id: UUID) -> dict[st
     return thread
 
 
+async def require_access(request: Request, classroom_id: str) -> None:
+    """403 unless Identity says the caller may use the classroom now. Enrollment can end, so this is asked on every
+    read and turn, not only when a thread is created."""
+    services: Services = request.app.state.services
+    try:
+        allowed = await services.classroom_access(
+            request.headers["authorization"], classroom_id, request.state.correlation_id
+        )
+    except UpstreamError:
+        raise failure(503, "DEPENDENCY_UNAVAILABLE", "Authorization is unavailable; retry later.") from None
+    if not allowed:
+        raise failure(403, "FORBIDDEN", "You do not have access to this classroom.")
+
+
+async def accessible_thread(request: Request, claims: Claims, thread_id: UUID) -> dict[str, Any]:
+    """The caller's thread, if they still have access to its classroom."""
+    thread = await owned_thread(store_of(request), claims, thread_id)
+    await require_access(request, str(thread["classroom_id"]))
+    return thread
+
+
 @app.get("/health/ready")
 async def ready(request: Request) -> dict[str, str]:
     try:
@@ -80,15 +101,7 @@ async def ready(request: Request) -> dict[str, str]:
 
 @app.post("/v1/threads", status_code=201, response_model=Thread, responses=ERRORS)
 async def create_thread(body: NewThread, request: Request, claims: Claims = Depends(PERSON)) -> Any:
-    services: Services = request.app.state.services
-    try:
-        allowed = await services.classroom_access(
-            request.headers["authorization"], str(body.classroom_id), request.state.correlation_id
-        )
-    except UpstreamError:
-        raise failure(503, "DEPENDENCY_UNAVAILABLE", "Authorization is unavailable; retry later.") from None
-    if not allowed:
-        raise failure(403, "FORBIDDEN", "You do not have access to this classroom.")
+    await require_access(request, str(body.classroom_id))
     return await store_of(request).create_thread(
         claims.org, claims.subject, claims.person_role or STUDENT, str(body.classroom_id)
     )
@@ -98,6 +111,8 @@ async def create_thread(body: NewThread, request: Request, claims: Claims = Depe
 async def list_threads(
     request: Request, classroom_id: UUID | None = Query(default=None), claims: Claims = Depends(PERSON)
 ) -> Any:
+    if classroom_id is not None:
+        await require_access(request, str(classroom_id))
     rows = await store_of(request).list_threads(
         claims.org, claims.subject, None if classroom_id is None else str(classroom_id)
     )
@@ -106,9 +121,8 @@ async def list_threads(
 
 @app.get("/v1/threads/{thread_id}/messages", response_model=MessageList, responses=ERRORS)
 async def list_messages(thread_id: UUID, request: Request, claims: Claims = Depends(PERSON)) -> Any:
-    store = store_of(request)
-    await owned_thread(store, claims, thread_id)
-    return {"messages": await store.messages(str(thread_id))}
+    await accessible_thread(request, claims, thread_id)
+    return {"messages": await store_of(request).messages(str(thread_id))}
 
 
 @app.post(
@@ -120,7 +134,7 @@ async def post_message(
     thread_id: UUID, body: NewMessage, request: Request, claims: Claims = Depends(PERSON)
 ) -> SSEResponse:
     store = store_of(request)
-    thread = await owned_thread(store, claims, thread_id)
+    thread = await accessible_thread(request, claims, thread_id)
     history = await store.start_turn(str(thread_id), body.content, HISTORY_TURNS)
     asked = TurnRequest(
         thread=thread,
