@@ -54,6 +54,29 @@ class Event(Contract):
         return self
 
 
+class ClassroomDeleted(Contract):
+    classroom_id: UUID
+    org_id: str = Field(min_length=1, max_length=200)
+
+
+class ClassroomDeletedEvent(Contract):
+    event_id: UUID
+    event_type: Literal["identity.classroom.deleted.v1"]
+    schema_version: int = Field(ge=1, le=1)
+    timestamp: datetime
+    correlation_id: UUID
+    resource_id: UUID
+    data: ClassroomDeleted
+
+    @model_validator(mode="after")
+    def deleted(self) -> "ClassroomDeletedEvent":
+        if self.resource_id != self.data.classroom_id:
+            raise ValueError("Not this classroom's deletion")
+        if self.timestamp.tzinfo is None:
+            raise ValueError("Timestamp must have a timezone")
+        return self
+
+
 class SkillMetric(Contract):
     skill_id: UUID
     attempted: int = Field(ge=1)

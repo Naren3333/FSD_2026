@@ -25,7 +25,7 @@ type pgStore struct{ db *pgxpool.Pool }
 
 // insertEvaluation runs inside the event consumer's transaction.
 func insertEvaluation(ctx context.Context, tx pgx.Tx, v Submitted, evidence []byte) error {
-	_, err := tx.Exec(ctx, "INSERT INTO evaluations(id,assessment_id,classroom_id,org_id,student_id,evidence) VALUES($1,$2,$3,$4,$5,$6) ON CONFLICT(id) DO NOTHING", v.Submission, v.Assessment, v.Classroom, v.Org, v.Student, evidence)
+	_, err := tx.Exec(ctx, "INSERT INTO evaluations(id,assessment_id,classroom_id,org_id,student_id,evidence) SELECT $1::uuid,$2::uuid,$3::uuid,$4::text,$5::text,$6::jsonb WHERE NOT EXISTS(SELECT 1 FROM purged_classrooms WHERE classroom_id=$3) ON CONFLICT(id) DO NOTHING", v.Submission, v.Assessment, v.Classroom, v.Org, v.Student, evidence)
 	return err
 }
 

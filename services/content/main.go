@@ -24,6 +24,11 @@ func main() {
 		server{store: pgStore{a.DB}, access: a.Identity(), files: files, ai: ai, vectors: newVectorCache()}.routes(a.Mux)
 		// Two indexing workers: ai-core ingests two PDFs at once.
 		x := indexer{a.DB, files, ai, 2 * time.Second}
-		return []func(context.Context){platform.Outbox{DB: a.DB}.Run, x.run, x.run}, nil
+		classrooms := platform.Consumer{DB: a.DB, Group: "content-classrooms-v1"}
+		purge := purger{files}.purge
+		return []func(context.Context){
+			platform.Outbox{DB: a.DB}.Run, x.run, x.run,
+			func(ctx context.Context) { classrooms.Consume(ctx, "identity.classroom.deleted.v1", purge, nil) },
+		}, nil
 	})
 }

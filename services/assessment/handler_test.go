@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"learning/platform"
 	"learning/platform/platformtest"
 	"net/http"
@@ -10,6 +11,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 )
 
@@ -123,5 +125,16 @@ func TestEachStudentSubmitsOnce(t *testing.T) {
 	}
 	if w := call(t, s, http.MethodPost, path, body, "teacher", "student"); w.Code != 403 {
 		t.Fatalf("a teacher submitted: %d", w.Code)
+	}
+}
+
+func TestPurgeRejectsMalformedDeletions(t *testing.T) {
+	deleted := uuid.NewString()
+	for _, data := range []string{`{}`, `{"classroom_id":"x","org_id":"o"}`, `{"classroom_id":"` + uuid.NewString() + `","org_id":"o"}`, `{"classroom_id":"` + deleted + `","org_id":""}`} {
+		event := platform.Event{Resource: deleted, Data: json.RawMessage(data)}
+		var invalid platform.InvalidEvent
+		if !errors.As(purge(context.Background(), nil, event), &invalid) {
+			t.Errorf("%s was not rejected", data)
+		}
 	}
 }

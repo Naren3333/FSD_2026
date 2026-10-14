@@ -25,7 +25,7 @@ from learning_transport import (
 from learning_transport.db import open_pool
 from psycopg_pool import ConnectionPool
 
-from consumer import consume
+from consumer import run
 from domain import PerformanceResponse, summarize
 
 MIGRATIONS = Path(__file__).parent / "migrations"
@@ -37,7 +37,7 @@ async def lifespan(app: Any) -> AsyncIterator[None]:
     require_env(*OIDC_SETTINGS, "IDENTITY_URL", "KAFKA_BROKERS", "DATABASE_URL")
     pool = open_pool(os.environ["DATABASE_URL"], MIGRATIONS)
     stop, connected = threading.Event(), threading.Event()
-    thread = threading.Thread(target=consume, args=(pool, stop, connected), daemon=True)
+    thread = threading.Thread(target=run, args=(pool, stop, connected), daemon=True)
     async with httpx.AsyncClient() as http:
         app.state.pool, app.state.connected = pool, connected
         app.state.identity = IdentityClient(os.environ["IDENTITY_URL"], http)

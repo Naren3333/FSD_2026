@@ -134,10 +134,11 @@ def main() -> None:
     password = state.setdefault("password", secrets.token_urlsafe(12))
     STATE.parent.mkdir(exist_ok=True)
     STATE.write_text(json.dumps(state, indent=2) + "\n", encoding="utf-8")
-    admin = admin_client()
     for first, last in STUDENTS:
         username = f"{first}.{last}".lower()
-        ensure_student(admin, username, first, last, password)
+        # Keycloak's admin tokens last a minute, so each student gets a fresh one.
+        with admin_client() as admin:
+            ensure_student(admin, username, first, last, password)
         register(username, password)
         print(f"{username:18} {first} {last}")
     print(f"\nPassword for all thirty: {password}  (saved in {STATE.relative_to(ROOT)})")

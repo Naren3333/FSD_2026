@@ -67,6 +67,21 @@ func (s storage) removeOrphan(documentID, key string) {
 	}
 }
 
+// removeAll deletes every object under prefix: a document's original and its figure crops.
+func (s storage) removeAll(ctx context.Context, prefix string) error {
+	ctx, cancel := context.WithCancel(ctx) // stops the listing if a removal fails part way
+	defer cancel()
+	for object := range s.client.ListObjects(ctx, s.bucket, minio.ListObjectsOptions{Prefix: prefix, Recursive: true}) {
+		if object.Err != nil {
+			return object.Err
+		}
+		if err := s.client.RemoveObject(ctx, s.bucket, object.Key, minio.RemoveObjectOptions{}); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 // open returns the object stream and its size. The caller must Close it.
 func (s storage) open(ctx context.Context, key string) (io.ReadCloser, int64, error) {
 	object, err := s.client.GetObject(ctx, s.bucket, key, minio.GetObjectOptions{})

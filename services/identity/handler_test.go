@@ -104,8 +104,9 @@ func (m *memoryStore) listStudents(_ context.Context, classroom string) ([]Stude
 	return result, nil
 }
 
-func (m *memoryStore) deleteClassroom(_ context.Context, classroom string) error {
+func (m *memoryStore) deleteClassroom(_ context.Context, classroom, _ string) error {
 	delete(m.owners, classroom)
+	delete(m.enrolled, classroom)
 	return nil
 }
 
@@ -269,6 +270,12 @@ func TestOnlyTheOwnerDeletesAClassroom(t *testing.T) {
 		if w := call(t, store, http.MethodGet, path+"/access", "", caller[0], caller[1]); w.Code != 403 {
 			t.Errorf("%s still has access: %d", caller[0], w.Code)
 		}
+	}
+	if enrolled, _ := store.isEnrolled(context.Background(), room, "student-1"); enrolled {
+		t.Error("student-1 is still enrolled in the deleted classroom")
+	}
+	if store.roles["student-1"] != "student" {
+		t.Error("deleting the classroom removed student-1's account")
 	}
 }
 

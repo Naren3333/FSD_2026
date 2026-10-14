@@ -150,12 +150,17 @@ def replay(service: str, topic: str, resource: str, fresh_id: bool = False) -> s
     Draft202012Validator(schema, format_checker=FormatChecker()).validate(event)
     if fresh_id:
         event["event_id"] = str(uuid4())
+    publish(topic, event)
+    return event["event_id"]
+
+
+def publish(topic: str, event: dict[str, Any]) -> None:
+    """Puts an event straight on a Kafka topic."""
     producer = "/opt/kafka/bin/kafka-console-producer.sh"
     docker(
         "exec", "-T", "kafka", producer, "--bootstrap-server", "kafka:9092", "--topic", topic,
         input=json.dumps(event) + "\n",
     )  # fmt: skip
-    return event["event_id"]
 
 
 # --- Steps ---------------------------------------------------------------------------------------------------
@@ -423,8 +428,22 @@ def unenroll(u: Users, room_id: str) -> None:
     assert len(request(u.teacher, "GET", f"/grading/evaluations?classroom_id={room_id}")) == 1
 
 
-def delete_classroom(u: Users, room_id: str) -> None:
-    """Deleting a classroom hides it and ends everyone's access, its teacher's included."""
+def delete_classroom(u: Users, room_id: str, graded: Graded) -> None:
+    """Deleting a classroom hides it, unenrolls its students and ends everyone's access, its teacher's included.
+    Then every service purges its data for the classroom, a repeated deletion changes nothing, and a submission
+    event arriving after the purge grades nothing; the students' accounts are kept."""
+    room = str(UUID(room_id))  # returned by a verified API
+    kept = {
+        "content": f"SELECT count(*) FROM documents WHERE classroom_id='{room}'",
+        "assessment": f"SELECT count(*) FROM assessments WHERE classroom_id='{room}'",
+        "grading": f"SELECT count(*) FROM evaluations WHERE classroom_id='{room}'",
+        "analytics": f"SELECT count(*) FROM evidence WHERE classroom_id='{room}'",
+        "chatbot": f"SELECT count(*) FROM threads WHERE classroom_id='{room}'",
+    }
+    for service, sql in kept.items():
+        assert sql_value(service, sql) != "0", service
+    submitted_sql = f"SELECT body FROM outbox WHERE partition_key='{UUID(graded.submission_id)}'"
+    late_submission = json.loads(sql_value("assessment", submitted_sql))
     request(u.teacher, "POST", f"/identity/classrooms/{room_id}/enrollments", json={"username": "student"})
     path = f"/identity/classrooms/{room_id}"
     request(u.other, "DELETE", path, 403)
@@ -435,6 +454,36 @@ def delete_classroom(u: Users, room_id: str) -> None:
         request(user, "GET", f"{path}/access", 403)
         assert room_id not in [r["id"] for r in request(user, "GET", "/identity/classrooms")]
     request(u.teacher, "GET", f"/grading/evaluations?classroom_id={room_id}", 403)
+    # Its students are unenrolled, so none stays tied to it.
+    assert sql_value("identity", f"SELECT count(*) FROM enrollments WHERE classroom_id='{room_id}'") == "0"
+    # The students themselves are kept and can still be enrolled elsewhere.
+    assert request(u.teacher, "GET", "/identity/students?search=STUDENT%20local")["total"] >= 1
+
+    for service, sql in kept.items():
+        eventually(
+            lambda service=service, sql=sql: sql_value(service, sql),
+            lambda value: value == "0",
+            f"{service} purge",
+        )
+    for service in ["content", "assessment", "grading"]:
+        unsent = f"SELECT count(*) FROM outbox WHERE body->'data'->>'classroom_id'='{room}'"
+        assert sql_value(service, unsent) == "0", service
+    # A repeated deletion and a late submission change nothing.
+    duplicate_id = replay("identity", "identity.classroom.deleted.v1", room, fresh_id=True)
+    late_id = str(uuid4())
+    publish("assessment.submitted.v1", {**late_submission, "event_id": late_id})
+    eventually(
+        lambda: sql_value("content", f"SELECT count(*) FROM inbox WHERE event_id='{duplicate_id}'"),
+        lambda value: value == "1",
+        "repeated deletion",
+    )
+    eventually(
+        lambda: sql_value("grading", f"SELECT count(*) FROM inbox WHERE event_id='{late_id}'"),
+        lambda value: value == "1",
+        "late submission",
+    )
+    for service, sql in kept.items():
+        assert sql_value(service, sql) == "0", service
 
 
 def databases() -> None:
@@ -448,7 +497,7 @@ def databases() -> None:
         isolation = psql(user, database, "SELECT 1", check=False)
         assert isolation.returncode != 0 and "permission denied" in isolation.stderr.lower(), (user, database)
     versions = "SELECT string_agg(version::text, ',' ORDER BY version) FROM schema_migrations"
-    for service, expected in [("content", "1,2"), ("identity", "1,2,3")]:
+    for service, expected in [("content", "1,2"), ("identity", "1,2,3,4,5")]:
         migrations = sql_value(service, versions)
         assert migrations == expected, (service, migrations)
     vector = sql_value("content", "SELECT count(*) FROM pg_extension WHERE extname='vector'")
@@ -471,11 +520,11 @@ def main() -> None:
     graded = assess_and_grade(users, room_id)
     replayed_events(users, room_id, graded)
     unenroll(users, room_id)
-    delete_classroom(users, room_id)
+    delete_classroom(users, room_id, graded)
     databases()
     ai_service_accounts(users)
     print(
-        "PASS: gateway auth, classroom isolation, enrollment by username, rosters, the school's student list, unenrollment, classroom deletion, curriculum, "
+        "PASS: gateway auth, classroom isolation, enrollment by username, rosters, the school's student list, unenrollment, classroom deletion and its cross-service purge, curriculum, "
         "S3 upload/extraction, PDF indexing jobs, teacher-only rubrics, search access, chat threads and streaming, "
         "AI spend allowance, answer-key secrecy, submissions, draft grading, teacher finalization, students' own "
         "finalized results, Kafka analytics, consumer restart, duplicate event and business-key idempotency, "

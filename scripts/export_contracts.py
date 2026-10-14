@@ -433,6 +433,7 @@ for name, routes in operations.items():
     )
 
 payloads = {
+    "identity.classroom.deleted.v1": obj({"classroom_id": UUID, "org_id": TEXT}),
     "content.uploaded.v1": obj(
         {
             "document_id": UUID,

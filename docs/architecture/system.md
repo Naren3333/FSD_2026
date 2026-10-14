@@ -25,6 +25,10 @@ flowchart LR
   Grading -->|outbox: finalized| Kafka
   Kafka --> Analytics
   Content -->|outbox: uploaded, indexed| Kafka
+  Identity -->|outbox: classroom deleted| Kafka
+  Kafka -->|purge deleted classroom| Content
+  Kafka -->|purge deleted classroom| Assessment
+  Kafka -->|purge deleted classroom| QC
   Content -->|ingest, embed, rerank as content-indexer| AI
   subgraph AI applications
     AI[AI core: ingest, embed, generate, rerank]
@@ -36,11 +40,11 @@ flowchart LR
 
 Content and the chatbot call ai-core: its indexing worker sends PDFs to ai-core, and search asks ai-core for the query vector and the rerank (ADR 0002). ai-core calls nothing back, so there is no circular dependency. Each persistent application connects only to its own database. Database and schema grants enforce the boundary; identifiers across services are references, not cross-database foreign keys. Assessment validates skill references through Curriculum. Identity is the policy owner for classroom access; bearer tokens forwarded by a business service are revalidated at Identity. No user identity headers are trusted.
 
-Go domain files implement exact grading, assessment validation and text chunking without framework/database dependencies, except the small transport UUID helper used by assessment validation (a remaining layering cleanup). SQL is explicit, application transactions are visible in handlers, and source remains intentionally small. The shared Go package implements transport, auth, connection lifecycle, outbox plumbing and consumer inboxes; it owns no educational entity. Python's shared package implements auth/error/logging only.
+Go domain files implement exact grading, assessment validation and text chunking without framework/database dependencies, except the small transport UUID helper used by assessment validation (a remaining layering cleanup). SQL is explicit, application transactions are visible in handlers, and source remains intentionally small. The shared Go package implements transport, auth, connection lifecycle, outbox plumbing and consumer inboxes; it owns no educational entity. Python's shared package implements auth/error/logging, database pools and the Kafka consumer loop only.
 
 ## Data owners
 
-Identity owns `organizations`, `users`, `classrooms`, `enrollments`. Curriculum owns `nodes`, `prerequisites`. Content owns `documents` including extracted text chunks and SHA-256/source revision metadata, `document_chunks` (indexed PDF chunks with pgvector embeddings and a full-text index), `index_jobs`, plus bucket objects (originals and figure crops). Assessment owns `assessments` with question snapshots and answer keys, and `submissions`. Grading owns `evaluations`, `audit`. Analytics owns its `evaluations`, `evidence` and `inbox` read model. Outbox/inbox tables are independently created in the application owner's database, not a shared event database.
+Identity owns `organizations`, `users`, `classrooms`, `enrollments`. Curriculum owns `nodes`, `prerequisites`. Content owns `documents` including extracted text chunks and SHA-256/source revision metadata, `document_chunks` (indexed PDF chunks with pgvector embeddings and a full-text index), `index_jobs`, plus bucket objects (originals and figure crops). Assessment owns `assessments` with question snapshots and answer keys, and `submissions`. Grading owns `evaluations`, `audit`. Analytics owns its `evaluations`, `evidence` and `inbox` read model. Grading and Analytics each keep `purged_classrooms`, the deleted classrooms whose data they purged, so a late event cannot bring it back. Outbox/inbox tables are independently created in the application owner's database, not a shared event database.
 
 The first migration is non-destructive and idempotent. Go migrations are embedded from each service's `migrations/NNN_name.sql` files and applied in order under a PostgreSQL advisory transaction lock; each version runs once and is recorded in `schema_migrations` (versions must run 1..n without gaps, or startup fails). The Python services that own a database (Analytics, ai-core, the chatbot) apply theirs the same way through `learning_transport.db`, under the same lock id and with the same `schema_migrations` table. Schema changes go in a new numbered file, never an edit to an applied one; `CREATE TABLE IF NOT EXISTS` is not an upgrade mechanism. Production migrations should run with separate owner credentials; local app roles own only their own database.
 

@@ -94,7 +94,7 @@ func (s server) remove(w http.ResponseWriter, r *http.Request) {
 	if !s.owner(w, r, id, "delete it") {
 		return
 	}
-	if err := s.store.deleteClassroom(r.Context(), id); err != nil {
+	if err := s.store.deleteClassroom(r.Context(), id, platform.Actor(r).Org); err != nil {
 		platform.Fail(w, err)
 		return
 	}

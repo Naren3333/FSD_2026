@@ -1,3 +1,4 @@
+import json
 from uuid import uuid4
 
 import pytest
@@ -30,9 +31,27 @@ def test_response_contract_rejects_invented_accuracy():
 
 
 def test_consumer_restart_backoff():
-    from consumer import RESTART_FIRST, RESTART_MAX, restart_wait
+    from learning_transport.kafka import RESTART_FIRST, RESTART_MAX, restart_wait
 
     assert restart_wait(None, False) == RESTART_FIRST
     assert restart_wait(RESTART_FIRST, False) == 2 * RESTART_FIRST
     assert restart_wait(RESTART_MAX, False) == RESTART_MAX
     assert restart_wait(RESTART_MAX, True) == RESTART_FIRST
+
+
+def test_malformed_classroom_deletions_are_dead_lettered():
+    from consumer import CLASSROOM_DELETED, handler
+
+    room = str(uuid4())
+    deletion = {
+        "event_id": str(uuid4()),
+        "event_type": CLASSROOM_DELETED,
+        "schema_version": 1,
+        "timestamp": "2026-10-14T00:00:00Z",
+        "correlation_id": str(uuid4()),
+        "resource_id": str(uuid4()),  # not the deleted classroom
+        "data": {"classroom_id": room, "org_id": "o"},
+    }
+    handle = handler(None)  # type: ignore[arg-type]  # never reached: the message is rejected first
+    assert handle(CLASSROOM_DELETED, json.dumps(deletion).encode()) is False
+    assert handle(CLASSROOM_DELETED, b"not json") is False

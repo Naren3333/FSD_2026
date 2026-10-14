@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"learning/platform"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -19,7 +20,7 @@ type store interface {
 	insertEnrollment(ctx context.Context, classroom, student string) error
 	removeEnrollment(ctx context.Context, classroom, student string) (bool, error)
 	listStudents(ctx context.Context, classroom string) ([]Student, error)
-	deleteClassroom(ctx context.Context, classroom string) error
+	deleteClassroom(ctx context.Context, classroom, org string) error
 	listOrgStudents(ctx context.Context, org, search string, offset, limit int) ([]Student, int, error)
 }
 
@@ -140,8 +141,28 @@ func scanStudent(row pgx.CollectableRow) (Student, error) {
 	return v, err
 }
 
-// deleteClassroom marks the classroom deleted, keeping its row and enrollments.
-func (p pgStore) deleteClassroom(ctx context.Context, classroom string) error {
-	_, err := p.db.Exec(ctx, "UPDATE classrooms SET deleted_at=now() WHERE id=$1 AND deleted_at IS NULL", classroom)
+// ClassroomDeleted is the identity.classroom.deleted.v1 topic: every service that keeps data for a classroom
+// removes it when the classroom is deleted.
+const ClassroomDeleted = "identity.classroom.deleted.v1"
+
+// deleteClassroom marks the classroom deleted, unenrolls its students and announces it, in one transaction, so no
+// student stays tied to it and every other service purges its data for it. The students' accounts are untouched.
+// The classroom row is kept as the record that it was deleted.
+func (p pgStore) deleteClassroom(ctx context.Context, classroom, org string) error {
+	tx, err := p.db.Begin(ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback(ctx)
+	_, err = tx.Exec(ctx, "UPDATE classrooms SET deleted_at=now() WHERE id=$1 AND deleted_at IS NULL", classroom)
+	if err == nil {
+		_, err = tx.Exec(ctx, "DELETE FROM enrollments WHERE classroom_id=$1", classroom)
+	}
+	if err == nil {
+		err = platform.Emit(ctx, tx, ClassroomDeleted, classroom, map[string]string{"classroom_id": classroom, "org_id": org})
+	}
+	if err == nil {
+		err = tx.Commit(ctx)
+	}
 	return err
 }

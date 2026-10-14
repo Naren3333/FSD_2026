@@ -2,6 +2,7 @@
 fsd_test's assistant. Reached through Kong at /api/chatbot with the user's own token."""
 
 import asyncio
+import threading
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from typing import Any
@@ -21,31 +22,44 @@ from learning_transport import (
     require_env,
     requires,
 )
+from learning_transport.db import open_pool
 
 import config
 from chat import HISTORY_TURNS, SSEResponse, Turn, TurnRequest
 from clients import Services, billed
 from contracts import MessageList, NewMessage, NewThread, Thread, ThreadList, Usage
-from store import PostgresStore, Store
+from purge import run as purge_deleted_classrooms
+from store import MIGRATIONS, PostgresStore, Store
 
 ERRORS: dict[int | str, dict[str, Any]] = {
     code: {"model": ErrorResponse} for code in (401, 403, 404, 422, 503)
 }
 SAVE_GRACE = 10.0  # seconds the shutdown waits for interrupted answers still being saved
+CONSUMER_STOP_GRACE = 35  # seconds shutdown waits for the classroom-deletion consumer
 
 
 @asynccontextmanager
 async def lifespan(app: Any) -> AsyncIterator[None]:
-    require_env(*OIDC_SETTINGS)
+    require_env(*OIDC_SETTINGS, "KAFKA_BROKERS")
     settings = config.load()
     store = await PostgresStore.open(settings.database_url)
+    # Deleted classrooms' threads are purged by a consumer thread, with its own small synchronous pool.
+    purge_pool = open_pool(settings.database_url, MIGRATIONS)
+    stop, connected = threading.Event(), threading.Event()
+    consumer = threading.Thread(
+        target=purge_deleted_classrooms, args=(purge_pool, stop, connected), daemon=True
+    )
     async with httpx.AsyncClient() as http:
         app.state.settings, app.state.store = settings, store
         app.state.services = Services(settings, http)
         app.state.pending = set()
+        consumer.start()
         yield
         if app.state.pending:
             await asyncio.wait(app.state.pending, timeout=SAVE_GRACE)
+        stop.set()
+        await asyncio.to_thread(consumer.join, CONSUMER_STOP_GRACE)
+    purge_pool.close()
     await store.close()
 
 

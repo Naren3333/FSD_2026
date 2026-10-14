@@ -67,7 +67,8 @@ services:
     - -ec
     command:
     - for topic in content.uploaded.v1 content.indexed.v1 assessment.submitted.v1 grading.finalized.v1
-      assessment.submitted.v1.dlq grading.finalized.v1.dlq; do /opt/kafka/bin/kafka-topics.sh
+      identity.classroom.deleted.v1 assessment.submitted.v1.dlq grading.finalized.v1.dlq
+      identity.classroom.deleted.v1.dlq; do /opt/kafka/bin/kafka-topics.sh
       --bootstrap-server kafka:9092 --create --if-not-exists --topic $$topic --partitions
       3 --replication-factor 1; done
   # S3-compatible document storage. MinIO's images stopped being publicly downloadable, so this is
@@ -152,11 +153,14 @@ services:
       OIDC_AUDIENCE: learning
       DATABASE_URL: postgresql://identity:${IDENTITY_DB_PASSWORD}@postgres:5432/identity?sslmode=disable
       IDENTITY_URL: http://identity:8080
+      KAFKA_BROKERS: kafka:9092
     depends_on:
       keycloak:
         condition: service_started
       postgres:
         condition: service_healthy
+      kafka-init:
+        condition: service_completed_successfully
     init: true
     restart: on-failure:3
     stop_grace_period: 45s
@@ -352,11 +356,15 @@ services:
       AI_TOKEN_URL: http://keycloak:8080/realms/learning/protocol/openid-connect/token
       AI_CLIENT_ID: question-chatbot-agent
       AI_CLIENT_SECRET: ${QUESTION_CHATBOT_AGENT_CLIENT_SECRET:?Run scripts/setup.py}
+      # Purges a deleted classroom's threads (identity.classroom.deleted.v1).
+      KAFKA_BROKERS: kafka:9092
     depends_on:
       keycloak:
         condition: service_started
       postgres:
         condition: service_healthy
+      kafka-init:
+        condition: service_completed_successfully
     init: true
     restart: on-failure:3
     stop_grace_period: 45s
