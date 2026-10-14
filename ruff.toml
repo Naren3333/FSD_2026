@@ -34,3 +34,5 @@ max-branches = 14
 "**/tests/**" = ["PLC0415", "PLR0911", "PLR0913"]
 "**/test_*.py" = ["PLC0415", "PLR0911", "PLR0913"]
 "**/conftest.py" = ["PLC0415", "PLR0911", "PLR0913"]
+# The retrieval and chat evaluation runners are long, linear reports over every case.
+"scripts/eval/*.py" = ["C901", "PLR0912", "PLR0915"]

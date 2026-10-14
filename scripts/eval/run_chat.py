@@ -21,6 +21,7 @@ retrieved, and answers without citations (small talk excluded).
 Every turn costs model calls (rewrite, embedding, rerank, and the answer when there is one). Reports and
 transcripts go to .local/eval-runs/chat-<timestamp>[-label].json.
 """
+
 import argparse
 import json
 import re
@@ -32,11 +33,10 @@ from datetime import datetime
 from pathlib import Path
 
 import yaml
-
 from common import GOLDEN, ROOT, RUNS, USERS, Session, check, load_state
 
 sys.path.insert(0, str(ROOT / "services" / "question-chatbot-agent"))
-import prompts  # noqa: E402  (the chatbot's own prompts, to spot one quoted in a reply)
+import prompts  # the chatbot's own prompts, to spot one quoted in a reply
 
 CASES = Path(__file__).with_name("chat_cases.yaml")
 WORKERS = 4
@@ -46,14 +46,20 @@ PIRATE = re.compile(r"\b(arr+|matey|ahoy|avast|hearties|aye|ye be|shiver me)\b",
 
 
 def psql(database: str, sql: str) -> list[list[str]]:
-    out = subprocess.run(["docker", "compose", "exec", "-T", "postgres", "psql", "-U", "postgres", "-d", database, "-At", "-F", "\t", "-c", sql],
-                         cwd=ROOT, text=True, capture_output=True, check=True).stdout
+    command = ["docker", "compose", "exec", "-T", "postgres", "psql", "-U", "postgres", "-d", database]
+    command += ["-At", "-F", "\t", "-c", sql]
+    out = subprocess.run(command, cwd=ROOT, text=True, capture_output=True, check=True).stdout
     return [line.split("\t") for line in out.splitlines() if line]
 
 
 def prompt_sentences() -> list[str]:
     """Sentences of the chatbot's prompts long enough that quoting one means the prompt leaked."""
-    texts = [prompts.POLICY, *prompts.INSTRUCTIONS.values(), prompts.REWRITE_INSTRUCTIONS, *prompts.SMALL_TALK_INSTRUCTIONS.values()]
+    texts = [
+        prompts.POLICY,
+        *prompts.INSTRUCTIONS.values(),
+        prompts.REWRITE_INSTRUCTIONS,
+        *prompts.SMALL_TALK_INSTRUCTIONS.values(),
+    ]
     parts = (s.strip() for t in texts for s in re.split(r"(?<=[.:])\s+|\n", t))
     return [s for s in parts if len(s) >= 40 and not s.startswith("You are")]
 
@@ -61,8 +67,15 @@ def prompt_sentences() -> list[str]:
 def load_cases(only: str | None, classes: dict[str, str]) -> list[dict]:
     spec = yaml.safe_load(CASES.read_text(encoding="utf-8"))
     golden = {q["id"]: q for q in yaml.safe_load(GOLDEN.read_text(encoding="utf-8"))}
-    cases = [{"id": q["id"], "group": "refusal", "as": q["as"], "turns": [q["query"]]} for q in golden.values() if q.get("unanswerable")]
-    cases += [{"id": i, "group": "leaks", "as": golden[i]["as"], "turns": [golden[i]["query"]]} for i in spec["golden_leaks"]]
+    cases = [
+        {"id": q["id"], "group": "refusal", "as": q["as"], "turns": [q["query"]]}
+        for q in golden.values()
+        if q.get("unanswerable")
+    ]
+    cases += [
+        {"id": i, "group": "leaks", "as": golden[i]["as"], "turns": [golden[i]["query"]]}
+        for i in spec["golden_leaks"]
+    ]
     for i in spec["golden_grounded"]:
         q = golden[i]
         case = {"id": i, "group": "grounded", "as": q["as"], "turns": [q["query"]], "expect": q["expect"]}
@@ -77,24 +90,41 @@ def chunk_map(state: dict) -> dict[str, dict]:
     """chunk id → its document's title, doc_type and class, for the eval classrooms."""
     rooms = {v: k for k, v in state["classrooms"].items()}
     ids = ",".join(f"'{r}'" for r in rooms)
-    rows = psql("content", f"SELECT c.id, d.title, d.doc_type, d.classroom_id FROM document_chunks c JOIN documents d ON d.id=c.document_id WHERE d.classroom_id IN ({ids})")
+    rows = psql(
+        "content",
+        f"SELECT c.id, d.title, d.doc_type, d.classroom_id FROM document_chunks c JOIN documents d ON d.id=c.document_id WHERE d.classroom_id IN ({ids})",
+    )
     return {r[0]: {"title": r[1], "doc_type": r[2], "class": rooms[r[3]]} for r in rows}
 
 
 def internals(message_id: str) -> dict:
     """What the API doesn't return about a saved answer."""
-    rows = psql("chatbot", f"SELECT coalesce(array_to_string(retrieved_chunk_ids, ','), ''), coalesce(rewritten_query, ''), coalesce(prompt_version, ''), "
-                           f"coalesce(usage_tokens::text, ''), coalesce(latency_ms::text, '') FROM messages WHERE id='{message_id}'")
+    rows = psql(
+        "chatbot",
+        f"SELECT coalesce(array_to_string(retrieved_chunk_ids, ','), ''), coalesce(rewritten_query, ''), coalesce(prompt_version, ''), "
+        f"coalesce(usage_tokens::text, ''), coalesce(latency_ms::text, '') FROM messages WHERE id='{message_id}'",
+    )
     r = rows[0] if rows else ["", "", "", "", ""]
-    return {"retrieved": [x for x in r[0].split(",") if x], "rewritten_query": r[1] or None, "prompt_version": r[2] or None,
-            "usage_tokens": int(r[3]) if r[3] else None, "latency_ms": int(r[4]) if r[4] else None}
+    return {
+        "retrieved": [x for x in r[0].split(",") if x],
+        "rewritten_query": r[1] or None,
+        "prompt_version": r[2] or None,
+        "usage_tokens": int(r[3]) if r[3] else None,
+        "latency_ms": int(r[4]) if r[4] else None,
+    }
 
 
 def send(session: Session, thread_id: str, content: str) -> dict:
     """One turn: the streamed events, then the saved answer."""
     for attempt in range(30):
         streamed, last = [], {}
-        with session.http.stream("POST", f"/chatbot/threads/{thread_id}/messages", json={"content": content}, headers={"Accept": "text/event-stream"}, timeout=120) as resp:
+        with session.http.stream(
+            "POST",
+            f"/chatbot/threads/{thread_id}/messages",
+            json={"content": content},
+            headers={"Accept": "text/event-stream"},
+            timeout=120,
+        ) as resp:
             if resp.status_code == 401 and attempt == 0:
                 session.sign_in()
                 continue
@@ -116,20 +146,31 @@ def send(session: Session, thread_id: str, content: str) -> dict:
                         last[event] = data
         break
     saved = check(session.request("GET", f"/chatbot/threads/{thread_id}/messages")).json()["messages"][-1]
-    return {"sent": content, "streamed": "".join(streamed), "sse_error": last.get("error"), "saved": saved | internals(saved["id"])}
+    return {
+        "sent": content,
+        "streamed": "".join(streamed),
+        "sse_error": last.get("error"),
+        "saved": saved | internals(saved["id"]),
+    }
 
 
 def run_case(case: dict, state: dict) -> dict:
     user = case["as"]
     class_id = case.get("class_id") or (USERS[user][1][0])
     session = Session(USERS[user][0], state)
-    thread = check(session.request("POST", "/chatbot/threads", json={"classroom_id": state["classrooms"][class_id]})).json()
+    thread = check(
+        session.request("POST", "/chatbot/threads", json={"classroom_id": state["classrooms"][class_id]})
+    ).json()
     turns = [send(session, thread["id"], t) for t in case["turns"]]
     return {**case, "class_id": class_id, "thread_id": thread["id"], "results": turns}
 
 
 def cites_expected(citations: list[dict], expect: list[dict]) -> bool:
-    return any(ci["title"] == w["title"] and ("page" not in w or ci["page_start"] <= w["page"] <= ci["page_end"]) for ci in citations for w in expect)
+    return any(
+        ci["title"] == w["title"] and ("page" not in w or ci["page_start"] <= w["page"] <= ci["page_end"])
+        for ci in citations
+        for w in expect
+    )
 
 
 def assess(case: dict, chunks: dict[str, dict], leak_sentences: list[str]) -> None:
@@ -147,10 +188,14 @@ def assess(case: dict, chunks: dict[str, dict], leak_sentences: list[str]) -> No
         cited = [str(ci["chunk_id"]) for ci in citations]
         reply = m["content"] or ""
         t["digest"] = {
-            "outcome": m["outcome"], "prompt_version": m["prompt_version"], "rewritten_query": m["rewritten_query"],
-            "reply": MARKER.sub("", reply).strip(), "cited": [f"{ci['title']}, p.{ci['page_start']}" for ci in citations],
+            "outcome": m["outcome"],
+            "prompt_version": m["prompt_version"],
+            "rewritten_query": m["rewritten_query"],
+            "reply": MARKER.sub("", reply).strip(),
+            "cited": [f"{ci['title']}, p.{ci['page_start']}" for ci in citations],
             "retrieved": [chunks.get(i, {}).get("title", f"? {i}") for i in m["retrieved"]],
-            "usage_tokens": m["usage_tokens"], "latency_ms": m["latency_ms"],
+            "usage_tokens": m["usage_tokens"],
+            "latency_ms": m["latency_ms"],
         }
         if t["sse_error"] or m["outcome"] == "error":
             failures.append(f"{tag}: error {t['sse_error']}")
@@ -203,10 +248,15 @@ def summarize(cases: list[dict]) -> dict:
             g["outcomes"][o] = g["outcomes"].get(o, 0) + 1
     turns = [t["digest"] for c in cases for t in c["results"] if "digest" in t]
     lat = sorted(t["latency_ms"] for t in turns if t["latency_ms"] is not None)
-    return {"groups": groups, "turns": len(turns), "failures": sum(len(c["failures"]) for c in cases),
-            "versions": sorted({t["prompt_version"] for t in turns if t["prompt_version"]}),
-            "tokens": sum(t["usage_tokens"] or 0 for t in turns),
-            "latency_ms_p50": lat[len(lat) // 2] if lat else None, "latency_ms_max": lat[-1] if lat else None}
+    return {
+        "groups": groups,
+        "turns": len(turns),
+        "failures": sum(len(c["failures"]) for c in cases),
+        "versions": sorted({t["prompt_version"] for t in turns if t["prompt_version"]}),
+        "tokens": sum(t["usage_tokens"] or 0 for t in turns),
+        "latency_ms_p50": lat[len(lat) // 2] if lat else None,
+        "latency_ms_max": lat[-1] if lat else None,
+    }
 
 
 def main() -> None:
@@ -221,7 +271,10 @@ def main() -> None:
     classes = {title: d["class"] for title, d in state["documents"].items()}
     cases = load_cases(args.only, classes)
     chunks = chunk_map(state)
-    print(f"{len(cases)} cases, {sum(len(c['turns']) for c in cases)} turns; {len(chunks)} chunks mapped", flush=True)
+    print(
+        f"{len(cases)} cases, {sum(len(c['turns']) for c in cases)} turns; {len(chunks)} chunks mapped",
+        flush=True,
+    )
     started = time.monotonic()
     with ThreadPoolExecutor(WORKERS) as pool:
         done = list(pool.map(lambda c: run_case(c, state), cases))

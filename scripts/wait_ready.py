@@ -1,28 +1,46 @@
-"""Probe all ten applications from their private network, then the public Kong and Keycloak ports, with bounded startup wait."""
+"""Probe all ten applications from their private network, then the public Kong and Keycloak ports, with bounded
+startup wait."""
+
 import json
 import subprocess
 import time
 import urllib.error
 import urllib.request
+from collections.abc import Callable
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
-SERVICES = ["identity", "curriculum", "content", "assessment", "grading", "analytics", "ai-core", "question-generation-agent", "student-performance-agent", "question-chatbot-agent"]
+TIMEOUT = 180  # seconds for both phases together
+SERVICES = [
+    "identity",
+    "curriculum",
+    "content",
+    "assessment",
+    "grading",
+    "analytics",
+    "ai-core",
+    "question-generation-agent",
+    "student-performance-agent",
+    "question-chatbot-agent",
+]
 # What the tests and the browser call from the host. Kong starts last and needs a few seconds to listen after its
 # container starts, so the applications being ready says nothing about it.
-PUBLIC = {"kong": ("http://127.0.0.1:8000/api/identity/classrooms", 401), "keycloak": ("http://127.0.0.1:8081/realms/learning", 200)}
-probe = """
-import json,urllib.request
-services = %r
-result = {}
-for name in services:
+PUBLIC = {
+    "kong": ("http://127.0.0.1:8000/api/identity/classrooms", 401),
+    "keycloak": ("http://127.0.0.1:8081/realms/learning", 200),
+}
+# Runs inside the analytics container, on the private network, and prints each service's readiness status.
+PROBE = f"""
+import json, urllib.request
+result = {{}}
+for name in {SERVICES!r}:
     try:
-        with urllib.request.urlopen('http://'+name+':8080/health/ready', timeout=3) as response:
+        with urllib.request.urlopen("http://" + name + ":8080/health/ready", timeout=3) as response:
             result[name] = response.status
     except Exception:
         result[name] = 503
 print(json.dumps(result))
-""" % SERVICES
+"""
 
 
 def status(url: str) -> int:
@@ -35,21 +53,29 @@ def status(url: str) -> int:
         return 0
 
 
-deadline = time.monotonic() + 180
-while time.monotonic() < deadline:
-    result = subprocess.run(["docker", "compose", "exec", "-T", "analytics", "python", "-c", probe], cwd=ROOT, text=True, capture_output=True, timeout=40)
-    if result.returncode == 0:
-        states = json.loads(result.stdout)
-        if all(value == 200 for value in states.values()):
-            print("PASS: all ten applications ready")
-            break
-    time.sleep(2)
-else:
-    raise SystemExit("Applications did not become ready within 180 seconds")
-while time.monotonic() < deadline:
-    if all(status(url) == expected for url, expected in PUBLIC.values()):
-        print("PASS: Kong and Keycloak answer on their public ports")
-        break
-    time.sleep(2)
-else:
-    raise SystemExit("Kong or Keycloak did not answer within 180 seconds: " + ", ".join(f"{name} {status(url)}" for name, (url, _) in PUBLIC.items()))
+def applications_ready() -> bool:
+    command = ["docker", "compose", "exec", "-T", "analytics", "python", "-c", PROBE]
+    result = subprocess.run(command, cwd=ROOT, text=True, capture_output=True, timeout=40, check=False)
+    return result.returncode == 0 and all(value == 200 for value in json.loads(result.stdout).values())
+
+
+def public_ports_ready() -> bool:
+    return all(status(url) == expected for url, expected in PUBLIC.values())
+
+
+def wait(ready: Callable[[], bool], deadline: float) -> bool:
+    while time.monotonic() < deadline:
+        if ready():
+            return True
+        time.sleep(2)
+    return False
+
+
+deadline = time.monotonic() + TIMEOUT
+if not wait(applications_ready, deadline):
+    raise SystemExit(f"Applications did not become ready within {TIMEOUT} seconds")
+print("PASS: all ten applications ready")
+if not wait(public_ports_ready, deadline):
+    states = ", ".join(f"{name} {status(url)}" for name, (url, _) in PUBLIC.items())
+    raise SystemExit(f"Kong or Keycloak did not answer within {TIMEOUT} seconds: {states}")
+print("PASS: Kong and Keycloak answer on their public ports")

@@ -14,6 +14,7 @@ their classes) and, with --rerank, the refusal-floor table. Each query costs one
 Voyage rerank per classroom searched. Exits 1 on a leak or a `kind` regression. Runs are saved to
 .local/eval-runs/.
 """
+
 import argparse
 import json
 import random
@@ -22,14 +23,15 @@ from datetime import datetime
 from pathlib import Path
 
 import yaml
-
 from common import GOLDEN, RUNS, USERS, Session, corpus, load_state
 
 TOP_K = 10
 MARGIN = 0.02
 
 
-def search(session: Session, classrooms: dict, q: dict, documents: dict, rerank: bool) -> tuple[list[dict], bool]:
+def search(
+    session: Session, classrooms: dict, q: dict, documents: dict, rerank: bool
+) -> tuple[list[dict], bool]:
     """Results for one query, best first, and whether any search fell back from the rerank."""
     filters = q.get("filters") or {}
     rooms = filters.get("class_ids") or list(USERS[q["as"]][1])
@@ -63,9 +65,7 @@ def matches(result: dict, want: dict) -> bool:
         return False
     if "section" in want and want["section"].lower() not in (result["section_path"] or "").lower():
         return False
-    if "kind" in want and result.get("kind", "text") != want["kind"]:
-        return False
-    return True
+    return "kind" not in want or result.get("kind", "text") == want["kind"]
 
 
 def alternatives(part: dict | list[dict]) -> list[dict]:
@@ -83,7 +83,11 @@ def leaks_of(q: dict, results: list[dict], classes: dict[str, str]) -> list[str]
     out = {r["title"] for r in results if r["title"] in forbidden}
     if q["as"] != "t1":
         mine = set(USERS[q["as"]][1])
-        out |= {r["title"] for r in results if r["doc_type"] != "teaching_material" or classes.get(r["title"]) not in mine}
+        out |= {
+            r["title"]
+            for r in results
+            if r["doc_type"] != "teaching_material" or classes.get(r["title"]) not in mine
+        }
     return sorted(out)
 
 
@@ -96,22 +100,35 @@ def score(q: dict, results: list[dict], classes: dict[str, str]) -> dict:
     margin = None
     if rank and hit.get("score") is not None:
         # rank 1: lead over the best wrong result below; otherwise: gap to the best wrong result above (< 0)
-        wrong = [s for i, s in enumerate(scores) if not correct[i] and s is not None and (i < rank - 1 or rank == 1)]
+        wrong = [
+            s
+            for i, s in enumerate(scores)
+            if not correct[i] and s is not None and (i < rank - 1 or rank == 1)
+        ]
         if wrong:
             margin = round(hit["score"] - max(wrong), 4)
     return {
-        "id": q["id"], "as": q["as"], "query": q["query"],
-        "group": q.get("group", "default"), "style": q.get("style", "clean"), "split": q.get("split", "tune"),
-        "scored": bool(wants), "unanswerable": bool(q.get("unanswerable")),
+        "id": q["id"],
+        "as": q["as"],
+        "query": q["query"],
+        "group": q.get("group", "default"),
+        "style": q.get("style", "clean"),
+        "split": q.get("split", "tune"),
+        "scored": bool(wants),
+        "unanswerable": bool(q.get("unanswerable")),
         "kind_checked": any("kind" in w for w in wants),
-        "rank": rank, "leaks": leaks_of(q, results, classes),
+        "rank": rank,
+        "leaks": leaks_of(q, results, classes),
         "recall@5": round(recall(results[:5], q["expect_all"]), 3) if q.get("expect_all") else None,
         "recall@10": round(recall(results[:10], q["expect_all"]), 3) if q.get("expect_all") else None,
         "top_score": scores[0] if scores else None,
         "margin": margin,
         "scores": [round(s, 4) if s is not None else None for s in scores],
         "span": hit["page_end"] - hit["page_start"] + 1 if hit and hit["page_start"] else None,
-        "top3": [f"{r['title']} p{r['page_start']}-{r['page_end']} [{r.get('kind', 'text')}] {r['section_path'] or ''}".strip() for r in results[:3]],
+        "top3": [
+            f"{r['title']} p{r['page_start']}-{r['page_end']} [{r.get('kind', 'text')}] {r['section_path'] or ''}".strip()
+            for r in results[:3]
+        ],
     }
 
 
@@ -120,11 +137,17 @@ def summarize(rows: list[dict]) -> dict:
     n = len(scored) or 1
     hit = lambda k: sum(1 for r in scored if r["rank"] and r["rank"] <= k) / n  # noqa: E731
     out = {
-        "queries": len(rows), "scored": len(scored), "unanswerable": sum(1 for r in rows if r["unanswerable"]),
-        "hit@1": round(hit(1), 3), "hit@3": round(hit(3), 3), "hit@5": round(hit(5), 3),
+        "queries": len(rows),
+        "scored": len(scored),
+        "unanswerable": sum(1 for r in rows if r["unanswerable"]),
+        "hit@1": round(hit(1), 3),
+        "hit@3": round(hit(3), 3),
+        "hit@5": round(hit(5), 3),
         "mrr": round(sum(1 / r["rank"] for r in scored if r["rank"]) / n, 3),
         "leaks": sum(len(r["leaks"]) for r in rows),
-        "mean_span": round(sum(spans) / len(spans), 2) if (spans := [r["span"] for r in scored if r["span"]]) else None,
+        "mean_span": round(sum(spans) / len(spans), 2)
+        if (spans := [r["span"] for r in scored if r["span"]])
+        else None,
     }
     if multi := [r for r in rows if r.get("recall@5") is not None]:
         out["recall@5"] = round(sum(r["recall@5"] for r in multi) / len(multi), 3)
@@ -146,7 +169,11 @@ def paired_bootstrap(before: list[dict], after: list[dict], n: int = 2000, seed:
         diffs = [f(b) - f(a) for a, b in pairs]
         means = sorted(sum(rng.choice(diffs) for _ in diffs) / len(diffs) for _ in range(n))
         lo, hi = round(means[int(0.025 * n)], 4), round(means[int(0.975 * n) - 1], 4)
-        out[name] = {"delta": round(sum(diffs) / len(diffs), 4), "ci95": [lo, hi], "changed": lo > 0 or hi < 0}
+        out[name] = {
+            "delta": round(sum(diffs) / len(diffs), 4),
+            "ci95": [lo, hi],
+            "changed": lo > 0 or hi < 0,
+        }
     return out
 
 
@@ -158,18 +185,36 @@ def floor_table(rows: list[dict], step: float = 0.05) -> dict | None:
     bad = [r["top_score"] if r["top_score"] is not None else float("-inf") for r in rows if r["unanswerable"]]
     if not good or not bad:
         return None
-    grid = {round(i * step, 4) for i in range(int(1 / step) + 1)} | {s for s in good + bad if s != float("-inf")}
+    grid = {round(i * step, 4) for i in range(int(1 / step) + 1)} | {
+        s for s in good + bad if s != float("-inf")
+    }
     table = []
     for t in sorted(grid):
         refused_bad, refused_good = sum(1 for s in bad if s < t), sum(1 for s in good if s < t)
         precision = refused_bad / (refused_bad + refused_good) if refused_bad + refused_good else 1.0
         rec = refused_bad / len(bad)
         f1 = 2 * precision * rec / (precision + rec) if precision + rec else 0.0
-        table.append({"floor": round(t, 4), "refuse_precision": round(precision, 3), "refuse_recall": round(rec, 3),
-                      "answered_kept": round(1 - refused_good / len(good), 3), "f1": round(f1, 3)})
+        table.append(
+            {
+                "floor": round(t, 4),
+                "refuse_precision": round(precision, 3),
+                "refuse_recall": round(rec, 3),
+                "answered_kept": round(1 - refused_good / len(good), 3),
+                "f1": round(f1, 3),
+            }
+        )
     best = max(table, key=lambda r: (r["f1"], r["answered_kept"]))
-    wrong_top = sorted((r["top_score"] for r in rows if r["scored"] and r["rank"] != 1 and r["top_score"] is not None), reverse=True)
-    return {"answerable": len(good), "unanswerable": len(bad), "best": best, "table": table, "wrong_top1_scores": [round(s, 4) for s in wrong_top]}
+    wrong_top = sorted(
+        (r["top_score"] for r in rows if r["scored"] and r["rank"] != 1 and r["top_score"] is not None),
+        reverse=True,
+    )
+    return {
+        "answerable": len(good),
+        "unanswerable": len(bad),
+        "best": best,
+        "table": table,
+        "wrong_top1_scores": [round(s, 4) for s in wrong_top],
+    }
 
 
 def kind_regressions(rows: list[dict], before: dict[str, dict]) -> list[str]:
@@ -242,14 +287,16 @@ def main() -> None:
             summary[f"{field}s"] = {v: summarize([r for r in rows if r[field] == v]) for v in values}
             for v, sub in summary[f"{field}s"].items():
                 print(f"\n[{field}: {v}] " + "  ".join(f"{k}={x}" for k, x in sub.items()))
-    print("\n[all] " + "  ".join(f"{k}={v}" for k, v in summary.items() if not isinstance(v, (dict, list))))
+    print("\n[all] " + "  ".join(f"{k}={v}" for k, v in summary.items() if not isinstance(v, dict | list)))
     if skipped:
         print(f"[skipped: topic_ids filter has no Content equivalent] {', '.join(skipped)}")
     if args.rerank and (floor := floor_table(rows)):
         summary["floor"] = floor
         b = floor["best"]
-        print(f"\n[floor] {floor['answerable']} answerable (correct top-1) vs {floor['unanswerable']} unanswerable; best floor {b['floor']}: "
-              f"refuse precision {b['refuse_precision']}, recall {b['refuse_recall']}, answerable kept {b['answered_kept']}")
+        print(
+            f"\n[floor] {floor['answerable']} answerable (correct top-1) vs {floor['unanswerable']} unanswerable; best floor {b['floor']}: "
+            f"refuse precision {b['refuse_precision']}, recall {b['refuse_recall']}, answerable kept {b['answered_kept']}"
+        )
         print(f"  the chatbot's RELEVANCE_FLOOR 0.61 {at(floor, 0.61)}")
         if floor["wrong_top1_scores"]:
             print(f"  wrong top-1 scores (answerable): {floor['wrong_top1_scores']}")
@@ -257,19 +304,28 @@ def main() -> None:
         summary["compare"] = boot | {"against": args.compare.name}
         for name in ("mrr", "hit@1"):
             b = boot[name]
-            print(f"[compare] {name} {b['delta']:+.4f}  95% CI [{b['ci95'][0]:+.4f}, {b['ci95'][1]:+.4f}]  "
-                  f"{'CHANGED' if b['changed'] else 'within noise'} ({boot['paired']} paired)")
+            print(
+                f"[compare] {name} {b['delta']:+.4f}  95% CI [{b['ci95'][0]:+.4f}, {b['ci95'][1]:+.4f}]  "
+                f"{'CHANGED' if b['changed'] else 'within noise'} ({boot['paired']} paired)"
+            )
         if args.rerank:
-            notable = [f"{r['id']} {before[r['id']]['rank'] or 'miss'}->{r['rank'] or 'miss'}" for r in rows
-                       if r["id"] in before and r["scored"] and r["rank"] != before[r["id"]]["rank"]
-                       and max(abs(r["margin"] or 0), abs(before[r["id"]].get("margin") or 0)) > MARGIN]
+            notable = [
+                f"{r['id']} {before[r['id']]['rank'] or 'miss'}->{r['rank'] or 'miss'}"
+                for r in rows
+                if r["id"] in before
+                and r["scored"]
+                and r["rank"] != before[r["id"]]["rank"]
+                and max(abs(r["margin"] or 0), abs(before[r["id"]].get("margin") or 0)) > MARGIN
+            ]
             if notable:
                 print(f"[compare] rank changes with margin > {MARGIN}: {', '.join(notable)}")
     regressed = kind_regressions(rows, before)
     if regressed:
         print(f"KIND REGRESSION: {', '.join(regressed)}")
     RUNS.mkdir(parents=True, exist_ok=True)
-    out = RUNS / (datetime.now().strftime("%Y%m%d-%H%M%S") + (f"-{args.label}" if args.label else "") + ".json")
+    out = RUNS / (
+        datetime.now().strftime("%Y%m%d-%H%M%S") + (f"-{args.label}" if args.label else "") + ".json"
+    )
     out.write_text(json.dumps({"summary": summary, "rows": rows}, indent=2), encoding="utf-8")
     print(f"saved {out.relative_to(Path.cwd()) if out.is_relative_to(Path.cwd()) else out}")
     if summary["leaks"] or regressed:

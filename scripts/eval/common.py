@@ -1,5 +1,6 @@
 """Shared by the golden eval scripts: local sign-in through Keycloak, the corpus manifest, and the eval's state in
 .local/ (classroom and document ids, the second student's generated password). Local development stack only."""
+
 import json
 import os
 import time
@@ -9,7 +10,11 @@ import httpx
 import yaml
 
 ROOT = Path(__file__).resolve().parents[2]
-ENV = dict(line.split("=", 1) for line in (ROOT / ".env").read_text().splitlines() if line and not line.startswith("#"))
+ENV = dict(
+    line.split("=", 1)
+    for line in (ROOT / ".env").read_text().splitlines()
+    if line and not line.startswith("#")
+)
 BASE = "http://localhost:8000/api"
 KEYCLOAK = "http://localhost:8081"
 CORPUS = Path(__file__).with_name("corpus.yaml")
@@ -54,8 +59,16 @@ class Session:
         self.sign_in()
 
     def sign_in(self) -> None:
-        res = httpx.post(f"{KEYCLOAK}/realms/learning/protocol/openid-connect/token", timeout=15,
-                         data={"client_id": "learning-e2e", "grant_type": "password", "username": self.user, "password": self.secret})
+        res = httpx.post(
+            f"{KEYCLOAK}/realms/learning/protocol/openid-connect/token",
+            timeout=15,
+            data={
+                "client_id": "learning-e2e",
+                "grant_type": "password",
+                "username": self.user,
+                "password": self.secret,
+            },
+        )
         if res.status_code != 200:
             raise SystemExit(f"Local sign-in failed for {self.user}: {res.status_code}")
         self.http.headers["Authorization"] = "Bearer " + res.json()["access_token"]
@@ -74,5 +87,7 @@ class Session:
 
 def check(res: httpx.Response) -> httpx.Response:
     if res.is_error:
-        raise SystemExit(f"{res.request.method} {res.request.url.path} -> {res.status_code}: {res.text[:300]}")
+        raise SystemExit(
+            f"{res.request.method} {res.request.url.path} -> {res.status_code}: {res.text[:300]}"
+        )
     return res
