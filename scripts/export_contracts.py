@@ -197,6 +197,24 @@ def operation(method, path, body, response, code=200, query=()):
     return path, method.lower(), op
 
 
+# One page of the teacher's school's students, narrowed by an optional search.
+school_students = operation(
+    "GET",
+    "/v1/students",
+    None,
+    obj({"students": array(student, maximum=50), "total": {"type": "integer", "minimum": 0}}),
+)
+school_students[2]["parameters"] = [
+    {"name": "search", "in": "query", "required": False, "schema": {"type": "string", "maxLength": 120}},
+    {"name": "offset", "in": "query", "required": False, "schema": {"type": "integer", "minimum": 0}},
+    {
+        "name": "limit",
+        "in": "query",
+        "required": False,
+        "schema": {"type": "integer", "minimum": 1, "maximum": 50},
+    },
+]
+
 operations = {
     "identity": [
         operation(
@@ -242,7 +260,7 @@ operations = {
             obj({"student_id": TEXT, "classroom_id": UUID}),
         ),
         operation("GET", "/v1/classrooms/{id}/students", None, array(student, maximum=500)),
-        operation("GET", "/v1/students", None, array(student, maximum=500)),
+        school_students,
     ],
     "curriculum": [
         operation("GET", "/v1/nodes", None, array(node, maximum=200)),

@@ -52,9 +52,10 @@ export class IdentityApi {
       method: 'DELETE',
     });
   }
-  /** Every student in the teacher's organization who has signed in, by name; up to 500. */
-  students(): Promise<Student[]> {
-    return this.gateway.request('identity', '/students');
+  /** One page of the students in the teacher's organization who have signed in, by name, and how many match. */
+  students(search: string, offset: number, limit: number): Promise<{ students: Student[]; total: number }> {
+    const query = new URLSearchParams({ search, offset: String(offset), limit: String(limit) });
+    return this.gateway.request('identity', `/students?${query}`);
   }
   /** The classroom's students, for its teacher only; up to 500. */
   roster(classroomId: string): Promise<Student[]> {

@@ -18,7 +18,7 @@ The Postgres image also changed from Alpine to Debian (pgvector), so text-index 
 
 ## Test students
 
-`python scripts/seed_students.py` adds ten local test students (aisha.rahman, ben.tan and so on) to the Keycloak realm and signs each in once so a teacher can enroll them by username. They share one generated password, printed at the end and kept in `.local/seed-students.json`. Re-running keeps them and their password.
+`python scripts/seed_students.py` adds thirty local test students (aisha.rahman, ben.tan and so on) to the Keycloak realm and signs each in once so a teacher can enroll them by username. They share one generated password, printed at the end and kept in `.local/seed-students.json`. Re-running keeps them and their password.
 
 ## Health and logs
 

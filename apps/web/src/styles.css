@@ -412,6 +412,16 @@ code,
   align-items: center;
   flex-wrap: wrap;
 }
+.pager {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+  padding-top: 16px;
+  font-size: 0.85rem;
+  color: var(--muted);
+}
 .roster-row div {
   display: grid;
   gap: 2px;

@@ -204,8 +204,12 @@ def classroom(u: Users) -> dict[str, Any]:
     request(u.student, "GET", roster, 403)
     request(u.other, "GET", roster, 403)
 
-    # Teachers can list every student in their school to enroll them; students cannot.
-    assert expected[0] in request(u.teacher, "GET", "/identity/students")
+    # Teachers page through every student in their school, by search, to enroll them; students cannot.
+    found = request(u.teacher, "GET", "/identity/students?search=STUDENT%20local&limit=50")
+    assert expected[0] in found["students"] and found["total"] >= 1
+    first = request(u.teacher, "GET", "/identity/students?limit=1")
+    assert len(first["students"]) == 1 and first["total"] >= found["total"]
+    request(u.teacher, "GET", "/identity/students?limit=51", 422)
     request(u.student, "GET", "/identity/students", 403)
     return room
 

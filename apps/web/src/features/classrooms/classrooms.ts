@@ -28,20 +28,20 @@ export class ClassroomsComponent {
   readonly state = new ActionState();
   readonly rosterState = new ActionState();
   readonly roster = signal<Student[]>([]);
-  /** Every student in the school who has signed in, and which of them the current classroom has. */
-  readonly everyone = signal<Student[]>([]);
+  /** The page of school students on show, fetched from the server ten at a time. */
+  readonly shown = signal<Student[]>([]);
+  /** How many students in the school match the search, across every page. */
+  readonly total = signal(0);
   readonly enrolled = computed(() => new Set(this.roster().map((student) => student.id)));
   readonly everyoneState = new ActionState();
-  /** What the teacher typed to narrow the list, matched against names and usernames. */
+  /** What the teacher typed to narrow the list, matched by the server against names and usernames. */
   readonly search = signal('');
-  readonly matching = computed(() => {
-    const words = this.search().trim().toLowerCase();
-    return words
-      ? this.everyone().filter((student) =>
-          `${student.display_name} ${student.username}`.toLowerCase().includes(words),
-        )
-      : this.everyone();
-  });
+  readonly page = signal(0);
+  readonly pageSize = 10;
+  readonly pages = computed(() => Math.max(1, Math.ceil(this.total() / this.pageSize)));
+  private searchTimer?: ReturnType<typeof setTimeout>;
+  /** Counts page requests so a slow, older response never replaces a newer one. */
+  private request = 0;
   /** The student the remove dialog is asking about. */
   readonly removing = signal<Student | null>(null);
   readonly studentName = studentName;
@@ -65,9 +65,34 @@ export class ClassroomsComponent {
     this.loadEveryone();
   }
 
+  /** Narrows the list and goes back to its first page once the teacher pauses typing. */
+  searchFor(words: string): void {
+    this.search.set(words);
+    clearTimeout(this.searchTimer);
+    this.searchTimer = setTimeout(() => this.goTo(0), 250);
+  }
+
+  goTo(page: number): void {
+    this.page.set(Math.max(0, page));
+    this.loadEveryone();
+  }
+
+  /** Fetches the page on show; a page past the end, after students leave, falls back to the last one. */
   loadEveryone(): void {
     if (!this.session.isTeacher()) return;
-    void this.everyoneState.run(async () => this.everyone.set(await this.identity.students()));
+    const request = ++this.request;
+    void this.everyoneState.run(async () => {
+      const search = this.search().trim();
+      let result = await this.identity.students(search, this.page() * this.pageSize, this.pageSize);
+      if (!result.students.length && result.total && this.page() > 0) {
+        const last = Math.ceil(result.total / this.pageSize) - 1;
+        result = await this.identity.students(search, last * this.pageSize, this.pageSize);
+        if (request === this.request) this.page.set(last);
+      }
+      if (request !== this.request) return;
+      this.shown.set(result.students);
+      this.total.set(result.total);
+    });
   }
 
   /** Enrolls a student from the school list into the current classroom. */

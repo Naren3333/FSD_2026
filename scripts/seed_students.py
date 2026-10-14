@@ -1,9 +1,9 @@
-"""Add ten test students to the local stack so a teacher can enroll them.
+"""Add thirty test students to the local stack so a teacher can enroll them.
 
     python scripts/seed_students.py
 
 Creates each student in the local Keycloak realm (role student, organization local-school) and signs them in
-once, which registers them with Identity; until then a teacher cannot enroll them by username. All ten share
+once, which registers them with Identity; until then a teacher cannot enroll them by username. All thirty share
 one generated password, kept in .local/seed-students.json (gitignored) and printed at the end. Safe to re-run:
 existing students are kept and given the saved password. Local development stack only; requires .env and httpx.
 """
@@ -35,6 +35,26 @@ STUDENTS = [
     ("Hari", "Kumar"),
     ("Isabel", "Chua"),
     ("Jun", "Ong"),
+    ("Kavya", "Nair"),
+    ("Liam", "Goh"),
+    ("Mei", "Ling"),
+    ("Nadia", "Yusof"),
+    ("Oliver", "Teo"),
+    ("Priya", "Menon"),
+    ("Qi", "Hao"),
+    ("Rachel", "Seah"),
+    ("Samuel", "Low"),
+    ("Tara", "Pillai"),
+    ("Umar", "Hassan"),
+    ("Vanessa", "Yeo"),
+    ("Wei", "Jie"),
+    ("Xin", "Yi"),
+    ("Yusuf", "Ali"),
+    ("Zara", "Quek"),
+    ("Arjun", "Das"),
+    ("Bella", "Foo"),
+    ("Caleb", "Sim"),
+    ("Diana", "Heng"),
 ]
 
 
@@ -120,7 +140,7 @@ def main() -> None:
         ensure_student(admin, username, first, last, password)
         register(username, password)
         print(f"{username:18} {first} {last}")
-    print(f"\nPassword for all ten: {password}  (saved in {STATE.relative_to(ROOT)})")
+    print(f"\nPassword for all thirty: {password}  (saved in {STATE.relative_to(ROOT)})")
 
 
 if __name__ == "__main__":

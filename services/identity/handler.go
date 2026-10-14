@@ -3,6 +3,7 @@ package main
 import (
 	"learning/platform"
 	"net/http"
+	"strconv"
 	"strings"
 
 	"github.com/google/uuid"
@@ -203,15 +204,41 @@ func (s server) roster(w http.ResponseWriter, r *http.Request) {
 	platform.JSON(w, http.StatusOK, students)
 }
 
-// students lists every student in the teacher's organization who has signed in, so a teacher can enroll them.
+// maxPage is the most students one page of the school's list holds.
+const maxPage = 50
+
+// students lists one page of the students in the teacher's organization who have signed in, so a teacher can find
+// and enroll them: ?search= narrows by name or username, ?offset= and ?limit= (default 10, at most 50) choose the
+// page, and total says how many match.
 func (s server) students(w http.ResponseWriter, r *http.Request) {
 	if !platform.Teacher(w, r) {
 		return
 	}
-	students, err := s.store.listOrgStudents(r.Context(), platform.Actor(r).Org)
+	query := r.URL.Query()
+	offset, okOffset := number(query.Get("offset"), 0)
+	limit, okLimit := number(query.Get("limit"), 10)
+	if !okOffset || !okLimit || limit < 1 || limit > maxPage {
+		platform.Invalid(w, "offset must be 0 or more and limit between 1 and 50.")
+		return
+	}
+	search := strings.TrimSpace(query.Get("search"))
+	if len(search) > maxName {
+		platform.Invalid(w, "search must be at most 120 characters.")
+		return
+	}
+	students, total, err := s.store.listOrgStudents(r.Context(), platform.Actor(r).Org, search, offset, limit)
 	if err != nil {
 		platform.Fail(w, err)
 		return
 	}
-	platform.JSON(w, http.StatusOK, students)
+	platform.JSON(w, http.StatusOK, map[string]any{"students": students, "total": total})
+}
+
+// number parses a non-negative whole-number query value, or gives fallback when it is absent.
+func number(value string, fallback int) (int, bool) {
+	if value == "" {
+		return fallback, true
+	}
+	n, err := strconv.Atoi(value)
+	return n, err == nil && n >= 0
 }

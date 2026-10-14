@@ -116,7 +116,7 @@ Web only. Teachers land on Classrooms and students on Assessments. Classrooms an
 
 ## The school's students for teachers (2026-10-14)
 
-Identity's `GET /v1/students`, for teachers only, lists every student in the teacher's organization who has signed in with a username (up to 500, by name); accounts with no name recorded yet are left out until their next sign-in. The Classrooms page shows them under "All students" with a search by name or username, each with an Enroll button for the current classroom, or "Enrolled" when the classroom already has them. This replaces the enroll-by-username form; the API still accepts `username`. Checks: Identity unit test, `integration.py` (`classroom` step), `e2e/workflow.spec.ts`.
+Identity's `GET /v1/students`, for teachers only, lists the students in the teacher's organization who have signed in with a username, by name, one page at a time: `search` (name or username, case-insensitive, up to 120 characters), `offset` (default 0) and `limit` (default 10, 1–50; anything else is a 422). It returns `{students, total}`, where `total` counts every match. Accounts with no name recorded yet are left out until their next sign-in. The Classrooms page shows them under "All students", ten per page with Previous/Next, searching on the server as the teacher types (after a short pause), each with an Enroll button for the current classroom, or "Enrolled" when the classroom already has them. This replaces the enroll-by-username form; the API still accepts `username`. Checks: Identity unit test, `integration.py` (`classroom` step), `e2e/workflow.spec.ts`.
 
 ## Incomplete requirements and risks
 

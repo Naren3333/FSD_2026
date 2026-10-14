@@ -20,7 +20,7 @@ type store interface {
 	removeEnrollment(ctx context.Context, classroom, student string) (bool, error)
 	listStudents(ctx context.Context, classroom string) ([]Student, error)
 	deleteClassroom(ctx context.Context, classroom string) error
-	listOrgStudents(ctx context.Context, org string) ([]Student, error)
+	listOrgStudents(ctx context.Context, org, search string, offset, limit int) ([]Student, int, error)
 }
 
 // pgStore is the store in the service's own Postgres database.
@@ -110,25 +110,34 @@ func (p pgStore) removeEnrollment(ctx context.Context, classroom, student string
 
 // listStudents is the classroom's roster, by name (students without one last, by id).
 func (p pgStore) listStudents(ctx context.Context, classroom string) ([]Student, error) {
-	return p.students(ctx, `SELECT u.id,COALESCE(u.username,''),COALESCE(u.display_name,'') FROM enrollments e JOIN users u ON u.id=e.student_id WHERE e.classroom_id=$1 ORDER BY lower(COALESCE(u.display_name,u.username)) NULLS LAST,u.id LIMIT 500`, classroom)
-}
-
-// listOrgStudents is every student in the organization who has signed in since names were recorded, by name, up
-// to 500. Accounts with no name yet are left out: a teacher could not tell them apart.
-func (p pgStore) listOrgStudents(ctx context.Context, org string) ([]Student, error) {
-	return p.students(ctx, `SELECT id,username,COALESCE(display_name,username) FROM users WHERE org_id=$1 AND role='student' AND username IS NOT NULL ORDER BY lower(COALESCE(display_name,username)),id LIMIT 500`, org)
-}
-
-func (p pgStore) students(ctx context.Context, sql string, arg string) ([]Student, error) {
-	rows, err := p.db.Query(ctx, sql, arg)
+	rows, err := p.db.Query(ctx, `SELECT u.id,COALESCE(u.username,''),COALESCE(u.display_name,'') FROM enrollments e JOIN users u ON u.id=e.student_id WHERE e.classroom_id=$1 ORDER BY lower(COALESCE(u.display_name,u.username)) NULLS LAST,u.id LIMIT 500`, classroom)
 	if err != nil {
 		return nil, err
 	}
-	return pgx.CollectRows(rows, func(row pgx.CollectableRow) (Student, error) {
-		var v Student
-		err := row.Scan(&v.ID, &v.Username, &v.Name)
-		return v, err
-	})
+	return pgx.CollectRows(rows, scanStudent)
+}
+
+// listOrgStudents is one page of the organization's students who have signed in since names were recorded, by
+// name, with how many match in all. search narrows them to names or usernames containing it, ignoring case.
+// Accounts with no name yet are left out: a teacher could not tell them apart.
+func (p pgStore) listOrgStudents(ctx context.Context, org, search string, offset, limit int) ([]Student, int, error) {
+	const match = `FROM users WHERE org_id=$1 AND role='student' AND username IS NOT NULL AND ($2='' OR strpos(lower(COALESCE(display_name,'')||' '||username),lower($2))>0)`
+	var total int
+	if err := p.db.QueryRow(ctx, "SELECT count(*) "+match, org, search).Scan(&total); err != nil {
+		return nil, 0, err
+	}
+	rows, err := p.db.Query(ctx, "SELECT id,username,COALESCE(display_name,username) "+match+" ORDER BY lower(COALESCE(display_name,username)),id OFFSET $3 LIMIT $4", org, search, offset, limit)
+	if err != nil {
+		return nil, 0, err
+	}
+	students, err := pgx.CollectRows(rows, scanStudent)
+	return students, total, err
+}
+
+func scanStudent(row pgx.CollectableRow) (Student, error) {
+	var v Student
+	err := row.Scan(&v.ID, &v.Username, &v.Name)
+	return v, err
 }
 
 // deleteClassroom marks the classroom deleted, keeping its row and enrollments.

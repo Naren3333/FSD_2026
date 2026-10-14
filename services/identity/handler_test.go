@@ -6,6 +6,7 @@ import (
 	"learning/platform/platformtest"
 	"net/http"
 	"net/http/httptest"
+	"sort"
 	"strings"
 	"testing"
 
@@ -108,14 +109,16 @@ func (m *memoryStore) deleteClassroom(_ context.Context, classroom string) error
 	return nil
 }
 
-func (m *memoryStore) listOrgStudents(context.Context, string) ([]Student, error) {
-	result := []Student{}
+func (m *memoryStore) listOrgStudents(_ context.Context, _, search string, offset, limit int) ([]Student, int, error) {
+	matching := []Student{}
 	for id, role := range m.roles {
-		if role == "student" && m.usernames[id] != "" {
-			result = append(result, Student{ID: id, Username: m.usernames[id]})
+		if role == "student" && m.usernames[id] != "" && strings.Contains(strings.ToLower(m.usernames[id]), strings.ToLower(search)) {
+			matching = append(matching, Student{ID: id, Username: m.usernames[id]})
 		}
 	}
-	return result, nil
+	sort.Slice(matching, func(i, j int) bool { return matching[i].ID < matching[j].ID })
+	end := min(offset+limit, len(matching))
+	return matching[min(offset, end):end], len(matching), nil
 }
 
 // call sends a request as a verified caller with the given roles.
@@ -274,8 +277,23 @@ func TestOnlyTeachersListTheSchoolsStudents(t *testing.T) {
 	if w := call(t, store, http.MethodGet, "/v1/students", "", "student-1", "student"); w.Code != 403 {
 		t.Fatalf("a student listed every student: %d", w.Code)
 	}
-	w := call(t, store, http.MethodGet, "/v1/students", "", "teacher-1", "teacher")
-	if w.Code != 200 || !strings.Contains(w.Body.String(), `"username":"ada"`) || strings.Contains(w.Body.String(), "teacher-1") {
-		t.Fatalf("%d %s", w.Code, w.Body.String())
+	cases := []struct {
+		query, want string
+		status      int
+	}{
+		{"", `"total":3`, 200},
+		{"?search=GRACE", `"total":2`, 200},
+		{"?offset=2&limit=1", `"students":[{"id":"student-3"`, 200},
+		{"?offset=5", `"students":[],"total":3`, 200},
+		{"?limit=0", "", 422},
+		{"?limit=51", "", 422},
+		{"?offset=-1", "", 422},
+		{"?offset=x", "", 422},
+	}
+	for _, tc := range cases {
+		w := call(t, store, http.MethodGet, "/v1/students"+tc.query, "", "teacher-1", "teacher")
+		if w.Code != tc.status || !strings.Contains(w.Body.String(), tc.want) {
+			t.Errorf("%s: %d %s", tc.query, w.Code, w.Body.String())
+		}
 	}
 }

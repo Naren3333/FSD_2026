@@ -104,7 +104,7 @@
         Refresh all students
       </button>
     </div>
-    <p class="caption">Everyone in your school who has signed in with a name, up to 500</p>
+    <p class="caption">Everyone in your school who has signed in with a name</p>
     <app-field controlId="student-search" label="Search students" hint="By name or username">
       <input
         id="student-search"
@@ -112,10 +112,10 @@
         autocomplete="off"
         aria-describedby="student-search-help"
         [value]="search()"
-        (input)="search.set($any($event.target).value)"
+        (input)="searchFor($any($event.target).value)"
       />
     </app-field>
-    @for (student of matching(); track student.id) {
+    @for (student of shown(); track student.id) {
       <article class="record roster-row">
         <div>
           <strong>{{ studentName(student) }}</strong>
@@ -141,11 +141,30 @@
     } @empty {
       <p class="empty">
         {{
-          everyone().length
+          search().trim()
             ? 'No students match that search.'
             : 'No students have signed in yet. Students appear here after their first sign-in.'
         }}
       </p>
+    }
+    @if (pages() > 1) {
+      <nav class="pager" aria-label="All students pages">
+        <button
+          class="secondary"
+          (click)="goTo(page() - 1)"
+          [disabled]="everyoneState.busy() || page() === 0"
+        >
+          Previous
+        </button>
+        <span aria-live="polite">Page {{ page() + 1 }} of {{ pages() }} · {{ total() }} students</span>
+        <button
+          class="secondary"
+          (click)="goTo(page() + 1)"
+          [disabled]="everyoneState.busy() || page() + 1 >= pages()"
+        >
+          Next
+        </button>
+      </nav>
     }
     <app-status [state]="everyoneState" />
   </section>
