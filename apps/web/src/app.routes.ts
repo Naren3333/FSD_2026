@@ -75,16 +75,19 @@ function landing(session: Session): string {
 function onlyFor(role: 'teacher' | 'student'): CanMatchFn {
   return async () => {
     const session = inject(Session);
+    const router = inject(Router);
     await session.ready().catch(() => undefined);
     const profile = session.profile();
-    return !profile || profile.role === role || inject(Router).parseUrl(landing(session));
+    return !profile || profile.role === role || router.parseUrl(landing(session));
   };
 }
 
 const toLanding: CanActivateFn = async () => {
+  // inject() only works before the first await.
   const session = inject(Session);
+  const router = inject(Router);
   await session.ready().catch(() => undefined);
-  return inject(Router).parseUrl(landing(session));
+  return router.parseUrl(landing(session));
 };
 
 function title(section: Section): ResolveFn<string> {
