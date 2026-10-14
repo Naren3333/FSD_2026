@@ -17,6 +17,7 @@ import (
 // original whose database row was never committed.
 type documentFiles interface {
 	objects
+	upload(ctx context.Context, key string, body io.Reader, size int64, contentType string) error
 	removeOrphan(documentID, key string)
 }
 
@@ -48,6 +49,12 @@ func (s storage) check(ctx context.Context) error {
 
 func (s storage) put(ctx context.Context, key string, data []byte, contentType string) error {
 	_, err := s.client.PutObject(ctx, s.bucket, key, bytes.NewReader(data), int64(len(data)), minio.PutObjectOptions{ContentType: contentType})
+	return err
+}
+
+// upload streams an original of known size into the bucket.
+func (s storage) upload(ctx context.Context, key string, body io.Reader, size int64, contentType string) error {
+	_, err := s.client.PutObject(ctx, s.bucket, key, body, size, minio.PutObjectOptions{ContentType: contentType})
 	return err
 }
 

@@ -7,9 +7,11 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"learning/platform"
 	"log/slog"
 	"net/http"
+	"os"
 	"strings"
 
 	"github.com/google/uuid"
@@ -56,14 +58,23 @@ func (s server) upload(w http.ResponseWriter, r *http.Request) {
 		platform.Invalid(w, problem)
 		return
 	}
-	r.Body = http.MaxBytesReader(w, r.Body, maxPDF)
-	data, err := io.ReadAll(r.Body)
-	if err != nil {
+	file, size, sum, err := spool(http.MaxBytesReader(w, r.Body, maxPDF))
+	var tooBig *http.MaxBytesError
+	var disk *fs.PathError
+	switch {
+	case errors.As(err, &tooBig):
 		platform.Error(w, http.StatusRequestEntityTooLarge, "UPLOAD_TOO_LARGE", tooLarge)
 		return
+	case errors.As(err, &disk): // the temporary file, not the client
+		platform.Fail(w, err)
+		return
+	case err != nil:
+		platform.Error(w, http.StatusBadRequest, "UPLOAD_INCOMPLETE", "The upload did not finish; retry.")
+		return
 	}
+	defer discard(file)
 	kind := strings.Split(r.Header.Get("Content-Type"), ";")[0]
-	chunks, status, err := extract(data, kind)
+	chunks, status, err := extractFile(file, kind)
 	if errors.Is(err, errTooLarge) {
 		platform.Error(w, http.StatusRequestEntityTooLarge, "UPLOAD_TOO_LARGE", tooLarge)
 		return
@@ -74,14 +85,13 @@ func (s server) upload(w http.ResponseWriter, r *http.Request) {
 	}
 	c := platform.Actor(r)
 	id := uuid.NewString()
-	sum := sha256.Sum256(data)
 	d := newDocument{
-		Document: Document{ID: id, Classroom: classroom, Title: title, Type: kind, Status: status, Revision: 1, SHA: hex.EncodeToString(sum[:]), DocType: docType, Chunks: chunks},
+		Document: Document{ID: id, Classroom: classroom, Title: title, Type: kind, Status: status, Revision: 1, SHA: sum, DocType: docType, Chunks: chunks},
 		Org:      c.Org,
 		Owner:    c.Subject,
 		Key:      c.Org + "/" + id + "/1",
 	}
-	if err = s.files.put(r.Context(), d.Key, data, kind); err != nil {
+	if err = s.files.upload(r.Context(), d.Key, file, size, kind); err != nil {
 		platform.Error(w, http.StatusServiceUnavailable, "STORAGE_UNAVAILABLE", "Upload storage is unavailable; retry later.")
 		return
 	}
@@ -95,6 +105,47 @@ func (s server) upload(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	platform.JSON(w, http.StatusCreated, d.Document)
+}
+
+// spool copies an upload to a temporary file, hashing it on the way, so a 50 MiB PDF is never held in memory. The
+// file is rewound for reading; the caller must discard it.
+func spool(body io.Reader) (*os.File, int64, string, error) {
+	file, err := os.CreateTemp("", "upload-*")
+	if err != nil {
+		return nil, 0, "", err
+	}
+	hash := sha256.New()
+	size, err := io.Copy(io.MultiWriter(file, hash), body)
+	if err == nil {
+		_, err = file.Seek(0, io.SeekStart)
+	}
+	if err != nil {
+		discard(file)
+		return nil, 0, "", err
+	}
+	return file, size, hex.EncodeToString(hash.Sum(nil)), nil
+}
+
+func discard(file *os.File) {
+	_ = file.Close()
+	_ = os.Remove(file.Name())
+}
+
+// extractFile reads as much of a spooled upload as extract needs (a PDF's first bytes, or a whole text document
+// up to one byte past its limit) and rewinds it for storage.
+func extractFile(file *os.File, kind string) ([]Chunk, string, error) {
+	limit := int64(maxText + 1)
+	if kind == mimePDF {
+		limit = int64(len(pdfMagic))
+	}
+	data, err := io.ReadAll(io.LimitReader(file, limit))
+	if err != nil {
+		return nil, "", err
+	}
+	if _, err = file.Seek(0, io.SeekStart); err != nil {
+		return nil, "", err
+	}
+	return extract(data, kind)
 }
 
 // uploadFields reads an upload's title and document type from the query string (the body is the file itself).

@@ -26,7 +26,11 @@ type App struct {
 	Client *http.Client // for calls to other services, with a short timeout
 	Checks []func(context.Context) error
 	auth   *Authenticator
+	slow   map[string]time.Duration
 }
+
+// requestTimeout bounds every request except the routes given a longer deadline with Slow.
+const requestTimeout = 15 * time.Second
 
 // New opens DATABASE_URL with the service's migrations (see OpenDB), sets up token verification from the OIDC_*
 // settings and registers the health routes.
@@ -39,7 +43,7 @@ func New(name string, migrations fs.FS, bootstrap string) (*App, error) {
 		return nil, err
 	}
 	client := &http.Client{Timeout: 5 * time.Second}
-	a := &App{Name: name, DB: db, Mux: http.NewServeMux(), Client: client, auth: NewAuthenticator(client)}
+	a := &App{Name: name, DB: db, Mux: http.NewServeMux(), Client: client, auth: NewAuthenticator(client), slow: map[string]time.Duration{}}
 	a.Mux.HandleFunc("GET /health/live", func(w http.ResponseWriter, _ *http.Request) {
 		JSON(w, http.StatusOK, map[string]string{"status": "alive"})
 	})
@@ -66,6 +70,11 @@ func (a *App) ready(w http.ResponseWriter, r *http.Request) {
 // Identity returns ClassroomAccess backed by the Identity service at IDENTITY_URL.
 func (a *App) Identity() *Identity { return NewIdentity(Required("IDENTITY_URL"), a.Client) }
 
+// Slow gives one route, "METHOD /path" matched exactly, a longer deadline than requestTimeout: both the request
+// context and the connection's read and write deadlines, so a large upload over a slow link isn't cut off by the
+// server's ReadTimeout.
+func (a *App) Slow(pattern string, deadline time.Duration) { a.slow[pattern] = deadline }
+
 // Handler wraps the routes with request logging, correlation ids and a deadline; every route except /health/
 // also needs a verified bearer token.
 func (a *App) Handler() http.Handler {
@@ -87,7 +96,15 @@ func (a *App) Handler() http.Handler {
 			}
 			slog.Info("request", "request_id", request, "correlation_id", correlation, "method", r.Method, "status", recorder.status, "error_category", category, "duration_ms", time.Since(start).Milliseconds())
 		}()
-		ctx, cancel := context.WithTimeout(context.WithValue(r.Context(), correlationKey, correlation), 15*time.Second)
+		timeout := requestTimeout
+		if deadline, ok := a.slow[r.Method+" "+r.URL.Path]; ok {
+			timeout = deadline
+			// Not every ResponseWriter supports deadlines (test recorders don't); then only the context is extended.
+			controller := http.NewResponseController(w)
+			_ = controller.SetReadDeadline(start.Add(deadline))
+			_ = controller.SetWriteDeadline(start.Add(deadline))
+		}
+		ctx, cancel := context.WithTimeout(context.WithValue(r.Context(), correlationKey, correlation), timeout)
 		defer cancel()
 		r = r.WithContext(ctx)
 		if strings.HasPrefix(r.URL.Path, "/health/") {

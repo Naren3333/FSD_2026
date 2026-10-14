@@ -20,6 +20,7 @@ func main() {
 		}
 		ai := newAICore()
 		a.Checks = append(a.Checks, files.check)
+		a.Slow("POST /v1/documents", uploadDeadline)
 		server{store: pgStore{a.DB}, access: a.Identity(), files: files, ai: ai, vectors: newVectorCache()}.routes(a.Mux)
 		// Two indexing workers: ai-core ingests two PDFs at once.
 		x := indexer{a.DB, files, ai, 2 * time.Second}

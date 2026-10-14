@@ -5,6 +5,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestStrictJSON(t *testing.T) {
@@ -71,5 +72,21 @@ func TestRelationReportsStudent(t *testing.T) {
 	relation, ok := a.Relation(httptest.NewRecorder(), asTeacher(httptest.NewRequest(http.MethodGet, "/", nil)), classroom, "")
 	if !ok || relation != RelationStudent {
 		t.Fatalf("got %q %v", relation, ok)
+	}
+}
+
+func TestSlowRoutesGetTheirOwnDeadline(t *testing.T) {
+	a := &App{Mux: http.NewServeMux(), auth: &Authenticator{}, slow: map[string]time.Duration{}} // /health/ routes skip auth
+	a.Slow("GET /health/upload", 5*time.Minute)
+	left := map[string]time.Duration{}
+	for _, path := range []string{"/health/upload", "/health/other"} {
+		a.Mux.HandleFunc("GET "+path, func(_ http.ResponseWriter, r *http.Request) {
+			deadline, _ := r.Context().Deadline()
+			left[path] = time.Until(deadline)
+		})
+		a.Handler().ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodGet, path, nil))
+	}
+	if left["/health/upload"] < 4*time.Minute || left["/health/other"] > requestTimeout {
+		t.Fatalf("deadlines %v", left)
 	}
 }

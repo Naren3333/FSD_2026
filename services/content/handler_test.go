@@ -2,8 +2,12 @@ package main
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"fmt"
+	"io"
 	"learning/platform"
 	"learning/platform/platformtest"
 	"net/http"
@@ -106,14 +110,20 @@ func (u uploadStore) insertDocument(_ context.Context, d newDocument) (bool, err
 	return u.commitAttempted, u.err
 }
 
-// fileStore records what was put and what was removed.
+// fileStore records what was uploaded and what was removed.
 type fileStore struct {
 	documentFiles
 	puts, removed []string
+	bodies        [][]byte
 }
 
-func (f *fileStore) put(_ context.Context, key string, _ []byte, _ string) error {
+func (f *fileStore) upload(_ context.Context, key string, body io.Reader, size int64, _ string) error {
+	data, err := io.ReadAll(body)
+	if err != nil || int64(len(data)) != size {
+		return fmt.Errorf("read %d of %d bytes: %w", len(data), size, err)
+	}
 	f.puts = append(f.puts, key)
+	f.bodies = append(f.bodies, data)
 	return nil
 }
 
@@ -121,13 +131,18 @@ func (f *fileStore) removeOrphan(_, key string) { f.removed = append(f.removed, 
 
 func upload(t *testing.T, store uploadStore, files *fileStore, query string) *httptest.ResponseRecorder {
 	t.Helper()
+	return uploadBody(t, store, files, query, mimeText, "Photosynthesis makes glucose.")
+}
+
+func uploadBody(t *testing.T, store uploadStore, files *fileStore, query, kind, body string) *httptest.ResponseRecorder {
+	t.Helper()
 	s := server{store: store, access: platformtest.Access(platform.RelationTeacher), files: files}
 	mux := http.NewServeMux()
 	s.routes(mux)
 	var c platform.Claims
 	c.Subject, c.Org, c.Realm.Roles = "teacher-1", "org", []string{"teacher"}
-	r := httptest.NewRequestWithContext(platform.WithClaims(context.Background(), c), http.MethodPost, "/v1/documents?classroom_id="+classID+query, strings.NewReader("Photosynthesis makes glucose."))
-	r.Header.Set("Content-Type", mimeText)
+	r := httptest.NewRequestWithContext(platform.WithClaims(context.Background(), c), http.MethodPost, "/v1/documents?classroom_id="+classID+query, strings.NewReader(body))
+	r.Header.Set("Content-Type", kind)
 	w := httptest.NewRecorder()
 	mux.ServeHTTP(w, r)
 	return w
@@ -162,6 +177,37 @@ func TestUploadValidatesItsFields(t *testing.T) {
 	for _, query := range []string{"&title=", "&title=Notes&doc_type=lesson"} {
 		if w := upload(t, uploadStore{inserted: &newDocument{}}, &fileStore{}, query); w.Code != 422 {
 			t.Errorf("%s: %d", query, w.Code)
+		}
+	}
+}
+
+func TestUploadStoresAWholePDFAndItsHash(t *testing.T) {
+	var inserted newDocument
+	files := &fileStore{}
+	pdf := pdfMagic + "1.7\n" + strings.Repeat("x", 6<<20) // larger than the text limit, which PDFs don't share
+	w := uploadBody(t, uploadStore{inserted: &inserted, commitAttempted: true}, files, "&title=Notes", mimePDF, pdf)
+	sum := sha256.Sum256([]byte(pdf))
+	if w.Code != 201 || inserted.Status != statusIndexing || inserted.SHA != hex.EncodeToString(sum[:]) {
+		t.Fatalf("%d %+v", w.Code, inserted.Document)
+	}
+	if len(files.bodies) != 1 || string(files.bodies[0]) != pdf {
+		t.Fatal("the stored original differs from the upload")
+	}
+}
+
+func TestUploadRefusesOversizedAndUnsupportedFiles(t *testing.T) {
+	cases := []struct {
+		kind, body string
+		code       int
+	}{
+		{mimeText, strings.Repeat("a", maxText+1), 413},
+		{mimePDF, strings.Repeat("a", 64), 422},
+		{"image/png", "png", 422},
+	}
+	for _, c := range cases {
+		files := &fileStore{}
+		if w := uploadBody(t, uploadStore{inserted: &newDocument{}}, files, "&title=Notes", c.kind, c.body); w.Code != c.code || len(files.puts) != 0 {
+			t.Errorf("%s: %d, stored %v", c.kind, w.Code, files.puts)
 		}
 	}
 }

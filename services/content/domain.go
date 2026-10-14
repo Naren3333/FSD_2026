@@ -31,12 +31,18 @@ const (
 	mimePDF  = "application/pdf"
 	mimeText = "text/plain"
 	mimePNG  = "image/png"
+
+	// pdfMagic starts every PDF; extract needs only this much of one.
+	pdfMagic = "%PDF-"
 )
 
 const (
 	maxPDF   = 50 << 20
 	maxText  = 5 << 20
 	maxTitle = 160
+
+	// uploadDeadline is how long one upload may take: a 50 MiB PDF at about 1.5 Mbit/s, matching the web app.
+	uploadDeadline = 5 * time.Minute
 )
 
 type Document struct {
@@ -78,10 +84,11 @@ type Chunk struct {
 
 var errTooLarge = fmt.Errorf("text documents must be no larger than %d MiB", maxText>>20)
 
-// extract chunks a text document. A PDF is only checked here: it is indexed asynchronously.
+// extract chunks a text document. A PDF is only checked here, by its first bytes (data need hold no more than
+// pdfMagic): it is indexed asynchronously.
 func extract(data []byte, kind string) ([]Chunk, string, error) {
 	if kind == mimePDF {
-		if !strings.HasPrefix(string(data), "%PDF-") {
+		if !strings.HasPrefix(string(data), pdfMagic) {
 			return nil, "", errors.New("file is not a PDF")
 		}
 		return []Chunk{}, statusIndexing, nil // the indexing worker sends it to ai-core
