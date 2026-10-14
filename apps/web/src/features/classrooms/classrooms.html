@@ -13,7 +13,6 @@
     @for (item of classrooms(); track item.id) {
       <article class="record">
         <strong>{{ item.name }}</strong>
-        <span class="identifier">{{ item.id }}</span>
       </article>
     } @empty {
       <p class="empty">No classrooms yet. Create one to get started.</p>
