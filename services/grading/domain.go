@@ -2,6 +2,7 @@ package main
 
 import (
 	"errors"
+	"time"
 )
 
 // Evaluation statuses: a draft until the classroom's teacher finalizes it.
@@ -36,6 +37,8 @@ type Evaluation struct {
 	Student    string     `json:"student_id"`
 	Status     string     `json:"status"`
 	Evidence   []Evidence `json:"evidence"`
+	// FinalizedAt is set on a student's own results only.
+	FinalizedAt *time.Time `json:"finalized_at,omitempty"`
 }
 
 // applyOverrides updates evidence in place with the teacher's scores. It

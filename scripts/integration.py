@@ -101,7 +101,16 @@ def main() -> None:
     room = request(teacher, "POST", "/identity/classrooms", 201, json={"name": "Integration " + str(uuid4())[:8]})
     request(student, "POST", "/identity/classrooms", 403, json={"name": "Forbidden"})
     request(other, "GET", f"/identity/classrooms/{room['id']}/access", 403)
-    request(teacher, "POST", f"/identity/classrooms/{room['id']}/enrollments", json={"student_id": student_profile["id"]})
+    # Teachers enroll by the username the student signs in with; only the classroom's teacher sees its roster.
+    assert student_profile["username"] == "student" and student_profile["display_name"] == "Student Local", student_profile
+    request(teacher, "POST", f"/identity/classrooms/{room['id']}/enrollments", 422, json={"username": "nobody-" + str(uuid4())[:8]})
+    request(other, "POST", f"/identity/classrooms/{room['id']}/enrollments", 403, json={"username": "student"})
+    enrolled = request(teacher, "POST", f"/identity/classrooms/{room['id']}/enrollments", json={"username": "STUDENT"})
+    assert enrolled["student_id"] == student_profile["id"]
+    roster_path = f"/identity/classrooms/{room['id']}/students"
+    assert request(teacher, "GET", roster_path) == [{"id": student_profile["id"], "username": "student", "display_name": "Student Local"}]
+    request(student, "GET", roster_path, 403)
+    request(other, "GET", roster_path, 403)
     skill = request(teacher, "POST", "/curriculum/nodes", 201, json={"kind": "skill", "name": "Integration exact decimals", "parent_id": None})
     doc = request(teacher, "POST", f"/content/documents?classroom_id={room['id']}&title=Integration", 201, content=b"A fraction is a part of a whole.", headers={"Content-Type": "text/plain"})
     assert doc["status"] == "extracted" and doc["chunks"][0]["text"] == "A fraction is a part of a whole."
@@ -171,12 +180,20 @@ def main() -> None:
     grades = eventually(lambda: request(teacher, "GET", f"/grading/evaluations?classroom_id={room['id']}"), lambda rows: len(rows) == 1, "draft grading")
     grade = grades[0]
     assert grade["status"] == "draft" and sum(e["awarded"] for e in grade["evidence"]) == 1
+    # A student sees only their own finalized results: the draft stays with the teacher.
+    mine_path = f"/grading/evaluations/mine?classroom_id={room['id']}"
+    assert request(student, "GET", mine_path) == []
+    request(teacher, "GET", mine_path, 403)
+    request(other, "GET", mine_path, 403)
     performance_path = f"/analytics/performance/{student_profile['id']}?classroom_id={room['id']}"
     assert request(teacher, "GET", performance_path)["skills"] == []
     request(student, "POST", f"/grading/evaluations/{grade['id']}/finalize", 403, json={"reason": "Forbidden", "overrides": {}})
     request(other, "POST", f"/grading/evaluations/{grade['id']}/finalize", 403, json={"reason": "Forbidden", "overrides": {}})
     request(teacher, "POST", f"/grading/evaluations/{grade['id']}/finalize", json={"reason": "Integration teacher review", "overrides": {}})
     request(teacher, "POST", f"/grading/evaluations/{grade['id']}/finalize", 409, json={"reason": "Duplicate", "overrides": {}})
+    mine = request(student, "GET", mine_path)
+    assert [r["id"] for r in mine] == [grade["id"]] and mine[0]["status"] == "finalized" and mine[0]["finalized_at"]
+    assert [(e["question_id"], e["correct"]) for e in mine[0]["evidence"]] == [(q["id"], c) for q, c in zip(assessment["questions"], [True, False])]
     result = eventually(lambda: request(teacher, "GET", performance_path), lambda result: len(result["skills"]) == 1, "analytics consumption")
     assert result["skills"][0]["attempted"] == 2 and result["skills"][0]["correct"] == 1 and result["skills"][0]["observed_accuracy"] == 0.5
     assert result["skills"][0]["evidence_status"] == "insufficient_evidence"
@@ -189,10 +206,22 @@ def main() -> None:
     eventually(lambda: docker("exec", "-T", "postgres", "psql", "-U", "analytics", "-d", "analytics", "-At", "-c", f"SELECT count(*) FROM inbox WHERE event_id='{duplicate_id}'").stdout.strip(), lambda value: value == "1", "duplicate processing")
     assert request(teacher, "GET", performance_path)["skills"] == result["skills"]
     assert len(request(teacher, "GET", f"/grading/evaluations?classroom_id={room['id']}")) == 1
+    # Removing a student keeps their grades but ends their access to the classroom.
+    remove_path = f"/identity/classrooms/{room['id']}/enrollments/{student_profile['id']}"
+    request(other, "DELETE", remove_path, 403)
+    request(student, "DELETE", remove_path, 403)
+    request(teacher, "DELETE", remove_path)
+    request(teacher, "DELETE", remove_path, 404)
+    assert request(teacher, "GET", roster_path) == []
+    request(student, "GET", mine_path, 403)
+    assert room["id"] not in [r["id"] for r in request(student, "GET", "/identity/classrooms")]
+    assert len(request(teacher, "GET", f"/grading/evaluations?classroom_id={room['id']}")) == 1
     for role, database in [("identity", "grading"), ("chatbot", "content"), ("aicore", "chatbot"), ("chatbot", "aicore")]:
         isolation = docker("exec", "-T", "postgres", "psql", "-U", role, "-d", database, "-c", "SELECT 1", check=False)
         assert isolation.returncode != 0 and "permission denied" in isolation.stderr.lower(), (role, database)
     migrations = docker("exec", "-T", "postgres", "psql", "-U", "content", "-d", "content", "-At", "-c", "SELECT string_agg(version::text, ',' ORDER BY version) FROM schema_migrations").stdout.strip()
+    assert migrations == "1,2", migrations
+    migrations = docker("exec", "-T", "postgres", "psql", "-U", "identity", "-d", "identity", "-At", "-c", "SELECT string_agg(version::text, ',' ORDER BY version) FROM schema_migrations").stdout.strip()
     assert migrations == "1,2", migrations
     vector = docker("exec", "-T", "postgres", "psql", "-U", "content", "-d", "content", "-At", "-c", "SELECT count(*) FROM pg_extension WHERE extname='vector'").stdout.strip()
     assert vector == "1", "pgvector is not installed in Content's database"
@@ -200,7 +229,7 @@ def main() -> None:
     for client_id in ["content-indexer", "question-chatbot-agent"]:
         assert ai_core_status(service_token(client_id)) in (200, 503)
     assert ai_core_status(student.headers["Authorization"].removeprefix("Bearer ")) == 403
-    print("PASS: gateway auth, classroom isolation, curriculum, S3 upload/extraction, PDF indexing jobs, teacher-only rubrics, search access, chat threads and streaming, AI spend allowance, answer-key secrecy, submissions, draft grading, teacher finalization, Kafka analytics, consumer restart, duplicate event and business-key idempotency, student privacy, database isolation, numbered migrations, pgvector, AI service accounts.")
+    print("PASS: gateway auth, classroom isolation, enrollment by username, rosters, unenrollment, curriculum, S3 upload/extraction, PDF indexing jobs, teacher-only rubrics, search access, chat threads and streaming, AI spend allowance, answer-key secrecy, submissions, draft grading, teacher finalization, students' own finalized results, Kafka analytics, consumer restart, duplicate event and business-key idempotency, student privacy, database isolation, numbered migrations, pgvector, AI service accounts.")
 
 
 if __name__ == "__main__":

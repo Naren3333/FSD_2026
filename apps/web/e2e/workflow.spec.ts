@@ -18,16 +18,21 @@ test('teacher and student complete a real assessment through Kong', async ({ bro
   const teacher = await browser.newPage(),
     student = await browser.newPage();
   await login(student, 'student', env.STUDENT_PASSWORD);
-  const studentId = await student.locator('.identity-note code').innerText();
+  const studentUsername = await student.locator('.identity-note code').innerText();
   await login(teacher, 'teacher', env.TEACHER_PASSWORD);
   const suffix = Date.now().toString();
   await teacher.getByLabel('Classroom name', { exact: true }).fill('Browser ' + suffix);
   await teacher.getByRole('button', { name: 'Create classroom', exact: true }).click();
   await expect(teacher.getByText('Classroom created.', { exact: true })).toBeVisible();
   await teacher.getByLabel('Current classroom').selectOption({ label: 'Browser ' + suffix });
-  await teacher.getByLabel('Student ID', { exact: true }).filter({ visible: true }).fill(studentId);
+  await teacher
+    .getByLabel('Student username', { exact: true })
+    .filter({ visible: true })
+    .fill(studentUsername);
   await teacher.getByRole('button', { name: 'Enroll student', exact: true }).click();
   await expect(teacher.getByText('Student enrolled.', { exact: true })).toBeVisible();
+  const roster = teacher.getByRole('region', { name: 'Students in Browser ' + suffix });
+  await expect(roster.getByText('Student Local', { exact: true })).toBeVisible();
   await teacher.getByRole('link', { name: 'Curriculum', exact: true }).click();
   await teacher.getByLabel('Name', { exact: true }).fill('Browser skill ' + suffix);
   await teacher.getByRole('button', { name: 'Add curriculum', exact: true }).click();
@@ -54,22 +59,55 @@ test('teacher and student complete a real assessment through Kong', async ({ bro
     await teacher.getByRole('button', { name: 'Refresh grades' }).click();
     await expect(teacher.getByRole('button', { name: 'Review grade', exact: true })).toBeVisible();
   }).toPass({ timeout: 30000 });
+  // The review shows names, not ids: the student, the assessment, the question and its skill.
+  await expect(teacher.getByRole('heading', { name: 'Student Local', exact: true })).toBeVisible();
+  await expect(teacher.getByText('Browser assessment ' + suffix, { exact: false })).toBeVisible();
+  await expect(teacher.getByText('What is 0.1 plus 0.2?', { exact: false })).toBeVisible();
+  await expect(teacher.getByText('Skill: Browser skill ' + suffix, { exact: true })).toBeVisible();
+  // A draft is the teacher's alone until it is finalized.
+  await student.getByRole('link', { name: 'My results', exact: true }).click();
+  await student.getByRole('button', { name: 'Refresh results' }).click();
+  await expect(student.getByText(/No finalized results yet/)).toBeVisible();
   await teacher.getByRole('button', { name: 'Review grade', exact: true }).click();
   await teacher.getByLabel('Review notes').fill('Reviewed exact decimal answer.');
   await teacher.getByRole('button', { name: 'Finalize grade', exact: true }).click();
   await expect(
     teacher.getByText('Grade finalized. Performance will update after event processing.', { exact: true }),
   ).toBeVisible();
+  await student.getByRole('button', { name: 'Refresh results' }).click();
+  await expect(
+    student.getByRole('heading', { name: 'Browser assessment ' + suffix, exact: true }),
+  ).toBeVisible();
+  await expect(student.getByText('Correct', { exact: true })).toBeVisible();
+  await expect(student.getByText('Skill: Browser skill ' + suffix, { exact: true })).toBeVisible();
   await student.getByRole('link', { name: 'Learning performance', exact: true }).click();
   await expect(async () => {
-    await student.getByRole('button', { name: 'View performance' }).click();
+    await student.getByRole('button', { name: 'View my performance' }).click();
     await expect(student.getByRole('cell', { name: '100%' })).toBeVisible();
   }).toPass({ timeout: 30000 });
   await expect(student.getByRole('cell', { name: 'Insufficient evidence' })).toBeVisible();
+  await expect(
+    student.getByRole('rowheader', { name: 'Browser skill ' + suffix, exact: true }),
+  ).toBeVisible();
+  // The teacher picks the student by name.
+  await teacher.getByRole('link', { name: 'Learning performance', exact: true }).click();
+  await teacher.getByLabel('Student', { exact: true }).selectOption({ label: 'Student Local' });
+  await teacher.getByRole('button', { name: 'View performance', exact: true }).click();
+  await expect(teacher.getByRole('cell', { name: '100%' })).toBeVisible();
   await student.screenshot({ path: 'test-results/performance-desktop.png', fullPage: true });
   await student.setViewportSize({ width: 390, height: 844 });
   await student.screenshot({ path: 'test-results/performance-mobile.png', fullPage: true });
   expect(await student.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+  // Removing asks first, with Cancel focused; the student then no longer sees the classroom.
+  await teacher.getByRole('link', { name: 'Classrooms', exact: true }).click();
+  await roster.getByRole('button', { name: 'Remove Student Local from the classroom' }).click();
+  await expect(teacher.getByRole('button', { name: 'Cancel', exact: true })).toBeFocused();
+  await teacher.getByRole('button', { name: 'Remove student', exact: true }).click();
+  await expect(teacher.getByText('Student removed from the classroom.', { exact: true })).toBeVisible();
+  await expect(roster.getByText(/No students enrolled yet/)).toBeVisible();
+  await student.getByRole('link', { name: 'Classrooms', exact: true }).click();
+  await student.getByRole('button', { name: 'Refresh classrooms' }).click();
+  await expect(student.getByRole('option', { name: 'Browser ' + suffix })).toHaveCount(0);
   await teacher.close();
   await student.close();
 });

@@ -16,18 +16,35 @@
   @for (grade of grades(); track grade.id) {
     <article class="grade">
       <div>
-        <span class="badge">{{ grade.status }}</span>
+        <span class="badge" [class.badge-plain]="grade.status === 'draft'">
+          {{ grade.status === 'draft' ? 'Draft' : 'Finalized' }}
+        </span>
         <h3>
-          Student
-          <span class="identifier">{{ grade.student_id }}</span>
+          @if (studentName(grade); as name) {
+            {{ name }}
+          } @else {
+            Student not on the roster
+            <span class="identifier">{{ grade.student_id }}</span>
+          }
         </h3>
+        <p>
+          {{ title(grade) || 'Assessment' }} ·
+          <strong>{{ total(grade.evidence).awarded }} / {{ total(grade.evidence).possible }}</strong>
+          marks
+        </p>
       </div>
       <div class="evidence-list">
         @for (evidence of grade.evidence; track evidence.question_id) {
           <p>
             <strong>{{ evidence.awarded }} / {{ evidence.possible }}</strong>
-            · Question
-            <span class="identifier">{{ evidence.question_id }}</span>
+            · {{ evidence.correct ? 'Correct' : 'Incorrect' }} ·
+            @if (prompt(grade, evidence); as text) {
+              {{ text }}
+            } @else {
+              Question
+              <span class="identifier">{{ evidence.question_id }}</span>
+            }
+            <span class="caption">Skill: {{ skill(evidence) || 'not in the curriculum' }}</span>
           </p>
         }
       </div>
@@ -46,6 +63,13 @@
 }
 <dialog #dialog aria-labelledby="review-title" (close)="close()">
   <h2 id="review-title">Finalize this grade?</h2>
+  @if (selected(); as grade) {
+    <p>
+      <strong>{{ studentName(grade) || grade.student_id }}</strong>
+      · {{ title(grade) || 'Assessment' }} · {{ total(grade.evidence).awarded }} /
+      {{ total(grade.evidence).possible }} marks
+    </p>
+  }
   <p>
     Finalization publishes this student's scores to their performance record. A finalized grade cannot be
     changed.

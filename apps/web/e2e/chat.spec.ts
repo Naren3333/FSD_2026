@@ -37,10 +37,10 @@ test('teacher uploads materials and an enrolled student asks the real assistant'
   const page = await browser.newPage(),
     student = await browser.newPage();
   await login(student, 'student', env.STUDENT_PASSWORD);
-  const studentId = await student.locator('.identity-note code').innerText();
+  const studentUsername = await student.locator('.identity-note code').innerText();
   const suffix = Date.now().toString();
   await teacherWithClassroom(page, 'Chat ' + suffix);
-  await page.getByLabel('Student ID', { exact: true }).filter({ visible: true }).fill(studentId);
+  await page.getByLabel('Student username', { exact: true }).filter({ visible: true }).fill(studentUsername);
   await page.getByRole('button', { name: 'Enroll student', exact: true }).click();
   await expect(page.getByText('Student enrolled.', { exact: true })).toBeVisible();
   await page.getByRole('link', { name: 'Teaching materials', exact: true }).click();

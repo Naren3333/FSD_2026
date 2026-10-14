@@ -7,19 +7,29 @@
 <p>Observed accuracy summarizes finalized question results. It is not a validated mastery probability.</p>
 <section class="panel">
   <form class="inline-form" novalidate [formGroup]="form" (ngSubmit)="load()">
-    <app-field
-      controlId="performance-student"
-      label="Student ID"
-      [invalid]="form.controls.student.touched && form.controls.student.invalid"
-    >
-      <input
-        id="performance-student"
-        formControlName="student"
-        aria-describedby="performance-student-help"
-        [readonly]="session.isStudent()"
-      />
-    </app-field>
-    <button [disabled]="state.busy() || !classroomId()">View performance</button>
+    @if (session.isTeacher()) {
+      <app-field
+        controlId="performance-student"
+        label="Student"
+        [hint]="classroomId() && !roster().length ? 'No students are enrolled in this classroom yet.' : ''"
+        error="Choose a student."
+        [invalid]="form.controls.student.touched && form.controls.student.invalid"
+      >
+        <select
+          id="performance-student"
+          formControlName="student"
+          aria-describedby="performance-student-help"
+        >
+          <option value="">Choose a student</option>
+          @for (student of roster(); track student.id) {
+            <option [value]="student.id">{{ studentName(student) || student.id }}</option>
+          }
+        </select>
+      </app-field>
+    }
+    <button [disabled]="state.busy() || !classroomId()">
+      {{ session.isStudent() ? 'View my performance' : 'View performance' }}
+    </button>
   </form>
   <app-status [state]="state" />
   @if (result(); as data) {
@@ -39,16 +49,20 @@
             </tr>
           </thead>
           <tbody>
-            @for (skill of data.skills; track skill.skill_id) {
+            @for (row of data.skills; track row.skill_id) {
               <tr>
-                <th scope="row" class="identifier">{{ skill.skill_id }}</th>
-                <td>{{ skill.attempted | number }}</td>
-                <td>{{ skill.correct | number }}</td>
-                <td>{{ skill.observed_accuracy | percent: '1.0-1' }}</td>
+                <th scope="row">
+                  @if (skill(row.skill_id); as name) {
+                    {{ name }}
+                  } @else {
+                    <span class="identifier">{{ row.skill_id }}</span>
+                  }
+                </th>
+                <td>{{ row.attempted | number }}</td>
+                <td>{{ row.correct | number }}</td>
+                <td>{{ row.observed_accuracy | percent: '1.0-1' }}</td>
                 <td>
-                  {{
-                    skill.evidence_status === 'insufficient_evidence' ? 'Insufficient evidence' : 'Observed'
-                  }}
+                  {{ row.evidence_status === 'insufficient_evidence' ? 'Insufficient evidence' : 'Observed' }}
                 </td>
               </tr>
             }
@@ -66,7 +80,13 @@
       </p>
     }
   } @else {
-    <p class="empty">Select a classroom and student to view their actual assessment evidence.</p>
+    <p class="empty">
+      {{
+        session.isStudent()
+          ? 'Select a classroom to view your assessment evidence.'
+          : 'Select a classroom and student to view their actual assessment evidence.'
+      }}
+    </p>
   }
 </section>
 <aside class="ai-notice">

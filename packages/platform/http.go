@@ -15,9 +15,11 @@ import (
 
 // Claims are the verified token claims services use: the user, their organization and realm roles.
 type Claims struct {
-	Subject string `json:"sub"`
-	Org     string `json:"org_id"`
-	Realm   struct {
+	Subject  string `json:"sub"`
+	Org      string `json:"org_id"`
+	Username string `json:"preferred_username"`
+	Name     string `json:"name"`
+	Realm    struct {
 		Roles []string `json:"roles"`
 	} `json:"realm_access"`
 }

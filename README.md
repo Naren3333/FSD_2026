@@ -23,11 +23,11 @@ docker compose down
 
 ## Basic workflow
 
-1. Sign in as a student and copy the ID shown in the header.
-2. Sign in as a teacher, create a classroom, and enroll that student ID.
+1. Sign in as a student once; the header shows their username.
+2. Sign in as a teacher, create a classroom, and enroll the student by that username. The classroom's students are listed below.
 3. Add a curriculum skill and create an assessment.
 4. As the student, select the classroom and submit the assessment.
-5. As the teacher, review and finalize the grade, then view Learning performance.
+5. As the teacher, review and finalize the grade, then view Learning performance. The student sees the finalized grade under My results.
 6. As the teacher, upload a PDF under Teaching materials and wait for it to show as indexed. Then, as the teacher or the student, ask about it under Ask the materials. Each provider call costs money on your API keys. Each user has a daily AI allowance ($5 for a student, $10 for a teacher), shown in the header.
 
 ## Development

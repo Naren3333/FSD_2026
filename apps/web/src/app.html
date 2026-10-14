@@ -61,9 +61,15 @@
           </select>
         </div>
         <div class="identity-note">
-          <span>Your ID</span>
-          <code>{{ profile.id }}</code>
-          <small>Share this ID with your teacher for enrollment.</small>
+          @if (profile.username) {
+            <span>Your username</span>
+            <code>{{ profile.username }}</code>
+            <small>Share this username with your teacher for enrollment.</small>
+          } @else {
+            <span>Your ID</span>
+            <code>{{ profile.id }}</code>
+            <small>Your sign-in has no username; contact your administrator.</small>
+          }
         </div>
         <app-usage />
       </div>

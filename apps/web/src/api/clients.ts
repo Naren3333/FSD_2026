@@ -13,6 +13,7 @@ import type {
   Profile,
   Question,
   StreamEvent,
+  Student,
   Thread,
   Usage,
 } from './models';
@@ -35,11 +36,21 @@ export class IdentityApi {
   createClassroom(name: string): Promise<Classroom> {
     return this.gateway.request('identity', '/classrooms', { method: 'POST', body: { name } });
   }
-  enroll(classroomId: string, studentId: string): Promise<void> {
+  /** Enrolls the organization's student with this username (case-insensitive). */
+  enroll(classroomId: string, username: string): Promise<void> {
     return this.gateway.request('identity', `/classrooms/${id(classroomId)}/enrollments`, {
       method: 'POST',
-      body: { student_id: studentId },
+      body: { username },
     });
+  }
+  unenroll(classroomId: string, studentId: string): Promise<void> {
+    return this.gateway.request('identity', `/classrooms/${id(classroomId)}/enrollments/${id(studentId)}`, {
+      method: 'DELETE',
+    });
+  }
+  /** The classroom's students, for its teacher only; up to 500. */
+  roster(classroomId: string): Promise<Student[]> {
+    return this.gateway.request('identity', `/classrooms/${id(classroomId)}/students`);
   }
 }
 
@@ -125,6 +136,10 @@ export class GradingApi {
 
   evaluations(classroomId: string): Promise<Evaluation[]> {
     return this.gateway.request('grading', `/evaluations?classroom_id=${id(classroomId)}`);
+  }
+  /** The signed-in student's finalized results in the classroom; drafts are never returned. */
+  mine(classroomId: string): Promise<Evaluation[]> {
+    return this.gateway.request('grading', `/evaluations/mine?classroom_id=${id(classroomId)}`);
   }
   finalize(
     evaluationId: string,

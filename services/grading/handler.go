@@ -17,6 +17,7 @@ type server struct {
 
 func (s server) routes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /v1/evaluations", s.list)
+	mux.HandleFunc("GET /v1/evaluations/mine", s.mine)
 	mux.HandleFunc("POST /v1/evaluations/{id}/finalize", s.finalize)
 }
 
@@ -26,6 +27,26 @@ func (s server) list(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	result, err := s.store.listEvaluations(r.Context(), platform.Actor(r).Org, classroom)
+	if err != nil {
+		platform.Fail(w, err)
+		return
+	}
+	platform.JSON(w, http.StatusOK, result)
+}
+
+// mine is the calling student's finalized results in a classroom they are enrolled in.
+func (s server) mine(w http.ResponseWriter, r *http.Request) {
+	c := platform.Actor(r)
+	classroom := r.URL.Query().Get("classroom_id")
+	relation, ok := s.access.Relation(w, r, classroom, c.Subject)
+	if !ok {
+		return
+	}
+	if relation != platform.RelationStudent {
+		platform.Forbidden(w, "Only enrolled students have results here.")
+		return
+	}
+	result, err := s.store.listFinalized(r.Context(), c.Org, classroom, c.Subject)
 	if err != nil {
 		platform.Fail(w, err)
 		return

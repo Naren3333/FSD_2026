@@ -17,6 +17,8 @@ func (s server) routes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /v1/classrooms", s.create)
 	mux.HandleFunc("GET /v1/classrooms/{id}/access", s.access)
 	mux.HandleFunc("POST /v1/classrooms/{id}/enrollments", s.enroll)
+	mux.HandleFunc("DELETE /v1/classrooms/{id}/enrollments/{student}", s.unenroll)
+	mux.HandleFunc("GET /v1/classrooms/{id}/students", s.roster)
 }
 
 func (s server) register(w http.ResponseWriter, r *http.Request) {
@@ -28,11 +30,12 @@ func (s server) register(w http.ResponseWriter, r *http.Request) {
 		platform.Forbidden(w, "An application role is required.")
 		return
 	}
-	if err := s.store.registerUser(r.Context(), c.Org, c.Subject, role); err != nil {
+	username, name := strings.TrimSpace(c.Username), displayName(c.Name, c.Username)
+	if err := s.store.registerUser(r.Context(), c.Org, c.Subject, role, username, name); err != nil {
 		platform.Fail(w, err)
 		return
 	}
-	platform.JSON(w, http.StatusOK, map[string]string{"id": c.Subject, "org_id": c.Org, "role": role})
+	platform.JSON(w, http.StatusOK, map[string]string{"id": c.Subject, "org_id": c.Org, "role": role, "username": username, "display_name": name})
 }
 
 func (s server) access(w http.ResponseWriter, r *http.Request) {
@@ -81,39 +84,105 @@ func (s server) list(w http.ResponseWriter, r *http.Request) {
 	platform.JSON(w, http.StatusOK, result)
 }
 
-func (s server) enroll(w http.ResponseWriter, r *http.Request) {
+// owner reports whether the caller is the classroom's teacher, writing the refusal when not.
+func (s server) owner(w http.ResponseWriter, r *http.Request, classroom, doing string) bool {
 	if !platform.Teacher(w, r) {
-		return
+		return false
 	}
-	c := platform.Actor(r)
-	id := r.PathValue("id")
-	relation, err := s.relation(r.Context(), c, id, "")
+	relation, err := s.relation(r.Context(), platform.Actor(r), classroom, "")
 	if err != nil {
 		platform.Fail(w, err)
-		return
+		return false
 	}
 	if relation != platform.RelationTeacher {
-		platform.Forbidden(w, "Only the classroom teacher may enroll students.")
+		platform.Forbidden(w, "Only the classroom teacher may "+doing+".")
+		return false
+	}
+	return true
+}
+
+// enroll adds a student by account id or, as the web app does, by username.
+func (s server) enroll(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	if !s.owner(w, r, id, "enroll students") {
 		return
 	}
 	var input struct {
-		Student string `json:"student_id"`
+		Student  string `json:"student_id"`
+		Username string `json:"username"`
 	}
 	if !platform.Decode(w, r, &input) {
 		return
 	}
-	exists, err := s.store.studentExists(r.Context(), input.Student, c.Org)
+	student, problem, err := s.findStudent(r, input.Student, strings.TrimSpace(input.Username))
 	if err != nil {
 		platform.Fail(w, err)
 		return
 	}
-	if !exists {
-		platform.Error(w, http.StatusUnprocessableEntity, "INVALID_STUDENT", "Student must first sign in to this organization.")
+	if problem != "" {
+		platform.Error(w, http.StatusUnprocessableEntity, "INVALID_STUDENT", problem)
 		return
 	}
-	if err = s.store.insertEnrollment(r.Context(), id, input.Student); err != nil {
+	if err = s.store.insertEnrollment(r.Context(), id, student); err != nil {
 		platform.Fail(w, err)
 		return
 	}
-	platform.JSON(w, http.StatusOK, map[string]string{"student_id": input.Student, "classroom_id": id})
+	platform.JSON(w, http.StatusOK, map[string]string{"student_id": student, "classroom_id": id})
+}
+
+// findStudent resolves exactly one of an account id or a username to a student in the caller's organization.
+// problem explains a refusal.
+func (s server) findStudent(r *http.Request, id, username string) (student, problem string, err error) {
+	org := platform.Actor(r).Org
+	switch {
+	case (id == "") == (username == ""):
+		return "", "Give either a student_id or a username.", nil
+	case id != "":
+		exists, err := s.store.studentExists(r.Context(), id, org)
+		if err != nil || !exists {
+			return "", "Student must first sign in to this organization.", err
+		}
+		return id, "", nil
+	}
+	ids, err := s.store.studentsNamed(r.Context(), org, username)
+	switch {
+	case err != nil:
+		return "", "", err
+	case len(ids) == 0:
+		return "", "No student with that username has signed in to this organization.", nil
+	case len(ids) > 1:
+		return "", "More than one student has that username; enroll by account id.", nil
+	}
+	return ids[0], "", nil
+}
+
+func (s server) unenroll(w http.ResponseWriter, r *http.Request) {
+	id, student := r.PathValue("id"), r.PathValue("student")
+	if !s.owner(w, r, id, "remove students") {
+		return
+	}
+	removed, err := s.store.removeEnrollment(r.Context(), id, student)
+	if err != nil {
+		platform.Fail(w, err)
+		return
+	}
+	if !removed {
+		platform.NotFound(w, "That student is not enrolled in this classroom.")
+		return
+	}
+	platform.JSON(w, http.StatusOK, map[string]string{"student_id": student, "classroom_id": id})
+}
+
+// roster lists the classroom's students with their names, for its teacher.
+func (s server) roster(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	if !s.owner(w, r, id, "see the roster") {
+		return
+	}
+	students, err := s.store.listStudents(r.Context(), id)
+	if err != nil {
+		platform.Fail(w, err)
+		return
+	}
+	platform.JSON(w, http.StatusOK, students)
 }

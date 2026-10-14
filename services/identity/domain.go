@@ -8,6 +8,22 @@ type Classroom struct {
 	Teacher string `json:"teacher_id"`
 }
 
+// Student is one enrolled student as a roster shows them. Username and Name are empty for a student who has not
+// signed in since names were recorded.
+type Student struct {
+	ID       string `json:"id"`
+	Username string `json:"username"`
+	Name     string `json:"display_name"`
+}
+
+// displayName is the name a roster shows: the token's full name, else its username, else nothing.
+func displayName(name, username string) string {
+	if name = strings.TrimSpace(name); name != "" {
+		return name
+	}
+	return strings.TrimSpace(username)
+}
+
 // maxName is the longest classroom name, in bytes.
 const maxName = 120
 

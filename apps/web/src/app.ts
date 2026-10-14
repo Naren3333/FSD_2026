@@ -25,7 +25,11 @@ export class AppComponent implements OnInit {
   private readonly usage = inject(AiUsage);
   readonly state = new ActionState();
   readonly sections = computed(() =>
-    SECTIONS.filter((section) => !section.teacherOnly || this.session.isTeacher()),
+    SECTIONS.filter(
+      (section) =>
+        (!section.teacherOnly || this.session.isTeacher()) &&
+        (!section.studentOnly || this.session.isStudent()),
+    ),
   );
 
   constructor() {

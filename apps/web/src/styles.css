@@ -397,6 +397,23 @@ code,
 .evidence-list p {
   margin-bottom: 8px;
 }
+.evidence-list .caption {
+  display: block;
+}
+.roster {
+  margin-top: 24px;
+}
+.roster-row {
+  flex-direction: row;
+  justify-content: space-between;
+  align-items: center;
+  flex-wrap: wrap;
+}
+.roster-row div {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
 .actions {
   display: flex;
   gap: 12px;

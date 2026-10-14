@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"learning/platform"
 	"learning/platform/platformtest"
 	"net/http"
 	"net/http/httptest"
@@ -16,6 +17,7 @@ const room = "6f1c5d2e-8a4b-4c3d-9e2f-1a2b3c4d5e6f"
 // memoryStore is an in-memory store: one organization's users, classrooms and enrollments.
 type memoryStore struct {
 	roles      map[string]string   // user -> role
+	usernames  map[string]string   // user -> username
 	owners     map[string]string   // classroom -> teacher
 	enrolled   map[string][]string // classroom -> students
 	registered []string
@@ -23,15 +25,16 @@ type memoryStore struct {
 
 func newMemoryStore() *memoryStore {
 	return &memoryStore{
-		roles:    map[string]string{"teacher-1": "teacher", "student-1": "student", "student-2": "student"},
-		owners:   map[string]string{room: "teacher-1"},
-		enrolled: map[string][]string{room: {"student-1"}},
+		roles:     map[string]string{"teacher-1": "teacher", "student-1": "student", "student-2": "student", "student-3": "student"},
+		usernames: map[string]string{"student-1": "ada", "student-2": "grace", "student-3": "Grace"},
+		owners:    map[string]string{room: "teacher-1"},
+		enrolled:  map[string][]string{room: {"student-1"}},
 	}
 }
 
-func (m *memoryStore) registerUser(_ context.Context, _, subject, role string) error {
+func (m *memoryStore) registerUser(_ context.Context, _, subject, role, username, name string) error {
 	m.roles[subject] = role
-	m.registered = append(m.registered, subject+":"+role)
+	m.registered = append(m.registered, subject+":"+role+":"+username+":"+name)
 	return nil
 }
 
@@ -70,7 +73,36 @@ func (m *memoryStore) insertEnrollment(_ context.Context, classroom, student str
 	return nil
 }
 
-// call sends a request as a verified caller with the given roles.
+func (m *memoryStore) studentsNamed(_ context.Context, _, username string) ([]string, error) {
+	ids := []string{}
+	for id, name := range m.usernames {
+		if strings.EqualFold(name, username) && m.roles[id] == "student" {
+			ids = append(ids, id)
+		}
+	}
+	return ids, nil
+}
+
+func (m *memoryStore) removeEnrollment(_ context.Context, classroom, student string) (bool, error) {
+	kept := []string{}
+	for _, s := range m.enrolled[classroom] {
+		if s != student {
+			kept = append(kept, s)
+		}
+	}
+	removed := len(kept) < len(m.enrolled[classroom])
+	m.enrolled[classroom] = kept
+	return removed, nil
+}
+
+func (m *memoryStore) listStudents(_ context.Context, classroom string) ([]Student, error) {
+	result := []Student{}
+	for _, id := range m.enrolled[classroom] {
+		result = append(result, Student{ID: id, Username: m.usernames[id], Name: m.usernames[id]})
+	}
+	return result, nil
+}
+
 // call sends a request as a verified caller with the given roles.
 func call(t *testing.T, store store, method, path, body, subject string, roles ...string) *httptest.ResponseRecorder {
 	t.Helper()
@@ -85,7 +117,7 @@ func TestRegisterRecordsTheTeacherRoleFirst(t *testing.T) {
 	if w := call(t, store, http.MethodPost, "/v1/me", "", "service"); w.Code != 403 {
 		t.Fatalf("a caller without a person role registered: %d", w.Code)
 	}
-	if len(store.registered) != 1 || store.registered[0] != "dual:teacher" {
+	if len(store.registered) != 1 || store.registered[0] != "dual:teacher::" {
 		t.Fatalf("registered %v", store.registered)
 	}
 }
@@ -137,5 +169,67 @@ func TestOnlyTheOwnerEnrollsKnownStudents(t *testing.T) {
 	}
 	if enrolled, _ := store.isEnrolled(context.Background(), room, "student-2"); !enrolled {
 		t.Fatal("student-2 was not enrolled")
+	}
+}
+
+func TestRegisterRecordsTheNamesFromTheToken(t *testing.T) {
+	store := newMemoryStore()
+	var c platform.Claims
+	c.Subject, c.Org, c.Username, c.Name, c.Realm.Roles = "s9", "org", " lin ", "  ", []string{"student"}
+	r := httptest.NewRequestWithContext(platform.WithClaims(context.Background(), c), http.MethodPost, "/v1/me", strings.NewReader(""))
+	w := httptest.NewRecorder()
+	mux := http.NewServeMux()
+	server{store: store}.routes(mux)
+	mux.ServeHTTP(w, r)
+	// Without a full name, the username stands in for it.
+	if w.Code != 200 || store.registered[0] != "s9:student:lin:lin" || !strings.Contains(w.Body.String(), `"username":"lin"`) {
+		t.Fatalf("%d %v", w.Code, store.registered)
+	}
+}
+
+func TestEnrollByUsername(t *testing.T) {
+	store := newMemoryStore()
+	path := "/v1/classrooms/" + room + "/enrollments"
+	cases := []struct {
+		body   string
+		status int
+	}{
+		{`{"username":"ADA"}`, 200},
+		{`{"username":"grace"}`, 422}, // two students share it
+		{`{"username":"nobody"}`, 422},
+		{`{}`, 422},
+		{`{"student_id":"student-2","username":"ada"}`, 422},
+	}
+	for _, tc := range cases {
+		if w := call(t, store, http.MethodPost, path, tc.body, "teacher-1", "teacher"); w.Code != tc.status {
+			t.Errorf("%s: %d %s", tc.body, w.Code, w.Body.String())
+		}
+	}
+}
+
+func TestOnlyTheOwnerSeesTheRosterAndRemovesStudents(t *testing.T) {
+	store := newMemoryStore()
+	roster := "/v1/classrooms/" + room + "/students"
+	if w := call(t, store, http.MethodGet, roster, "", "student-1", "student"); w.Code != 403 {
+		t.Fatalf("a student read the roster: %d", w.Code)
+	}
+	if w := call(t, store, http.MethodGet, roster, "", "teacher-2", "teacher"); w.Code != 403 {
+		t.Fatalf("another teacher read the roster: %d", w.Code)
+	}
+	if w := call(t, store, http.MethodGet, roster, "", "teacher-1", "teacher"); w.Code != 200 || !strings.Contains(w.Body.String(), `"username":"ada"`) {
+		t.Fatalf("%d %s", w.Code, w.Body.String())
+	}
+	remove := "/v1/classrooms/" + room + "/enrollments/student-1"
+	if w := call(t, store, http.MethodDelete, remove, "", "teacher-2", "teacher"); w.Code != 403 {
+		t.Fatalf("another teacher removed a student: %d", w.Code)
+	}
+	if w := call(t, store, http.MethodDelete, remove, "", "teacher-1", "teacher"); w.Code != 200 {
+		t.Fatalf("status %d", w.Code)
+	}
+	if enrolled, _ := store.isEnrolled(context.Background(), room, "student-1"); enrolled {
+		t.Fatal("student-1 is still enrolled")
+	}
+	if w := call(t, store, http.MethodDelete, remove, "", "teacher-1", "teacher"); w.Code != 404 {
+		t.Fatalf("removing twice: %d", w.Code)
 	}
 }

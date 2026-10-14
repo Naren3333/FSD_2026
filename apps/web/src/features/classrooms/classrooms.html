@@ -43,21 +43,20 @@
         <button type="reset" class="secondary clear-form" [disabled]="state.busy()">Clear form</button>
       </form>
       <h3 class="separated">Enroll a student</h3>
-      <p>Select a classroom above. The student must sign in once before enrollment.</p>
+      <p>Enrolls into the current classroom. The student must sign in once before enrollment.</p>
       <form novalidate [formGroup]="enrollment" (ngSubmit)="enroll()">
         <app-field
           controlId="enroll-student"
-          label="Student ID"
-          hint="The student can find their ID in the workspace header."
-          [invalid]="enrollment.controls.student_id.touched && enrollment.controls.student_id.invalid"
+          label="Student username"
+          hint="The student can find their username in the workspace header."
+          [invalid]="enrollment.controls.username.touched && enrollment.controls.username.invalid"
         >
           <input
             id="enroll-student"
-            formControlName="student_id"
+            formControlName="username"
+            autocomplete="off"
             aria-describedby="enroll-student-help"
-            [attr.aria-invalid]="
-              enrollment.controls.student_id.touched && enrollment.controls.student_id.invalid
-            "
+            [attr.aria-invalid]="enrollment.controls.username.touched && enrollment.controls.username.invalid"
           />
         </app-field>
         <button [disabled]="state.busy() || !classroomId()">Enroll student</button>
@@ -67,3 +66,64 @@
   }
 </div>
 <app-status [state]="state" />
+@if (session.isTeacher()) {
+  <section class="panel roster" aria-labelledby="roster-title">
+    <div class="section-heading">
+      <h3 id="roster-title">Students in {{ classroomName() || 'this classroom' }}</h3>
+      <button class="secondary" (click)="loadRoster()" [disabled]="rosterState.busy() || !classroomId()">
+        Refresh students
+      </button>
+    </div>
+    <p class="caption">Up to 500 students, by name</p>
+    @for (student of roster(); track student.id) {
+      <article class="record roster-row">
+        <div>
+          <strong>{{ studentName(student) || 'Name not recorded yet' }}</strong>
+          @if (student.username && student.username !== studentName(student)) {
+            <span class="caption">{{ student.username }}</span>
+          }
+          @if (!studentName(student)) {
+            <span class="identifier">{{ student.id }}</span>
+          }
+        </div>
+        <button
+          class="secondary"
+          (click)="confirmRemove(student)"
+          [disabled]="rosterState.busy()"
+          [attr.aria-label]="'Remove ' + (studentName(student) || student.id) + ' from the classroom'"
+        >
+          Remove
+        </button>
+      </article>
+    } @empty {
+      <p class="empty">
+        {{
+          classroomId()
+            ? 'No students enrolled yet. Enroll a student by their username above.'
+            : 'Select a classroom to see its students.'
+        }}
+      </p>
+    }
+    @if (!removing()) {
+      <app-status [state]="rosterState" />
+    }
+  </section>
+}
+<dialog #removeDialog aria-labelledby="remove-title" (close)="closeRemove()">
+  <h2 id="remove-title">Remove this student?</h2>
+  @if (removing(); as student) {
+    <p>
+      {{ studentName(student) || student.id }} will lose access to {{ classroomName() || 'this classroom' }}.
+      Their submissions and grades are kept, and you can enroll them again later.
+    </p>
+  }
+  <div class="actions">
+    <button type="button" class="secondary" autofocus (click)="closeRemove()" [disabled]="rosterState.busy()">
+      Cancel
+    </button>
+    <button type="button" (click)="remove()" [disabled]="rosterState.busy()">Remove student</button>
+  </div>
+  @if (removing()) {
+    <app-status [state]="rosterState" />
+  }
+</dialog>

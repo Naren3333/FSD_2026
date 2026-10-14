@@ -4,6 +4,15 @@ export interface Profile {
   id: string;
   org_id: string;
   role: 'teacher' | 'student';
+  /** Empty when the sign-in token carries no username. */
+  username: string;
+  display_name: string;
+}
+/** An enrolled student as the classroom's roster shows them; names are empty until they sign in again. */
+export interface Student {
+  id: string;
+  username: string;
+  display_name: string;
 }
 export interface Classroom {
   id: string;
@@ -92,9 +101,13 @@ export interface Evidence {
 }
 export interface Evaluation {
   id: string;
+  assessment_id: string;
+  classroom_id: string;
   student_id: string;
   status: 'draft' | 'finalized';
   evidence: Evidence[];
+  /** On a student's own results only. */
+  finalized_at?: string;
 }
 /** The signed-in user's AI spend today against their daily allowance (ADR 0003). */
 export interface Usage {

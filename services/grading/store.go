@@ -15,6 +15,7 @@ var errAlreadyFinalized = errors.New("evaluation already finalized")
 // store is a classroom's draft and finalized evaluations, with their audit trail.
 type store interface {
 	listEvaluations(ctx context.Context, org, classroom string) ([]Evaluation, error)
+	listFinalized(ctx context.Context, org, classroom, student string) ([]Evaluation, error)
 	findClassroom(ctx context.Context, org, id string) (string, error)
 	finalizeEvaluation(ctx context.Context, org, id, actor, reason string, overrides map[string]int) (Evaluation, error)
 }
@@ -50,6 +51,23 @@ func (p pgStore) listEvaluations(ctx context.Context, org, classroom string) ([]
 		return nil, rows.Err()
 	}
 	return result, nil
+}
+
+// listFinalized is one student's finalized results in a classroom, newest first. Drafts never leave Grading for
+// students: a grade is the student's only once a teacher has finalized it.
+func (p pgStore) listFinalized(ctx context.Context, org, classroom, student string) ([]Evaluation, error) {
+	rows, err := p.db.Query(ctx, "SELECT id,assessment_id,classroom_id,student_id,status,evidence,finalized_at FROM evaluations WHERE classroom_id=$1 AND org_id=$2 AND student_id=$3 AND status='finalized' ORDER BY finalized_at DESC LIMIT 100", classroom, org, student)
+	if err != nil {
+		return nil, err
+	}
+	return pgx.CollectRows(rows, func(row pgx.CollectableRow) (Evaluation, error) {
+		var v Evaluation
+		var data []byte
+		if err := row.Scan(&v.ID, &v.Assessment, &v.Classroom, &v.Student, &v.Status, &data, &v.FinalizedAt); err != nil {
+			return v, err
+		}
+		return v, json.Unmarshal(data, &v.Evidence)
+	})
 }
 
 func (p pgStore) findClassroom(ctx context.Context, org, id string) (string, error) {

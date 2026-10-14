@@ -40,11 +40,17 @@ search_response = obj({"results": array(search_hit, maximum=30), "rerank_fallbac
 classroom = obj({"id": UUID, "name": TEXT, "teacher_id": TEXT})
 node = obj({"id": UUID, "kind": {"enum": ["subject", "course", "unit", "topic", "skill", "objective"]}, "name": TEXT, "parent_id": {"type": ["string", "null"], "format": "uuid"}})
 evaluation = obj({"id": UUID, "assessment_id": UUID, "classroom_id": UUID, "student_id": TEXT, "status": {"enum": ["draft", "finalized"]}, "evidence": array(evidence, 1, 50)})
+own_result = obj({**evaluation["properties"], "status": {"const": "finalized"}, "finalized_at": {"type": "string", "format": "date-time"}})
+NAME = {"type": "string"}
+student = obj({"id": TEXT, "username": NAME, "display_name": NAME})
+enrollment = obj({"student_id": TEXT, "username": TEXT}, [])
+enrollment["oneOf"] = [{"required": ["student_id"]}, {"required": ["username"]}]
 error = obj({"error": obj({"code": TEXT, "message": TEXT})})
 
 
 def operation(method, path, body, response, code=200, query=()):
     parameters = [{"name": "id", "in": "path", "required": True, "schema": UUID}] if "{id}" in path else []
+    parameters += [{"name": "student", "in": "path", "required": True, "schema": TEXT}] if "{student}" in path else []
     parameters += [{"name": q, "in": "query", "required": q != "student_id", "schema": TEXT if q in ("student_id", "title") else UUID} for q in query]
     op = {"operationId": method + path.replace("/", "_").replace("{", "").replace("}", ""), "parameters": parameters, "responses": {str(code): {"description": "Success", **({"content": {"application/json": {"schema": response}}} if response else {})}, **{str(s): {"description": label, "content": {"application/json": {"schema": error}}} for s, label in [(401, "Unauthenticated"), (403, "Forbidden"), (404, "Not found"), (409, "State conflict"), (422, "Validation error"), (503, "Dependency unavailable")]}}}
     if body is not None:
@@ -53,11 +59,11 @@ def operation(method, path, body, response, code=200, query=()):
 
 
 operations = {
-    "identity": [operation("POST", "/v1/me", obj({}), obj({"id": TEXT, "org_id": TEXT, "role": {"enum": ["teacher", "student"]}})), operation("GET", "/v1/classrooms", None, array(classroom)), operation("POST", "/v1/classrooms", obj({"name": {"type": "string", "minLength": 1, "maxLength": 120}}), classroom, 201), operation("GET", "/v1/classrooms/{id}/access", None, obj({"allowed": {"const": True}, "relation": {"enum": ["teacher", "student"]}}), query=["student_id"]), operation("POST", "/v1/classrooms/{id}/enrollments", obj({"student_id": TEXT}), obj({"student_id": TEXT, "classroom_id": UUID}))],
+    "identity": [operation("POST", "/v1/me", obj({}), obj({"id": TEXT, "org_id": TEXT, "role": {"enum": ["teacher", "student"]}, "username": NAME, "display_name": NAME})), operation("GET", "/v1/classrooms", None, array(classroom)), operation("POST", "/v1/classrooms", obj({"name": {"type": "string", "minLength": 1, "maxLength": 120}}), classroom, 201), operation("GET", "/v1/classrooms/{id}/access", None, obj({"allowed": {"const": True}, "relation": {"enum": ["teacher", "student"]}}), query=["student_id"]), operation("POST", "/v1/classrooms/{id}/enrollments", enrollment, obj({"student_id": TEXT, "classroom_id": UUID})), operation("DELETE", "/v1/classrooms/{id}/enrollments/{student}", None, obj({"student_id": TEXT, "classroom_id": UUID})), operation("GET", "/v1/classrooms/{id}/students", None, array(student, maximum=500))],
     "curriculum": [operation("GET", "/v1/nodes", None, array(node, maximum=200)), operation("GET", "/v1/nodes/{id}", None, node), operation("POST", "/v1/nodes", obj({k: v for k, v in node["properties"].items() if k != "id"}, ["kind", "name"]), node, 201), operation("PATCH", "/v1/nodes/{id}", obj({"name": TEXT}), obj({"id": UUID, "name": TEXT})), operation("DELETE", "/v1/nodes/{id}", None, None, 204), operation("POST", "/v1/skills/{id}/prerequisites", obj({"prerequisite_id": UUID}), obj({"skill_id": UUID, "prerequisite_id": UUID}))],
     "content": [operation("GET", "/v1/documents", None, array(document), query=["classroom_id"]), operation("GET", "/v1/documents/{id}", None, document), operation("POST", "/v1/documents", None, document, 201, query=["classroom_id", "title"]), operation("POST", "/v1/documents/{id}/reindex", None, document, 202), operation("POST", "/v1/search", search_request, search_response)],
     "assessment": [operation("GET", "/v1/assessments", None, array(obj({"id": UUID, "title": TEXT})), query=["classroom_id"]), operation("POST", "/v1/assessments", obj({"classroom_id": UUID, "title": {"type": "string", "minLength": 1, "maxLength": 160}, "questions": array(question_input, 1, 50)}), assessment, 201), operation("GET", "/v1/assessments/{id}", None, {"oneOf": [assessment, public_assessment]}), operation("POST", "/v1/assessments/{id}/submissions", obj({"answers": {"type": "object", "additionalProperties": TEXT}}), obj({"id": UUID, "status": {"const": "submitted"}}), 201)],
-    "grading": [operation("GET", "/v1/evaluations", None, array(evaluation), query=["classroom_id"]), operation("POST", "/v1/evaluations/{id}/finalize", obj({"reason": {"type": "string", "minLength": 1, "maxLength": 1000}, "overrides": {"type": "object", "additionalProperties": {"type": "integer", "minimum": 0, "maximum": 1}}}, ["reason"]), evaluation)],
+    "grading": [operation("GET", "/v1/evaluations", None, array(evaluation), query=["classroom_id"]), operation("GET", "/v1/evaluations/mine", None, array(own_result), query=["classroom_id"]), operation("POST", "/v1/evaluations/{id}/finalize", obj({"reason": {"type": "string", "minLength": 1, "maxLength": 1000}, "overrides": {"type": "object", "additionalProperties": {"type": "integer", "minimum": 0, "maximum": 1}}}, ["reason"]), evaluation)],
 }
 for name, routes in operations.items():
     paths = {}

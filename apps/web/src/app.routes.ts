@@ -7,6 +7,7 @@ export interface Section {
   path: string;
   label: string;
   teacherOnly?: boolean;
+  studentOnly?: boolean;
   load: () => Promise<Type<unknown>>;
 }
 
@@ -37,6 +38,12 @@ export const SECTIONS: Section[] = [
     load: () => import('./features/assessments/assessments').then((m) => m.AssessmentsComponent),
   },
   {
+    path: 'results',
+    label: 'My results',
+    studentOnly: true,
+    load: () => import('./features/results/results').then((m) => m.ResultsComponent),
+  },
+  {
     path: 'review',
     label: 'Grading review',
     teacherOnly: true,
@@ -56,13 +63,20 @@ const teacherOnly: CanMatchFn = async () => {
   return session.isTeacher() || inject(Router).parseUrl('/classrooms');
 };
 
+/** Student-only sections send everyone else to Classrooms. */
+const studentOnly: CanMatchFn = async () => {
+  const session = inject(Session);
+  await session.ready().catch(() => undefined);
+  return session.isStudent() || inject(Router).parseUrl('/classrooms');
+};
+
 export const routes: Routes = [
   { path: '', pathMatch: 'full', redirectTo: 'classrooms' },
   ...SECTIONS.map((section) => ({
     path: section.path,
     title: `${section.label} · Learning Ledger`,
     loadComponent: section.load,
-    canMatch: section.teacherOnly ? [teacherOnly] : [],
+    canMatch: section.teacherOnly ? [teacherOnly] : section.studentOnly ? [studentOnly] : [],
     data: { keepAlive: true },
   })),
   { path: '**', redirectTo: 'classrooms' },

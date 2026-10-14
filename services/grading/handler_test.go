@@ -6,6 +6,7 @@ import (
 	"learning/platform/platformtest"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/jackc/pgx/v5"
@@ -24,6 +25,14 @@ type memoryStore struct {
 
 func (m *memoryStore) listEvaluations(context.Context, string, string) ([]Evaluation, error) {
 	return []Evaluation{}, nil
+}
+
+// listFinalized answers for student-1 only, so a test sees whose results were asked for.
+func (m *memoryStore) listFinalized(_ context.Context, _, _, student string) ([]Evaluation, error) {
+	if student != "student-1" {
+		return []Evaluation{}, nil
+	}
+	return []Evaluation{{ID: evaluationID, Student: student, Status: statusFinalized}}, nil
 }
 
 func (m *memoryStore) findClassroom(_ context.Context, _, id string) (string, error) {
@@ -78,6 +87,26 @@ func TestOnlyTheClassroomTeacherListsEvaluations(t *testing.T) {
 		w := platformtest.Serve(s.routes, http.MethodGet, "/v1/evaluations?classroom_id="+room, "", "teacher-1", "teacher")
 		if w.Code != status {
 			t.Errorf("%s: %d", relation, w.Code)
+		}
+	}
+}
+
+func TestOnlyAnEnrolledStudentReadsTheirOwnResults(t *testing.T) {
+	cases := []struct {
+		relation, subject string
+		roles             []string
+		status            int
+		body              string
+	}{
+		{platform.RelationStudent, "student-1", []string{"student"}, 200, evaluationID},
+		{platform.RelationTeacher, "teacher-1", []string{"teacher"}, 403, ""},
+		{"", "student-2", []string{"student"}, 403, ""},
+	}
+	for _, tc := range cases {
+		s := server{store: &memoryStore{}, access: platformtest.Access(tc.relation)}
+		w := platformtest.Serve(s.routes, http.MethodGet, "/v1/evaluations/mine?classroom_id="+room, "", tc.subject, tc.roles...)
+		if w.Code != tc.status || !strings.Contains(w.Body.String(), tc.body) {
+			t.Errorf("%s: %d %s", tc.subject, w.Code, w.Body.String())
 		}
 	}
 }

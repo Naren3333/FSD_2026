@@ -29,13 +29,13 @@ DESIGN.md / UX-CONTRACT.md          UI design and behavioral ownership
 ## Working non-AI behavior
 
 - OIDC authorization code + PKCE login. Services verify RS256, issuer, audience, expiration and organization. Resource policy comes from Identity. Unknown identity headers confer no privileges.
-- User-profile registration, teacher-owned classroom creation/listing, same-organization student enrollment, classroom/student access checks.
+- User-profile registration with username and display name, teacher-owned classroom creation/listing, same-organization student enrollment by username, classroom rosters and unenrollment, classroom/student access checks.
 - Curriculum node create/read/rename/archive, stable IDs, parent validation, and prerequisite insertion with serialized cycle detection.
 - Authorized uploads into a restricted S3 bucket, real UTF-8 extraction/chunk provenance, SHA-256, original-file retrieval and metadata. PDFs (up to 50 MiB) are indexed asynchronously through ai-core into searchable chunks (ADR 0002 stage 3); documents are typed teaching material, rubric or marking scheme, and students see teaching material only.
 - Immutable manually authored multiple-choice/numerical assessments, enrolled-student submission, answer-key-safe student projection, and one submission per assessment/student.
 - Kafka-triggered deterministic draft grading with exact rational decimal arithmetic and inclusive tolerance. Teacher review is mandatory; API overrides are bounded, and finalization writes an audit trail and event atomically.
 - Finalized per-question evidence consumed into Analytics. Skill accuracy, attempted/correct counts and explicit insufficient-evidence status come from actual results, with no mastery-probability claim.
-- Angular classroom, curriculum, upload (with indexing status), document chat, assessment authoring/submission, grading review and performance interfaces calling Kong. No canned chatbot answers or invented dashboard data.
+- Angular classroom, curriculum, upload (with indexing status), document chat, assessment authoring/submission, students' finalized results, grading review and performance interfaces calling Kong. No canned chatbot answers or invented dashboard data.
 
 ## AI contracts and future interfaces
 
@@ -96,6 +96,16 @@ Not run: a chat turn against the real OpenAI and Voyage APIs (only a real ingest
 
 Kong now re-resolves service names every 5 seconds (`KONG_DNS_VALID_TTL`). Before this, recreating one service while Kong kept running sent its requests to the old container address (502) until Kong restarted. A new route still needs `docker compose restart kong`, because Kong reads its route file at start.
 
+## Student results, rosters and names (2026-10-14)
+
+The first three items of the recommended milestone:
+
+- **Students see their finalized results.** Grading's `GET /v1/evaluations/mine?classroom_id=` returns the caller's own finalized evaluations, newest first, and only to a student enrolled in the classroom (Identity relation `student`); drafts are never returned. The web app's student-only "My results" section shows each assessment's title, the marks, and each question as correct or incorrect with its prompt (from the student's answer-key-free copy of the assessment) and skill.
+- **Rosters with names, and unenrollment.** Identity migration `002_names.sql` (additive) adds `users.username` and `users.display_name`, filled from the token's `preferred_username` and `name` each time a user registers (users who registered earlier get them at their next sign-in), and `enrollments.enrolled_at`. New routes for the classroom's teacher: `GET /v1/classrooms/{id}/students` (up to 500, by name) and `DELETE /v1/classrooms/{id}/enrollments/{student}` (404 when not enrolled; submissions and grades are kept). Enrollment accepts exactly one of `student_id` or `username` (case-insensitive; an ambiguous or unknown username is a 422). `POST /v1/me` also returns `username` and `display_name`. The Classrooms section enrolls by username and lists the current classroom's students with a Remove action behind a confirmation dialog (Cancel focused); the header shows the user's username to share with their teacher.
+- **Names instead of ids.** Grading review shows the student's name, the assessment title, total marks, each question's prompt and skill name; Learning performance lets a teacher choose a student from the roster and shows skill names. Ids appear only where no name exists (a student who has not signed in since names were recorded, or one no longer enrolled).
+
+Checks: Go unit tests for Identity and Grading, the new SQL against PostgreSQL 16, web unit tests for the naming helpers; `integration.py` and `e2e/workflow.spec.ts` cover username enrollment, roster access, drafts hidden from students, finalized results, unenrollment and named views.
+
 ## Incomplete requirements and risks
 
 The full requested definition of done is **not claimed**. The coherent core workflow is implemented, but these requirements remain incomplete or narrower than the full brief:
@@ -109,4 +119,4 @@ The full requested definition of done is **not claimed**. The coherent core work
 - S3/SQL atomicity requires a staged-upload saga and orphan reconciliation. Ambiguous commits retain originals to avoid deleting a possibly committed document. No destructive cleanup is scheduled.
 - Static checks and focused browser tests are not a comprehensive WCAG/assistive-technology, multi-browser, offline, load, chaos or security assessment.
 
-Recommended next milestone: close the product loop for students and teachers. Students need to see their finalized results; teachers need a classroom roster with names (enrollment currently takes a raw account id), skill and student names instead of ids in the performance and grading views, a class-level performance table, a multi-question assessment editor and override editing in grading review. After that, the question generation or performance interpretation agent, each behind its own ADR as AGENTS.md requires. Preserve teacher approval and evidence provenance throughout.
+Recommended next milestone: finish closing the product loop for teachers: a class-level performance table, a multi-question assessment editor and override editing in grading review. After that, the question generation or performance interpretation agent, each behind its own ADR as AGENTS.md requires. Preserve teacher approval and evidence provenance throughout.
