@@ -297,6 +297,9 @@ main {
   width: 300px;
   max-width: 100%;
 }
+.context-refresh {
+  margin-top: 8px;
+}
 .identity-note {
   display: grid;
   gap: 3px;

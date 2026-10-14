@@ -106,6 +106,10 @@ The first three items of the recommended milestone:
 
 Checks: Go unit tests for Identity and Grading, the new SQL against PostgreSQL 16, web unit tests for the naming helpers; `integration.py` and `e2e/workflow.spec.ts` cover username enrollment, roster access, drafts hidden from students, finalized results, unenrollment and named views.
 
+## Separate student and teacher views, phase 1 (2026-10-14)
+
+Web only. Teachers land on Classrooms and students on Assessments. Classrooms and Curriculum are teacher-only routes and leave the student menu; students reload the classroom picker with a Refresh classrooms button in the header. Learning performance is labelled My progress for students. The header's username note shows for students only. The performance table shows Analytics' existing `weakness_indicator` as "Needs practice" (five or more questions under 60% correct). Next: the teacher Class dashboard, then student Home.
+
 ## Incomplete requirements and risks
 
 The full requested definition of done is **not claimed**. The coherent core workflow is implemented, but these requirements remain incomplete or narrower than the full brief:

@@ -2,7 +2,7 @@ import { Component, HostListener, OnInit, computed, inject } from '@angular/core
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { NavigationEnd, Router, RouterLink, RouterLinkActive, RouterOutlet } from '@angular/router';
 import { filter } from 'rxjs';
-import { SECTIONS } from './app.routes';
+import { SECTIONS, sectionLabel } from './app.routes';
 import { AiUsage } from './core/ai-usage';
 import { ClassroomContext } from './core/classroom-context';
 import { Session } from './core/session';
@@ -29,7 +29,7 @@ export class AppComponent implements OnInit {
       (section) =>
         (!section.teacherOnly || this.session.isTeacher()) &&
         (!section.studentOnly || this.session.isStudent()),
-    ),
+    ).map((section) => ({ path: section.path, label: sectionLabel(section, this.session) })),
   );
 
   constructor() {
@@ -61,6 +61,11 @@ export class AppComponent implements OnInit {
       return;
     }
     void this.state.run(() => this.session.logout());
+  }
+
+  /** Students have no Classrooms page, so they reload the picker here after a teacher enrolls them. */
+  refreshClassrooms(): void {
+    void this.state.run(() => this.context.refresh());
   }
 
   selectClassroom(event: Event): void {

@@ -124,5 +124,7 @@ export interface Performance {
     correct: number;
     observed_accuracy: number;
     evidence_status: string;
+    /** Five or more attempts under 60% correct. */
+    weakness_indicator: boolean;
   }[];
 }

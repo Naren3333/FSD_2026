@@ -16,9 +16,7 @@
         <span class="identifier">{{ item.id }}</span>
       </article>
     } @empty {
-      <p class="empty">
-        No classrooms yet. Teachers can create one; students need to be enrolled by their teacher.
-      </p>
+      <p class="empty">No classrooms yet. Create one to get started.</p>
     }
   </section>
   @if (session.isTeacher()) {

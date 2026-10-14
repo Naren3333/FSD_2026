@@ -29,7 +29,7 @@ func Migrations(fsys fs.FS) ([]Migration, error) {
 	if err != nil {
 		return nil, err
 	}
-	var out []Migration
+	out := make([]Migration, 0, len(entries))
 	for _, e := range entries {
 		if e.IsDir() || path.Ext(e.Name()) != ".sql" {
 			continue

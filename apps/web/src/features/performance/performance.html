@@ -1,7 +1,7 @@
 <div class="section-heading">
   <div>
     <p class="eyebrow">Evidence, before interpretation</p>
-    <h2>Learning performance</h2>
+    <h2>{{ session.isStudent() ? 'My progress' : 'Learning performance' }}</h2>
   </div>
 </div>
 <p>Observed accuracy summarizes finalized question results. It is not a validated mastery probability.</p>
@@ -46,6 +46,7 @@
               <th scope="col">Correct</th>
               <th scope="col">Observed accuracy</th>
               <th scope="col">Evidence</th>
+              <th scope="col">Focus</th>
             </tr>
           </thead>
           <tbody>
@@ -64,14 +65,19 @@
                 <td>
                   {{ row.evidence_status === 'insufficient_evidence' ? 'Insufficient evidence' : 'Observed' }}
                 </td>
+                <td>
+                  @if (row.weakness_indicator) {
+                    <span class="badge badge-danger">Needs practice</span>
+                  }
+                </td>
               </tr>
             }
           </tbody>
         </table>
       </div>
       <p class="caption">
-        Fewer than five questions is reported as insufficient evidence. This is a reporting threshold, not a
-        statistical validation.
+        Fewer than five questions is reported as insufficient evidence. Needs practice marks a skill with five
+        or more questions and under 60% correct. These are reporting thresholds, not a statistical validation.
       </p>
     } @else {
       <p class="empty">

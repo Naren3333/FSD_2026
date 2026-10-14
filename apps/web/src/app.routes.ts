@@ -1,11 +1,13 @@
 import { Type, inject } from '@angular/core';
-import { CanMatchFn, Router, Routes } from '@angular/router';
+import { CanActivateFn, CanMatchFn, ResolveFn, Router, Routes } from '@angular/router';
 import { Session } from './core/session';
 
 /** A workspace section: its route, its navigation label, and the component loaded the first time it opens. */
 export interface Section {
   path: string;
   label: string;
+  /** The label students see, when it differs. */
+  studentLabel?: string;
   teacherOnly?: boolean;
   studentOnly?: boolean;
   load: () => Promise<Type<unknown>>;
@@ -15,11 +17,13 @@ export const SECTIONS: Section[] = [
   {
     path: 'classrooms',
     label: 'Classrooms',
+    teacherOnly: true,
     load: () => import('./features/classrooms/classrooms').then((m) => m.ClassroomsComponent),
   },
   {
     path: 'curriculum',
     label: 'Curriculum',
+    teacherOnly: true,
     load: () => import('./features/curriculum/curriculum').then((m) => m.CurriculumComponent),
   },
   {
@@ -52,32 +56,49 @@ export const SECTIONS: Section[] = [
   {
     path: 'performance',
     label: 'Learning performance',
+    studentLabel: 'My progress',
     load: () => import('./features/performance/performance').then((m) => m.PerformanceComponent),
   },
 ];
 
-/** Teacher-only sections send everyone else to Classrooms. */
-const teacherOnly: CanMatchFn = async () => {
+/** The section label for the signed-in user's role. */
+export function sectionLabel(section: Section, session: Session): string {
+  return session.isStudent() && section.studentLabel ? section.studentLabel : section.label;
+}
+
+/** Where each role starts: teachers on their classrooms, students on their assessments. */
+function landing(session: Session): string {
+  return session.isStudent() ? '/assessments' : '/classrooms';
+}
+
+/** Sections for one role send the other role to its own landing page. Signed out, the shell shows sign-in. */
+function onlyFor(role: 'teacher' | 'student'): CanMatchFn {
+  return async () => {
+    const session = inject(Session);
+    await session.ready().catch(() => undefined);
+    const profile = session.profile();
+    return !profile || profile.role === role || inject(Router).parseUrl(landing(session));
+  };
+}
+
+const toLanding: CanActivateFn = async () => {
   const session = inject(Session);
   await session.ready().catch(() => undefined);
-  return session.isTeacher() || inject(Router).parseUrl('/classrooms');
+  return inject(Router).parseUrl(landing(session));
 };
 
-/** Student-only sections send everyone else to Classrooms. */
-const studentOnly: CanMatchFn = async () => {
-  const session = inject(Session);
-  await session.ready().catch(() => undefined);
-  return session.isStudent() || inject(Router).parseUrl('/classrooms');
-};
+function title(section: Section): ResolveFn<string> {
+  return () => `${sectionLabel(section, inject(Session))} · Learning Ledger`;
+}
 
 export const routes: Routes = [
-  { path: '', pathMatch: 'full', redirectTo: 'classrooms' },
+  { path: '', pathMatch: 'full', canActivate: [toLanding], children: [] },
   ...SECTIONS.map((section) => ({
     path: section.path,
-    title: `${section.label} · Learning Ledger`,
+    title: title(section),
     loadComponent: section.load,
-    canMatch: section.teacherOnly ? [teacherOnly] : section.studentOnly ? [studentOnly] : [],
+    canMatch: section.teacherOnly ? [onlyFor('teacher')] : section.studentOnly ? [onlyFor('student')] : [],
     data: { keepAlive: true },
   })),
-  { path: '**', redirectTo: 'classrooms' },
+  { path: '**', canActivate: [toLanding], children: [] },
 ];

@@ -19,7 +19,15 @@ test('teacher and student complete a real assessment through Kong', async ({ bro
     student = await browser.newPage();
   await login(student, 'student', env.STUDENT_PASSWORD);
   const studentUsername = await student.locator('.identity-note code').innerText();
+  // Each role lands on its own page and sees only its own menu.
+  await expect(student).toHaveURL(/\/assessments$/);
+  const studentMenu = student.getByRole('navigation', { name: 'Workspace' });
+  await expect(studentMenu.getByRole('link', { name: 'Classrooms', exact: true })).toHaveCount(0);
+  await expect(studentMenu.getByRole('link', { name: 'Curriculum', exact: true })).toHaveCount(0);
   await login(teacher, 'teacher', env.TEACHER_PASSWORD);
+  await expect(teacher).toHaveURL(/\/classrooms$/);
+  await expect(teacher.locator('.identity-note')).toHaveCount(0);
+  await expect(teacher.getByRole('link', { name: 'My results', exact: true })).toHaveCount(0);
   const suffix = Date.now().toString();
   await teacher.getByLabel('Classroom name', { exact: true }).fill('Browser ' + suffix);
   await teacher.getByRole('button', { name: 'Create classroom', exact: true }).click();
@@ -80,7 +88,7 @@ test('teacher and student complete a real assessment through Kong', async ({ bro
   ).toBeVisible();
   await expect(student.getByText('Correct', { exact: true })).toBeVisible();
   await expect(student.getByText('Skill: Browser skill ' + suffix, { exact: true })).toBeVisible();
-  await student.getByRole('link', { name: 'Learning performance', exact: true }).click();
+  await student.getByRole('link', { name: 'My progress', exact: true }).click();
   await expect(async () => {
     await student.getByRole('button', { name: 'View my performance' }).click();
     await expect(student.getByRole('cell', { name: '100%' })).toBeVisible();
@@ -105,7 +113,6 @@ test('teacher and student complete a real assessment through Kong', async ({ bro
   await teacher.getByRole('button', { name: 'Remove student', exact: true }).click();
   await expect(teacher.getByText('Student removed from the classroom.', { exact: true })).toBeVisible();
   await expect(roster.getByText(/No students enrolled yet/)).toBeVisible();
-  await student.getByRole('link', { name: 'Classrooms', exact: true }).click();
   await student.getByRole('button', { name: 'Refresh classrooms' }).click();
   await expect(student.getByRole('option', { name: 'Browser ' + suffix })).toHaveCount(0);
   await teacher.close();
