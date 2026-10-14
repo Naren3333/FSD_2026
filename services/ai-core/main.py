@@ -37,7 +37,7 @@ from contracts import (
     RerankResponse,
     ResponseContract,
 )
-from ingest import IngestError, IngestResult, costs, ingest, vision_config
+from ingest import IngestError, IngestResult, costs, ingest, passage_text, vision_config
 from settings import get_settings
 
 log = logging.getLogger("ai-core")
@@ -214,16 +214,15 @@ async def rerank_documents(
 ) -> RerankResponse:
     billing = billing_of(http)
     await billing.check(request.billed_to)
+    documents = [passage_text(p.title, p.section_path, p.content) for p in request.passages]
     try:
-        scores, tokens = await rerank.rerank(request.query, request.documents)
+        scores, tokens = await rerank.rerank(request.query, documents)
     except PROVIDER_ERRORS as error:
         provider_error(error)
     model = get_settings().reranker_model
     if tokens is None:
         # Voyage counts the query once per document.
-        guess = sum(
-            spend.estimate_tokens(request.query) + spend.estimate_tokens(d) for d in request.documents
-        )
+        guess = sum(spend.estimate_tokens(request.query) + spend.estimate_tokens(d) for d in documents)
         charge = priced("rerank", model, guess, estimated=True)
     else:
         charge = priced("rerank", model, tokens)

@@ -58,20 +58,23 @@ class ResponseContract(Contract):
     finish_reason: str | None = None
 
 
+class Passage(Contract):
+    """A search hit as Content stores it. ai-core builds the text the reranker scores from these parts
+    (ingest.passage_text, the same rule that built the embedded text), so the rule lives in one place."""
+
+    title: str = Field(min_length=1, max_length=200)
+    section_path: str | None = Field(default=None, max_length=20000)
+    content: str = Field(min_length=1, max_length=20000)
+
+
 class RerankRequest(Contract):
     query: str = Field(min_length=1, max_length=2000)
-    documents: list[str] = Field(min_length=1, max_length=100)
+    passages: list[Passage] = Field(min_length=1, max_length=100)
     billed_to: Billed
-
-    @model_validator(mode="after")
-    def bounded(self) -> Self:
-        if any(not d or len(d) > 20000 for d in self.documents):
-            raise ValueError("each document must be 1-20000 characters")
-        return self
 
 
 class RerankResponse(Contract):
-    scores: list[float]  # in the documents' order
+    scores: list[float]  # in the passages' order
     model_version: str
     usage_tokens: int | None = Field(default=None, ge=0)
 

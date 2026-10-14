@@ -34,7 +34,15 @@ func newAICore() *aiCore {
 // searchModels is what search needs from ai-core: query embeddings and reranking, billed to the searching user.
 type searchModels interface {
 	embed(ctx context.Context, text string, who billed) ([]float32, string, error)
-	rerank(ctx context.Context, query string, documents []string, who billed) ([]float64, error)
+	rerank(ctx context.Context, query string, passages []passage, who billed) ([]float64, error)
+}
+
+// passage is a search hit as the reranker needs it. ai-core builds the scored text from these parts with the same
+// rule it used for the embedded text, so Content doesn't keep a copy of that rule.
+type passage struct {
+	Title       string  `json:"title"`
+	SectionPath *string `json:"section_path"`
+	Content     string  `json:"content"`
 }
 
 // ingester turns a PDF into chunks with embeddings and the figure crops they point at.
@@ -150,16 +158,16 @@ func (a *aiCore) embed(ctx context.Context, text string, who billed) ([]float32,
 	return out.Vectors[0], out.ModelVersion, nil
 }
 
-// rerank scores each document against the query, in the documents' order.
-func (a *aiCore) rerank(ctx context.Context, query string, documents []string, who billed) ([]float64, error) {
+// rerank scores each passage against the query, in the passages' order.
+func (a *aiCore) rerank(ctx context.Context, query string, passages []passage, who billed) ([]float64, error) {
 	var out struct {
 		Scores []float64 `json:"scores"`
 	}
-	body, _ := json.Marshal(map[string]any{"query": query, "documents": documents, "billed_to": who})
+	body, _ := json.Marshal(map[string]any{"query": query, "passages": passages, "billed_to": who})
 	if err := a.call(ctx, "/v1/rerank", "application/json", bytes.NewReader(body), int64(len(body)), &out); err != nil {
 		return nil, err
 	}
-	if len(out.Scores) != len(documents) {
+	if len(out.Scores) != len(passages) {
 		return nil, &aiError{Status: 502, Code: "UNEXPECTED_SCORES"}
 	}
 	return out.Scores, nil

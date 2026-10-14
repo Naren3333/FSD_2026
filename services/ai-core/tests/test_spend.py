@@ -24,7 +24,14 @@ from ingest import costs
 
 EMBED = {"operation": "embed", "input": "Authorized material", "billed_to": BILLED}
 GENERATE = {"operation": "generate", "input": "Say hello", "billed_to": BILLED}
-RERANK = {"query": "photosynthesis", "documents": ["light reactions", "cell walls"], "billed_to": BILLED}
+RERANK = {
+    "query": "photosynthesis",
+    "passages": [
+        {"title": "Plants", "content": "light reactions"},
+        {"title": "Cells", "content": "cell walls"},
+    ],
+    "billed_to": BILLED,
+}
 
 
 def settle(ledger: MemoryLedger, n: int) -> None:

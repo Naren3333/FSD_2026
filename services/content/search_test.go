@@ -3,6 +3,7 @@ package main
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"learning/platform"
 	"net/http"
@@ -48,16 +49,6 @@ func TestDistinctKeepsTheBestRankedCopy(t *testing.T) {
 	}
 	if len(hits) != 3 || hits[2].ChunkID != "c" {
 		t.Fatal("the input slice was modified")
-	}
-}
-
-func TestPassageTextMatchesIngest(t *testing.T) {
-	section := "Chapter 1 > Leaves"
-	if got := passageText("Biology", &section, "Stomata"); got != "Biology\nLeaves\n\nStomata" {
-		t.Fatalf("%q", got)
-	}
-	if got := passageText("Biology", nil, "Stomata"); got != "Biology\n\nStomata" {
-		t.Fatalf("%q", got)
 	}
 }
 
@@ -220,8 +211,27 @@ func TestRerankRejectsAShortScoreList(t *testing.T) {
 	f.scores = func(w http.ResponseWriter, r *http.Request) {
 		json.NewEncoder(w).Encode(map[string]any{"scores": []float64{0.5}})
 	}
-	if _, err := f.client().rerank(t.Context(), "q", []string{"a", "b"}, testBilled); err == nil {
+	if _, err := f.client().rerank(t.Context(), "q", []passage{{Title: "T", Content: "a"}, {Title: "T", Content: "b"}}, testBilled); err == nil {
 		t.Fatal("scores for 1 of 2 documents accepted")
+	}
+}
+
+func TestRerankSendsThePassagePartsForAICoreToJoin(t *testing.T) {
+	f := newFakeAICore(t)
+	var sent struct {
+		Passages []map[string]any `json:"passages"`
+	}
+	f.scores = func(w http.ResponseWriter, r *http.Request) {
+		json.NewDecoder(r.Body).Decode(&sent)
+		json.NewEncoder(w).Encode(map[string]any{"scores": []float64{0.5}})
+	}
+	section := "Chapter 1 > Leaves"
+	if _, err := f.client().rerank(t.Context(), "q", []passage{{"Biology", &section, "Stomata"}}, testBilled); err != nil {
+		t.Fatal(err)
+	}
+	want := map[string]any{"title": "Biology", "section_path": section, "content": "Stomata"}
+	if len(sent.Passages) != 1 || fmt.Sprint(sent.Passages[0]) != fmt.Sprint(want) {
+		t.Fatalf("sent %v", sent.Passages)
 	}
 }
 

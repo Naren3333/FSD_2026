@@ -22,7 +22,11 @@ EMBED = {"operation": "embed", "input": "Authorized material", "billed_to": BILL
 GENERATE = {"operation": "generate", "input": "Say hello", "billed_to": BILLED}
 RERANK = {
     "query": "photosynthesis stages",
-    "documents": ["light reactions", "the Calvin cycle", "cell walls"],
+    "passages": [
+        {"title": "Photosynthesis", "section_path": "Plants > Light reactions", "content": "ATP and NADPH"},
+        {"title": "Photosynthesis", "section_path": None, "content": "the Calvin cycle"},
+        {"title": "Cells", "content": "cell walls"},
+    ],
     "billed_to": BILLED,
 }
 SCHEMA = {
@@ -159,7 +163,11 @@ def test_rerank(api: TestClient, reranker_fake: FakeReranker) -> None:
     assert reranker_fake.requests == [
         {
             "query": RERANK["query"],
-            "documents": RERANK["documents"],
+            "documents": [
+                "Photosynthesis\nLight reactions\n\nATP and NADPH",
+                "Photosynthesis\n\nthe Calvin cycle",
+                "Cells\n\ncell walls",
+            ],
             "model": "rerank-test",
             "truncation": True,
         }
@@ -198,7 +206,14 @@ def test_rerank_without_a_key(api: TestClient, monkeypatch) -> None:
 
 @pytest.mark.parametrize(
     "body",
-    [{**RERANK, "documents": []}, {**RERANK, "documents": [""]}, {**RERANK, "query": ""}, {"query": "q"}],
+    [
+        {**RERANK, "passages": []},
+        {**RERANK, "passages": [{"title": "T", "content": ""}]},
+        {**RERANK, "passages": [{"title": "", "content": "c"}]},
+        {**RERANK, "documents": ["the old shape"]},
+        {**RERANK, "query": ""},
+        {"query": "q"},
+    ],
 )
 def test_rerank_requests_outside_the_contract(api: TestClient, body: dict) -> None:
     assert error(api.post("/v1/rerank", json=body)) == (422, "VALIDATION_ERROR")

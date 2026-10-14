@@ -300,11 +300,11 @@ func distinct(hits []hit) []hit {
 func (s server) rerankHits(ctx context.Context, query string, hits []hit, who billed) (bool, error) {
 	ctx, cancel := context.WithTimeout(ctx, rerankTimeout)
 	defer cancel()
-	documents := make([]string, len(hits))
+	passages := make([]passage, len(hits))
 	for i, h := range hits {
-		documents[i] = passageText(h.Title, h.SectionPath, h.Content)
+		passages[i] = passage{h.Title, h.SectionPath, h.Content}
 	}
-	scores, err := s.ai.rerank(ctx, query, documents, who)
+	scores, err := s.ai.rerank(ctx, query, passages, who)
 	if _, ok := spendLimit(err); ok {
 		return false, err
 	}
@@ -317,15 +317,4 @@ func (s server) rerankHits(ctx context.Context, query string, hits []hit, who bi
 	}
 	sort.SliceStable(hits, func(i, j int) bool { return hits[i].Score > hits[j].Score })
 	return false, nil
-}
-
-// passageText is what the reranker scores: the title, the chunk's deepest heading and its content, as ai-core's
-// ingest.passage_text builds it.
-func passageText(title string, section *string, content string) string {
-	head := title
-	if section != nil && *section != "" {
-		parts := strings.Split(*section, " > ")
-		head += "\n" + parts[len(parts)-1]
-	}
-	return head + "\n\n" + content
 }
