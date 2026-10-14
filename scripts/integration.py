@@ -203,6 +203,10 @@ def classroom(u: Users) -> dict[str, Any]:
     assert request(u.teacher, "GET", roster) == expected
     request(u.student, "GET", roster, 403)
     request(u.other, "GET", roster, 403)
+
+    # Teachers can list every student in their school to enroll them; students cannot.
+    assert expected[0] in request(u.teacher, "GET", "/identity/students")
+    request(u.student, "GET", "/identity/students", 403)
     return room
 
 
@@ -467,7 +471,7 @@ def main() -> None:
     databases()
     ai_service_accounts(users)
     print(
-        "PASS: gateway auth, classroom isolation, enrollment by username, rosters, unenrollment, classroom deletion, curriculum, "
+        "PASS: gateway auth, classroom isolation, enrollment by username, rosters, the school's student list, unenrollment, classroom deletion, curriculum, "
         "S3 upload/extraction, PDF indexing jobs, teacher-only rubrics, search access, chat threads and streaming, "
         "AI spend allowance, answer-key secrecy, submissions, draft grading, teacher finalization, students' own "
         "finalized results, Kafka analytics, consumer restart, duplicate event and business-key idempotency, "

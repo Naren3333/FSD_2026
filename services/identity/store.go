@@ -20,6 +20,7 @@ type store interface {
 	removeEnrollment(ctx context.Context, classroom, student string) (bool, error)
 	listStudents(ctx context.Context, classroom string) ([]Student, error)
 	deleteClassroom(ctx context.Context, classroom string) error
+	listOrgStudents(ctx context.Context, org string) ([]Student, error)
 }
 
 // pgStore is the store in the service's own Postgres database.
@@ -109,7 +110,16 @@ func (p pgStore) removeEnrollment(ctx context.Context, classroom, student string
 
 // listStudents is the classroom's roster, by name (students without one last, by id).
 func (p pgStore) listStudents(ctx context.Context, classroom string) ([]Student, error) {
-	rows, err := p.db.Query(ctx, `SELECT u.id,COALESCE(u.username,''),COALESCE(u.display_name,'') FROM enrollments e JOIN users u ON u.id=e.student_id WHERE e.classroom_id=$1 ORDER BY lower(COALESCE(u.display_name,u.username)) NULLS LAST,u.id LIMIT 500`, classroom)
+	return p.students(ctx, `SELECT u.id,COALESCE(u.username,''),COALESCE(u.display_name,'') FROM enrollments e JOIN users u ON u.id=e.student_id WHERE e.classroom_id=$1 ORDER BY lower(COALESCE(u.display_name,u.username)) NULLS LAST,u.id LIMIT 500`, classroom)
+}
+
+// listOrgStudents is every student in the organization who has signed in, by name, up to 500.
+func (p pgStore) listOrgStudents(ctx context.Context, org string) ([]Student, error) {
+	return p.students(ctx, `SELECT id,COALESCE(username,''),COALESCE(display_name,'') FROM users WHERE org_id=$1 AND role='student' ORDER BY lower(COALESCE(display_name,username)) NULLS LAST,id LIMIT 500`, org)
+}
+
+func (p pgStore) students(ctx context.Context, sql string, arg string) ([]Student, error) {
+	rows, err := p.db.Query(ctx, sql, arg)
 	if err != nil {
 		return nil, err
 	}

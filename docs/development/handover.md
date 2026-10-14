@@ -114,6 +114,10 @@ Web only. Teachers land on Classrooms and students on Assessments. Classrooms an
 
 `DELETE /v1/classrooms/{id}`, for the classroom's teacher only. Identity migration `003_deleted_classrooms.sql` (additive) adds `classrooms.deleted_at`; deleting sets it. A deleted classroom leaves every classroom list and Identity's access check refuses it for everyone, its teacher included, so every other service refuses its materials, assessments, grades and analytics. Nothing is removed: enrollments and every service's data stay, and clearing `deleted_at` restores the classroom. The Classrooms page has a Delete action per classroom behind a confirmation dialog with Cancel focused. Checks: Identity unit test, `integration.py` step `delete_classroom`.
 
+## The school's students for teachers (2026-10-14)
+
+Identity's `GET /v1/students`, for teachers only, lists every student in the teacher's organization who has signed in (up to 500, by name). The Classrooms page shows them under "All students", each with an Enroll button for the current classroom, or "Enrolled" when the classroom already has them; enrolling by username still works. Checks: Identity unit test, `integration.py` (`classroom` step), `e2e/workflow.spec.ts`.
+
 ## Incomplete requirements and risks
 
 The full requested definition of done is **not claimed**. The coherent core workflow is implemented, but these requirements remain incomplete or narrower than the full brief:

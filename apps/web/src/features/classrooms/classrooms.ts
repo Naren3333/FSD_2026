@@ -28,6 +28,10 @@ export class ClassroomsComponent {
   readonly state = new ActionState();
   readonly rosterState = new ActionState();
   readonly roster = signal<Student[]>([]);
+  /** Every student in the school who has signed in, and which of them the current classroom has. */
+  readonly everyone = signal<Student[]>([]);
+  readonly enrolled = computed(() => new Set(this.roster().map((student) => student.id)));
+  readonly everyoneState = new ActionState();
   /** The student the remove dialog is asking about. */
   readonly removing = signal<Student | null>(null);
   readonly studentName = studentName;
@@ -54,6 +58,25 @@ export class ClassroomsComponent {
       this.roster.set([]);
       this.loadRoster();
     });
+    this.loadEveryone();
+  }
+
+  loadEveryone(): void {
+    if (!this.session.isTeacher()) return;
+    void this.everyoneState.run(async () => this.everyone.set(await this.identity.students()));
+  }
+
+  /** Enrolls a student from the school list into the current classroom. */
+  enrollStudent(student: Student): void {
+    const classroomId = this.classroomId();
+    if (!classroomId) return;
+    void this.everyoneState.run(
+      async () => {
+        await this.identity.enroll(classroomId, { student_id: student.id });
+        this.roster.set(await this.identity.roster(classroomId));
+      },
+      `${this.studentName(student) || 'Student'} enrolled.`,
+    );
   }
 
   refresh(): void {
@@ -80,7 +103,7 @@ export class ClassroomsComponent {
     if (!this.state.validate(this.enrollment)) return;
     const classroomId = this.classroomId();
     void this.state.run(async () => {
-      await this.identity.enroll(classroomId, this.enrollment.controls.username.value.trim());
+      await this.identity.enroll(classroomId, { username: this.enrollment.controls.username.value.trim() });
       this.enrollment.reset();
       this.roster.set(await this.identity.roster(classroomId));
     }, 'Student enrolled.');

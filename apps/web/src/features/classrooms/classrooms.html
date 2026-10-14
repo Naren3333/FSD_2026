@@ -116,6 +116,50 @@
     }
   </section>
 }
+@if (session.isTeacher()) {
+  <section class="panel roster" aria-labelledby="everyone-title">
+    <div class="section-heading">
+      <h3 id="everyone-title">All students</h3>
+      <button class="secondary" (click)="loadEveryone()" [disabled]="everyoneState.busy()">
+        Refresh all students
+      </button>
+    </div>
+    <p class="caption">Everyone in your school who has signed in, up to 500, by name</p>
+    @for (student of everyone(); track student.id) {
+      <article class="record roster-row">
+        <div>
+          <strong>{{ studentName(student) || 'Name not recorded yet' }}</strong>
+          @if (student.username && student.username !== studentName(student)) {
+            <span class="caption">{{ student.username }}</span>
+          }
+          @if (!studentName(student)) {
+            <span class="identifier">{{ student.id }}</span>
+          }
+        </div>
+        @if (enrolled().has(student.id)) {
+          <span class="badge badge-plain">Enrolled</span>
+        } @else {
+          <button
+            class="secondary"
+            (click)="enrollStudent(student)"
+            [disabled]="everyoneState.busy() || !classroomId()"
+            [attr.aria-label]="
+              'Enroll ' +
+              (studentName(student) || student.id) +
+              ' in ' +
+              (classroomName() || 'this classroom')
+            "
+          >
+            Enroll
+          </button>
+        }
+      </article>
+    } @empty {
+      <p class="empty">No students have signed in yet. Students appear here after their first sign-in.</p>
+    }
+    <app-status [state]="everyoneState" />
+  </section>
+}
 <dialog #removeDialog aria-labelledby="remove-title" (close)="closeRemove()">
   <h2 id="remove-title">Remove this student?</h2>
   @if (removing(); as student) {

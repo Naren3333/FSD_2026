@@ -16,6 +16,10 @@ Content indexing (stage 3) needs no reset: Content's migration `002_indexing.sql
 
 The Postgres image also changed from Alpine to Debian (pgvector), so text-index collations differ. Recreating the volume is the clean path. Keeping data means reindexing every database (`REINDEX DATABASE <name>;` as each owner) after the switch, plus adding the clients and extension by hand.
 
+## Test students
+
+`python scripts/seed_students.py` adds ten local test students (aisha.rahman, ben.tan and so on) to the Keycloak realm and signs each in once so a teacher can enroll them by username. They share one generated password, printed at the end and kept in `.local/seed-students.json`. Re-running keeps them and their password.
+
 ## Health and logs
 
 Each application exposes `/health/live` and `/health/ready` on its private port 8080. Persistent apps check PostgreSQL; Content also checks the document bucket; Grading marks readiness unavailable after its consumer stops; Analytics checks its database and consumer state. The two AI placeholders (question generation and performance interpretation) need only valid authentication configuration; the chatbot also checks its database. ai-core's readiness reports whether the OpenAI and Voyage keys are set, without calling either (a paid probe on every check would cost money and latency); a provider outage shows per request as `502 AI_PROVIDER_FAILED`.

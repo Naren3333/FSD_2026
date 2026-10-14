@@ -20,6 +20,7 @@ func (s server) routes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /v1/classrooms/{id}/enrollments", s.enroll)
 	mux.HandleFunc("DELETE /v1/classrooms/{id}/enrollments/{student}", s.unenroll)
 	mux.HandleFunc("GET /v1/classrooms/{id}/students", s.roster)
+	mux.HandleFunc("GET /v1/students", s.students)
 }
 
 func (s server) register(w http.ResponseWriter, r *http.Request) {
@@ -195,6 +196,19 @@ func (s server) roster(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	students, err := s.store.listStudents(r.Context(), id)
+	if err != nil {
+		platform.Fail(w, err)
+		return
+	}
+	platform.JSON(w, http.StatusOK, students)
+}
+
+// students lists every student in the teacher's organization who has signed in, so a teacher can enroll them.
+func (s server) students(w http.ResponseWriter, r *http.Request) {
+	if !platform.Teacher(w, r) {
+		return
+	}
+	students, err := s.store.listOrgStudents(r.Context(), platform.Actor(r).Org)
 	if err != nil {
 		platform.Fail(w, err)
 		return

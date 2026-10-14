@@ -41,6 +41,11 @@ test('teacher and student complete a real assessment through Kong', async ({ bro
   await expect(teacher.getByText('Student enrolled.', { exact: true })).toBeVisible();
   const roster = teacher.getByRole('region', { name: 'Students in Browser ' + suffix });
   await expect(roster.getByText('Student Local', { exact: true })).toBeVisible();
+  // The school's student list marks them enrolled in the current classroom.
+  const everyone = teacher.getByRole('region', { name: 'All students' });
+  await expect(
+    everyone.getByRole('article').filter({ hasText: 'Student Local' }).getByText('Enrolled', { exact: true }),
+  ).toBeVisible();
   await teacher.getByRole('link', { name: 'Curriculum', exact: true }).click();
   await teacher.getByLabel('Name', { exact: true }).fill('Browser skill ' + suffix);
   await teacher.getByRole('button', { name: 'Add curriculum', exact: true }).click();

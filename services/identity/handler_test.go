@@ -108,6 +108,16 @@ func (m *memoryStore) deleteClassroom(_ context.Context, classroom string) error
 	return nil
 }
 
+func (m *memoryStore) listOrgStudents(context.Context, string) ([]Student, error) {
+	result := []Student{}
+	for id, role := range m.roles {
+		if role == "student" {
+			result = append(result, Student{ID: id, Username: m.usernames[id]})
+		}
+	}
+	return result, nil
+}
+
 // call sends a request as a verified caller with the given roles.
 func call(t *testing.T, store store, method, path, body, subject string, roles ...string) *httptest.ResponseRecorder {
 	t.Helper()
@@ -256,5 +266,16 @@ func TestOnlyTheOwnerDeletesAClassroom(t *testing.T) {
 		if w := call(t, store, http.MethodGet, path+"/access", "", caller[0], caller[1]); w.Code != 403 {
 			t.Errorf("%s still has access: %d", caller[0], w.Code)
 		}
+	}
+}
+
+func TestOnlyTeachersListTheSchoolsStudents(t *testing.T) {
+	store := newMemoryStore()
+	if w := call(t, store, http.MethodGet, "/v1/students", "", "student-1", "student"); w.Code != 403 {
+		t.Fatalf("a student listed every student: %d", w.Code)
+	}
+	w := call(t, store, http.MethodGet, "/v1/students", "", "teacher-1", "teacher")
+	if w.Code != 200 || !strings.Contains(w.Body.String(), `"username":"ada"`) || strings.Contains(w.Body.String(), "teacher-1") {
+		t.Fatalf("%d %s", w.Code, w.Body.String())
 	}
 }

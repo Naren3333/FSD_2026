@@ -40,17 +40,21 @@ export class IdentityApi {
   deleteClassroom(classroomId: string): Promise<void> {
     return this.gateway.request('identity', `/classrooms/${id(classroomId)}`, { method: 'DELETE' });
   }
-  /** Enrolls the organization's student with this username (case-insensitive). */
-  enroll(classroomId: string, username: string): Promise<void> {
+  /** Enrolls the organization's student with this username (case-insensitive) or account id. */
+  enroll(classroomId: string, student: { username: string } | { student_id: string }): Promise<void> {
     return this.gateway.request('identity', `/classrooms/${id(classroomId)}/enrollments`, {
       method: 'POST',
-      body: { username },
+      body: student,
     });
   }
   unenroll(classroomId: string, studentId: string): Promise<void> {
     return this.gateway.request('identity', `/classrooms/${id(classroomId)}/enrollments/${id(studentId)}`, {
       method: 'DELETE',
     });
+  }
+  /** Every student in the teacher's organization who has signed in, by name; up to 500. */
+  students(): Promise<Student[]> {
+    return this.gateway.request('identity', '/students');
   }
   /** The classroom's students, for its teacher only; up to 500. */
   roster(classroomId: string): Promise<Student[]> {
