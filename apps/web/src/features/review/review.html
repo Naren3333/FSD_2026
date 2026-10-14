@@ -47,8 +47,8 @@
 <dialog #dialog aria-labelledby="review-title" (close)="close()">
   <h2 id="review-title">Finalize this grade?</h2>
   <p>
-    Finalization publishes this student's scores to their performance record. This grade cannot be changed in
-    this milestone.
+    Finalization publishes this student's scores to their performance record. A finalized grade cannot be
+    changed.
   </p>
   <form novalidate [formGroup]="form" (ngSubmit)="finalize()">
     <app-field

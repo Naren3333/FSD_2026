@@ -72,7 +72,7 @@
   @if (session.isTeacher()) {
     <section class="panel">
       <h3>Create an assessment</h3>
-      <p class="caption">The foundation editor authors one question. The API supports up to 50 questions.</p>
+      <p class="caption">This editor authors one question. The API supports up to 50 questions.</p>
       <form novalidate [formGroup]="form" (ngSubmit)="create()">
         <app-field
           controlId="assessment-title"

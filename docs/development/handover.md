@@ -92,7 +92,7 @@ In the sandbox (Docker 29.8.2) on 2026-10-13, after `docker compose up -d --buil
 - `npm run test:e2e`: 5 tests passed, including the two chat tests.
 - With ai-core pointed at a local stand-in for the OpenAI and Voyage APIs (sandbox only, not committed), a browser run passed: a PDF upload became indexed, and both the teacher and an enrolled student got a cited answer.
 
-Not run: a chat turn against the real OpenAI and Voyage APIs (only a real ingest has been run, on the desktop), the premium UI audit (its tool is not in the repository), a hosted CI run, and any production deployment. Stages 4 to 6 have not yet been run on the Windows desktop.
+Not run: a chat turn against the real OpenAI and Voyage APIs (only a real ingest has been run, on the desktop), the premium UI audit (its tool is not in the repository), and any production deployment. GitHub Actions has since run the full gate on `main`, including the live Docker integration and Playwright jobs. Stages 4 to 6 have not yet been run on the Windows desktop.
 
 Kong now re-resolves service names every 5 seconds (`KONG_DNS_VALID_TTL`). Before this, recreating one service while Kong kept running sent its requests to the old container address (502) until Kong restarted. A new route still needs `docker compose restart kong`, because Kong reads its route file at start.
 
@@ -109,4 +109,4 @@ The full requested definition of done is **not claimed**. The coherent core work
 - S3/SQL atomicity requires a staged-upload saga and orphan reconciliation. Ambiguous commits retain originals to avoid deleting a possibly committed document. No destructive cleanup is scheduled.
 - Static checks and focused browser tests are not a comprehensive WCAG/assistive-technology, multi-browser, offline, load, chaos or security assessment.
 
-Recommended next milestone: harden this verified non-AI workflow first—production authentication/broker/database security, pagination, lifecycle/versioning, reconciliation/backups and broader failure-path tests—then implement authorized Content retrieval and genuine inference behind the existing four private AI contracts. Preserve teacher approval and evidence provenance throughout.
+Recommended next milestone: close the product loop for students and teachers. Students need to see their finalized results; teachers need a classroom roster with names (enrollment currently takes a raw account id), skill and student names instead of ids in the performance and grading views, a class-level performance table, a multi-question assessment editor and override editing in grading review. After that, the question generation or performance interpretation agent, each behind its own ADR as AGENTS.md requires. Preserve teacher approval and evidence provenance throughout.

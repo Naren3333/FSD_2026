@@ -42,7 +42,7 @@ Go domain files implement exact grading, assessment validation and text chunking
 
 Identity owns `organizations`, `users`, `classrooms`, `enrollments`. Curriculum owns `nodes`, `prerequisites`. Content owns `documents` including extracted text chunks and SHA-256/source revision metadata, `document_chunks` (indexed PDF chunks with pgvector embeddings and a full-text index), `index_jobs`, plus bucket objects (originals and figure crops). Assessment owns `assessments` with question snapshots and answer keys, and `submissions`. Grading owns `evaluations`, `audit`. Analytics owns its `evaluations`, `evidence` and `inbox` read model. Outbox/inbox tables are independently created in the application owner's database, not a shared event database.
 
-The first migration is non-destructive and idempotent. Go migrations are embedded from each service's `migrations/NNN_name.sql` files and applied in order under a PostgreSQL advisory transaction lock; each version runs once and is recorded in `schema_migrations` (versions must run 1..n without gaps, or startup fails). Schema changes go in a new numbered file, never an edit to an applied one; `CREATE TABLE IF NOT EXISTS` is not an upgrade mechanism. Production migrations should run with separate owner credentials; local app roles own only their own database.
+The first migration is non-destructive and idempotent. Go migrations are embedded from each service's `migrations/NNN_name.sql` files and applied in order under a PostgreSQL advisory transaction lock; each version runs once and is recorded in `schema_migrations` (versions must run 1..n without gaps, or startup fails). The Python services that own a database (Analytics, ai-core, the chatbot) apply theirs the same way through `learning_transport.db`, under the same lock id and with the same `schema_migrations` table. Schema changes go in a new numbered file, never an edit to an applied one; `CREATE TABLE IF NOT EXISTS` is not an upgrade mechanism. Production migrations should run with separate owner credentials; local app roles own only their own database.
 
 ## Security and state
 
@@ -66,7 +66,7 @@ flowchart LR
   Inference -->|streamed answer + citations| Student
 ```
 
-ai-core implements `/v1/ingest` (PDF bytes in; chunks, vectors and figure crops out), `/v1/inference` (embed, generate, structured or streamed generation) and `/v1/rerank`, statelessly: Content stores the results. Provider failures are errors (502/503), never placeholder output; Content retries indexing and answers search with 503 `SEARCH_UNAVAILABLE` instead of inventing results.
+ai-core implements `/v1/ingest` (PDF bytes in; chunks, vectors and figure crops out), `/v1/inference` (embed, generate, structured or streamed generation) and `/v1/rerank` (Content sends each hit's title, section path and content, and ai-core builds the scored text with the same rule it used for the embedded text), statelessly: Content stores the results. Provider failures are errors (502/503), never placeholder output; Content retries indexing and answers search with 503 `SEARCH_UNAVAILABLE` instead of inventing results.
 
 Every paid call is charged to a user (ADR 0003): callers pass `billed_to` (the searching or chatting user, or the teacher who uploaded the document being indexed), and ai-core records each call's cost in its own `aicore` database. Before a call it refuses with `429 AI_SPEND_LIMIT` once the user's spend since local midnight reaches the daily limit ($5 for a student, $10 for a teacher). The chatbot shows the user their spend through `GET /v1/usage`.
 
