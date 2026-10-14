@@ -40,11 +40,11 @@ export class IdentityApi {
   deleteClassroom(classroomId: string): Promise<void> {
     return this.gateway.request('identity', `/classrooms/${id(classroomId)}`, { method: 'DELETE' });
   }
-  /** Enrolls the organization's student with this username (case-insensitive) or account id. */
-  enroll(classroomId: string, student: { username: string } | { student_id: string }): Promise<void> {
+  /** Enrolls one of the organization's students by account id. */
+  enroll(classroomId: string, studentId: string): Promise<void> {
     return this.gateway.request('identity', `/classrooms/${id(classroomId)}/enrollments`, {
       method: 'POST',
-      body: student,
+      body: { student_id: studentId },
     });
   }
   unenroll(classroomId: string, studentId: string): Promise<void> {

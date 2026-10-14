@@ -32,6 +32,16 @@ export class ClassroomsComponent {
   readonly everyone = signal<Student[]>([]);
   readonly enrolled = computed(() => new Set(this.roster().map((student) => student.id)));
   readonly everyoneState = new ActionState();
+  /** What the teacher typed to narrow the list, matched against names and usernames. */
+  readonly search = signal('');
+  readonly matching = computed(() => {
+    const words = this.search().trim().toLowerCase();
+    return words
+      ? this.everyone().filter((student) =>
+          `${student.display_name} ${student.username}`.toLowerCase().includes(words),
+        )
+      : this.everyone();
+  });
   /** The student the remove dialog is asking about. */
   readonly removing = signal<Student | null>(null);
   readonly studentName = studentName;
@@ -45,15 +55,9 @@ export class ClassroomsComponent {
       validators: [Validators.required, Validators.maxLength(120), Validators.pattern(/\S/)],
     }),
   });
-  readonly enrollment = new FormGroup({
-    username: new FormControl('', {
-      nonNullable: true,
-      validators: [Validators.required, Validators.pattern(/\S/)],
-    }),
-  });
 
   constructor() {
-    inject(UnsavedChanges).track(() => this.form.dirty || this.enrollment.dirty);
+    inject(UnsavedChanges).track(() => this.form.dirty);
     onClassroomChange(() => {
       this.roster.set([]);
       this.loadRoster();
@@ -72,10 +76,10 @@ export class ClassroomsComponent {
     if (!classroomId) return;
     void this.everyoneState.run(
       async () => {
-        await this.identity.enroll(classroomId, { student_id: student.id });
+        await this.identity.enroll(classroomId, student.id);
         this.roster.set(await this.identity.roster(classroomId));
       },
-      `${this.studentName(student) || 'Student'} enrolled.`,
+      `${this.studentName(student)} enrolled.`,
     );
   }
 
@@ -97,16 +101,6 @@ export class ClassroomsComponent {
       this.form.reset();
       await this.context.refresh();
     }, 'Classroom created.');
-  }
-
-  enroll(): void {
-    if (!this.state.validate(this.enrollment)) return;
-    const classroomId = this.classroomId();
-    void this.state.run(async () => {
-      await this.identity.enroll(classroomId, { username: this.enrollment.controls.username.value.trim() });
-      this.enrollment.reset();
-      this.roster.set(await this.identity.roster(classroomId));
-    }, 'Student enrolled.');
   }
 
   confirmRemove(student: Student): void {

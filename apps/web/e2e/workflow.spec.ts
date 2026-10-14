@@ -33,16 +33,13 @@ test('teacher and student complete a real assessment through Kong', async ({ bro
   await teacher.getByRole('button', { name: 'Create classroom', exact: true }).click();
   await expect(teacher.getByText('Classroom created.', { exact: true })).toBeVisible();
   await teacher.getByLabel('Current classroom').selectOption({ label: 'Browser ' + suffix });
-  await teacher
-    .getByLabel('Student username', { exact: true })
-    .filter({ visible: true })
-    .fill(studentUsername);
-  await teacher.getByRole('button', { name: 'Enroll student', exact: true }).click();
-  await expect(teacher.getByText('Student enrolled.', { exact: true })).toBeVisible();
+  // The teacher finds the student in the school's list by username and enrolls them.
+  const everyone = teacher.getByRole('region', { name: 'All students' });
+  await everyone.getByLabel('Search students').fill(studentUsername);
+  await everyone.getByRole('button', { name: 'Enroll Student Local in Browser ' + suffix }).click();
+  await expect(teacher.getByText('Student Local enrolled.', { exact: true })).toBeVisible();
   const roster = teacher.getByRole('region', { name: 'Students in Browser ' + suffix });
   await expect(roster.getByText('Student Local', { exact: true })).toBeVisible();
-  // The school's student list marks them enrolled in the current classroom.
-  const everyone = teacher.getByRole('region', { name: 'All students' });
   await expect(
     everyone.getByRole('article').filter({ hasText: 'Student Local' }).getByText('Enrolled', { exact: true }),
   ).toBeVisible();

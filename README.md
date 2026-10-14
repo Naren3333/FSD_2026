@@ -24,7 +24,7 @@ docker compose down
 ## Basic workflow
 
 1. Sign in as a student once; the header shows their username.
-2. Sign in as a teacher, create a classroom, and enroll the student by that username. The classroom's students are listed below.
+2. Sign in as a teacher, create a classroom, and enroll the student from All students (search by name or that username). The classroom's students are listed above it.
 3. Add a curriculum skill and create an assessment.
 4. As the student, refresh classrooms in the header, select the classroom and submit the assessment.
 5. As the teacher, review and finalize the grade, then view Learning performance. The student sees the finalized grade under My results and their skills under My progress.

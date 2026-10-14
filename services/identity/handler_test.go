@@ -111,7 +111,7 @@ func (m *memoryStore) deleteClassroom(_ context.Context, classroom string) error
 func (m *memoryStore) listOrgStudents(context.Context, string) ([]Student, error) {
 	result := []Student{}
 	for id, role := range m.roles {
-		if role == "student" {
+		if role == "student" && m.usernames[id] != "" {
 			result = append(result, Student{ID: id, Username: m.usernames[id]})
 		}
 	}

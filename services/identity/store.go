@@ -113,9 +113,10 @@ func (p pgStore) listStudents(ctx context.Context, classroom string) ([]Student,
 	return p.students(ctx, `SELECT u.id,COALESCE(u.username,''),COALESCE(u.display_name,'') FROM enrollments e JOIN users u ON u.id=e.student_id WHERE e.classroom_id=$1 ORDER BY lower(COALESCE(u.display_name,u.username)) NULLS LAST,u.id LIMIT 500`, classroom)
 }
 
-// listOrgStudents is every student in the organization who has signed in, by name, up to 500.
+// listOrgStudents is every student in the organization who has signed in since names were recorded, by name, up
+// to 500. Accounts with no name yet are left out: a teacher could not tell them apart.
 func (p pgStore) listOrgStudents(ctx context.Context, org string) ([]Student, error) {
-	return p.students(ctx, `SELECT id,COALESCE(username,''),COALESCE(display_name,'') FROM users WHERE org_id=$1 AND role='student' ORDER BY lower(COALESCE(display_name,username)) NULLS LAST,id LIMIT 500`, org)
+	return p.students(ctx, `SELECT id,username,COALESCE(display_name,username) FROM users WHERE org_id=$1 AND role='student' AND username IS NOT NULL ORDER BY lower(COALESCE(display_name,username)),id LIMIT 500`, org)
 }
 
 func (p pgStore) students(ctx context.Context, sql string, arg string) ([]Student, error) {

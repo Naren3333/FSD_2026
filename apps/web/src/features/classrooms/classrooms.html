@@ -47,26 +47,6 @@
         <button [disabled]="state.busy()">Create classroom</button>
         <button type="reset" class="secondary clear-form" [disabled]="state.busy()">Clear form</button>
       </form>
-      <h3 class="separated">Enroll a student</h3>
-      <p>Enrolls into the current classroom. The student must sign in once before enrollment.</p>
-      <form novalidate [formGroup]="enrollment" (ngSubmit)="enroll()">
-        <app-field
-          controlId="enroll-student"
-          label="Student username"
-          hint="The student can find their username in the workspace header."
-          [invalid]="enrollment.controls.username.touched && enrollment.controls.username.invalid"
-        >
-          <input
-            id="enroll-student"
-            formControlName="username"
-            autocomplete="off"
-            aria-describedby="enroll-student-help"
-            [attr.aria-invalid]="enrollment.controls.username.touched && enrollment.controls.username.invalid"
-          />
-        </app-field>
-        <button [disabled]="state.busy() || !classroomId()">Enroll student</button>
-        <button type="reset" class="secondary clear-form" [disabled]="state.busy()">Clear form</button>
-      </form>
     </section>
   }
 </div>
@@ -106,7 +86,7 @@
       <p class="empty">
         {{
           classroomId()
-            ? 'No students enrolled yet. Enroll a student by their username above.'
+            ? 'No students enrolled yet. Enroll them from All students below.'
             : 'Select a classroom to see its students.'
         }}
       </p>
@@ -124,16 +104,23 @@
         Refresh all students
       </button>
     </div>
-    <p class="caption">Everyone in your school who has signed in, up to 500, by name</p>
-    @for (student of everyone(); track student.id) {
+    <p class="caption">Everyone in your school who has signed in with a name, up to 500</p>
+    <app-field controlId="student-search" label="Search students" hint="By name or username">
+      <input
+        id="student-search"
+        type="search"
+        autocomplete="off"
+        aria-describedby="student-search-help"
+        [value]="search()"
+        (input)="search.set($any($event.target).value)"
+      />
+    </app-field>
+    @for (student of matching(); track student.id) {
       <article class="record roster-row">
         <div>
-          <strong>{{ studentName(student) || 'Name not recorded yet' }}</strong>
-          @if (student.username && student.username !== studentName(student)) {
+          <strong>{{ studentName(student) }}</strong>
+          @if (student.username !== studentName(student)) {
             <span class="caption">{{ student.username }}</span>
-          }
-          @if (!studentName(student)) {
-            <span class="identifier">{{ student.id }}</span>
           }
         </div>
         @if (enrolled().has(student.id)) {
@@ -144,10 +131,7 @@
             (click)="enrollStudent(student)"
             [disabled]="everyoneState.busy() || !classroomId()"
             [attr.aria-label]="
-              'Enroll ' +
-              (studentName(student) || student.id) +
-              ' in ' +
-              (classroomName() || 'this classroom')
+              'Enroll ' + studentName(student) + ' in ' + (classroomName() || 'this classroom')
             "
           >
             Enroll
@@ -155,7 +139,13 @@
         }
       </article>
     } @empty {
-      <p class="empty">No students have signed in yet. Students appear here after their first sign-in.</p>
+      <p class="empty">
+        {{
+          everyone().length
+            ? 'No students match that search.'
+            : 'No students have signed in yet. Students appear here after their first sign-in.'
+        }}
+      </p>
     }
     <app-status [state]="everyoneState" />
   </section>
