@@ -415,6 +415,20 @@ def unenroll(u: Users, room_id: str) -> None:
     assert len(request(u.teacher, "GET", f"/grading/evaluations?classroom_id={room_id}")) == 1
 
 
+def delete_classroom(u: Users, room_id: str) -> None:
+    """Deleting a classroom hides it and ends everyone's access, its teacher's included."""
+    request(u.teacher, "POST", f"/identity/classrooms/{room_id}/enrollments", json={"username": "student"})
+    path = f"/identity/classrooms/{room_id}"
+    request(u.other, "DELETE", path, 403)
+    request(u.student, "DELETE", path, 403)
+    request(u.teacher, "DELETE", path)
+    request(u.teacher, "DELETE", path, 403)
+    for user in [u.teacher, u.student]:
+        request(user, "GET", f"{path}/access", 403)
+        assert room_id not in [r["id"] for r in request(user, "GET", "/identity/classrooms")]
+    request(u.teacher, "GET", f"/grading/evaluations?classroom_id={room_id}", 403)
+
+
 def databases() -> None:
     """Each service's database user is refused by the others, and migrations and pgvector are in place."""
     for user, database in [
@@ -426,9 +440,9 @@ def databases() -> None:
         isolation = psql(user, database, "SELECT 1", check=False)
         assert isolation.returncode != 0 and "permission denied" in isolation.stderr.lower(), (user, database)
     versions = "SELECT string_agg(version::text, ',' ORDER BY version) FROM schema_migrations"
-    for service in ["content", "identity"]:
+    for service, expected in [("content", "1,2"), ("identity", "1,2,3")]:
         migrations = sql_value(service, versions)
-        assert migrations == "1,2", (service, migrations)
+        assert migrations == expected, (service, migrations)
     vector = sql_value("content", "SELECT count(*) FROM pg_extension WHERE extname='vector'")
     assert vector == "1", "pgvector is not installed in Content's database"
 
@@ -449,10 +463,11 @@ def main() -> None:
     graded = assess_and_grade(users, room_id)
     replayed_events(users, room_id, graded)
     unenroll(users, room_id)
+    delete_classroom(users, room_id)
     databases()
     ai_service_accounts(users)
     print(
-        "PASS: gateway auth, classroom isolation, enrollment by username, rosters, unenrollment, curriculum, "
+        "PASS: gateway auth, classroom isolation, enrollment by username, rosters, unenrollment, classroom deletion, curriculum, "
         "S3 upload/extraction, PDF indexing jobs, teacher-only rubrics, search access, chat threads and streaming, "
         "AI spend allowance, answer-key secrecy, submissions, draft grading, teacher finalization, students' own "
         "finalized results, Kafka analytics, consumer restart, duplicate event and business-key idempotency, "

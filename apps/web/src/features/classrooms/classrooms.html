@@ -11,8 +11,16 @@
     <h3>Your classrooms</h3>
     <p class="caption">Up to 100 most recent classrooms</p>
     @for (item of classrooms(); track item.id) {
-      <article class="record">
+      <article class="record roster-row">
         <strong>{{ item.name }}</strong>
+        <button
+          class="secondary"
+          (click)="confirmDelete(item)"
+          [disabled]="state.busy()"
+          [attr.aria-label]="'Delete ' + item.name"
+        >
+          Delete
+        </button>
       </article>
     } @empty {
       <p class="empty">No classrooms yet. Create one to get started.</p>
@@ -62,7 +70,9 @@
     </section>
   }
 </div>
-<app-status [state]="state" />
+@if (!deleting()) {
+  <app-status [state]="state" />
+}
 @if (session.isTeacher()) {
   <section class="panel roster" aria-labelledby="roster-title">
     <div class="section-heading">
@@ -122,5 +132,23 @@
   </div>
   @if (removing()) {
     <app-status [state]="rosterState" />
+  }
+</dialog>
+<dialog #deleteDialog aria-labelledby="delete-title" (close)="closeDelete()">
+  <h2 id="delete-title">Delete this classroom?</h2>
+  @if (deleting(); as classroom) {
+    <p>
+      {{ classroom.name }} will disappear for you and its students, along with access to its materials,
+      assessments and results. Its data is kept on the server, but the app cannot bring the classroom back.
+    </p>
+  }
+  <div class="actions">
+    <button type="button" class="secondary" autofocus (click)="closeDelete()" [disabled]="state.busy()">
+      Cancel
+    </button>
+    <button type="button" (click)="deleteClassroom()" [disabled]="state.busy()">Delete classroom</button>
+  </div>
+  @if (deleting()) {
+    <app-status [state]="state" />
   }
 </dialog>

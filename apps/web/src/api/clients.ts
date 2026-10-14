@@ -36,6 +36,10 @@ export class IdentityApi {
   createClassroom(name: string): Promise<Classroom> {
     return this.gateway.request('identity', '/classrooms', { method: 'POST', body: { name } });
   }
+  /** Deletes the classroom for its teacher. Its students lose access; its work is kept but no longer reachable. */
+  deleteClassroom(classroomId: string): Promise<void> {
+    return this.gateway.request('identity', `/classrooms/${id(classroomId)}`, { method: 'DELETE' });
+  }
   /** Enrolls the organization's student with this username (case-insensitive). */
   enroll(classroomId: string, username: string): Promise<void> {
     return this.gateway.request('identity', `/classrooms/${id(classroomId)}/enrollments`, {

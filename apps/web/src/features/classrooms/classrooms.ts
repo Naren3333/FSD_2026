@@ -1,7 +1,7 @@
 import { Component, ElementRef, ViewChild, computed, inject, signal } from '@angular/core';
 import { FormControl, FormGroup, ReactiveFormsModule, Validators } from '@angular/forms';
 import { IdentityApi } from '../../api/clients';
-import type { Student } from '../../api/models';
+import type { Classroom, Student } from '../../api/models';
 import { ClassroomContext, onClassroomChange } from '../../core/classroom-context';
 import { Session } from '../../core/session';
 import { UnsavedChanges } from '../../core/unsaved-changes';
@@ -32,6 +32,9 @@ export class ClassroomsComponent {
   readonly removing = signal<Student | null>(null);
   readonly studentName = studentName;
   @ViewChild('removeDialog') removeDialog?: ElementRef<HTMLDialogElement>;
+  /** The classroom the delete dialog is asking about. */
+  readonly deleting = signal<Classroom | null>(null);
+  @ViewChild('deleteDialog') deleteDialog?: ElementRef<HTMLDialogElement>;
   readonly form = new FormGroup({
     name: new FormControl('', {
       nonNullable: true,
@@ -102,5 +105,25 @@ export class ClassroomsComponent {
       this.closeRemove();
       this.roster.set(await this.identity.roster(classroomId));
     }, 'Student removed from the classroom.');
+  }
+
+  confirmDelete(classroom: Classroom): void {
+    this.deleting.set(classroom);
+    this.deleteDialog?.nativeElement.showModal();
+  }
+
+  closeDelete(): void {
+    this.deleting.set(null);
+    this.deleteDialog?.nativeElement.close();
+  }
+
+  deleteClassroom(): void {
+    const classroom = this.deleting();
+    if (!classroom) return;
+    void this.state.run(async () => {
+      await this.identity.deleteClassroom(classroom.id);
+      this.closeDelete();
+      await this.context.refresh();
+    }, 'Classroom deleted.');
   }
 }

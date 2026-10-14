@@ -15,6 +15,7 @@ func (s server) routes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /v1/me", s.register)
 	mux.HandleFunc("GET /v1/classrooms", s.list)
 	mux.HandleFunc("POST /v1/classrooms", s.create)
+	mux.HandleFunc("DELETE /v1/classrooms/{id}", s.remove)
 	mux.HandleFunc("GET /v1/classrooms/{id}/access", s.access)
 	mux.HandleFunc("POST /v1/classrooms/{id}/enrollments", s.enroll)
 	mux.HandleFunc("DELETE /v1/classrooms/{id}/enrollments/{student}", s.unenroll)
@@ -82,6 +83,20 @@ func (s server) list(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	platform.JSON(w, http.StatusOK, result)
+}
+
+// remove deletes a classroom for its teacher. Students lose access and it leaves every list; its enrollments,
+// submissions and grades are kept, and every service refuses access to it from then on.
+func (s server) remove(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	if !s.owner(w, r, id, "delete it") {
+		return
+	}
+	if err := s.store.deleteClassroom(r.Context(), id); err != nil {
+		platform.Fail(w, err)
+		return
+	}
+	platform.JSON(w, http.StatusOK, map[string]string{"classroom_id": id})
 }
 
 // owner reports whether the caller is the classroom's teacher, writing the refusal when not.

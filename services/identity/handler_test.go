@@ -103,6 +103,11 @@ func (m *memoryStore) listStudents(_ context.Context, classroom string) ([]Stude
 	return result, nil
 }
 
+func (m *memoryStore) deleteClassroom(_ context.Context, classroom string) error {
+	delete(m.owners, classroom)
+	return nil
+}
+
 // call sends a request as a verified caller with the given roles.
 func call(t *testing.T, store store, method, path, body, subject string, roles ...string) *httptest.ResponseRecorder {
 	t.Helper()
@@ -231,5 +236,25 @@ func TestOnlyTheOwnerSeesTheRosterAndRemovesStudents(t *testing.T) {
 	}
 	if w := call(t, store, http.MethodDelete, remove, "", "teacher-1", "teacher"); w.Code != 404 {
 		t.Fatalf("removing twice: %d", w.Code)
+	}
+}
+
+func TestOnlyTheOwnerDeletesAClassroom(t *testing.T) {
+	store := newMemoryStore()
+	path := "/v1/classrooms/" + room
+	if w := call(t, store, http.MethodDelete, path, "", "student-1", "student"); w.Code != 403 {
+		t.Fatalf("a student deleted the classroom: %d", w.Code)
+	}
+	if w := call(t, store, http.MethodDelete, path, "", "teacher-2", "teacher"); w.Code != 403 {
+		t.Fatalf("another teacher deleted the classroom: %d", w.Code)
+	}
+	if w := call(t, store, http.MethodDelete, path, "", "teacher-1", "teacher"); w.Code != 200 {
+		t.Fatalf("status %d", w.Code)
+	}
+	// Once deleted, nobody has access, including its teacher and its students.
+	for _, caller := range [][2]string{{"teacher-1", "teacher"}, {"student-1", "student"}} {
+		if w := call(t, store, http.MethodGet, path+"/access", "", caller[0], caller[1]); w.Code != 403 {
+			t.Errorf("%s still has access: %d", caller[0], w.Code)
+		}
 	}
 }

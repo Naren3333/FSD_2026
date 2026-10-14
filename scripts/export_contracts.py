@@ -221,6 +221,7 @@ operations = {
             classroom,
             201,
         ),
+        operation("DELETE", "/v1/classrooms/{id}", None, obj({"classroom_id": UUID})),
         operation(
             "GET",
             "/v1/classrooms/{id}/access",

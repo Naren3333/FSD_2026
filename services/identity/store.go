@@ -19,6 +19,7 @@ type store interface {
 	insertEnrollment(ctx context.Context, classroom, student string) error
 	removeEnrollment(ctx context.Context, classroom, student string) (bool, error)
 	listStudents(ctx context.Context, classroom string) ([]Student, error)
+	deleteClassroom(ctx context.Context, classroom string) error
 }
 
 // pgStore is the store in the service's own Postgres database.
@@ -42,9 +43,9 @@ func (p pgStore) registerUser(ctx context.Context, org, subject, role, username,
 }
 
 // findClassroomOwner returns the classroom's organization and teacher.
-// It returns pgx.ErrNoRows when the classroom does not exist.
+// It returns pgx.ErrNoRows when the classroom does not exist or was deleted.
 func (p pgStore) findClassroomOwner(ctx context.Context, classroom string) (org, teacher string, err error) {
-	err = p.db.QueryRow(ctx, "SELECT org_id,teacher_id FROM classrooms WHERE id=$1", classroom).Scan(&org, &teacher)
+	err = p.db.QueryRow(ctx, "SELECT org_id,teacher_id FROM classrooms WHERE id=$1 AND deleted_at IS NULL", classroom).Scan(&org, &teacher)
 	return org, teacher, err
 }
 
@@ -60,7 +61,7 @@ func (p pgStore) insertClassroom(ctx context.Context, id, name, org, teacher str
 }
 
 func (p pgStore) listClassrooms(ctx context.Context, org, subject string, isTeacher bool) ([]Classroom, error) {
-	rows, err := p.db.Query(ctx, `SELECT c.id,c.name,c.teacher_id FROM classrooms c WHERE c.org_id=$1 AND ((c.teacher_id=$2 AND $3) OR EXISTS(SELECT 1 FROM enrollments e WHERE e.classroom_id=c.id AND e.student_id=$2)) ORDER BY c.created_at DESC LIMIT 100`, org, subject, isTeacher)
+	rows, err := p.db.Query(ctx, `SELECT c.id,c.name,c.teacher_id FROM classrooms c WHERE c.org_id=$1 AND c.deleted_at IS NULL AND ((c.teacher_id=$2 AND $3) OR EXISTS(SELECT 1 FROM enrollments e WHERE e.classroom_id=c.id AND e.student_id=$2)) ORDER BY c.created_at DESC LIMIT 100`, org, subject, isTeacher)
 	if err != nil {
 		return nil, err
 	}
@@ -117,4 +118,10 @@ func (p pgStore) listStudents(ctx context.Context, classroom string) ([]Student,
 		err := row.Scan(&v.ID, &v.Username, &v.Name)
 		return v, err
 	})
+}
+
+// deleteClassroom marks the classroom deleted, keeping its row and enrollments.
+func (p pgStore) deleteClassroom(ctx context.Context, classroom string) error {
+	_, err := p.db.Exec(ctx, "UPDATE classrooms SET deleted_at=now() WHERE id=$1 AND deleted_at IS NULL", classroom)
+	return err
 }

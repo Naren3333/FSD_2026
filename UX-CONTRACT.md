@@ -8,11 +8,11 @@ Business authority: docs/requirements.md sections 6, 8, 15–18 and docs/decisio
 | Select/Listbox | native select | DESIGN.md | classroom, skill, type | keyboard/browser |
 | Scrollbar | global styles.css | DESIGN.md | document and horizontal tables | static + browser |
 | Toast | shared status component | this contract | status, error | unit + browser |
-| CRUD | feature components + Api service | API/domain contracts | create, refresh list, remove enrollment | live E2E |
+| CRUD | feature components + Api service | API/domain contracts | create, refresh list, remove enrollment, delete classroom | live E2E |
 
 Creation retains the owning view, refreshes the real list, clears only successfully saved input, and announces completion. Validation keeps entered values and focuses the first invalid control. Mutations disable their submit button. Failed operations retain input, explain the failure, and allow explicit retry; no automatic mutation retries. Authentication failures offer sign-in without deleting drafts. Tokens remain in memory through Keycloak JS.
 
-Tab panels stay mounted to retain work; page unload warns when a form is dirty. Classroom context changes are disabled while work is unsaved. Finalization uses an explicit review reason and an app-owned confirmation dialog; cancel is the initially focused action. Removing a student from a classroom uses the same app-owned confirmation dialog with Cancel focused; it keeps their submissions and grades and is undone by enrolling them again. No irreversible delete UI in this milestone.
+Tab panels stay mounted to retain work; page unload warns when a form is dirty. Classroom context changes are disabled while work is unsaved. Finalization uses an explicit review reason and an app-owned confirmation dialog; cancel is the initially focused action. Removing a student from a classroom uses the same app-owned confirmation dialog with Cancel focused; it keeps their submissions and grades and is undone by enrolling them again. Deleting a classroom uses the same dialog with Cancel focused; it hides the classroom and ends everyone's access while keeping its data, and only an administrator can restore it (by clearing `classrooms.deleted_at` in Identity's database). No other delete UI in this milestone.
 
 Lists are capped by APIs at 100 (curriculum 200); the UI states this limit. Full server pagination is a documented remaining limitation. No search or selection feature is claimed. Empty states explain the next action. All shared feedback reserves space. Errors appear inline; status has a polite live region.
 

@@ -110,6 +110,10 @@ Checks: Go unit tests for Identity and Grading, the new SQL against PostgreSQL 1
 
 Web only. Teachers land on Classrooms and students on Assessments. Classrooms and Curriculum are teacher-only routes and leave the student menu; students reload the classroom picker with a Refresh classrooms button in the header. Learning performance is labelled My progress for students. The header's username note shows for students only. The performance table shows Analytics' existing `weakness_indicator` as "Needs practice" (five or more questions under 60% correct). Next: the teacher Class dashboard, then student Home.
 
+## Deleting classrooms (2026-10-14)
+
+`DELETE /v1/classrooms/{id}`, for the classroom's teacher only. Identity migration `003_deleted_classrooms.sql` (additive) adds `classrooms.deleted_at`; deleting sets it. A deleted classroom leaves every classroom list and Identity's access check refuses it for everyone, its teacher included, so every other service refuses its materials, assessments, grades and analytics. Nothing is removed: enrollments and every service's data stay, and clearing `deleted_at` restores the classroom. The Classrooms page has a Delete action per classroom behind a confirmation dialog with Cancel focused. Checks: Identity unit test, `integration.py` step `delete_classroom`.
+
 ## Incomplete requirements and risks
 
 The full requested definition of done is **not claimed**. The coherent core workflow is implemented, but these requirements remain incomplete or narrower than the full brief:
