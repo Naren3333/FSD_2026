@@ -2,6 +2,7 @@ import asyncio
 import json
 import logging
 from collections.abc import AsyncIterator
+from pathlib import Path
 from typing import Any
 
 import httpx
@@ -125,3 +126,22 @@ def test_log_lines_are_json_with_the_extra_fields() -> None:
         "message": "ledger_write_failed",
         "model": "m1",
     }
+
+
+def test_migrations_run_in_version_order(tmp_path: Path) -> None:
+    from learning_transport.db import migrations
+
+    (tmp_path / "002_more.sql").write_text("SELECT 2;")
+    (tmp_path / "001_init.sql").write_text("SELECT 1;")
+    (tmp_path / "notes.txt").write_text("ignored")
+    assert [(m.version, m.sql) for m in migrations(tmp_path)] == [(1, "SELECT 1;"), (2, "SELECT 2;")]
+
+
+@pytest.mark.parametrize("names", [[], ["001_init.sql", "003_gap.sql"], ["001_init.sql", "002-bad.sql"]])
+def test_migrations_reject_gaps_and_bad_names(tmp_path: Path, names: list[str]) -> None:
+    from learning_transport.db import migrations
+
+    for name in names:
+        (tmp_path / name).write_text("SELECT 1;")
+    with pytest.raises(ValueError):
+        migrations(tmp_path)

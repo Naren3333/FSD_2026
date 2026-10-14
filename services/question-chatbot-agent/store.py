@@ -9,7 +9,7 @@ from learning_transport.db import open_async_pool
 from psycopg.types.json import Jsonb
 from psycopg_pool import AsyncConnectionPool
 
-MIGRATION = (Path(__file__).parent / "migrations/001_init.sql").read_text()
+MIGRATIONS = Path(__file__).parent / "migrations"
 TITLE_CHARS = 80
 THREAD_COLUMNS = "id, classroom_id, role, title, created_at, last_message_at"
 MESSAGE_COLUMNS = "id, role, content, outcome, citations, created_at"
@@ -38,7 +38,7 @@ class PostgresStore:
 
     @classmethod
     async def open(cls, url: str) -> "PostgresStore":
-        return cls(await open_async_pool(url, MIGRATION))
+        return cls(await open_async_pool(url, MIGRATIONS))
 
     async def close(self) -> None:
         await self.pool.close()

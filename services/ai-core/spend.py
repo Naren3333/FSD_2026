@@ -21,7 +21,7 @@ from settings import get_settings
 
 log = logging.getLogger("ai-core.spend")
 
-MIGRATION = (Path(__file__).parent / "migrations/001_init.sql").read_text()
+MIGRATIONS = Path(__file__).parent / "migrations"
 Role = Literal["student", "teacher"]
 
 # USD per million tokens: input, cached input, output. Checked against third-party price listings on 2026-10-13;
@@ -108,7 +108,7 @@ class PostgresLedger:
 
     @classmethod
     async def open(cls, url: str) -> "PostgresLedger":
-        return cls(await open_async_pool(url, MIGRATION))
+        return cls(await open_async_pool(url, MIGRATIONS))
 
     async def today(self, billed: Billed) -> Usage:
         # The day boundary is computed by PostgreSQL, which carries the time zone database.

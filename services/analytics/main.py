@@ -28,14 +28,14 @@ from psycopg_pool import ConnectionPool
 from consumer import consume
 from domain import PerformanceResponse, summarize
 
-MIGRATION = (Path(__file__).parent / "migrations/001_init.sql").read_text()
+MIGRATIONS = Path(__file__).parent / "migrations"
 CONSUMER_STOP_GRACE = 35  # seconds shutdown waits for the consumer thread
 
 
 @asynccontextmanager
 async def lifespan(app: Any) -> AsyncIterator[None]:
     require_env(*OIDC_SETTINGS, "IDENTITY_URL", "KAFKA_BROKERS", "DATABASE_URL")
-    pool = open_pool(os.environ["DATABASE_URL"], MIGRATION)
+    pool = open_pool(os.environ["DATABASE_URL"], MIGRATIONS)
     stop, connected = threading.Event(), threading.Event()
     thread = threading.Thread(target=consume, args=(pool, stop, connected), daemon=True)
     async with httpx.AsyncClient() as http:

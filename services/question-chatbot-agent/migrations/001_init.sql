@@ -1,5 +1,6 @@
--- Chat threads and messages, ported from fsd_test's assistant (ADR 0002). Idempotent: applied on every start.
--- A thread belongs to one user in one classroom; classroom access is checked through Identity when it is created,
+-- Chat threads and messages, ported from fsd_test's assistant (ADR 0002). Idempotent, because databases created before
+-- numbered migrations ran it on every start and take it once more when they are first recorded.
+-- A thread belongs to one user in one classroom; classroom access is checked through Identity on every request,
 -- and every search runs with the user's own token, so Content applies the user's access on each turn.
 CREATE TABLE IF NOT EXISTS threads (
   id              uuid        PRIMARY KEY DEFAULT gen_random_uuid(),
