@@ -38,6 +38,10 @@ func (m *memoryStore) listFinalized(_ context.Context, _, _, student string) ([]
 	return []Evaluation{{ID: evaluationID, Student: student, Status: statusFinalized}}, nil
 }
 
+func (m *memoryStore) countEvaluations(context.Context, string, string) (Counts, error) {
+	return Counts{Drafts: 1 - len(m.finalized), Finalized: len(m.finalized)}, nil
+}
+
 func (m *memoryStore) findClassroom(_ context.Context, _, id string) (string, error) {
 	if id != evaluationID {
 		return "", pgx.ErrNoRows
@@ -122,5 +126,18 @@ func TestPurgeRejectsMalformedDeletions(t *testing.T) {
 		if !errors.As(purge(context.Background(), nil, event), &invalid) {
 			t.Errorf("%s was not rejected", data)
 		}
+	}
+}
+
+func TestOnlyTheTeacherSeesGradingCounts(t *testing.T) {
+	path := "/v1/evaluations/counts?classroom_id=" + room
+	student := server{store: &memoryStore{}, access: platformtest.Access(platform.RelationStudent)}
+	if w := platformtest.Serve(student.routes, http.MethodGet, path, "", "student-1", "student"); w.Code != 403 {
+		t.Fatalf("a student saw grading counts: %d", w.Code)
+	}
+	teacher := server{store: &memoryStore{}, access: platformtest.Access(platform.RelationTeacher)}
+	w := platformtest.Serve(teacher.routes, http.MethodGet, path, "", "teacher-1", "teacher")
+	if w.Code != 200 || w.Body.String() != `{"drafts":1,"finalized":0}`+"\n" {
+		t.Fatalf("%d %q", w.Code, w.Body.String())
 	}
 }

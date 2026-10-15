@@ -14,6 +14,10 @@ test('forms preserve drafts and list refresh exposes loading and network recover
   await page.getByLabel('Password', { exact: true }).fill(env.TEACHER_PASSWORD);
   await page.getByRole('button', { name: 'Sign In', exact: true }).click();
   await expect(page.getByRole('button', { name: 'Sign out' })).toBeVisible();
+  await page
+    .getByRole('navigation', { name: 'Workspace' })
+    .getByRole('link', { name: 'Classrooms', exact: true })
+    .click();
   const name = page.getByLabel('Classroom name', { exact: true });
   await page.getByRole('button', { name: 'Create classroom', exact: true }).click();
   await expect(name).toHaveAttribute('aria-invalid', 'true');

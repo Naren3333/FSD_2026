@@ -42,6 +42,20 @@ func (m *memoryStore) listAssessments(context.Context, string, string) ([]Summar
 	return nil, nil
 }
 
+func (m *memoryStore) listProgress(context.Context, string, string) ([]Progress, error) {
+	result := []Progress{}
+	for _, v := range m.assessments {
+		n := 0
+		for key := range m.submitted {
+			if strings.HasPrefix(key, v.ID+"/") {
+				n++
+			}
+		}
+		result = append(result, Progress{ID: v.ID, Title: v.Title, Submissions: n})
+	}
+	return result, nil
+}
+
 func (m *memoryStore) insertSubmission(_ context.Context, v Assessment, sub Submission) (bool, error) {
 	key := v.ID + "/" + sub.Student
 	if m.submitted[key] {
@@ -125,6 +139,23 @@ func TestEachStudentSubmitsOnce(t *testing.T) {
 	}
 	if w := call(t, s, http.MethodPost, path, body, "teacher", "student"); w.Code != 403 {
 		t.Fatalf("a teacher submitted: %d", w.Code)
+	}
+}
+
+func TestOnlyTheTeacherSeesSubmissionCounts(t *testing.T) {
+	s, v := created(t, platform.RelationStudent)
+	path := "/v1/assessments/" + v.ID + "/submissions"
+	if w := call(t, s, http.MethodPost, path, `{"answers":{"`+v.Questions[0].ID+`":"1"}}`, "student"); w.Code != 201 {
+		t.Fatalf("status %d", w.Code)
+	}
+	progress := "/v1/assessments/progress?classroom_id=" + room
+	if w := call(t, s, http.MethodGet, progress, "", "student"); w.Code != 403 {
+		t.Fatalf("a student saw submission counts: %d", w.Code)
+	}
+	s.access = platformtest.Access(platform.RelationTeacher)
+	w := call(t, s, http.MethodGet, progress, "", "teacher")
+	if w.Code != 200 || !strings.Contains(w.Body.String(), `"submissions":1`) {
+		t.Fatalf("%d %s", w.Code, w.Body.String())
 	}
 }
 

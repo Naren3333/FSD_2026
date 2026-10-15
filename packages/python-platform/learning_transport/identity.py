@@ -38,3 +38,27 @@ class IdentityClient:
         if relation not in (RELATION_TEACHER, RELATION_STUDENT):
             raise UpstreamError("identity", 502)
         return str(relation)
+
+    async def roster(self, authorization: str, classroom_id: str, correlation: str) -> list[str] | None:
+        """The ids of the classroom's students, in Identity's order (by name), for its own teacher: None when
+        access is denied. Raises UpstreamError when Identity is unavailable or answers out of contract."""
+        try:
+            resp = await self.http.get(
+                f"{self.base_url}/v1/classrooms/{classroom_id}/students",
+                headers={"Authorization": authorization, "X-Correlation-ID": correlation},
+                timeout=5,
+            )
+        except httpx.HTTPError:
+            raise UpstreamError("identity", 0) from None
+        if resp.status_code >= 500:
+            raise UpstreamError("identity", resp.status_code)
+        if resp.status_code != 200:
+            return None
+        try:
+            students = resp.json()
+            ids = [student["id"] for student in students]
+        except (ValueError, TypeError, KeyError):
+            raise UpstreamError("identity", 502) from None
+        if not all(isinstance(i, str) and i for i in ids):
+            raise UpstreamError("identity", 502)
+        return ids

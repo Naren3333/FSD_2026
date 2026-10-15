@@ -115,16 +115,35 @@ export interface Usage {
   limit_usd: number;
   resets_at: string;
 }
+export interface SkillMetric {
+  skill_id: string;
+  attempted: number;
+  correct: number;
+  observed_accuracy: number;
+  evidence_status: string;
+  /** Five or more attempts under 60% correct. */
+  weakness_indicator: boolean;
+}
 export interface Performance {
   evidence_status: string;
   interpretation: string;
-  skills: {
-    skill_id: string;
-    attempted: number;
-    correct: number;
-    observed_accuracy: number;
-    evidence_status: string;
-    /** Five or more attempts under 60% correct. */
-    weakness_indicator: boolean;
-  }[];
+  skills: SkillMetric[];
+}
+/** One page of a classroom's enrolled students, in roster order, each with their finalized skill evidence. */
+export interface ClassPerformance {
+  total: number;
+  offset: number;
+  students: { student_id: string; skills: SkillMetric[]; evidence_status: string }[];
+  interpretation: string;
+}
+/** How many students have submitted an assessment. */
+export interface AssessmentProgress {
+  id: string;
+  title: string;
+  submissions: number;
+}
+/** How many of a classroom's grades wait for its teacher, and how many are final. */
+export interface GradingCounts {
+  drafts: number;
+  finalized: number;
 }

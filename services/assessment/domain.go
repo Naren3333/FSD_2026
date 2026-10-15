@@ -39,6 +39,13 @@ type Summary struct {
 	Title string `json:"title"`
 }
 
+// Progress is how many students have submitted an assessment, for its classroom's teacher.
+type Progress struct {
+	ID          string `json:"id"`
+	Title       string `json:"title"`
+	Submissions int    `json:"submissions"`
+}
+
 // Submission is one student's answers to an assessment, by question id.
 type Submission struct {
 	ID, Org, Student string

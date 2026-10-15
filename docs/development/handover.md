@@ -108,7 +108,7 @@ Checks: Go unit tests for Identity and Grading, the new SQL against PostgreSQL 1
 
 ## Separate student and teacher views, phase 1 (2026-10-14)
 
-Web only. Teachers land on Classrooms and students on Assessments. Classrooms and Curriculum are teacher-only routes and leave the student menu; students reload the classroom picker with a Refresh classrooms button in the header. Learning performance is labelled My progress for students. The header's username note shows for students only. The performance table shows Analytics' existing `weakness_indicator` as "Needs practice" (five or more questions under 60% correct). Next: the teacher Class dashboard, then student Home.
+Web only. Teachers land on Classrooms (now the Class dashboard, below) and students on Assessments. Classrooms and Curriculum are teacher-only routes and leave the student menu; students reload the classroom picker with a Refresh classrooms button in the header. Learning performance is labelled My progress for students. The header's username note shows for students only. The performance table shows Analytics' existing `weakness_indicator` as "Needs practice" (five or more questions under 60% correct). Next: the teacher Class dashboard, then student Home.
 
 ## Deleting classrooms (2026-10-14)
 
@@ -119,6 +119,16 @@ Deleting also purges the classroom's data in every service (authorized by the pr
 ## The school's students for teachers (2026-10-14)
 
 Identity's `GET /v1/students`, for teachers only, lists the students in the teacher's organization who have signed in with a username, by name, one page at a time: `search` (name or username, case-insensitive, up to 120 characters), `offset` (default 0) and `limit` (default 10, 1–50; anything else is a 422). It returns `{students, total}`, where `total` counts every match. Accounts with no name recorded yet are left out until their next sign-in. The Classrooms page shows them under "All students", ten per page with Previous/Next, searching on the server as the teacher types (after a short pause), each with an Enroll button for the current classroom, or "Enrolled" when the classroom already has them. This replaces the enroll-by-username form; the API still accepts `username`. Checks: Identity unit test, `integration.py` (`classroom` step), `e2e/workflow.spec.ts`.
+
+## Class dashboard, phase 2 (2026-10-15)
+
+Teachers now land on a Class dashboard (`/dashboard`, teacher-only, first in their menu) for the current classroom. Three new read endpoints, each for the classroom's own teacher only (anyone else gets 403):
+
+- Assessment `GET /v1/assessments/progress?classroom_id=` lists up to 100 newest assessments as `{id, title, submissions}`; `submissions` counts every submission, including those of students since removed.
+- Grading `GET /v1/evaluations/counts?classroom_id=` returns `{drafts, finalized}`.
+- Analytics `GET /v1/performance?classroom_id=&offset=&limit=` returns one page of the currently enrolled students (`limit` 1–50, default 20; anything else is a 422) with their finalized skill evidence, in roster order, students without evidence included: `{classroom_id, total, offset, students: [{student_id, skills}], interpretation}`. The roster comes from Identity (`GET /v1/classrooms/{id}/students`, read with the teacher's token through the new `IdentityClient.roster`), so a removed student drops out. Identity unavailable is a 503.
+
+The page shows tiles for drafts needing grading (to Grading review), students enrolled (to Classrooms) and assessments (to Assessments); each assessment's "N of M students submitted"; and a skills-by-students table, twenty students per page, whose student names open Learning performance for that student (`/performance?student=`). Only students are paged; every skill any student on the page has evidence for is a row. Each part loads and fails on its own. Checks: Assessment and Grading unit tests, Analytics `test_class_performance_keeps_roster_order_and_students_without_evidence`, the `learning_transport` roster test, `integration.py` step `class_dashboard`, `e2e/workflow.spec.ts` (landing, counts, skills table, link to a student). Next: student Home.
 
 ## Incomplete requirements and risks
 

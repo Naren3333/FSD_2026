@@ -9,7 +9,7 @@ from typing import Any
 from uuid import UUID
 
 import httpx
-from fastapi import Depends, Request
+from fastapi import Depends, Query, Request
 from fastapi.concurrency import run_in_threadpool
 from learning_transport import (
     OIDC_SETTINGS,
@@ -26,7 +26,7 @@ from learning_transport.db import open_pool
 from psycopg_pool import ConnectionPool
 
 from consumer import run
-from domain import PerformanceResponse, summarize
+from domain import ClassPerformanceResponse, PerformanceResponse, by_student, summarize
 
 MIGRATIONS = Path(__file__).parent / "migrations"
 CONSUMER_STOP_GRACE = 35  # seconds shutdown waits for the consumer thread
@@ -71,6 +71,55 @@ def skill_evidence(pool: ConnectionPool[Any], org: str, classroom_id: UUID, stud
         ).fetchall()
 
 
+INTERPRETATION = "Observed accuracy describes finalized question evidence, not a mastery probability."
+MAX_PAGE = 50
+
+
+def class_evidence(pool: ConnectionPool[Any], org: str, classroom_id: UUID, students: list[str]) -> list[Any]:
+    with pool.connection() as conn:
+        return conn.execute(
+            "SELECT student_id,skill_id,correct FROM evidence WHERE org_id=%s AND classroom_id=%s"
+            " AND student_id = ANY(%s)",
+            (org, classroom_id, students),
+        ).fetchall()
+
+
+@app.get("/v1/performance")
+async def class_performance(
+    classroom_id: UUID,
+    request: Request,
+    offset: int = Query(default=0, ge=0),
+    limit: int = Query(default=20, ge=1, le=MAX_PAGE),
+    claims: Claims = Depends(requires(TEACHER)),
+) -> ClassPerformanceResponse:
+    """One page of the classroom's enrolled students with their skill evidence, for its own teacher only. The
+    roster comes from Identity with the teacher's token, so only currently enrolled students appear."""
+    identity: IdentityClient = request.app.state.identity
+    authorization, correlation = request.headers["authorization"], request.state.correlation_id
+    try:
+        relation = await identity.relation(authorization, str(classroom_id), correlation)
+        roster = await identity.roster(authorization, str(classroom_id), correlation) if relation else None
+    except UpstreamError:
+        raise failure(503, "DEPENDENCY_UNAVAILABLE", "Authorization is unavailable.") from None
+    if relation != TEACHER or roster is None:
+        raise failure(403, "ACCESS_DENIED", "Only the classroom's teacher can view its performance.")
+    page = roster[offset : offset + limit]
+    rows = (
+        await run_in_threadpool(class_evidence, request.app.state.pool, claims.org, classroom_id, page)
+        if page
+        else []
+    )
+    return ClassPerformanceResponse.model_validate(
+        {
+            "classroom_id": str(classroom_id),
+            "total": len(roster),
+            "offset": offset,
+            "students": by_student(page, rows),
+            "interpretation": INTERPRETATION,
+        }
+    )
+
+
 @app.get("/v1/performance/{student_id}")
 async def performance(
     student_id: str,
@@ -98,6 +147,6 @@ async def performance(
             "classroom_id": str(classroom_id),
             "skills": summarize(rows),
             "evidence_status": "no_finalized_evidence" if not rows else "available",
-            "interpretation": "Observed accuracy describes finalized question evidence, not a mastery probability.",
+            "interpretation": INTERPRETATION,
         }
     )

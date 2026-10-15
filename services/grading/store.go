@@ -16,12 +16,25 @@ var errAlreadyFinalized = errors.New("evaluation already finalized")
 type store interface {
 	listEvaluations(ctx context.Context, org, classroom string) ([]Evaluation, error)
 	listFinalized(ctx context.Context, org, classroom, student string) ([]Evaluation, error)
+	countEvaluations(ctx context.Context, org, classroom string) (Counts, error)
 	findClassroom(ctx context.Context, org, id string) (string, error)
 	finalizeEvaluation(ctx context.Context, org, id, actor, reason string, overrides map[string]int) (Evaluation, error)
 }
 
 // pgStore is the store in the service's own Postgres database.
 type pgStore struct{ db *pgxpool.Pool }
+
+// Counts is how many of a classroom's evaluations are drafts waiting for its teacher, and how many are finalized.
+type Counts struct {
+	Drafts    int `json:"drafts"`
+	Finalized int `json:"finalized"`
+}
+
+func (p pgStore) countEvaluations(ctx context.Context, org, classroom string) (Counts, error) {
+	var c Counts
+	err := p.db.QueryRow(ctx, "SELECT count(*) FILTER (WHERE status='draft'),count(*) FILTER (WHERE status='finalized') FROM evaluations WHERE classroom_id=$1 AND org_id=$2", classroom, org).Scan(&c.Drafts, &c.Finalized)
+	return c, err
+}
 
 // insertEvaluation runs inside the event consumer's transaction.
 func insertEvaluation(ctx context.Context, tx pgx.Tx, v Submitted, evidence []byte) error {

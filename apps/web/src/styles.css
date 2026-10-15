@@ -903,3 +903,46 @@ dialog::backdrop {
     max-width: 100%;
   }
 }
+.stats {
+  list-style: none;
+  margin: 24px 0;
+  padding: 0;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 16px;
+}
+.stat {
+  display: grid;
+  gap: 6px;
+  min-height: 44px;
+  padding: 20px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  color: inherit;
+  text-decoration: none;
+}
+.stat:hover {
+  border-color: var(--brand);
+}
+.stat-label {
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: var(--muted);
+}
+.stat-value {
+  font-size: 2rem;
+  line-height: 1.1;
+}
+.dashboard-panel {
+  margin-top: 24px;
+}
+.skills-table td {
+  vertical-align: top;
+}
+.skills-table td > span {
+  display: block;
+}
+.cell-value {
+  font-weight: 600;
+}

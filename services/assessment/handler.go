@@ -20,6 +20,7 @@ type server struct {
 func (s server) routes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /v1/assessments", s.create)
 	mux.HandleFunc("GET /v1/assessments", s.list)
+	mux.HandleFunc("GET /v1/assessments/progress", s.progress)
 	mux.HandleFunc("GET /v1/assessments/{id}", s.get)
 	mux.HandleFunc("POST /v1/assessments/{id}/submissions", s.submit)
 }
@@ -64,6 +65,20 @@ func (s server) list(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	result, err := s.store.listAssessments(r.Context(), platform.Actor(r).Org, id)
+	if err != nil {
+		platform.Fail(w, err)
+		return
+	}
+	platform.JSON(w, http.StatusOK, result)
+}
+
+// progress is, for the classroom's teacher only, each assessment with how many students have submitted it.
+func (s server) progress(w http.ResponseWriter, r *http.Request) {
+	id := r.URL.Query().Get("classroom_id")
+	if !s.access.TeacherOf(w, r, id) {
+		return
+	}
+	result, err := s.store.listProgress(r.Context(), platform.Actor(r).Org, id)
 	if err != nil {
 		platform.Fail(w, err)
 		return

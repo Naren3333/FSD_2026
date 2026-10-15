@@ -55,3 +55,22 @@ def test_malformed_classroom_deletions_are_dead_lettered():
     handle = handler(None)  # type: ignore[arg-type]  # never reached: the message is rejected first
     assert handle(CLASSROOM_DELETED, json.dumps(deletion).encode()) is False
     assert handle(CLASSROOM_DELETED, b"not json") is False
+
+
+def test_class_performance_keeps_roster_order_and_students_without_evidence():
+    from domain import ClassPerformanceResponse, by_student
+
+    skill = str(uuid4())
+    rows = [{"student_id": "s2", "skill_id": skill, "correct": n < 4} for n in range(5)]
+    students = by_student(["s1", "s2"], rows)
+    assert [s["student_id"] for s in students] == ["s1", "s2"]
+    assert students[0] == {"student_id": "s1", "skills": [], "evidence_status": "no_finalized_evidence"}
+    assert students[1]["skills"][0]["observed_accuracy"] == 0.8
+    page = {
+        "classroom_id": str(uuid4()),
+        "total": 2,
+        "offset": 0,
+        "students": students,
+        "interpretation": "x",
+    }
+    assert ClassPerformanceResponse.model_validate(page).total == 2

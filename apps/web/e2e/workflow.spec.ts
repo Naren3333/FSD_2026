@@ -25,9 +25,13 @@ test('teacher and student complete a real assessment through Kong', async ({ bro
   await expect(studentMenu.getByRole('link', { name: 'Classrooms', exact: true })).toHaveCount(0);
   await expect(studentMenu.getByRole('link', { name: 'Curriculum', exact: true })).toHaveCount(0);
   await login(teacher, 'teacher', env.TEACHER_PASSWORD);
-  await expect(teacher).toHaveURL(/\/classrooms$/);
+  await expect(teacher).toHaveURL(/\/dashboard$/);
   await expect(teacher.locator('.identity-note')).toHaveCount(0);
   await expect(teacher.getByRole('link', { name: 'My results', exact: true })).toHaveCount(0);
+  await expect(studentMenu.getByRole('link', { name: 'Class dashboard', exact: true })).toHaveCount(0);
+  // The dashboard links to Classrooms too, so the menu link is the one to use.
+  const teacherMenu = teacher.getByRole('navigation', { name: 'Workspace' });
+  await teacherMenu.getByRole('link', { name: 'Classrooms', exact: true }).click();
   const suffix = Date.now().toString();
   await teacher.getByLabel('Classroom name', { exact: true }).fill('Browser ' + suffix);
   await teacher.getByRole('button', { name: 'Create classroom', exact: true }).click();
@@ -99,17 +103,28 @@ test('teacher and student complete a real assessment through Kong', async ({ bro
   await expect(
     student.getByRole('rowheader', { name: 'Browser skill ' + suffix, exact: true }),
   ).toBeVisible();
-  // The teacher picks the student by name.
-  await teacher.getByRole('link', { name: 'Learning performance', exact: true }).click();
-  await teacher.getByLabel('Student', { exact: true }).selectOption({ label: 'Student Local' });
-  await teacher.getByRole('button', { name: 'View performance', exact: true }).click();
+  // The class dashboard counts the finalized grade and shows the class's skills; a student's name opens their
+  // full performance.
+  await teacher.getByRole('link', { name: 'Class dashboard', exact: true }).click();
+  const skills = teacher.getByRole('region', { name: 'Class skills table' });
+  await expect(async () => {
+    await teacher.getByRole('button', { name: 'Refresh dashboard' }).click();
+    await expect(
+      skills.getByRole('rowheader', { name: 'Browser skill ' + suffix, exact: true }),
+    ).toBeVisible();
+  }).toPass({ timeout: 30000 });
+  await expect(teacher.getByText('1 of 1 students submitted', { exact: true })).toBeVisible();
+  await expect(skills.getByText('100%', { exact: true })).toBeVisible();
+  await skills.getByRole('link', { name: 'Student Local', exact: true }).click();
+  await expect(teacher).toHaveURL(/\/performance\?student=/);
+  await expect(teacher.getByLabel('Student', { exact: true })).toHaveValue(/.+/);
   await expect(teacher.getByRole('cell', { name: '100%' })).toBeVisible();
   await student.screenshot({ path: 'test-results/performance-desktop.png', fullPage: true });
   await student.setViewportSize({ width: 390, height: 844 });
   await student.screenshot({ path: 'test-results/performance-mobile.png', fullPage: true });
   expect(await student.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
   // Removing asks first, with Cancel focused; the student then no longer sees the classroom.
-  await teacher.getByRole('link', { name: 'Classrooms', exact: true }).click();
+  await teacherMenu.getByRole('link', { name: 'Classrooms', exact: true }).click();
   await roster.getByRole('button', { name: 'Remove Student Local from the classroom' }).click();
   await expect(teacher.getByRole('button', { name: 'Cancel', exact: true })).toBeFocused();
   await teacher.getByRole('button', { name: 'Remove student', exact: true }).click();

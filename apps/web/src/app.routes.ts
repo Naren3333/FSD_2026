@@ -15,6 +15,12 @@ export interface Section {
 
 export const SECTIONS: Section[] = [
   {
+    path: 'dashboard',
+    label: 'Class dashboard',
+    teacherOnly: true,
+    load: () => import('./features/dashboard/dashboard').then((m) => m.DashboardComponent),
+  },
+  {
     path: 'classrooms',
     label: 'Classrooms',
     teacherOnly: true,
@@ -66,9 +72,9 @@ export function sectionLabel(section: Section, session: Session): string {
   return session.isStudent() && section.studentLabel ? section.studentLabel : section.label;
 }
 
-/** Where each role starts: teachers on their classrooms, students on their assessments. */
+/** Where each role starts: teachers on their class dashboard, students on their assessments. */
 function landing(session: Session): string {
-  return session.isStudent() ? '/assessments' : '/classrooms';
+  return session.isStudent() ? '/assessments' : '/dashboard';
 }
 
 /** Sections for one role send the other role to its own landing page. Signed out, the shell shows sign-in. */

@@ -95,12 +95,43 @@ class SkillMetric(Contract):
         return self
 
 
+class StudentPerformance(Contract):
+    student_id: str
+    skills: list[SkillMetric]
+    evidence_status: Literal["no_finalized_evidence", "available"]
+
+
+class ClassPerformanceResponse(Contract):
+    """One page of a classroom's enrolled students, in Identity's roster order, each with their skill evidence."""
+
+    classroom_id: UUID
+    total: int = Field(ge=0)
+    offset: int = Field(ge=0)
+    students: list[StudentPerformance] = Field(max_length=50)
+    interpretation: str
+
+
 class PerformanceResponse(Contract):
     student_id: str
     classroom_id: UUID
     skills: list[SkillMetric]
     evidence_status: Literal["no_finalized_evidence", "available"]
     interpretation: str
+
+
+def by_student(students: list[str], rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Each student's skill summary, in the given order; a student without evidence has no skills."""
+    evidence: dict[str, list[dict[str, Any]]] = defaultdict(list)
+    for row in rows:
+        evidence[row["student_id"]].append(row)
+    return [
+        {
+            "student_id": student,
+            "skills": summarize(evidence[student]),
+            "evidence_status": "available" if evidence[student] else "no_finalized_evidence",
+        }
+        for student in students
+    ]
 
 
 def summarize(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:

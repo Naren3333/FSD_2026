@@ -49,6 +49,70 @@
         }
       }
     },
+    "/v1/performance": {
+      "get": {
+        "summary": "Class Performance",
+        "description": "One page of the classroom's enrolled students with their skill evidence, for its own teacher only. The\nroster comes from Identity with the teacher's token, so only currently enrolled students appear.",
+        "operationId": "class_performance_v1_performance_get",
+        "parameters": [
+          {
+            "name": "classroom_id",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Classroom Id"
+            }
+          },
+          {
+            "name": "offset",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 0,
+              "default": 0,
+              "title": "Offset"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 50,
+              "minimum": 1,
+              "default": 20,
+              "title": "Limit"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ClassPerformanceResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/v1/performance/{student_id}": {
       "get": {
         "summary": "Performance",
@@ -101,6 +165,48 @@
   },
   "components": {
     "schemas": {
+      "ClassPerformanceResponse": {
+        "properties": {
+          "classroom_id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Classroom Id"
+          },
+          "total": {
+            "type": "integer",
+            "minimum": 0.0,
+            "title": "Total"
+          },
+          "offset": {
+            "type": "integer",
+            "minimum": 0.0,
+            "title": "Offset"
+          },
+          "students": {
+            "items": {
+              "$ref": "#/components/schemas/StudentPerformance"
+            },
+            "type": "array",
+            "maxItems": 50,
+            "title": "Students"
+          },
+          "interpretation": {
+            "type": "string",
+            "title": "Interpretation"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "classroom_id",
+          "total",
+          "offset",
+          "students",
+          "interpretation"
+        ],
+        "title": "ClassPerformanceResponse",
+        "description": "One page of a classroom's enrolled students, in Identity's roster order, each with their skill evidence."
+      },
       "HTTPValidationError": {
         "properties": {
           "detail": {
@@ -203,6 +309,37 @@
           "weakness_indicator"
         ],
         "title": "SkillMetric"
+      },
+      "StudentPerformance": {
+        "properties": {
+          "student_id": {
+            "type": "string",
+            "title": "Student Id"
+          },
+          "skills": {
+            "items": {
+              "$ref": "#/components/schemas/SkillMetric"
+            },
+            "type": "array",
+            "title": "Skills"
+          },
+          "evidence_status": {
+            "type": "string",
+            "enum": [
+              "no_finalized_evidence",
+              "available"
+            ],
+            "title": "Evidence Status"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "student_id",
+          "skills",
+          "evidence_status"
+        ],
+        "title": "StudentPerformance"
       },
       "ValidationError": {
         "properties": {

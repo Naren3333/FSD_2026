@@ -14,6 +14,7 @@ type store interface {
 	findAssessment(ctx context.Context, org, id string) (Assessment, error)
 	insertAssessment(ctx context.Context, org string, v Assessment) error
 	listAssessments(ctx context.Context, org, classroomID string) ([]Summary, error)
+	listProgress(ctx context.Context, org, classroomID string) ([]Progress, error)
 	insertSubmission(ctx context.Context, v Assessment, sub Submission) (bool, error)
 }
 
@@ -40,6 +41,19 @@ func (p pgStore) insertAssessment(ctx context.Context, org string, v Assessment)
 	}
 	_, err = p.db.Exec(ctx, "INSERT INTO assessments(id,classroom_id,org_id,title,questions) VALUES($1,$2,$3,$4,$5)", v.ID, v.Classroom, org, v.Title, data)
 	return err
+}
+
+// listProgress is the classroom's 100 newest assessments with how many students submitted each.
+func (p pgStore) listProgress(ctx context.Context, org, classroomID string) ([]Progress, error) {
+	rows, err := p.db.Query(ctx, "SELECT a.id,a.title,count(s.id) FROM assessments a LEFT JOIN submissions s ON s.assessment_id=a.id WHERE a.classroom_id=$1 AND a.org_id=$2 GROUP BY a.id ORDER BY a.created_at DESC LIMIT 100", classroomID, org)
+	if err != nil {
+		return nil, err
+	}
+	return pgx.CollectRows(rows, func(row pgx.CollectableRow) (Progress, error) {
+		var v Progress
+		err := row.Scan(&v.ID, &v.Title, &v.Submissions)
+		return v, err
+	})
 }
 
 func (p pgStore) listAssessments(ctx context.Context, org, classroomID string) ([]Summary, error) {

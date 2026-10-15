@@ -2,11 +2,14 @@ import { Injectable, inject } from '@angular/core';
 import { Gateway } from '../core/gateway';
 import type {
   Assessment,
+  AssessmentProgress,
   ChatMessage,
+  ClassPerformance,
   Classroom,
   DocType,
   DocumentRecord,
   Evaluation,
+  GradingCounts,
   Node,
   NodeInput,
   Performance,
@@ -124,6 +127,10 @@ export class AssessmentApi {
   list(classroomId: string): Promise<Pick<Assessment, 'id' | 'title'>[]> {
     return this.gateway.request('assessment', `/assessments?classroom_id=${id(classroomId)}`);
   }
+  /** For the classroom's teacher: its 100 newest assessments with how many students submitted each. */
+  progress(classroomId: string): Promise<AssessmentProgress[]> {
+    return this.gateway.request('assessment', `/assessments/progress?classroom_id=${id(classroomId)}`);
+  }
   /** With answer keys for the classroom's teacher only. */
   get(assessmentId: string): Promise<Assessment> {
     return this.gateway.request('assessment', `/assessments/${id(assessmentId)}`);
@@ -145,6 +152,10 @@ export class GradingApi {
 
   evaluations(classroomId: string): Promise<Evaluation[]> {
     return this.gateway.request('grading', `/evaluations?classroom_id=${id(classroomId)}`);
+  }
+  /** For the classroom's teacher: how many grades are drafts waiting for review, and how many are final. */
+  counts(classroomId: string): Promise<GradingCounts> {
+    return this.gateway.request('grading', `/evaluations/counts?classroom_id=${id(classroomId)}`);
   }
   /** The signed-in student's finalized results in the classroom; drafts are never returned. */
   mine(classroomId: string): Promise<Evaluation[]> {
@@ -168,6 +179,15 @@ export class AnalyticsApi {
 
   performance(studentId: string, classroomId: string): Promise<Performance> {
     return this.gateway.request('analytics', `/performance/${id(studentId)}?classroom_id=${id(classroomId)}`);
+  }
+  /** For the classroom's teacher: one page of its enrolled students with their finalized skill evidence. */
+  classPerformance(classroomId: string, offset: number, limit: number): Promise<ClassPerformance> {
+    const query = new URLSearchParams({
+      classroom_id: classroomId,
+      offset: String(offset),
+      limit: String(limit),
+    });
+    return this.gateway.request('analytics', `/performance?${query}`);
   }
 }
 

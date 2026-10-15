@@ -25,6 +25,10 @@ async function login(page: Page, user: string, password: string) {
 }
 async function teacherWithClassroom(page: Page, name: string) {
   await login(page, 'teacher', env.TEACHER_PASSWORD);
+  await page
+    .getByRole('navigation', { name: 'Workspace' })
+    .getByRole('link', { name: 'Classrooms', exact: true })
+    .click();
   await page.getByLabel('Classroom name', { exact: true }).fill(name);
   await page.getByRole('button', { name: 'Create classroom', exact: true }).click();
   await expect(page.getByText('Classroom created.', { exact: true })).toBeVisible();

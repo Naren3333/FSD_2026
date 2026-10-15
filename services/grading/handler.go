@@ -18,6 +18,7 @@ type server struct {
 func (s server) routes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /v1/evaluations", s.list)
 	mux.HandleFunc("GET /v1/evaluations/mine", s.mine)
+	mux.HandleFunc("GET /v1/evaluations/counts", s.counts)
 	mux.HandleFunc("POST /v1/evaluations/{id}/finalize", s.finalize)
 }
 
@@ -27,6 +28,20 @@ func (s server) list(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	result, err := s.store.listEvaluations(r.Context(), platform.Actor(r).Org, classroom)
+	if err != nil {
+		platform.Fail(w, err)
+		return
+	}
+	platform.JSON(w, http.StatusOK, result)
+}
+
+// counts is, for the classroom's teacher only, how many of its evaluations need grading and how many are final.
+func (s server) counts(w http.ResponseWriter, r *http.Request) {
+	classroom := r.URL.Query().Get("classroom_id")
+	if !s.access.TeacherOf(w, r, classroom) {
+		return
+	}
+	result, err := s.store.countEvaluations(r.Context(), platform.Actor(r).Org, classroom)
 	if err != nil {
 		platform.Fail(w, err)
 		return

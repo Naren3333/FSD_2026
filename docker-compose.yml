@@ -131,6 +131,7 @@ services:
       KONG_PROXY_ACCESS_LOG: 'off'
       KONG_PROXY_ERROR_LOG: /dev/stderr
       KONG_DNS_VALID_TTL: '5'  # re-resolve services every 5 s, so a recreated container is found without restarting Kong
+      KONG_DNS_STALE_TTL: '0'  # never route to a cached address after it expires; a restarted container's old IP may now belong to another service
     ports:
     - 127.0.0.1:8000:8000
     volumes:

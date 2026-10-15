@@ -415,6 +415,27 @@ def replayed_events(u: Users, room_id: str, graded: Graded) -> None:
     assert len(request(u.teacher, "GET", f"/grading/evaluations?classroom_id={room_id}")) == 1
 
 
+def class_dashboard(u: Users, room_id: str, graded: Graded) -> None:
+    """The class dashboard's numbers, for the classroom's teacher only: submissions per assessment, grades waiting
+    and finalized, and one page of enrolled students with their skill evidence."""
+    query = f"?classroom_id={room_id}"
+    progress = f"/assessment/assessments/progress{query}"
+    assert {"title": "Decimal test", "submissions": 1} in [
+        {"title": a["title"], "submissions": a["submissions"]} for a in request(u.teacher, "GET", progress)
+    ]
+    counts = f"/grading/evaluations/counts{query}"
+    assert request(u.teacher, "GET", counts) == {"drafts": 0, "finalized": 1}
+    performance = f"/analytics/performance{query}&limit=50"
+    page = request(u.teacher, "GET", performance)
+    assert page["total"] >= 1 and page["offset"] == 0
+    [student] = [s for s in page["students"] if s["student_id"] == u.student_id]
+    assert student["skills"] == graded.skills and student["evidence_status"] == "available"
+    request(u.teacher, "GET", f"/analytics/performance{query}&limit=51", 422)
+    for path in [progress, counts, performance]:
+        request(u.student, "GET", path, 403)
+        request(u.other, "GET", path, 403)
+
+
 def unenroll(u: Users, room_id: str) -> None:
     """Removing a student keeps their grades but ends their access to the classroom."""
     remove = f"/identity/classrooms/{room_id}/enrollments/{u.student_id}"
@@ -519,6 +540,7 @@ def main() -> None:
     chat(users, room_id)
     graded = assess_and_grade(users, room_id)
     replayed_events(users, room_id, graded)
+    class_dashboard(users, room_id, graded)
     unenroll(users, room_id)
     delete_classroom(users, room_id, graded)
     databases()
@@ -527,7 +549,7 @@ def main() -> None:
         "PASS: gateway auth, classroom isolation, enrollment by username, rosters, the school's student list, unenrollment, classroom deletion and its cross-service purge, curriculum, "
         "S3 upload/extraction, PDF indexing jobs, teacher-only rubrics, search access, chat threads and streaming, "
         "AI spend allowance, answer-key secrecy, submissions, draft grading, teacher finalization, students' own "
-        "finalized results, Kafka analytics, consumer restart, duplicate event and business-key idempotency, "
+        "finalized results, the class dashboard's counts and class performance, Kafka analytics, consumer restart, duplicate event and business-key idempotency, "
         "student privacy, database isolation, numbered migrations, pgvector, AI service accounts."
     )
 

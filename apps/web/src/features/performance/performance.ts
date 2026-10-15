@@ -1,6 +1,8 @@
 import { DecimalPipe, PercentPipe } from '@angular/common';
 import { Component, inject, signal } from '@angular/core';
+import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { FormControl, FormGroup, ReactiveFormsModule, Validators } from '@angular/forms';
+import { ActivatedRoute } from '@angular/router';
 import { AnalyticsApi, CurriculumApi, IdentityApi } from '../../api/clients';
 import type { Performance, Student } from '../../api/models';
 import { ClassroomContext, onClassroomChange } from '../../core/classroom-context';
@@ -28,6 +30,8 @@ export class PerformanceComponent {
   readonly roster = signal<Student[]>([]);
   private readonly skills = signal(new Map<string, string>());
   readonly studentName = studentName;
+  /** The student a link such as the class dashboard asked to open, until they are found on the roster. */
+  private requested = '';
   readonly form = new FormGroup({
     student: new FormControl('', { nonNullable: true, validators: [Validators.required] }),
   });
@@ -43,10 +47,26 @@ export class PerformanceComponent {
       } else {
         this.form.reset();
         if (classroomId) {
-          void this.state.run(async () => this.roster.set(await this.identity.roster(classroomId)));
+          void this.state
+            .run(async () => this.roster.set(await this.identity.roster(classroomId)))
+            .then(() => this.openRequested());
         }
       }
     });
+    inject(ActivatedRoute)
+      .queryParamMap.pipe(takeUntilDestroyed())
+      .subscribe((params) => {
+        this.requested = params.get('student') ?? '';
+        this.openRequested();
+      });
+  }
+
+  /** Shows the requested student's evidence once they are on the current classroom's roster. */
+  private openRequested(): void {
+    if (!this.requested || !this.roster().some((s) => s.id === this.requested)) return;
+    this.form.controls.student.setValue(this.requested);
+    this.requested = '';
+    this.load();
   }
 
   skill(skillId: string): string {

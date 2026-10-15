@@ -39,13 +39,15 @@ async function guard(path: string, role: 'teacher' | 'student' | null): Promise<
 describe('role landing pages', () => {
   it('sends each role from the root to its own landing page', async () => {
     expect(await guard('', 'student')).toBe('/assessments');
-    expect(await guard('', 'teacher')).toBe('/classrooms');
+    expect(await guard('', 'teacher')).toBe('/dashboard');
   });
 
   it('sends a role away from the other role’s sections', async () => {
     expect(await guard('classrooms', 'student')).toBe('/assessments');
-    expect(await guard('results', 'teacher')).toBe('/classrooms');
+    expect(await guard('dashboard', 'student')).toBe('/assessments');
+    expect(await guard('results', 'teacher')).toBe('/dashboard');
     expect(await guard('classrooms', 'teacher')).toBe(true);
+    expect(await guard('dashboard', 'teacher')).toBe(true);
     expect(await guard('results', null)).toBe(true);
   });
 });

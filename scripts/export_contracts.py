@@ -305,6 +305,13 @@ operations = {
             assessment,
             201,
         ),
+        operation(
+            "GET",
+            "/v1/assessments/progress",
+            None,
+            array(obj({"id": UUID, "title": TEXT, "submissions": {"type": "integer", "minimum": 0}})),
+            query=["classroom_id"],
+        ),
         operation("GET", "/v1/assessments/{id}", None, {"oneOf": [assessment, public_assessment]}),
         operation(
             "POST",
@@ -317,6 +324,15 @@ operations = {
     "grading": [
         operation("GET", "/v1/evaluations", None, array(evaluation), query=["classroom_id"]),
         operation("GET", "/v1/evaluations/mine", None, array(own_result), query=["classroom_id"]),
+        operation(
+            "GET",
+            "/v1/evaluations/counts",
+            None,
+            obj(
+                {"drafts": {"type": "integer", "minimum": 0}, "finalized": {"type": "integer", "minimum": 0}}
+            ),
+            query=["classroom_id"],
+        ),
         operation(
             "POST",
             "/v1/evaluations/{id}/finalize",
