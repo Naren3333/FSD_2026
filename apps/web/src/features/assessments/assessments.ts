@@ -1,7 +1,9 @@
 import { Component, inject, signal } from '@angular/core';
+import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { FormControl, FormGroup, ReactiveFormsModule, Validators } from '@angular/forms';
+import { ActivatedRoute } from '@angular/router';
 import { AssessmentApi, CurriculumApi, NewAssessment } from '../../api/clients';
-import type { Assessment, Node, Question } from '../../api/models';
+import type { Assessment, AssessmentSummary, Node, Question } from '../../api/models';
 import { ClassroomContext, onClassroomChange } from '../../core/classroom-context';
 import { Session } from '../../core/session';
 import { UnsavedChanges } from '../../core/unsaved-changes';
@@ -23,10 +25,12 @@ export class AssessmentsComponent {
   private readonly curriculum = inject(CurriculumApi);
   readonly classroomId = inject(ClassroomContext).classroomId;
   readonly state = new ActionState();
-  readonly assessments = signal<Pick<Assessment, 'id' | 'title'>[]>([]);
+  readonly assessments = signal<AssessmentSummary[]>([]);
   readonly skills = signal<Node[]>([]);
   readonly selected = signal<Assessment | null>(null);
   readonly submitted = signal(false);
+  /** The assessment a link such as student Home asked to open, until the classroom's list has it. */
+  private requested = '';
   answers = new FormGroup<Record<string, FormControl<string>>>({});
   readonly form = new FormGroup({
     title: new FormControl('', {
@@ -51,15 +55,31 @@ export class AssessmentsComponent {
       this.assessments.set([]);
       this.load();
     });
+    inject(ActivatedRoute)
+      .queryParamMap.pipe(takeUntilDestroyed())
+      .subscribe((params) => {
+        this.requested = params.get('open') ?? '';
+        this.openRequested();
+      });
   }
 
   load(): void {
     const classroomId = this.classroomId();
     if (!classroomId) return;
-    void this.state.run(async () => {
-      this.assessments.set(await this.assessmentApi.list(classroomId));
-      this.skills.set((await this.curriculum.nodes()).filter((n) => n.kind === 'skill'));
-    });
+    void this.state
+      .run(async () => {
+        this.assessments.set(await this.assessmentApi.list(classroomId));
+        this.skills.set((await this.curriculum.nodes()).filter((n) => n.kind === 'skill'));
+      })
+      .then(() => this.openRequested());
+  }
+
+  /** Opens the requested assessment once it is in the current classroom's list. */
+  private openRequested(): void {
+    if (!this.requested || !this.assessments().some((a) => a.id === this.requested)) return;
+    const id = this.requested;
+    this.requested = '';
+    this.open(id);
   }
 
   create(): void {
@@ -107,7 +127,7 @@ export class AssessmentsComponent {
         ),
       );
       this.selected.set(assessment);
-      this.submitted.set(false);
+      this.submitted.set(this.assessments().find((a) => a.id === id)?.submitted ?? false);
     });
   }
 
@@ -118,6 +138,9 @@ export class AssessmentsComponent {
       await this.assessmentApi.submit(assessment.id, this.answers.getRawValue());
       this.answers.markAsPristine();
       this.submitted.set(true);
+      this.assessments.update((list) =>
+        list.map((a) => (a.id === assessment.id ? { ...a, submitted: true } : a)),
+      );
     }, 'Answers submitted. Your teacher will review the grade.');
   }
 }

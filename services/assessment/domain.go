@@ -33,10 +33,11 @@ type Assessment struct {
 	Questions []Question `json:"questions"`
 }
 
-// Summary is an assessment in a classroom's list.
+// Summary is an assessment in a classroom's list, with whether the caller has submitted it.
 type Summary struct {
-	ID    string `json:"id"`
-	Title string `json:"title"`
+	ID        string `json:"id"`
+	Title     string `json:"title"`
+	Submitted bool   `json:"submitted"`
 }
 
 // Progress is how many students have submitted an assessment, for its classroom's teacher.

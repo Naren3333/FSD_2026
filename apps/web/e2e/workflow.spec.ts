@@ -20,7 +20,7 @@ test('teacher and student complete a real assessment through Kong', async ({ bro
   await login(student, 'student', env.STUDENT_PASSWORD);
   const studentUsername = await student.locator('.identity-note code').innerText();
   // Each role lands on its own page and sees only its own menu.
-  await expect(student).toHaveURL(/\/assessments$/);
+  await expect(student).toHaveURL(/\/home$/);
   const studentMenu = student.getByRole('navigation', { name: 'Workspace' });
   await expect(studentMenu.getByRole('link', { name: 'Classrooms', exact: true })).toHaveCount(0);
   await expect(studentMenu.getByRole('link', { name: 'Curriculum', exact: true })).toHaveCount(0);
@@ -61,13 +61,19 @@ test('teacher and student complete a real assessment through Kong', async ({ bro
   await expect(teacher.getByText('Assessment created.', { exact: true })).toBeVisible();
   await student.getByRole('button', { name: 'Refresh classrooms' }).click();
   await student.getByLabel('Current classroom').selectOption({ label: 'Browser ' + suffix });
-  await student.getByRole('link', { name: 'Assessments', exact: true }).click();
-  await student.getByRole('button', { name: 'Open assessment', exact: true }).click();
+  // Home lists the new assessment as to do and opens it.
+  const todo = student.getByRole('region', { name: 'To do' });
+  await todo.getByRole('link', { name: 'Start Browser assessment ' + suffix }).click();
+  await expect(student).toHaveURL(/\/assessments\?open=/);
   await student.getByLabel('What is 0.1 plus 0.2?').fill('0.30');
   await student.getByRole('button', { name: 'Submit answers', exact: true }).click();
   await expect(
     student.getByText('Answers submitted. Your teacher will review the grade.', { exact: true }),
   ).toBeVisible();
+  await student.getByRole('link', { name: 'Home', exact: true }).click();
+  await student.getByRole('button', { name: 'Refresh home' }).click();
+  await expect(todo.getByText(/All caught up/)).toBeVisible();
+  await expect(student.getByText(/1 submission is waiting for your teacher's review/)).toBeVisible();
   await teacher.getByRole('link', { name: 'Grading review', exact: true }).click();
   await expect(async () => {
     await teacher.getByRole('button', { name: 'Refresh grades' }).click();

@@ -136,6 +136,12 @@ export interface ClassPerformance {
   students: { student_id: string; skills: SkillMetric[]; evidence_status: string }[];
   interpretation: string;
 }
+/** An assessment in a classroom's list, with whether the signed-in user has submitted it. */
+export interface AssessmentSummary {
+  id: string;
+  title: string;
+  submitted: boolean;
+}
 /** How many students have submitted an assessment. */
 export interface AssessmentProgress {
   id: string;

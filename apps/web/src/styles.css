@@ -82,6 +82,22 @@ button.secondary {
 button.secondary:hover:not(:disabled) {
   background: #e8f0f3;
 }
+/* A link that leads to an action, styled as a secondary button. */
+a.button-link {
+  display: inline-flex;
+  align-items: center;
+  min-height: 44px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 10px 18px;
+  background: var(--surface);
+  color: var(--ink);
+  font-weight: 600;
+  text-decoration: none;
+}
+a.button-link:hover {
+  background: #e8f0f3;
+}
 a {
   color: var(--brand);
 }

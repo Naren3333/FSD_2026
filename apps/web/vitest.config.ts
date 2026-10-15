@@ -1,3 +1,4 @@
 import { defineConfig } from 'vitest/config';
-// Worker threads, not child processes: on Windows the process pool can time out starting the jsdom test file.
-export default defineConfig({ test: { include: ['src/**/*.test.ts'], pool: 'threads' } });
+// Worker threads with a small cap: Vitest gives each worker 5 s to start, and on a slow Windows disk
+// several workers starting at once can miss that, failing the run with "Timeout starting threads runner".
+export default defineConfig({ test: { include: ['src/**/*.test.ts'], pool: 'threads', maxWorkers: 2 } });

@@ -1,0 +1,107 @@
+<div class="section-heading">
+  <div>
+    <p class="eyebrow">Your work at a glance</p>
+    <h2>{{ classroomName() || 'Home' }}</h2>
+  </div>
+  <button class="secondary" (click)="refresh()" [disabled]="!classroomId()">Refresh home</button>
+</div>
+@if (!classroomId()) {
+  <p class="empty">
+    You are not in a classroom yet. Ask your teacher to enroll you, then choose Refresh classrooms above.
+  </p>
+} @else {
+  <section class="panel dashboard-panel" aria-labelledby="todo-title">
+    <h3 id="todo-title">To do</h3>
+    @if (assessments.loading()) {
+      <p role="status" aria-live="polite">Loading assessments…</p>
+    } @else if (assessments.error()) {
+      <p role="alert" class="error">{{ assessments.error() }}</p>
+    } @else {
+      @for (item of toDo(); track item.id) {
+        <article class="record roster-row">
+          <strong>{{ item.title }}</strong>
+          <a class="button-link" routerLink="/assessments" [queryParams]="{ open: item.id }">
+            Start {{ item.title }}
+          </a>
+        </article>
+      } @empty {
+        <p class="empty">
+          {{
+            assessments.value()?.length
+              ? 'All caught up. You have submitted every assessment.'
+              : 'No assessments in this classroom yet.'
+          }}
+        </p>
+      }
+    }
+  </section>
+
+  <section class="panel dashboard-panel" aria-labelledby="waiting-title">
+    <h3 id="waiting-title">Waiting for your teacher</h3>
+    @if (waiting(); as count) {
+      <p>
+        {{ count }} {{ count === 1 ? 'submission is' : 'submissions are' }} waiting for your teacher's review.
+        Grades appear once your teacher finalizes them.
+      </p>
+    } @else if (waiting() === 0) {
+      <p class="empty">Nothing waiting. Every submission has a final grade.</p>
+    } @else if (assessments.loading() || results.loading()) {
+      <p role="status" aria-live="polite">Loading…</p>
+    } @else {
+      <p class="empty">This could not be worked out because your assessments or results did not load.</p>
+    }
+  </section>
+
+  <section class="panel dashboard-panel" aria-labelledby="recent-title">
+    <h3 id="recent-title">Recent results</h3>
+    @if (results.loading()) {
+      <p role="status" aria-live="polite">Loading results…</p>
+    } @else if (results.error()) {
+      <p role="alert" class="error">{{ results.error() }}</p>
+    } @else {
+      @for (result of recent(); track result.id) {
+        <article class="record roster-row">
+          <strong>{{ title(result) }}</strong>
+          <span>{{ total(result.evidence).awarded }} / {{ total(result.evidence).possible }} marks</span>
+        </article>
+      } @empty {
+        <p class="empty">No finalized results yet.</p>
+      }
+      @if (results.value()?.length) {
+        <a routerLink="/results">See all your results</a>
+      }
+    }
+  </section>
+
+  <section class="panel dashboard-panel" aria-labelledby="practise-title">
+    <h3 id="practise-title">Skills to practise</h3>
+    @if (performance.loading()) {
+      <p role="status" aria-live="polite">Loading your skills…</p>
+    } @else if (performance.error()) {
+      <p role="alert" class="error">{{ performance.error() }}</p>
+    } @else {
+      @for (metric of practise(); track metric.skill_id) {
+        <article class="record roster-row">
+          <strong>{{ skill(metric.skill_id) }}</strong>
+          <span
+            >{{ metric.correct }} of {{ metric.attempted }} correct ({{
+              metric.observed_accuracy | percent: '1.0-0'
+            }})</span
+          >
+        </article>
+      } @empty {
+        <p class="empty">
+          {{
+            performance.value()?.skills?.length
+              ? 'No skill needs practice right now.'
+              : 'No finalized grades yet, so there is nothing to suggest.'
+          }}
+        </p>
+      }
+      <p class="caption">
+        A skill needs practice after five or more questions under 60% correct. This is a reporting threshold,
+        not a mastery measure. <a routerLink="/performance">See your progress</a>
+      </p>
+    }
+  </section>
+}

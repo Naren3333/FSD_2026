@@ -13,7 +13,7 @@ import (
 type store interface {
 	findAssessment(ctx context.Context, org, id string) (Assessment, error)
 	insertAssessment(ctx context.Context, org string, v Assessment) error
-	listAssessments(ctx context.Context, org, classroomID string) ([]Summary, error)
+	listAssessments(ctx context.Context, org, classroomID, student string) ([]Summary, error)
 	listProgress(ctx context.Context, org, classroomID string) ([]Progress, error)
 	insertSubmission(ctx context.Context, v Assessment, sub Submission) (bool, error)
 }
@@ -56,8 +56,9 @@ func (p pgStore) listProgress(ctx context.Context, org, classroomID string) ([]P
 	})
 }
 
-func (p pgStore) listAssessments(ctx context.Context, org, classroomID string) ([]Summary, error) {
-	rows, err := p.db.Query(ctx, "SELECT id,title FROM assessments WHERE classroom_id=$1 AND org_id=$2 ORDER BY created_at DESC LIMIT 100", classroomID, org)
+// listAssessments is the classroom's 100 newest assessments, each with whether student has submitted it.
+func (p pgStore) listAssessments(ctx context.Context, org, classroomID, student string) ([]Summary, error) {
+	rows, err := p.db.Query(ctx, "SELECT a.id,a.title,EXISTS(SELECT 1 FROM submissions s WHERE s.assessment_id=a.id AND s.student_id=$3) FROM assessments a WHERE a.classroom_id=$1 AND a.org_id=$2 ORDER BY a.created_at DESC LIMIT 100", classroomID, org, student)
 	if err != nil {
 		return nil, err
 	}
@@ -65,7 +66,7 @@ func (p pgStore) listAssessments(ctx context.Context, org, classroomID string) (
 	result := []Summary{}
 	for rows.Next() {
 		var v Summary
-		if err = rows.Scan(&v.ID, &v.Title); err != nil {
+		if err = rows.Scan(&v.ID, &v.Title, &v.Submitted); err != nil {
 			return nil, err
 		}
 		result = append(result, v)

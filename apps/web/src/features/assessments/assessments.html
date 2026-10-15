@@ -18,6 +18,9 @@
     @for (item of assessments(); track item.id) {
       <article class="record">
         <strong>{{ item.title }}</strong>
+        @if (session.isStudent() && item.submitted) {
+          <span class="badge">Submitted</span>
+        }
         <button class="secondary" (click)="open(item.id)" [disabled]="state.busy()">Open assessment</button>
       </article>
     } @empty {
@@ -57,7 +60,13 @@
             </app-field>
           }
           @if (session.isStudent()) {
-            <p class="caption">Submission is final. Check your answers before submitting.</p>
+            <p class="caption">
+              {{
+                submitted()
+                  ? 'You have submitted this assessment. Your teacher will review the grade.'
+                  : 'Submission is final. Check your answers before submitting.'
+              }}
+            </p>
             <button [disabled]="state.busy() || submitted()">
               {{ submitted() ? 'Submitted' : 'Submit answers' }}
             </button>

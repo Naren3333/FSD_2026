@@ -50,11 +50,15 @@
                       "title": {
                         "type": "string",
                         "minLength": 1
+                      },
+                      "submitted": {
+                        "type": "boolean"
                       }
                     },
                     "required": [
                       "id",
-                      "title"
+                      "title",
+                      "submitted"
                     ],
                     "additionalProperties": false
                   },

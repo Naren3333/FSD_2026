@@ -290,7 +290,11 @@ operations = {
     ],
     "assessment": [
         operation(
-            "GET", "/v1/assessments", None, array(obj({"id": UUID, "title": TEXT})), query=["classroom_id"]
+            "GET",
+            "/v1/assessments",
+            None,
+            array(obj({"id": UUID, "title": TEXT, "submitted": {"type": "boolean"}})),
+            query=["classroom_id"],
         ),
         operation(
             "POST",

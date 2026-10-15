@@ -108,7 +108,7 @@ Checks: Go unit tests for Identity and Grading, the new SQL against PostgreSQL 1
 
 ## Separate student and teacher views, phase 1 (2026-10-14)
 
-Web only. Teachers land on Classrooms (now the Class dashboard, below) and students on Assessments. Classrooms and Curriculum are teacher-only routes and leave the student menu; students reload the classroom picker with a Refresh classrooms button in the header. Learning performance is labelled My progress for students. The header's username note shows for students only. The performance table shows Analytics' existing `weakness_indicator` as "Needs practice" (five or more questions under 60% correct). Next: the teacher Class dashboard, then student Home.
+Web only. Teachers land on Classrooms (now the Class dashboard, below) and students on Assessments (now Home, below). Classrooms and Curriculum are teacher-only routes and leave the student menu; students reload the classroom picker with a Refresh classrooms button in the header. Learning performance is labelled My progress for students. The header's username note shows for students only. The performance table shows Analytics' existing `weakness_indicator` as "Needs practice" (five or more questions under 60% correct). Next: the teacher Class dashboard, then student Home.
 
 ## Deleting classrooms (2026-10-14)
 
@@ -129,6 +129,17 @@ Teachers now land on a Class dashboard (`/dashboard`, teacher-only, first in the
 - Analytics `GET /v1/performance?classroom_id=&offset=&limit=` returns one page of the currently enrolled students (`limit` 1–50, default 20; anything else is a 422) with their finalized skill evidence, in roster order, students without evidence included: `{classroom_id, total, offset, students: [{student_id, skills}], interpretation}`. The roster comes from Identity (`GET /v1/classrooms/{id}/students`, read with the teacher's token through the new `IdentityClient.roster`), so a removed student drops out. Identity unavailable is a 503.
 
 The page shows tiles for drafts needing grading (to Grading review), students enrolled (to Classrooms) and assessments (to Assessments); each assessment's "N of M students submitted"; and a skills-by-students table, twenty students per page, whose student names open Learning performance for that student (`/performance?student=`). Only students are paged; every skill any student on the page has evidence for is a row. Each part loads and fails on its own. Checks: Assessment and Grading unit tests, Analytics `test_class_performance_keeps_roster_order_and_students_without_evidence`, the `learning_transport` roster test, `integration.py` step `class_dashboard`, `e2e/workflow.spec.ts` (landing, counts, skills table, link to a student). Next: student Home.
+
+## Student Home, phase 3 (2026-10-15)
+
+Students now land on Home (`/home`, student-only, first in their menu) for the current classroom. Assessment's `GET /v1/assessments` adds `submitted` to each assessment: whether the caller has submitted it (always false for a teacher, who never submits). Home shows:
+
+- **To do:** assessments not yet submitted, each linking to Assessments with `?open=<id>`, which opens it once the classroom's list has loaded.
+- **Waiting for your teacher:** how many submitted assessments have no finalized result yet, worked out from the student's own list and `GET /v1/evaluations/mine`. Draft grades are never fetched.
+- **Recent results:** the three latest finalized results with their marks, linking to My results.
+- **Skills to practise:** skills with Analytics' `weakness_indicator` (five or more questions under 60% correct), linking to My progress.
+
+Each part loads and fails on its own (the shared `Section` helper, now in `shared/section.ts`, also used by the Class dashboard). On Assessments, students see a Submitted badge, and opening an assessment they already submitted shows it as submitted instead of offering a submit that would be refused. Checks: Assessment unit test `TestTheListSaysWhetherTheStudentSubmitted`, `integration.py` (`assess_and_grade` checks the flag for the student before and after submitting, and for the teacher), `e2e/workflow.spec.ts` (landing, starting from To do, the waiting count).
 
 ## Incomplete requirements and risks
 

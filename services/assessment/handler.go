@@ -64,7 +64,8 @@ func (s server) list(w http.ResponseWriter, r *http.Request) {
 	if !s.access.Access(w, r, id, "") {
 		return
 	}
-	result, err := s.store.listAssessments(r.Context(), platform.Actor(r).Org, id)
+	actor := platform.Actor(r)
+	result, err := s.store.listAssessments(r.Context(), actor.Org, id, actor.Subject)
 	if err != nil {
 		platform.Fail(w, err)
 		return

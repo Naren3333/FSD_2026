@@ -38,8 +38,12 @@ func (m *memoryStore) insertAssessment(_ context.Context, _ string, v Assessment
 	return nil
 }
 
-func (m *memoryStore) listAssessments(context.Context, string, string) ([]Summary, error) {
-	return nil, nil
+func (m *memoryStore) listAssessments(_ context.Context, _, _, student string) ([]Summary, error) {
+	result := []Summary{}
+	for _, v := range m.assessments {
+		result = append(result, Summary{ID: v.ID, Title: v.Title, Submitted: m.submitted[v.ID+"/"+student]})
+	}
+	return result, nil
 }
 
 func (m *memoryStore) listProgress(context.Context, string, string) ([]Progress, error) {
@@ -155,6 +159,21 @@ func TestOnlyTheTeacherSeesSubmissionCounts(t *testing.T) {
 	s.access = platformtest.Access(platform.RelationTeacher)
 	w := call(t, s, http.MethodGet, progress, "", "teacher")
 	if w.Code != 200 || !strings.Contains(w.Body.String(), `"submissions":1`) {
+		t.Fatalf("%d %s", w.Code, w.Body.String())
+	}
+}
+
+func TestTheListSaysWhetherTheStudentSubmitted(t *testing.T) {
+	s, v := created(t, platform.RelationStudent)
+	list := "/v1/assessments?classroom_id=" + room
+	if w := call(t, s, http.MethodGet, list, "", "student"); !strings.Contains(w.Body.String(), `"submitted":false`) {
+		t.Fatalf("%d %s", w.Code, w.Body.String())
+	}
+	path := "/v1/assessments/" + v.ID + "/submissions"
+	if w := call(t, s, http.MethodPost, path, `{"answers":{"`+v.Questions[0].ID+`":"1"}}`, "student"); w.Code != 201 {
+		t.Fatalf("status %d", w.Code)
+	}
+	if w := call(t, s, http.MethodGet, list, "", "student"); !strings.Contains(w.Body.String(), `"submitted":true`) {
 		t.Fatalf("%d %s", w.Code, w.Body.String())
 	}
 }

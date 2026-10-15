@@ -3,6 +3,7 @@ import { Gateway } from '../core/gateway';
 import type {
   Assessment,
   AssessmentProgress,
+  AssessmentSummary,
   ChatMessage,
   ClassPerformance,
   Classroom,
@@ -124,7 +125,8 @@ export interface NewAssessment {
 export class AssessmentApi {
   private readonly gateway = inject(Gateway);
 
-  list(classroomId: string): Promise<Pick<Assessment, 'id' | 'title'>[]> {
+  /** The classroom's 100 newest assessments, each saying whether the signed-in user has submitted it. */
+  list(classroomId: string): Promise<AssessmentSummary[]> {
     return this.gateway.request('assessment', `/assessments?classroom_id=${id(classroomId)}`);
   }
   /** For the classroom's teacher: its 100 newest assessments with how many students submitted each. */

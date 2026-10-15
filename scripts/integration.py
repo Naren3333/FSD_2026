@@ -355,9 +355,15 @@ def assess_and_grade(u: Users, room_id: str) -> Graded:
     # The first answer is right, the second wrong. A second submission is refused.
     first, second = (q["id"] for q in assessment["questions"])
     submissions = f"/assessment/assessments/{assessment['id']}/submissions"
+    listed = f"/assessment/assessments?classroom_id={room_id}"
+    entry = {"id": assessment["id"], "title": "Decimal test"}
+    assert {**entry, "submitted": False} in request(u.student, "GET", listed)
     answers = {"answers": {first: "0.30", second: "word"}}
     submission = request(u.student, "POST", submissions, 201, json=answers)
     request(u.student, "POST", submissions, 409, json=answers)
+    # The list says who is asking has submitted: the student has, the teacher has not.
+    assert {**entry, "submitted": True} in request(u.student, "GET", listed)
+    assert {**entry, "submitted": False} in request(u.teacher, "GET", listed)
 
     evaluations = f"/grading/evaluations?classroom_id={room_id}"
     grades = eventually(
