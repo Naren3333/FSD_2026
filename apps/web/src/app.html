@@ -38,7 +38,7 @@
           <span>{{ profile.role === 'teacher' ? 'Teacher' : 'Student' }} · {{ profile.org_id }}</span>
           <button class="secondary" (click)="logout()">Sign out</button>
         </div>
-      } @else {
+      } @else if (!session.signedIn) {
         <button (click)="login()" [disabled]="state.busy()">Sign in</button>
       }
     </header>
@@ -85,6 +85,21 @@
       </p>
       <app-status [state]="state" />
       <router-outlet />
+    } @else if (session.signedIn) {
+      <!-- Signed in with Keycloak, waiting for Identity to return the profile: not the signed-out welcome. -->
+      <section class="signing-in" [attr.aria-busy]="state.busy()">
+        @if (state.error()) {
+          <h1>Your workspace didn't load</h1>
+          <p role="alert" class="error">{{ state.error() }}</p>
+          <div class="signing-in-actions">
+            <button (click)="load()" [disabled]="state.busy()">Try again</button>
+            <button class="secondary" (click)="logout()" [disabled]="state.busy()">Sign out</button>
+          </div>
+        } @else {
+          <span class="loading-bar" aria-hidden="true"></span>
+          <p role="status" aria-live="polite">Loading your workspace…</p>
+        }
+      </section>
     } @else {
       <section class="welcome">
         <p class="eyebrow">A clearer picture of learning</p>

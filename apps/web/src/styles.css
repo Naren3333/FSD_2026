@@ -520,6 +520,60 @@ thead th {
   display: flex;
   gap: 40px;
 }
+.boot {
+  margin: 0;
+  padding: 48px 24px;
+  font-family: system-ui, sans-serif;
+  color: var(--muted);
+}
+.signing-in {
+  padding: 70px 0 24px;
+  max-width: 540px;
+  min-height: 240px;
+}
+.signing-in [role='status'] {
+  color: var(--muted);
+  margin: 18px 0 0;
+}
+.signing-in-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin-top: 18px;
+}
+.loading-bar {
+  display: block;
+  position: relative;
+  height: 4px;
+  max-width: 320px;
+  overflow: hidden;
+  border-radius: 2px;
+  background: var(--border);
+}
+.loading-bar::after {
+  content: '';
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: 40%;
+  border-radius: 2px;
+  background: var(--brand);
+  animation: loading-slide 1.2s ease-in-out infinite;
+}
+@keyframes loading-slide {
+  from {
+    transform: translateX(-100%);
+  }
+  to {
+    transform: translateX(250%);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .loading-bar::after {
+    animation: none;
+    width: 100%;
+    opacity: 0.5;
+  }
+}
 .learning-rail {
   display: grid;
   grid-template-columns: repeat(4, 1fr);

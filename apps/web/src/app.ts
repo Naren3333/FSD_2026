@@ -45,6 +45,11 @@ export class AppComponent implements OnInit {
   }
 
   ngOnInit(): void {
+    this.load();
+  }
+
+  /** Loads the signed-in user's profile and classrooms; also the retry when that fails. */
+  load(): void {
     void this.state.run(async () => {
       await this.session.ready();
       if (this.session.profile()) await this.context.refresh();

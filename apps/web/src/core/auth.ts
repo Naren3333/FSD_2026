@@ -7,9 +7,18 @@ import { APP_CONFIG } from './config';
 export class Auth {
   private readonly keycloak = new Keycloak(inject(APP_CONFIG).keycloak);
 
-  /** Completes a sign-in redirect if there is one. Run before the router reads the URL. */
+  /**
+   * Completes a sign-in redirect if there is one, otherwise asks Keycloak (without showing its login page) whether
+   * this browser is still signed in, so a page refresh keeps the user signed in. Tokens stay in memory only.
+   * Run before the router reads the URL.
+   */
   async initialize(): Promise<void> {
-    await this.keycloak.init({ checkLoginIframe: false, pkceMethod: 'S256', responseMode: 'query' });
+    await this.keycloak.init({
+      onLoad: 'check-sso',
+      checkLoginIframe: false,
+      pkceMethod: 'S256',
+      responseMode: 'query',
+    });
   }
 
   get authenticated(): boolean {
