@@ -13,6 +13,8 @@ from fastapi import Depends, Query, Request
 from fastapi.concurrency import run_in_threadpool
 from learning_transport import (
     OIDC_SETTINGS,
+    RELATION_TEACHER,
+    STUDENT,
     TEACHER,
     Claims,
     IdentityClient,
@@ -20,6 +22,7 @@ from learning_transport import (
     application,
     failure,
     require_env,
+    require_relation,
     requires,
 )
 from learning_transport.db import open_pool
@@ -71,6 +74,7 @@ def skill_evidence(pool: ConnectionPool[Any], org: str, classroom_id: UUID, stud
         ).fetchall()
 
 
+TEACHER_ONLY = ("ACCESS_DENIED", "Only the classroom's teacher can view its performance.")
 INTERPRETATION = "Observed accuracy describes finalized question evidence, not a mastery probability."
 MAX_PAGE = 50
 
@@ -95,14 +99,17 @@ async def class_performance(
     """One page of the classroom's enrolled students with their skill evidence, for its own teacher only. The
     roster comes from Identity with the teacher's token, so only currently enrolled students appear."""
     identity: IdentityClient = request.app.state.identity
-    authorization, correlation = request.headers["authorization"], request.state.correlation_id
+    await require_relation(
+        identity, request, str(classroom_id), allowed=(RELATION_TEACHER,), denied=TEACHER_ONLY
+    )
     try:
-        relation = await identity.relation(authorization, str(classroom_id), correlation)
-        roster = await identity.roster(authorization, str(classroom_id), correlation) if relation else None
+        roster = await identity.roster(
+            request.headers["authorization"], str(classroom_id), request.state.correlation_id
+        )
     except UpstreamError:
-        raise failure(503, "DEPENDENCY_UNAVAILABLE", "Authorization is unavailable.") from None
-    if relation != TEACHER or roster is None:
-        raise failure(403, "ACCESS_DENIED", "Only the classroom's teacher can view its performance.")
+        raise failure(503, "DEPENDENCY_UNAVAILABLE", "Authorization is unavailable; retry later.") from None
+    if roster is None:
+        raise failure(403, *TEACHER_ONLY)
     page = roster[offset : offset + limit]
     rows = (
         await run_in_threadpool(class_evidence, request.app.state.pool, claims.org, classroom_id, page)
@@ -125,19 +132,17 @@ async def performance(
     student_id: str,
     classroom_id: UUID,
     request: Request,
-    claims: Claims = Depends(requires("teacher", "student")),
+    claims: Claims = Depends(requires(TEACHER, STUDENT)),
 ) -> PerformanceResponse:
     if claims.person_role != TEACHER and student_id != claims.subject:
         raise failure(403, "FORBIDDEN", "Students can only view their own performance.")
-    identity: IdentityClient = request.app.state.identity
-    try:
-        relation = await identity.relation(
-            request.headers["authorization"], str(classroom_id), request.state.correlation_id, student_id
-        )
-    except UpstreamError:
-        raise failure(503, "DEPENDENCY_UNAVAILABLE", "Authorization is unavailable.") from None
-    if relation is None:
-        raise failure(403, "ACCESS_DENIED", "Classroom or student access could not be verified.")
+    await require_relation(
+        request.app.state.identity,
+        request,
+        str(classroom_id),
+        student_id=student_id,
+        denied=("ACCESS_DENIED", "Classroom or student access could not be verified."),
+    )
     rows = await run_in_threadpool(
         skill_evidence, request.app.state.pool, claims.org, classroom_id, student_id
     )

@@ -1,9 +1,12 @@
 """Classroom access, decided by the Identity service. Callers forward the user's own token, so Identity's rules
 decide; a service never works out classroom membership itself."""
 
-import httpx
+from collections.abc import Collection
 
-from learning_transport.errors import UpstreamError
+import httpx
+from fastapi import Request
+
+from learning_transport.errors import UpstreamError, failure
 
 RELATION_TEACHER, RELATION_STUDENT = "teacher", "student"
 
@@ -62,3 +65,25 @@ class IdentityClient:
         if not all(isinstance(i, str) and i for i in ids):
             raise UpstreamError("identity", 502)
         return ids
+
+
+async def require_relation(
+    identity: IdentityClient,
+    request: Request,
+    classroom_id: str,
+    *,
+    student_id: str | None = None,
+    allowed: Collection[str] = (RELATION_TEACHER, RELATION_STUDENT),
+    denied: tuple[str, str] = ("FORBIDDEN", "You do not have access to this classroom."),
+) -> str:
+    """The caller's relation to the classroom (optionally on behalf of a student), as Identity decides it with the
+    request's own token. 503 when Identity is unavailable; 403 with the `denied` code and message when access is
+    denied or the relation is not one of `allowed`."""
+    authorization, correlation = request.headers["authorization"], request.state.correlation_id
+    try:
+        relation = await identity.relation(authorization, classroom_id, correlation, student_id)
+    except UpstreamError:
+        raise failure(503, "DEPENDENCY_UNAVAILABLE", "Authorization is unavailable; retry later.") from None
+    if relation is None or relation not in allowed:
+        raise failure(403, *denied)
+    return relation

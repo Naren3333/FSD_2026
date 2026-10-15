@@ -1,19 +1,8 @@
 import { test, expect } from '@playwright/test';
-import { readFileSync } from 'node:fs';
-const env = Object.fromEntries(
-  readFileSync('../../.env', 'utf8')
-    .split(/\r?\n/)
-    .filter((l) => l && !l.startsWith('#'))
-    .map((l) => l.split('=')),
-);
+import { env, login } from './helpers';
 
 test('forms preserve drafts and list refresh exposes loading and network recovery', async ({ page }) => {
-  await page.goto('/');
-  await page.getByRole('button', { name: 'Sign in', exact: true }).click();
-  await page.getByLabel('Username or email').fill('teacher');
-  await page.getByLabel('Password', { exact: true }).fill(env.TEACHER_PASSWORD);
-  await page.getByRole('button', { name: 'Sign In', exact: true }).click();
-  await expect(page.getByRole('button', { name: 'Sign out' })).toBeVisible();
+  await login(page, 'teacher', env.TEACHER_PASSWORD);
   await page
     .getByRole('navigation', { name: 'Workspace' })
     .getByRole('link', { name: 'Classrooms', exact: true })

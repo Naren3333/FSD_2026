@@ -3,20 +3,19 @@
 
 import json
 import os
+import sys
 import time
+from collections.abc import Iterator
+from contextlib import contextmanager
 from pathlib import Path
 
 import httpx
 import yaml
 
-ROOT = Path(__file__).resolve().parents[2]
-ENV = dict(
-    line.split("=", 1)
-    for line in (ROOT / ".env").read_text().splitlines()
-    if line and not line.startswith("#")
-)
-BASE = "http://localhost:8000/api"
-KEYCLOAK = "http://localhost:8081"
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))  # scripts/, for local_stack
+from local_stack import BASE, ROOT, env, password_token
+
+ATTEMPTS = 30  # a 429 waits and retries this often
 CORPUS = Path(__file__).with_name("corpus.yaml")
 GOLDEN = Path(__file__).with_name("golden.yaml")
 PDF_DIR = Path(os.getenv("EVAL_PDF_DIR", str(ROOT.parent / "fsd_test" / "data" / "test_pdfs")))
@@ -45,7 +44,7 @@ def save_state(state: dict) -> None:
 def password(user: str, state: dict) -> str:
     if user == STUDENT2:
         return state["student2_password"]
-    return ENV[{"teacher": "TEACHER_PASSWORD", "student": "STUDENT_PASSWORD"}[user]]
+    return env()[{"teacher": "TEACHER_PASSWORD", "student": "STUDENT_PASSWORD"}[user]]
 
 
 class Session:
@@ -59,35 +58,30 @@ class Session:
         self.sign_in()
 
     def sign_in(self) -> None:
-        res = httpx.post(
-            f"{KEYCLOAK}/realms/learning/protocol/openid-connect/token",
-            timeout=15,
-            data={
-                "client_id": "learning-e2e",
-                "grant_type": "password",
-                "username": self.user,
-                "password": self.secret,
-            },
-        )
-        if res.status_code != 200:
-            raise SystemExit(f"Local sign-in failed for {self.user}: {res.status_code}")
-        self.http.headers["Authorization"] = "Bearer " + res.json()["access_token"]
+        self.http.headers["Authorization"] = "Bearer " + password_token(self.user, self.secret)
 
-    def request(self, method: str, path: str, **kwargs) -> httpx.Response:
-        for attempt in range(30):
-            res = self.http.request(method, path, **kwargs)
+    def send(self, method: str, path: str, *, stream: bool = False, **kwargs) -> httpx.Response:
+        """The response, after signing in again on a first 401 and waiting out 429s. With `stream`, the body is
+        not read yet: close the response when done with it."""
+        for attempt in range(ATTEMPTS):
+            res = self.http.send(self.http.build_request(method, path, **kwargs), stream=stream)
             if res.status_code == 401 and attempt == 0:
                 self.sign_in()
-            elif res.status_code == 429:
+            elif res.status_code == 429 and attempt < ATTEMPTS - 1:
                 time.sleep(5)
             else:
-                break
-        return res
+                return res
+            res.close()
+        raise AssertionError("unreachable")
 
+    def request(self, method: str, path: str, **kwargs) -> httpx.Response:
+        return self.send(method, path, **kwargs)
 
-def check(res: httpx.Response) -> httpx.Response:
-    if res.is_error:
-        raise SystemExit(
-            f"{res.request.method} {res.request.url.path} -> {res.status_code}: {res.text[:300]}"
-        )
-    return res
+    @contextmanager
+    def stream(self, method: str, path: str, **kwargs) -> Iterator[httpx.Response]:
+        """Like request, with the response streamed inside the block."""
+        res = self.send(method, path, stream=True, **kwargs)
+        try:
+            yield res
+        finally:
+            res.close()

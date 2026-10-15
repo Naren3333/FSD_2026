@@ -27,7 +27,7 @@ from learning_transport import (
 import openai_client
 import rerank
 import spend
-from billing import Billing, StreamBill, ingest_charges, priced, reply_charge
+from billing import Billing, StreamBill, ingest_charges, ledger_unavailable, priced, reply_charge
 from contracts import (
     IngestChunk,
     IngestFigure,
@@ -68,6 +68,9 @@ async def lifespan(app: Any) -> AsyncIterator[None]:
 
 
 app = application("ai-core", lifespan=lifespan)
+
+# Only service accounts holding ai-client call ai-core; each call names the user it is billed to.
+SERVICE = requires(AI_CLIENT)
 
 
 @app.get("/health/ready")
@@ -129,19 +132,17 @@ async def usage_today(
     user_id: str = Query(min_length=1, max_length=200),
     org_id: str = Query(min_length=1, max_length=200),
     role: spend.Role = Query(),
-    _caller: Claims = Depends(requires(AI_CLIENT)),
+    _caller: Claims = Depends(SERVICE),
 ) -> spend.Usage:
     """A user's spend today, their daily limit and when it resets, for a service showing it to that user."""
     try:
         return await billing_of(request).ledger.today(spend.Billed(user_id=user_id, org_id=org_id, role=role))
     except Exception:
-        raise failure(503, "USAGE_LEDGER_UNAVAILABLE", "AI usage cannot be checked right now.") from None
+        raise ledger_unavailable() from None
 
 
 @app.post("/v1/inference", response_model=ResponseContract, responses=ERRORS)
-async def execute(
-    request: RequestContract, http: Request, _caller: Claims = Depends(requires(AI_CLIENT))
-) -> Any:
+async def execute(request: RequestContract, http: Request, _caller: Claims = Depends(SERVICE)) -> Any:
     settings = get_settings()
     billed, billing, correlation = request.billed_to, billing_of(http), correlation_of(http)
     await billing.check(billed)
@@ -210,7 +211,7 @@ async def events(
 
 @app.post("/v1/rerank", response_model=RerankResponse, responses=ERRORS)
 async def rerank_documents(
-    request: RerankRequest, http: Request, _caller: Claims = Depends(requires(AI_CLIENT))
+    request: RerankRequest, http: Request, _caller: Claims = Depends(SERVICE)
 ) -> RerankResponse:
     billing = billing_of(http)
     await billing.check(request.billed_to)
@@ -245,7 +246,7 @@ async def ingest_pdf(
     billed_user: str = Query(min_length=1, max_length=200),
     billed_org: str = Query(min_length=1, max_length=200),
     billed_role: spend.Role = Query(),
-    _caller: Claims = Depends(requires(AI_CLIENT)),
+    _caller: Claims = Depends(SERVICE),
 ) -> IngestResponse:
     """One PDF (the raw body) → chunks with embeddings and the figure crops they point at. Stateless: the caller
     stores the result. A document problem is a `failed` outcome; a provider outage is an error to retry. The

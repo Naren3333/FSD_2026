@@ -3,7 +3,11 @@
     <p class="eyebrow">A shared source of learning</p>
     <h2>Teaching materials</h2>
   </div>
-  <button class="secondary" (click)="load()" [disabled]="state.busy() || !classroomId()">
+  <button
+    class="secondary"
+    (click)="load()"
+    [disabled]="state.busy() || documents.loading() || !classroomId()"
+  >
     Refresh materials
   </button>
 </div>
@@ -15,32 +19,35 @@
   <section class="panel">
     <h3>Classroom library</h3>
     <p class="caption">Up to 100 most recent documents</p>
-    @for (doc of documents(); track doc.id) {
-      <article class="record">
-        <strong>{{ doc.title }}</strong>
-        <span class="doc-tags">
-          <span class="badge" [class.badge-danger]="doc.status === 'failed'">{{ status(doc).label }}</span>
-          @if (session.isTeacher()) {
-            <span class="badge badge-plain">{{ typeLabel(doc.doc_type) }}</span>
+    <app-section-state [section]="documents" loading="Loading materials…" />
+    @if (documents.ready()) {
+      @for (doc of documents.value() ?? []; track doc.id) {
+        <article class="record">
+          <strong>{{ doc.title }}</strong>
+          <span class="doc-tags">
+            <span class="badge" [class.badge-danger]="doc.status === 'failed'">{{ status(doc).label }}</span>
+            @if (session.isTeacher()) {
+              <span class="badge badge-plain">{{ typeLabel(doc.doc_type) }}</span>
+            }
+          </span>
+          <small>{{ status(doc).detail }}</small>
+          <small>Revision {{ doc.revision }} · {{ doc.mime_type }}</small>
+          @if (session.isTeacher() && (doc.status === 'failed' || doc.status === 'extraction_unsupported')) {
+            <button class="secondary" (click)="reindex(doc)" [disabled]="state.busy()">
+              {{ doc.status === 'failed' ? 'Retry indexing' : 'Index document' }}
+              <span class="visually-hidden">{{ doc.title }}</span>
+            </button>
           }
-        </span>
-        <small>{{ status(doc).detail }}</small>
-        <small>Revision {{ doc.revision }} · {{ doc.mime_type }}</small>
-        @if (session.isTeacher() && (doc.status === 'failed' || doc.status === 'extraction_unsupported')) {
-          <button class="secondary" (click)="reindex(doc)" [disabled]="state.busy()">
-            {{ doc.status === 'failed' ? 'Retry indexing' : 'Index document' }}
-            <span class="visually-hidden">{{ doc.title }}</span>
-          </button>
-        }
-      </article>
-    } @empty {
-      <p class="empty">
-        {{
-          classroomId()
-            ? 'No documents in this classroom. Upload a teaching resource to begin.'
-            : 'Select a classroom to view its materials.'
-        }}
-      </p>
+        </article>
+      } @empty {
+        <p class="empty">
+          {{
+            classroomId()
+              ? 'No documents in this classroom. Upload a teaching resource to begin.'
+              : 'Select a classroom to view its materials.'
+          }}
+        </p>
+      }
     }
     @if (polling()) {
       <p class="caption" aria-live="off">Indexing status refreshes automatically.</p>

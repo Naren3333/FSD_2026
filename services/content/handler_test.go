@@ -14,8 +14,6 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
-
-	"github.com/jackc/pgx/v5"
 )
 
 const (
@@ -34,7 +32,7 @@ type documentStore struct {
 func (documentStore) findDocument(_ context.Context, _, id string) (Document, []byte, error) {
 	docType := map[string]string{teachingID: "teaching_material", rubricID: "rubric"}[id]
 	if docType == "" {
-		return Document{}, nil, pgx.ErrNoRows
+		return Document{}, nil, platform.ErrNotFound
 	}
 	return Document{ID: id, Classroom: classID, Title: "Doc", DocType: docType, Type: "text/plain"}, []byte("[]"), nil
 }
@@ -56,13 +54,13 @@ func TestStudentsCannotSeeRubrics(t *testing.T) {
 		roles              []string
 		status             int
 	}{
-		{"teacher, rubric", platform.RelationTeacher, rubricID, []string{"teacher"}, 200},
-		{"student, teaching material", platform.RelationStudent, teachingID, []string{"student"}, 200},
-		{"student, rubric", platform.RelationStudent, rubricID, []string{"student"}, 404},
+		{"teacher, rubric", platform.RelationTeacher, rubricID, []string{"teacher"}, http.StatusOK},
+		{"student, teaching material", platform.RelationStudent, teachingID, []string{"student"}, http.StatusOK},
+		{"student, rubric", platform.RelationStudent, rubricID, []string{"student"}, http.StatusNotFound},
 		// The token's teacher role is not enough: enrolled here, the account sees what students see.
-		{"teacher enrolled as a student, rubric", platform.RelationStudent, rubricID, []string{"teacher", "student"}, 404},
-		{"no access", "", teachingID, []string{"student"}, 403},
-		{"unknown document", platform.RelationTeacher, classID, []string{"teacher"}, 404},
+		{"teacher enrolled as a student, rubric", platform.RelationStudent, rubricID, []string{"teacher", "student"}, http.StatusNotFound},
+		{"no access", "", teachingID, []string{"student"}, http.StatusForbidden},
+		{"unknown document", platform.RelationTeacher, classID, []string{"teacher"}, http.StatusNotFound},
 	}
 	for _, tc := range cases {
 		if got := get(t, tc.relation, tc.id, tc.roles...); got != tc.status {
@@ -77,7 +75,7 @@ func TestTheListIsFilteredByTheClassroomRelation(t *testing.T) {
 		s := server{store: documentStore{listedForTeacher: &teacher}, access: platformtest.Access(relation)}
 		w := platformtest.Serve(s.routes, http.MethodGet, "/v1/documents?classroom_id="+classID, "", "user", "teacher")
 		var docs []Document
-		if w.Code != 200 || json.Unmarshal(w.Body.Bytes(), &docs) != nil || teacher != wantTeacher {
+		if w.Code != http.StatusOK || json.Unmarshal(w.Body.Bytes(), &docs) != nil || teacher != wantTeacher {
 			t.Errorf("%s: %d, listed as teacher %v", relation, w.Code, teacher)
 		}
 	}
@@ -91,7 +89,7 @@ func TestSearchValidatesBeforeAnyLookup(t *testing.T) {
 		`{"classroom_id":"` + classID + `","query":"leaves","doc_types":["lesson"]}`,
 		`{"classroom_id":"` + classID + `","query":"leaves","document_ids":["nope"]}`,
 	} {
-		if w := platformtest.Serve(s.routes, http.MethodPost, "/v1/search", body, "user", "teacher"); w.Code != 422 {
+		if w := platformtest.Serve(s.routes, http.MethodPost, "/v1/search", body, "user", "teacher"); w.Code != http.StatusUnprocessableEntity {
 			t.Errorf("%s: %d", body, w.Code)
 		}
 	}
@@ -137,22 +135,16 @@ func upload(t *testing.T, store uploadStore, files *fileStore, query string) *ht
 func uploadBody(t *testing.T, store uploadStore, files *fileStore, query, kind, body string) *httptest.ResponseRecorder {
 	t.Helper()
 	s := server{store: store, access: platformtest.Access(platform.RelationTeacher), files: files}
-	mux := http.NewServeMux()
-	s.routes(mux)
-	var c platform.Claims
-	c.Subject, c.Org, c.Realm.Roles = "teacher-1", "org", []string{"teacher"}
-	r := httptest.NewRequestWithContext(platform.WithClaims(context.Background(), c), http.MethodPost, "/v1/documents?classroom_id="+classID+query, strings.NewReader(body))
+	r := platformtest.Request(platformtest.Claims("teacher-1", "teacher"), http.MethodPost, "/v1/documents?classroom_id="+classID+query, body)
 	r.Header.Set("Content-Type", kind)
-	w := httptest.NewRecorder()
-	mux.ServeHTTP(w, r)
-	return w
+	return platformtest.ServeRequest(s.routes, r)
 }
 
 func TestUploadStoresTheDocumentAndItsOriginal(t *testing.T) {
 	var inserted newDocument
 	files := &fileStore{}
 	w := upload(t, uploadStore{inserted: &inserted, commitAttempted: true}, files, "&title=Notes")
-	if w.Code != 201 || inserted.Title != "Notes" || inserted.DocType != docTeachingMaterial || inserted.Status != statusExtracted {
+	if w.Code != http.StatusCreated || inserted.Title != "Notes" || inserted.DocType != docTeachingMaterial || inserted.Status != statusExtracted {
 		t.Fatalf("%d %+v", w.Code, inserted.Document)
 	}
 	if len(files.puts) != 1 || files.puts[0] != inserted.Key || inserted.Org != "org" || inserted.Owner != "teacher-1" {
@@ -163,19 +155,19 @@ func TestUploadStoresTheDocumentAndItsOriginal(t *testing.T) {
 func TestUploadRemovesAnOriginalWhoseRowWasNeverCommitted(t *testing.T) {
 	var inserted newDocument
 	failed := &fileStore{}
-	if w := upload(t, uploadStore{inserted: &inserted, err: errors.New("db down")}, failed, "&title=Notes"); w.Code != 500 || len(failed.removed) != 1 {
+	if w := upload(t, uploadStore{inserted: &inserted, err: errors.New("db down")}, failed, "&title=Notes"); w.Code != http.StatusInternalServerError || len(failed.removed) != 1 {
 		t.Fatalf("%d, removed %v", w.Code, failed.removed)
 	}
 	// After an uncertain commit the row may exist, so the original stays.
 	uncertain := &fileStore{}
-	if w := upload(t, uploadStore{inserted: &inserted, err: errors.New("commit lost"), commitAttempted: true}, uncertain, "&title=Notes"); w.Code != 500 || len(uncertain.removed) != 0 {
+	if w := upload(t, uploadStore{inserted: &inserted, err: errors.New("commit lost"), commitAttempted: true}, uncertain, "&title=Notes"); w.Code != http.StatusInternalServerError || len(uncertain.removed) != 0 {
 		t.Fatalf("%d, removed %v", w.Code, uncertain.removed)
 	}
 }
 
 func TestUploadValidatesItsFields(t *testing.T) {
 	for _, query := range []string{"&title=", "&title=Notes&doc_type=lesson"} {
-		if w := upload(t, uploadStore{inserted: &newDocument{}}, &fileStore{}, query); w.Code != 422 {
+		if w := upload(t, uploadStore{inserted: &newDocument{}}, &fileStore{}, query); w.Code != http.StatusUnprocessableEntity {
 			t.Errorf("%s: %d", query, w.Code)
 		}
 	}
@@ -187,7 +179,7 @@ func TestUploadStoresAWholePDFAndItsHash(t *testing.T) {
 	pdf := pdfMagic + "1.7\n" + strings.Repeat("x", 6<<20) // larger than the text limit, which PDFs don't share
 	w := uploadBody(t, uploadStore{inserted: &inserted, commitAttempted: true}, files, "&title=Notes", mimePDF, pdf)
 	sum := sha256.Sum256([]byte(pdf))
-	if w.Code != 201 || inserted.Status != statusIndexing || inserted.SHA != hex.EncodeToString(sum[:]) {
+	if w.Code != http.StatusCreated || inserted.Status != statusIndexing || inserted.SHA != hex.EncodeToString(sum[:]) {
 		t.Fatalf("%d %+v", w.Code, inserted.Document)
 	}
 	if len(files.bodies) != 1 || string(files.bodies[0]) != pdf {
@@ -200,14 +192,34 @@ func TestUploadRefusesOversizedAndUnsupportedFiles(t *testing.T) {
 		kind, body string
 		code       int
 	}{
-		{mimeText, strings.Repeat("a", maxText+1), 413},
-		{mimePDF, strings.Repeat("a", 64), 422},
-		{"image/png", "png", 422},
+		{mimeText, strings.Repeat("a", maxText+1), http.StatusRequestEntityTooLarge},
+		{mimePDF, strings.Repeat("a", 64), http.StatusUnprocessableEntity},
+		{"image/png", "png", http.StatusUnprocessableEntity},
 	}
 	for _, c := range cases {
 		files := &fileStore{}
 		if w := uploadBody(t, uploadStore{inserted: &newDocument{}}, files, "&title=Notes", c.kind, c.body); w.Code != c.code || len(files.puts) != 0 {
 			t.Errorf("%s: %d, stored %v", c.kind, w.Code, files.puts)
+		}
+	}
+}
+
+func TestReindexNeedsTheClassroomsTeacherAndAPDF(t *testing.T) {
+	cases := []struct {
+		name, relation, id string
+		roles              []string
+		status             int
+	}{
+		{"malformed id", platform.RelationTeacher, "not-a-uuid", []string{"teacher"}, http.StatusNotFound},
+		{"unknown document", platform.RelationTeacher, classID, []string{"teacher"}, http.StatusNotFound},
+		{"a student", platform.RelationStudent, teachingID, []string{"student"}, http.StatusForbidden},
+		{"teacher enrolled here", platform.RelationStudent, teachingID, []string{"teacher", "student"}, http.StatusForbidden},
+		{"not a PDF", platform.RelationTeacher, teachingID, []string{"teacher"}, http.StatusConflict},
+	}
+	for _, tc := range cases {
+		s := server{store: documentStore{}, access: platformtest.Access(tc.relation)}
+		if w := platformtest.Serve(s.routes, http.MethodPost, "/v1/documents/"+tc.id+"/reindex", "", "user", tc.roles...); w.Code != tc.status {
+			t.Errorf("%s: %d %s", tc.name, w.Code, w.Body.String())
 		}
 	}
 }

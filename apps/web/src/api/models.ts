@@ -19,30 +19,35 @@ export interface Classroom {
   name: string;
   teacher_id: string;
 }
+/** Curriculum levels, top down; each node's parent is the level above it. */
+export type NodeKind = 'subject' | 'course' | 'unit' | 'topic' | 'skill' | 'objective';
 export interface Node {
   id: string;
-  kind: string;
+  kind: NodeKind;
   name: string;
   parent_id: string | null;
 }
 export type DocType = 'teaching_material' | 'rubric' | 'marking_scheme';
 export type DocumentStatus = 'extracted' | 'extraction_unsupported' | 'indexing' | 'indexed' | 'failed';
+/** Why indexing a PDF failed. */
+export type FailureReason = 'NO_TEXT_LAYER' | 'ENCRYPTED' | 'CORRUPT' | 'AI_UNAVAILABLE' | 'INTERNAL';
 export interface DocumentRecord {
   id: string;
+  classroom_id: string;
   title: string;
-  mime_type: string;
+  mime_type: 'text/plain' | 'application/pdf';
   status: DocumentStatus;
   revision: number;
   doc_type: DocType;
   page_count?: number;
   chunk_count?: number;
   indexed_at?: string;
-  failure_reason?: string;
+  failure_reason?: FailureReason;
 }
 export interface Thread {
   id: string;
   classroom_id: string;
-  role: 'student' | 'teacher';
+  role: Profile['role'];
   title: string | null;
   created_at: string;
   last_message_at: string;
@@ -72,11 +77,7 @@ export interface StreamEvent {
   data: Record<string, unknown>;
 }
 /** The fields a new node needs: its level, name and the node one level above it. */
-export interface NodeInput {
-  kind: string;
-  name: string;
-  parent_id: string | null;
-}
+export type NodeInput = Omit<Node, 'id'>;
 export interface Question {
   id?: string;
   prompt: string;
@@ -91,6 +92,17 @@ export interface Assessment {
   classroom_id: string;
   title: string;
   questions: Question[];
+}
+/** What a teacher sends to create an assessment; Assessment assigns the ids. */
+export interface NewAssessment {
+  classroom_id: string;
+  title: string;
+  questions: Omit<Question, 'id'>[];
+}
+/** A recorded submission; its grade starts as a draft for the teacher. */
+export interface Submission {
+  id: string;
+  status: 'submitted';
 }
 export interface Evidence {
   question_id: string;
@@ -120,20 +132,26 @@ export interface SkillMetric {
   attempted: number;
   correct: number;
   observed_accuracy: number;
-  evidence_status: string;
+  /** Fewer than five attempts is too few to judge. */
+  evidence_status: 'insufficient_evidence' | 'observed';
   /** Five or more attempts under 60% correct. */
   weakness_indicator: boolean;
 }
+/** Whether a student has any finalized evidence in the classroom yet. */
+export type PerformanceStatus = 'no_finalized_evidence' | 'available';
 export interface Performance {
-  evidence_status: string;
+  student_id: string;
+  classroom_id: string;
+  evidence_status: PerformanceStatus;
   interpretation: string;
   skills: SkillMetric[];
 }
 /** One page of a classroom's enrolled students, in roster order, each with their finalized skill evidence. */
 export interface ClassPerformance {
+  classroom_id: string;
   total: number;
   offset: number;
-  students: { student_id: string; skills: SkillMetric[]; evidence_status: string }[];
+  students: { student_id: string; skills: SkillMetric[]; evidence_status: PerformanceStatus }[];
   interpretation: string;
 }
 /** An assessment in a classroom's list, with whether the signed-in user has submitted it. */
@@ -147,6 +165,11 @@ export interface AssessmentProgress {
   id: string;
   title: string;
   submissions: number;
+}
+/** A classroom enrollment, as Identity confirms adding or removing it. */
+export interface Enrollment {
+  student_id: string;
+  classroom_id: string;
 }
 /** How many of a classroom's grades wait for its teacher, and how many are final. */
 export interface GradingCounts {

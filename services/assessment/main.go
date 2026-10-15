@@ -18,7 +18,7 @@ func main() {
 		classrooms := platform.Consumer{DB: a.DB, Group: "assessment-classrooms-v1"}
 		return []func(context.Context){
 			platform.Outbox{DB: a.DB}.Run,
-			func(ctx context.Context) { classrooms.Consume(ctx, "identity.classroom.deleted.v1", purge, nil) },
+			func(ctx context.Context) { classrooms.Consume(ctx, platform.TopicClassroomDeleted, purge, nil) },
 		}, nil
 	})
 }

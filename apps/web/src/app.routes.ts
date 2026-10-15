@@ -3,7 +3,7 @@ import { CanActivateFn, CanMatchFn, ResolveFn, Router, Routes } from '@angular/r
 import { Session } from './core/session';
 
 /** A workspace section: its route, its navigation label, and the component loaded the first time it opens. */
-export interface Section {
+export interface WorkspaceSection {
   path: string;
   label: string;
   /** The label students see, when it differs. */
@@ -13,7 +13,7 @@ export interface Section {
   load: () => Promise<Type<unknown>>;
 }
 
-export const SECTIONS: Section[] = [
+export const SECTIONS: WorkspaceSection[] = [
   {
     path: 'home',
     label: 'Home',
@@ -74,7 +74,7 @@ export const SECTIONS: Section[] = [
 ];
 
 /** The section label for the signed-in user's role. */
-export function sectionLabel(section: Section, session: Session): string {
+export function sectionLabel(section: WorkspaceSection, session: Session): string {
   return session.isStudent() && section.studentLabel ? section.studentLabel : section.label;
 }
 
@@ -102,7 +102,7 @@ const toLanding: CanActivateFn = async () => {
   return router.parseUrl(landing(session));
 };
 
-function title(section: Section): ResolveFn<string> {
+function title(section: WorkspaceSection): ResolveFn<string> {
   return () => `${sectionLabel(section, inject(Session))} · Learning Ledger`;
 }
 

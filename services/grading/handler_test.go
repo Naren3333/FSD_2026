@@ -10,9 +10,6 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
-
-	"github.com/google/uuid"
-	"github.com/jackc/pgx/v5"
 )
 
 const (
@@ -44,7 +41,7 @@ func (m *memoryStore) countEvaluations(context.Context, string, string) (Counts,
 
 func (m *memoryStore) findClassroom(_ context.Context, _, id string) (string, error) {
 	if id != evaluationID {
-		return "", pgx.ErrNoRows
+		return "", platform.ErrNotFound
 	}
 	return room, nil
 }
@@ -71,14 +68,14 @@ func TestFinalizeMapsEachOutcome(t *testing.T) {
 		roles                    []string
 		status                   int
 	}{
-		{"finalized", platform.RelationTeacher, evaluationID, `{"reason":"Checked"}`, nil, []string{"teacher"}, 200},
-		{"no reason", platform.RelationTeacher, evaluationID, `{"reason":" "}`, nil, []string{"teacher"}, 422},
-		{"unknown evaluation", platform.RelationTeacher, missing, `{"reason":"Checked"}`, nil, []string{"teacher"}, 404},
-		{"a student", platform.RelationStudent, evaluationID, `{"reason":"Checked"}`, nil, []string{"student"}, 403},
-		{"teacher enrolled here", platform.RelationStudent, evaluationID, `{"reason":"Checked"}`, nil, []string{"teacher", "student"}, 403},
-		{"already final", platform.RelationTeacher, evaluationID, `{"reason":"Checked"}`, errAlreadyFinalized, []string{"teacher"}, 409},
-		{"score too high", platform.RelationTeacher, evaluationID, `{"reason":"Checked"}`, errScoreOutOfBounds, []string{"teacher"}, 422},
-		{"unknown question", platform.RelationTeacher, evaluationID, `{"reason":"Checked"}`, errUnknownQuestion, []string{"teacher"}, 422},
+		{"finalized", platform.RelationTeacher, evaluationID, `{"reason":"Checked"}`, nil, []string{"teacher"}, http.StatusOK},
+		{"no reason", platform.RelationTeacher, evaluationID, `{"reason":" "}`, nil, []string{"teacher"}, http.StatusUnprocessableEntity},
+		{"unknown evaluation", platform.RelationTeacher, missing, `{"reason":"Checked"}`, nil, []string{"teacher"}, http.StatusNotFound},
+		{"a student", platform.RelationStudent, evaluationID, `{"reason":"Checked"}`, nil, []string{"student"}, http.StatusForbidden},
+		{"teacher enrolled here", platform.RelationStudent, evaluationID, `{"reason":"Checked"}`, nil, []string{"teacher", "student"}, http.StatusForbidden},
+		{"already final", platform.RelationTeacher, evaluationID, `{"reason":"Checked"}`, errAlreadyFinalized, []string{"teacher"}, http.StatusConflict},
+		{"score too high", platform.RelationTeacher, evaluationID, `{"reason":"Checked"}`, errScoreOutOfBounds, []string{"teacher"}, http.StatusUnprocessableEntity},
+		{"unknown question", platform.RelationTeacher, evaluationID, `{"reason":"Checked"}`, errUnknownQuestion, []string{"teacher"}, http.StatusUnprocessableEntity},
 	}
 	for _, tc := range cases {
 		store := &memoryStore{finalizeErr: tc.err}
@@ -118,26 +115,24 @@ func TestOnlyAnEnrolledStudentReadsTheirOwnResults(t *testing.T) {
 	}
 }
 
+// The decoder is tested in platform; this checks purge refuses before touching the database (tx is nil).
 func TestPurgeRejectsMalformedDeletions(t *testing.T) {
-	deleted := uuid.NewString()
-	for _, data := range []string{`{}`, `{"classroom_id":"x","org_id":"o"}`, `{"classroom_id":"` + uuid.NewString() + `","org_id":"o"}`, `{"classroom_id":"` + deleted + `","org_id":""}`} {
-		event := platform.Event{Resource: deleted, Data: json.RawMessage(data)}
-		var invalid platform.InvalidEvent
-		if !errors.As(purge(context.Background(), nil, event), &invalid) {
-			t.Errorf("%s was not rejected", data)
-		}
+	event := platform.Event{Resource: room, Data: json.RawMessage(`{"classroom_id":"` + room + `","org_id":""}`)}
+	var invalid platform.InvalidEvent
+	if !errors.As(purge(context.Background(), nil, event), &invalid) {
+		t.Fatal("a malformed deletion was not rejected")
 	}
 }
 
 func TestOnlyTheTeacherSeesGradingCounts(t *testing.T) {
 	path := "/v1/evaluations/counts?classroom_id=" + room
 	student := server{store: &memoryStore{}, access: platformtest.Access(platform.RelationStudent)}
-	if w := platformtest.Serve(student.routes, http.MethodGet, path, "", "student-1", "student"); w.Code != 403 {
+	if w := platformtest.Serve(student.routes, http.MethodGet, path, "", "student-1", "student"); w.Code != http.StatusForbidden {
 		t.Fatalf("a student saw grading counts: %d", w.Code)
 	}
 	teacher := server{store: &memoryStore{}, access: platformtest.Access(platform.RelationTeacher)}
 	w := platformtest.Serve(teacher.routes, http.MethodGet, path, "", "teacher-1", "teacher")
-	if w.Code != 200 || w.Body.String() != `{"drafts":1,"finalized":0}`+"\n" {
+	if w.Code != http.StatusOK || w.Body.String() != `{"drafts":1,"finalized":0}`+"\n" {
 		t.Fatalf("%d %q", w.Code, w.Body.String())
 	}
 }

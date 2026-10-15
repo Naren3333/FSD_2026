@@ -1,41 +1,13 @@
-from collections.abc import AsyncIterator
-from contextlib import asynccontextmanager
-from typing import Any
+"""Question generation (ADR 0002): not authorized yet, so every request that matches the contract answers 501."""
 
-from fastapi import Depends
-from fastapi.responses import JSONResponse
-from learning_transport import (
-    AI_CLIENT,
-    OIDC_SETTINGS,
-    Claims,
-    ErrorResponse,
-    application,
-    require_env,
-    requires,
-    unavailable,
-)
+from learning_transport import placeholder_app
 
 from contracts import RequestContract, ResponseContract
 
-
-@asynccontextmanager
-async def lifespan(app: Any) -> AsyncIterator[None]:
-    require_env(*OIDC_SETTINGS)
-    yield
-
-
-app = application("question-generation-agent", lifespan=lifespan)
-
-
-@app.get("/health/ready")
-def ready() -> dict[str, str]:
-    return {"status": "ready", "capability": "not_implemented"}
-
-
-@app.post(
-    "/v1/question_generation", response_model=ResponseContract, responses={501: {"model": ErrorResponse}}
+app = placeholder_app(
+    "question-generation-agent",
+    "/v1/question_generation",
+    "question_generation",
+    RequestContract,
+    ResponseContract,
 )
-def execute(request: RequestContract, _caller: Claims = Depends(requires(AI_CLIENT))) -> JSONResponse:
-    # References are untrusted until future workflow authorization resolves them.
-    # No private data is fetched and no inference is attempted until this capability is authorized.
-    return unavailable("question_generation")

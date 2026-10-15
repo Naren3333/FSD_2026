@@ -5,7 +5,7 @@ service that has psycopg installed."""
 import re
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import Any, ClassVar, Self
 
 from psycopg.rows import dict_row
 from psycopg_pool import AsyncConnectionPool, ConnectionPool
@@ -86,3 +86,23 @@ def open_pool(url: str, directory: Path) -> ConnectionPool[Any]:
             conn.execute(m.sql)
             conn.execute(RECORD, (m.version,))
     return pool
+
+
+class AsyncPooled:
+    """A service's own database behind an async pool, opened with the service's MIGRATIONS applied."""
+
+    MIGRATIONS: ClassVar[Path]
+
+    def __init__(self, pool: AsyncConnectionPool[Any]) -> None:
+        self.pool = pool
+
+    @classmethod
+    async def open(cls, url: str) -> Self:
+        return cls(await open_async_pool(url, cls.MIGRATIONS))
+
+    async def ping(self) -> None:
+        async with self.pool.connection() as conn:
+            await conn.execute("SELECT 1")
+
+    async def close(self) -> None:
+        await self.pool.close()

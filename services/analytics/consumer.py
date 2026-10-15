@@ -5,9 +5,8 @@ dead-lettered; learning_transport.kafka runs the consumer."""
 import threading
 from typing import Any
 
-from learning_transport.kafka import Handler, consume
+from learning_transport.kafka import Handler, consume, parse
 from psycopg_pool import ConnectionPool
-from pydantic import ValidationError
 
 from domain import ClassroomDeletedEvent, Event
 
@@ -80,13 +79,16 @@ def purge(pool: ConnectionPool[Any], event: ClassroomDeletedEvent) -> None:
 
 def handler(pool: ConnectionPool[Any]) -> Handler:
     def handle(topic: str, value: bytes | None) -> bool:
-        try:
-            if topic == CLASSROOM_DELETED:
-                purge(pool, ClassroomDeletedEvent.model_validate_json(value or b""))
-            else:
-                process(pool, Event.model_validate_json(value or b""))
-        except (ValidationError, ValueError):
-            return False
+        if topic == CLASSROOM_DELETED:
+            deleted = parse(ClassroomDeletedEvent, value)
+            if deleted is None:
+                return False
+            purge(pool, deleted)
+        else:
+            finalized = parse(Event, value)
+            if finalized is None:
+                return False
+            process(pool, finalized)
         return True
 
     return handle

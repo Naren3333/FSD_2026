@@ -2,45 +2,45 @@ import { Component, inject, signal } from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { FormControl, FormGroup, ReactiveFormsModule, Validators } from '@angular/forms';
 import { ActivatedRoute } from '@angular/router';
-import { AssessmentApi, CurriculumApi, NewAssessment } from '../../api/clients';
-import type { Assessment, AssessmentSummary, Node, Question } from '../../api/models';
+import { AssessmentApi } from '../../api/clients';
+import type { Assessment, AssessmentSummary, NewAssessment, Node, Question } from '../../api/models';
 import { ClassroomContext, onClassroomChange } from '../../core/classroom-context';
+import { CurriculumNames } from '../../core/curriculum-names';
 import { Session } from '../../core/session';
 import { UnsavedChanges } from '../../core/unsaved-changes';
 import { ActionState } from '../../shared/action-state';
 import { FieldComponent } from '../../shared/field';
+import { Section } from '../../shared/section';
+import { SectionStateComponent } from '../../shared/section-state';
 import { StatusComponent } from '../../shared/status';
+import { requiredText } from '../../shared/validators';
 
 type QuestionType = Question['type'];
 
 @Component({
   selector: 'app-assessments',
   standalone: true,
-  imports: [ReactiveFormsModule, FieldComponent, StatusComponent],
+  imports: [ReactiveFormsModule, FieldComponent, StatusComponent, SectionStateComponent],
   templateUrl: './assessments.html',
 })
 export class AssessmentsComponent {
   readonly session = inject(Session);
   private readonly assessmentApi = inject(AssessmentApi);
-  private readonly curriculum = inject(CurriculumApi);
+  private readonly curriculum = inject(CurriculumNames);
   readonly classroomId = inject(ClassroomContext).classroomId;
   readonly state = new ActionState();
-  readonly assessments = signal<AssessmentSummary[]>([]);
-  readonly skills = signal<Node[]>([]);
+  readonly assessments = new Section<AssessmentSummary[]>();
+  readonly skills = this.curriculum.skills;
+  /** Reading the curriculum for the skill a new question uses. */
+  readonly skillsState = new Section<Node[]>();
   readonly selected = signal<Assessment | null>(null);
   readonly submitted = signal(false);
   /** The assessment a link such as student Home asked to open, until the classroom's list has it. */
   private requested = '';
   answers = new FormGroup<Record<string, FormControl<string>>>({});
   readonly form = new FormGroup({
-    title: new FormControl('', {
-      nonNullable: true,
-      validators: [Validators.required, Validators.maxLength(160)],
-    }),
-    prompt: new FormControl('', {
-      nonNullable: true,
-      validators: [Validators.required, Validators.maxLength(2000)],
-    }),
+    title: new FormControl('', { nonNullable: true, validators: requiredText(160) }),
+    prompt: new FormControl('', { nonNullable: true, validators: requiredText(2000) }),
     skill_id: new FormControl('', { nonNullable: true, validators: [Validators.required] }),
     type: new FormControl<QuestionType>('numerical', { nonNullable: true }),
     options: new FormControl('', { nonNullable: true }),
@@ -52,7 +52,6 @@ export class AssessmentsComponent {
     inject(UnsavedChanges).track(() => this.form.dirty || this.answers.dirty);
     onClassroomChange(() => {
       this.selected.set(null);
-      this.assessments.set([]);
       this.load();
     });
     inject(ActivatedRoute)
@@ -65,18 +64,16 @@ export class AssessmentsComponent {
 
   load(): void {
     const classroomId = this.classroomId();
+    this.assessments.clear();
     if (!classroomId) return;
-    void this.state
-      .run(async () => {
-        this.assessments.set(await this.assessmentApi.list(classroomId));
-        this.skills.set((await this.curriculum.nodes()).filter((n) => n.kind === 'skill'));
-      })
-      .then(() => this.openRequested());
+    void this.assessments.load(() => this.assessmentApi.list(classroomId)).then(() => this.openRequested());
+    // Read fresh, so a skill a colleague just added is there to choose.
+    if (this.session.isTeacher()) void this.skillsState.load(() => this.curriculum.refresh());
   }
 
   /** Opens the requested assessment once it is in the current classroom's list. */
   private openRequested(): void {
-    if (!this.requested || !this.assessments().some((a) => a.id === this.requested)) return;
+    if (!this.requested || !this.assessments.value()?.some((a) => a.id === this.requested)) return;
     const id = this.requested;
     this.requested = '';
     this.open(id);
@@ -127,7 +124,7 @@ export class AssessmentsComponent {
         ),
       );
       this.selected.set(assessment);
-      this.submitted.set(this.assessments().find((a) => a.id === id)?.submitted ?? false);
+      this.submitted.set(this.assessments.value()?.find((a) => a.id === id)?.submitted ?? false);
     });
   }
 
@@ -138,9 +135,9 @@ export class AssessmentsComponent {
       await this.assessmentApi.submit(assessment.id, this.answers.getRawValue());
       this.answers.markAsPristine();
       this.submitted.set(true);
-      this.assessments.update((list) =>
-        list.map((a) => (a.id === assessment.id ? { ...a, submitted: true } : a)),
-      );
+      const list = this.assessments.value();
+      if (list)
+        this.assessments.set(list.map((a) => (a.id === assessment.id ? { ...a, submitted: true } : a)));
     }, 'Answers submitted. Your teacher will review the grade.');
   }
 }

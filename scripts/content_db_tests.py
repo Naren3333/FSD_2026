@@ -8,28 +8,16 @@ on the Compose network because PostgreSQL is not published to the host. ai-core 
 
 import os
 import subprocess
-from pathlib import Path
 
-ROOT = Path(__file__).resolve().parents[1]
-ENV = dict(
-    line.split("=", 1)
-    for line in (ROOT / ".env").read_text().splitlines()
-    if line and not line.startswith("#")
-)
+from local_stack import ROOT, env, psql_value
+from setup import password_key
+
 GO_IMAGE = "golang:1.25.7-alpine"
 
-
-def psql(database: str, sql: str) -> str:
-    """Runs one statement as the PostgreSQL superuser, inside the Compose container."""
-    command = ["docker", "compose", "exec", "-T", "postgres", "psql", "-U", "postgres"]
-    command += ["-d", database, "-At", "-c", sql]
-    return subprocess.run(command, cwd=ROOT, text=True, capture_output=True, check=True).stdout.strip()
-
-
-if psql("postgres", "SELECT count(*) FROM pg_database WHERE datname='content_test'") == "0":
-    psql("postgres", "CREATE DATABASE content_test OWNER content")
-psql("content_test", "CREATE EXTENSION IF NOT EXISTS vector")
-url = f"postgresql://content:{ENV['CONTENT_DB_PASSWORD']}@postgres:5432/content_test?sslmode=disable"
+if psql_value("SELECT count(*) FROM pg_database WHERE datname='content_test'") == "0":
+    psql_value("CREATE DATABASE content_test OWNER content")
+psql_value("CREATE EXTENSION IF NOT EXISTS vector", database="content_test")
+url = f"postgresql://content:{env()[password_key('content')]}@postgres:5432/content_test?sslmode=disable"
 command = [
     "docker", "run", "--rm",
     "--network", "learning-foundation_default",

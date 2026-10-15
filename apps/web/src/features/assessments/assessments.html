@@ -3,7 +3,11 @@
     <p class="eyebrow">From questions to evidence</p>
     <h2>Assessments</h2>
   </div>
-  <button class="secondary" (click)="load()" [disabled]="state.busy() || !classroomId()">
+  <button
+    class="secondary"
+    (click)="load()"
+    [disabled]="state.busy() || assessments.loading() || !classroomId()"
+  >
     Refresh assessments
   </button>
 </div>
@@ -15,22 +19,25 @@
   <section class="panel">
     <h3>Classroom assessments</h3>
     <p class="caption">Up to 100 most recent assessments</p>
-    @for (item of assessments(); track item.id) {
-      <article class="record">
-        <strong>{{ item.title }}</strong>
-        @if (session.isStudent() && item.submitted) {
-          <span class="badge">Submitted</span>
-        }
-        <button class="secondary" (click)="open(item.id)" [disabled]="state.busy()">Open assessment</button>
-      </article>
-    } @empty {
-      <p class="empty">
-        {{
-          classroomId()
-            ? 'No assessments yet. Create one using a curriculum skill.'
-            : 'Select a classroom to continue.'
-        }}
-      </p>
+    <app-section-state [section]="assessments" loading="Loading assessments…" />
+    @if (assessments.ready()) {
+      @for (item of assessments.value() ?? []; track item.id) {
+        <article class="record">
+          <strong>{{ item.title }}</strong>
+          @if (session.isStudent() && item.submitted) {
+            <span class="badge">Submitted</span>
+          }
+          <button class="secondary" (click)="open(item.id)" [disabled]="state.busy()">Open assessment</button>
+        </article>
+      } @empty {
+        <p class="empty">
+          {{
+            classroomId()
+              ? 'No assessments yet. Create one using a curriculum skill.'
+              : 'Select a classroom to continue.'
+          }}
+        </p>
+      }
     }
     @if (selected(); as assessment) {
       <div class="separated">
@@ -105,7 +112,6 @@
             formControlName="prompt"
             rows="4"
             maxlength="2000"
-            style="resize: none"
             aria-describedby="question-prompt-help"
           ></textarea>
         </app-field>
@@ -121,6 +127,7 @@
             }
           </select>
         </app-field>
+        <app-section-state [section]="skillsState" loading="Loading curriculum skills…" />
         <app-field controlId="question-type" label="Question type">
           <select id="question-type" formControlName="type">
             <option value="numerical">Numerical</option>
@@ -137,7 +144,6 @@
               id="question-options"
               formControlName="options"
               rows="4"
-              style="resize: none"
               aria-describedby="question-options-help"
             ></textarea>
           </app-field>

@@ -2,14 +2,13 @@
 Messages that don't match the contract are dead-lettered; learning_transport.kafka runs the consumer."""
 
 import threading
-from datetime import datetime
 from typing import Any, Literal
 from uuid import UUID
 
 from learning_transport import Contract
-from learning_transport.kafka import consume
+from learning_transport.kafka import Envelope, consume, parse
 from psycopg_pool import ConnectionPool
-from pydantic import Field, ValidationError, model_validator
+from pydantic import Field, model_validator
 
 TOPIC = "identity.classroom.deleted.v1"
 GROUP = "question-chatbot-agent-v1"
@@ -20,30 +19,22 @@ class ClassroomDeleted(Contract):
     org_id: str = Field(min_length=1, max_length=200)
 
 
-class ClassroomDeletedEvent(Contract):
-    event_id: UUID
+class ClassroomDeletedEvent(Envelope):
     event_type: Literal["identity.classroom.deleted.v1"]
-    schema_version: int = Field(ge=1, le=1)
-    timestamp: datetime
-    correlation_id: UUID
-    resource_id: UUID
     data: ClassroomDeleted
 
     @model_validator(mode="after")
     def deleted(self) -> "ClassroomDeletedEvent":
         if self.resource_id != self.data.classroom_id:
             raise ValueError("Not this classroom's deletion")
-        if self.timestamp.tzinfo is None:
-            raise ValueError("Timestamp must have a timezone")
         return self
 
 
 def purge(pool: ConnectionPool[Any], value: bytes | None) -> bool:
     """Delete the classroom's threads (their messages go with them). False when the message is not a valid
     deletion. Deleting what is already gone changes nothing, so a repeated event is harmless."""
-    try:
-        event = ClassroomDeletedEvent.model_validate_json(value or b"")
-    except (ValidationError, ValueError):
+    event = parse(ClassroomDeletedEvent, value)
+    if event is None:
         return False
     with pool.connection() as conn:
         conn.execute(

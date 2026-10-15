@@ -1,0 +1,13 @@
+<dialog #dialog [attr.aria-labelledby]="dialogId + '-title'" (close)="onClose()">
+  <h2 [id]="dialogId + '-title'">{{ heading }}</h2>
+  <ng-content />
+  <div class="actions">
+    <button type="button" class="secondary" autofocus (click)="close()" [disabled]="state.busy()">
+      Cancel
+    </button>
+    <button type="button" (click)="confirm.emit()" [disabled]="state.busy()">{{ confirmLabel }}</button>
+  </div>
+  @if (isOpen()) {
+    <app-status [state]="state" />
+  }
+</dialog>

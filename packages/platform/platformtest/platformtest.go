@@ -10,20 +10,34 @@ import (
 	"strings"
 )
 
-// Serve sends one request through the routes as a verified caller in organization "org" with the given roles.
-func Serve(routes func(*http.ServeMux), method, path, body, subject string, roles ...string) *httptest.ResponseRecorder {
+// Claims are verified claims for subject in organization "org" with the given realm roles.
+func Claims(subject string, roles ...string) platform.Claims {
+	c := platform.Claims{Subject: subject, Org: "org"}
+	c.Realm.Roles = roles
+	return c
+}
+
+// Request is a request from a verified caller with claims c, for tests that also need to set headers.
+func Request(c platform.Claims, method, path, body string) *http.Request {
+	return httptest.NewRequestWithContext(platform.WithClaims(context.Background(), c), method, path, strings.NewReader(body))
+}
+
+// ServeRequest sends one request through the routes.
+func ServeRequest(routes func(*http.ServeMux), r *http.Request) *httptest.ResponseRecorder {
 	mux := http.NewServeMux()
 	routes(mux)
-	var c platform.Claims
-	c.Subject, c.Org, c.Realm.Roles = subject, "org", roles
-	r := httptest.NewRequestWithContext(platform.WithClaims(context.Background(), c), method, path, strings.NewReader(body))
 	w := httptest.NewRecorder()
 	mux.ServeHTTP(w, r)
 	return w
 }
 
+// Serve sends one request through the routes as a verified caller in organization "org" with the given roles.
+func Serve(routes func(*http.ServeMux), method, path, body, subject string, roles ...string) *httptest.ResponseRecorder {
+	return ServeRequest(routes, Request(Claims(subject, roles...), method, path, body))
+}
+
 // Access answers every classroom check with one relation: platform.RelationTeacher, platform.RelationStudent,
-// or "" to deny.
+// or "" to deny. platform.Access and platform.TeacherOf apply the real policy on top of it.
 type Access string
 
 // Relation implements platform.ClassroomAccess.
@@ -33,23 +47,4 @@ func (a Access) Relation(w http.ResponseWriter, _ *http.Request, _, _ string) (s
 		return "", false
 	}
 	return string(a), true
-}
-
-// Access implements platform.ClassroomAccess.
-func (a Access) Access(w http.ResponseWriter, r *http.Request, classroom, student string) bool {
-	_, ok := a.Relation(w, r, classroom, student)
-	return ok
-}
-
-// TeacherOf implements platform.ClassroomAccess, with the same role check as the real one.
-func (a Access) TeacherOf(w http.ResponseWriter, r *http.Request, classroom string) bool {
-	if !platform.Teacher(w, r) {
-		return false
-	}
-	relation, ok := a.Relation(w, r, classroom, "")
-	if ok && relation != platform.RelationTeacher {
-		platform.Forbidden(w, "Only the classroom's teacher may do this.")
-		return false
-	}
-	return ok
 }

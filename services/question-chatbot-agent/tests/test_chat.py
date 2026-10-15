@@ -12,6 +12,7 @@ import httpx
 import pytest
 from conftest import OTHER_ROOM, ROOM, Fakes, MemoryStore, as_user, chat_stream, rewrite
 from fastapi.testclient import TestClient
+from learning_transport import sse_event
 
 import prompts
 
@@ -206,7 +207,7 @@ def test_a_failure_mid_stream_saves_the_partial_answer(
 
 def test_disconnect_saves_an_interrupted_answer(api: TestClient, fakes: Fakes, store: MemoryStore) -> None:
     async def hang() -> AsyncIterator[bytes]:
-        yield b'event: delta\ndata: {"text": "Partial [S1] "}\n\n'
+        yield sse_event("delta", {"text": "Partial [S1] "}).encode()
         await asyncio.Event().wait()
 
     fakes.results = RESULTS

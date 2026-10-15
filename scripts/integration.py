@@ -12,21 +12,14 @@ import subprocess
 import time
 from collections.abc import Callable
 from dataclasses import dataclass
-from pathlib import Path
 from typing import Any, TypeVar
 from uuid import UUID, uuid4
 
 import httpx
 from jsonschema import Draft202012Validator, FormatChecker
+from local_stack import BASE, ROOT, TOKEN_URL, env, password_token, psql, psql_value, sse_events
+from setup import client_secret_key
 
-ROOT = Path(__file__).resolve().parents[1]
-ENV = dict(
-    line.split("=", 1)
-    for line in (ROOT / ".env").read_text().splitlines()
-    if line and not line.startswith("#")
-)
-BASE = "http://localhost:8000/api"
-TOKEN_URL = "http://localhost:8081/realms/learning/protocol/openid-connect/token"
 CONTRACTS = {"chatbot": "question-chatbot-agent"}  # gateway path → contract file
 TEXT = {"Content-Type": "text/plain"}
 PDF = {"Content-Type": "application/pdf"}
@@ -49,31 +42,18 @@ def docker(*args: str, input: str | None = None, check: bool = True) -> subproce
     )
 
 
-def psql(user: str, database: str, sql: str, check: bool = True) -> subprocess.CompletedProcess[str]:
-    """Runs one statement as a service's own database user."""
-    return docker("exec", "-T", "postgres", "psql", "-U", user, "-d", database, "-At", "-c", sql, check=check)
-
-
 def sql_value(service: str, sql: str) -> str:
-    """The single value a statement returns in a service's own database."""
-    return psql(service, service, sql).stdout.strip()
+    """The single value a statement returns in a service's own database, as its own database user."""
+    return psql_value(sql, database=service, user=service)
 
 
 def login(username: str, password_key: str) -> httpx.Client:
-    data = {
-        "client_id": "learning-e2e",
-        "grant_type": "password",
-        "username": username,
-        "password": ENV[password_key],
-    }
-    res = httpx.post(TOKEN_URL, data=data, timeout=15)
-    assert res.status_code == 200, f"Local identity login failed: {res.status_code}"
-    token = res.json()["access_token"]
+    token = password_token(username, env()[password_key])
     return httpx.Client(base_url=BASE, headers={"Authorization": "Bearer " + token}, timeout=25)
 
 
 def service_token(client_id: str) -> str:
-    secret = ENV[client_id.upper().replace("-", "_") + "_CLIENT_SECRET"]
+    secret = env()[client_secret_key(client_id)]
     data = {"client_id": client_id, "client_secret": secret, "grant_type": "client_credentials"}
     res = httpx.post(TOKEN_URL, data=data, timeout=15)
     assert res.status_code == 200, f"Service account login failed for {client_id}: {res.status_code}"
@@ -298,8 +278,7 @@ def chat(u: Users, room_id: str) -> None:
     with u.student.stream("POST", messages, json=question, timeout=60) as streamed:
         assert streamed.status_code == 200
         assert streamed.headers["content-type"].startswith("text/event-stream")
-        blocks = streamed.read().decode().strip().split("\n\n")
-    events = [block.split("\n")[0].removeprefix("event: ") for block in blocks]
+        events = [name for name, _ in sse_events(streamed.iter_lines())]
     assert events[-1] in ("done", "error"), events
 
     turn = request(u.student, "GET", messages)["messages"]
@@ -521,7 +500,7 @@ def databases() -> None:
         ("aicore", "chatbot"),
         ("chatbot", "aicore"),
     ]:
-        isolation = psql(user, database, "SELECT 1", check=False)
+        isolation = psql("SELECT 1", database=database, user=user, check=False)
         assert isolation.returncode != 0 and "permission denied" in isolation.stderr.lower(), (user, database)
     versions = "SELECT string_agg(version::text, ',' ORDER BY version) FROM schema_migrations"
     for service, expected in [("content", "1,2"), ("identity", "1,2,3,4,5")]:

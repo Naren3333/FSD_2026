@@ -6,6 +6,7 @@ import logging
 from collections import defaultdict
 from dataclasses import dataclass
 
+from fastapi import HTTPException
 from learning_transport import failure
 
 import openai_client
@@ -16,6 +17,11 @@ from settings import get_settings
 log = logging.getLogger("ai-core.billing")
 
 WRITE_GRACE = 10.0  # seconds shutdown waits for charges still being written
+
+
+def ledger_unavailable() -> HTTPException:
+    """503 when the usage ledger cannot be read."""
+    return failure(503, "USAGE_LEDGER_UNAVAILABLE", "AI usage cannot be checked right now.")
 
 
 class Billing:
@@ -32,7 +38,7 @@ class Billing:
             usage = await self.ledger.today(billed)
         except Exception:
             log.error("ledger_unavailable")
-            raise failure(503, "USAGE_LEDGER_UNAVAILABLE", "AI usage cannot be checked right now.") from None
+            raise ledger_unavailable() from None
         if spend.over_limit(usage):
             raise spend.limit_reached(usage)
 
@@ -60,17 +66,29 @@ class Billing:
 
 
 def priced(
-    operation: str, model: str, tokens_in: int, tokens_out: int = 0, estimated: bool = False
+    operation: str,
+    model: str,
+    tokens_in: int,
+    tokens_out: int = 0,
+    estimated: bool = False,
+    cached_in: int = 0,
 ) -> spend.Charge:
+    """A charge priced from token counts; `cached_in` of `tokens_in` are billed at the model's cached rate."""
     return spend.Charge(
-        operation, model, tokens_in, tokens_out, spend.cost(model, tokens_in, tokens_out), estimated
+        operation,
+        model,
+        tokens_in,
+        tokens_out,
+        spend.cost(model, tokens_in, tokens_out, cached_in),
+        estimated,
     )
 
 
 def reply_charge(
     operation: str, model: str, prompt: str, reply: str, usage: openai_client.Usage | None
 ) -> spend.Charge:
-    """A chat reply's charge: OpenAI's token counts when it sent them, otherwise an estimate from the text."""
+    """A chat reply's charge: OpenAI's token counts (cached prompt tokens at the cached rate) when it sent them,
+    otherwise an estimate from the text."""
     tokens_in = usage.tokens_in if usage else None
     tokens_out = usage.tokens_out if usage else None
     return priced(
@@ -79,6 +97,7 @@ def reply_charge(
         spend.estimate_tokens(prompt) if tokens_in is None else tokens_in,
         spend.estimate_tokens(reply) if tokens_out is None else tokens_out,
         estimated=tokens_in is None or tokens_out is None,
+        cached_in=usage.cached_in if usage and tokens_in is not None else 0,
     )
 
 
@@ -99,14 +118,7 @@ def ingest_charges(record: costs.IngestCost) -> list[spend.Charge]:
             tokens.cached += calls.cached_tokens
             tokens.completion += calls.completion_tokens
     out = [
-        spend.Charge(
-            "ingest",
-            model,
-            t.prompt,
-            t.completion,
-            spend.cost(model, t.prompt, t.completion, t.cached),
-        )
-        for model, t in by_model.items()
+        priced("ingest", model, t.prompt, t.completion, cached_in=t.cached) for model, t in by_model.items()
     ]
     if record.embed_tokens:
         model = get_settings().embedding_model

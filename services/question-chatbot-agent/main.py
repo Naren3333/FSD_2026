@@ -20,6 +20,7 @@ from learning_transport import (
     application,
     failure,
     require_env,
+    require_relation,
     requires,
 )
 from learning_transport.db import open_pool
@@ -87,14 +88,7 @@ async def require_access(request: Request, classroom_id: str) -> None:
     """403 unless Identity says the caller may use the classroom now. Enrollment can end, so this is asked on every
     read and turn, not only when a thread is created."""
     services: Services = request.app.state.services
-    try:
-        allowed = await services.classroom_access(
-            request.headers["authorization"], classroom_id, request.state.correlation_id
-        )
-    except UpstreamError:
-        raise failure(503, "DEPENDENCY_UNAVAILABLE", "Authorization is unavailable; retry later.") from None
-    if not allowed:
-        raise failure(403, "FORBIDDEN", "You do not have access to this classroom.")
+    await require_relation(services.identity, request, classroom_id)
 
 
 async def accessible_thread(request: Request, claims: Claims, thread_id: UUID) -> dict[str, Any]:

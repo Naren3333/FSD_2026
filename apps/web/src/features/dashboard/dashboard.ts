@@ -1,7 +1,7 @@
 import { PercentPipe } from '@angular/common';
 import { Component, computed, inject, signal } from '@angular/core';
 import { RouterLink } from '@angular/router';
-import { AnalyticsApi, AssessmentApi, CurriculumApi, GradingApi, IdentityApi } from '../../api/clients';
+import { AnalyticsApi, AssessmentApi, GradingApi, IdentityApi } from '../../api/clients';
 import type {
   AssessmentProgress,
   ClassPerformance,
@@ -10,13 +10,16 @@ import type {
   Student,
 } from '../../api/models';
 import { ClassroomContext, onClassroomChange } from '../../core/classroom-context';
-import { skillNames, studentNames } from '../../shared/names';
+import { CurriculumNames } from '../../core/curriculum-names';
+import { studentNames } from '../../shared/names';
+import { PagerComponent } from '../../shared/pager';
 import { Section } from '../../shared/section';
+import { SectionStateComponent } from '../../shared/section-state';
 
 @Component({
   selector: 'app-dashboard',
   standalone: true,
-  imports: [RouterLink, PercentPipe],
+  imports: [RouterLink, PercentPipe, SectionStateComponent, PagerComponent],
   templateUrl: './dashboard.html',
 })
 export class DashboardComponent {
@@ -24,28 +27,23 @@ export class DashboardComponent {
   private readonly assessmentApi = inject(AssessmentApi);
   private readonly grading = inject(GradingApi);
   private readonly analytics = inject(AnalyticsApi);
-  private readonly curriculum = inject(CurriculumApi);
+  private readonly curriculum = inject(CurriculumNames);
   private readonly context = inject(ClassroomContext);
   readonly classroomId = this.context.classroomId;
-  readonly classroomName = computed(
-    () => this.context.classrooms().find((room) => room.id === this.classroomId())?.name ?? '',
-  );
+  readonly classroomName = this.context.classroomName;
   readonly roster = new Section<Student[]>();
   readonly assessments = new Section<AssessmentProgress[]>();
   readonly counts = new Section<GradingCounts>();
   readonly performance = new Section<ClassPerformance>();
-  private readonly skills = signal(new Map<string, string>());
   private readonly names = computed(() => studentNames(this.roster.value() ?? []));
   /** The class skills table shows this many students at a time. */
   readonly pageSize = 20;
   readonly page = signal(0);
-  readonly pages = computed(() =>
-    Math.max(1, Math.ceil((this.performance.value()?.total ?? 0) / this.pageSize)),
-  );
-  /** The skills any student on this page has evidence for, by name. */
+  /** The skills any student on this page has evidence for, by name (or id, for a skill with none). */
   readonly skillRows = computed(() => {
     const ids = new Set(this.performance.value()?.students.flatMap((s) => s.skills.map((m) => m.skill_id)));
-    return [...ids].sort((a, b) => this.skill(a).localeCompare(this.skill(b)));
+    const label = (id: string) => this.skill(id) || id;
+    return [...ids].sort((a, b) => label(a).localeCompare(label(b)));
   });
   /** Each student's evidence on this page, by skill. */
   private readonly metrics = computed(
@@ -82,11 +80,12 @@ export class DashboardComponent {
 
   private loadPerformance(classroomId: string): Promise<void> {
     return this.performance.load(async () => {
-      const [page, nodes] = await Promise.all([
-        this.analytics.classPerformance(classroomId, this.page() * this.pageSize, this.pageSize),
-        this.curriculum.nodes(),
-      ]);
-      this.skills.set(skillNames(nodes));
+      const page = await this.analytics.classPerformance(
+        classroomId,
+        this.page() * this.pageSize,
+        this.pageSize,
+      );
+      await this.curriculum.need(page.students.flatMap((s) => s.skills.map((m) => m.skill_id)));
       return page;
     });
   }
@@ -95,8 +94,9 @@ export class DashboardComponent {
     return this.names().get(studentId) ?? studentId;
   }
 
+  /** The skill's name, or '' when the curriculum has none. */
   skill(skillId: string): string {
-    return this.skills().get(skillId) ?? skillId;
+    return this.curriculum.skillName(skillId);
   }
 
   metric(studentId: string, skillId: string): SkillMetric | undefined {

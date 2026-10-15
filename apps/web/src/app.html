@@ -35,7 +35,7 @@
       <span class="workspace-label">LEARNING WORKSPACE</span>
       @if (session.profile(); as profile) {
         <div class="account">
-          <span>{{ profile.role === 'teacher' ? 'Teacher' : 'Student' }} · {{ profile.org_id }}</span>
+          <span>{{ session.isTeacher() ? 'Teacher' : 'Student' }} · {{ profile.org_id }}</span>
           <button class="secondary" (click)="logout()">Sign out</button>
         </div>
       } @else if (!session.signedIn) {

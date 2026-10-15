@@ -39,10 +39,7 @@ class Services:
         self.identity = IdentityClient(settings.identity_url, http)
         self.token = ServiceToken(http, settings.token_url, settings.client_id, settings.client_secret)
 
-    # ---- user-token calls
-
-    async def classroom_access(self, authorization: str, classroom_id: str, correlation: str) -> bool:
-        return await self.identity.relation(authorization, classroom_id, correlation) is not None
+    # ---- user-token calls (classroom access is learning_transport.require_relation with self.identity)
 
     async def search(
         self, authorization: str, classroom_id: str, query: str, correlation: str

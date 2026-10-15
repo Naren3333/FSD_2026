@@ -1,19 +1,21 @@
 import { PercentPipe } from '@angular/common';
-import { Component, computed, inject, signal } from '@angular/core';
+import { Component, computed, inject } from '@angular/core';
 import { RouterLink } from '@angular/router';
-import { AnalyticsApi, AssessmentApi, CurriculumApi, GradingApi } from '../../api/clients';
+import { AnalyticsApi, AssessmentApi, GradingApi } from '../../api/clients';
 import type { AssessmentSummary, Evaluation, Performance } from '../../api/models';
 import { ClassroomContext, onClassroomChange } from '../../core/classroom-context';
+import { CurriculumNames } from '../../core/curriculum-names';
 import { Session } from '../../core/session';
-import { skillNames, total } from '../../shared/names';
+import { MarksPipe } from '../../shared/marks';
 import { Section } from '../../shared/section';
+import { SectionStateComponent } from '../../shared/section-state';
 
 /** A student's start page for the current classroom: what is still to do, what waits for the teacher, recent
  * finalized results and the skills to practise. Grades show only once the teacher has finalized them. */
 @Component({
   selector: 'app-home',
   standalone: true,
-  imports: [RouterLink, PercentPipe],
+  imports: [RouterLink, PercentPipe, SectionStateComponent, MarksPipe],
   templateUrl: './home.html',
 })
 export class HomeComponent {
@@ -21,17 +23,13 @@ export class HomeComponent {
   private readonly assessmentApi = inject(AssessmentApi);
   private readonly grading = inject(GradingApi);
   private readonly analytics = inject(AnalyticsApi);
-  private readonly curriculum = inject(CurriculumApi);
+  private readonly curriculum = inject(CurriculumNames);
   private readonly context = inject(ClassroomContext);
   readonly classroomId = this.context.classroomId;
-  readonly classroomName = computed(
-    () => this.context.classrooms().find((room) => room.id === this.classroomId())?.name ?? '',
-  );
+  readonly classroomName = this.context.classroomName;
   readonly assessments = new Section<AssessmentSummary[]>();
   readonly results = new Section<Evaluation[]>();
   readonly performance = new Section<Performance>();
-  private readonly skills = signal(new Map<string, string>());
-  readonly total = total;
   /** Recent results shown here; the rest are under My results. */
   readonly recentCount = 3;
 
@@ -67,11 +65,8 @@ export class HomeComponent {
     void this.assessments.load(() => this.assessmentApi.list(classroomId));
     void this.results.load(() => this.grading.mine(classroomId));
     void this.performance.load(async () => {
-      const [performance, nodes] = await Promise.all([
-        this.analytics.performance(studentId, classroomId),
-        this.curriculum.nodes(),
-      ]);
-      this.skills.set(skillNames(nodes));
+      const performance = await this.analytics.performance(studentId, classroomId);
+      await this.curriculum.need(performance.skills.map((s) => s.skill_id));
       return performance;
     });
   }
@@ -80,7 +75,8 @@ export class HomeComponent {
     return this.titles().get(result.assessment_id) ?? 'Assessment';
   }
 
+  /** The skill's name, or '' when the curriculum has none. */
   skill(skillId: string): string {
-    return this.skills().get(skillId) ?? skillId;
+    return this.curriculum.skillName(skillId);
   }
 }

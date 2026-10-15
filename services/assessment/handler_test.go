@@ -10,9 +10,6 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
-
-	"github.com/google/uuid"
-	"github.com/jackc/pgx/v5"
 )
 
 const (
@@ -28,7 +25,7 @@ type memoryStore struct {
 func (m *memoryStore) findAssessment(_ context.Context, _, id string) (Assessment, error) {
 	v, ok := m.assessments[id]
 	if !ok {
-		return v, pgx.ErrNoRows
+		return v, platform.ErrNotFound
 	}
 	return v, nil
 }
@@ -91,10 +88,10 @@ func TestCreateChecksTheTeacherAndEverySkill(t *testing.T) {
 		skill    skillStatus
 		status   int
 	}{
-		{platform.RelationTeacher, skillValid, 201},
-		{platform.RelationStudent, skillValid, 403},
-		{platform.RelationTeacher, skillInvalid, 422},
-		{platform.RelationTeacher, skillUnavailable, 503},
+		{platform.RelationTeacher, skillValid, http.StatusCreated},
+		{platform.RelationStudent, skillValid, http.StatusForbidden},
+		{platform.RelationTeacher, skillInvalid, http.StatusUnprocessableEntity},
+		{platform.RelationTeacher, skillUnavailable, http.StatusServiceUnavailable},
 	}
 	for _, tc := range cases {
 		s, _ := newServer(tc.relation, tc.skill)
@@ -119,7 +116,7 @@ func created(t *testing.T, relation string) (server, Assessment) {
 func TestStudentsSeeNoAnswerKey(t *testing.T) {
 	s, v := created(t, platform.RelationStudent)
 	w := call(t, s, http.MethodGet, "/v1/assessments/"+v.ID, "", "student")
-	if w.Code != 200 || strings.Contains(w.Body.String(), `"answer"`) {
+	if w.Code != http.StatusOK || strings.Contains(w.Body.String(), `"answer"`) {
 		t.Fatalf("student view: %d %s", w.Code, w.Body.String())
 	}
 	s.access = platformtest.Access(platform.RelationTeacher)
@@ -132,16 +129,16 @@ func TestEachStudentSubmitsOnce(t *testing.T) {
 	s, v := created(t, platform.RelationStudent)
 	path := "/v1/assessments/" + v.ID + "/submissions"
 	body := `{"answers":{"` + v.Questions[0].ID + `":"1"}}`
-	if w := call(t, s, http.MethodPost, path, body, "student"); w.Code != 201 {
+	if w := call(t, s, http.MethodPost, path, body, "student"); w.Code != http.StatusCreated {
 		t.Fatalf("status %d %s", w.Code, w.Body.String())
 	}
-	if w := call(t, s, http.MethodPost, path, body, "student"); w.Code != 409 {
+	if w := call(t, s, http.MethodPost, path, body, "student"); w.Code != http.StatusConflict {
 		t.Fatalf("second submission: %d", w.Code)
 	}
-	if w := call(t, s, http.MethodPost, path, `{"answers":{}}`, "student"); w.Code != 422 && w.Code != 409 {
+	if w := call(t, s, http.MethodPost, path, `{"answers":{}}`, "student"); w.Code != http.StatusUnprocessableEntity && w.Code != http.StatusConflict {
 		t.Fatalf("missing answers: %d", w.Code)
 	}
-	if w := call(t, s, http.MethodPost, path, body, "teacher", "student"); w.Code != 403 {
+	if w := call(t, s, http.MethodPost, path, body, "teacher", "student"); w.Code != http.StatusForbidden {
 		t.Fatalf("a teacher submitted: %d", w.Code)
 	}
 }
@@ -149,16 +146,16 @@ func TestEachStudentSubmitsOnce(t *testing.T) {
 func TestOnlyTheTeacherSeesSubmissionCounts(t *testing.T) {
 	s, v := created(t, platform.RelationStudent)
 	path := "/v1/assessments/" + v.ID + "/submissions"
-	if w := call(t, s, http.MethodPost, path, `{"answers":{"`+v.Questions[0].ID+`":"1"}}`, "student"); w.Code != 201 {
+	if w := call(t, s, http.MethodPost, path, `{"answers":{"`+v.Questions[0].ID+`":"1"}}`, "student"); w.Code != http.StatusCreated {
 		t.Fatalf("status %d", w.Code)
 	}
 	progress := "/v1/assessments/progress?classroom_id=" + room
-	if w := call(t, s, http.MethodGet, progress, "", "student"); w.Code != 403 {
+	if w := call(t, s, http.MethodGet, progress, "", "student"); w.Code != http.StatusForbidden {
 		t.Fatalf("a student saw submission counts: %d", w.Code)
 	}
 	s.access = platformtest.Access(platform.RelationTeacher)
 	w := call(t, s, http.MethodGet, progress, "", "teacher")
-	if w.Code != 200 || !strings.Contains(w.Body.String(), `"submissions":1`) {
+	if w.Code != http.StatusOK || !strings.Contains(w.Body.String(), `"submissions":1`) {
 		t.Fatalf("%d %s", w.Code, w.Body.String())
 	}
 }
@@ -170,7 +167,7 @@ func TestTheListSaysWhetherTheStudentSubmitted(t *testing.T) {
 		t.Fatalf("%d %s", w.Code, w.Body.String())
 	}
 	path := "/v1/assessments/" + v.ID + "/submissions"
-	if w := call(t, s, http.MethodPost, path, `{"answers":{"`+v.Questions[0].ID+`":"1"}}`, "student"); w.Code != 201 {
+	if w := call(t, s, http.MethodPost, path, `{"answers":{"`+v.Questions[0].ID+`":"1"}}`, "student"); w.Code != http.StatusCreated {
 		t.Fatalf("status %d", w.Code)
 	}
 	if w := call(t, s, http.MethodGet, list, "", "student"); !strings.Contains(w.Body.String(), `"submitted":true`) {
@@ -178,13 +175,20 @@ func TestTheListSaysWhetherTheStudentSubmitted(t *testing.T) {
 	}
 }
 
+// The decoder is tested in platform; this checks purge refuses before touching the database (tx is nil).
 func TestPurgeRejectsMalformedDeletions(t *testing.T) {
-	deleted := uuid.NewString()
-	for _, data := range []string{`{}`, `{"classroom_id":"x","org_id":"o"}`, `{"classroom_id":"` + uuid.NewString() + `","org_id":"o"}`, `{"classroom_id":"` + deleted + `","org_id":""}`} {
-		event := platform.Event{Resource: deleted, Data: json.RawMessage(data)}
-		var invalid platform.InvalidEvent
-		if !errors.As(purge(context.Background(), nil, event), &invalid) {
-			t.Errorf("%s was not rejected", data)
+	event := platform.Event{Resource: room, Data: json.RawMessage(`{"classroom_id":"` + room + `","org_id":""}`)}
+	var invalid platform.InvalidEvent
+	if !errors.As(purge(context.Background(), nil, event), &invalid) {
+		t.Fatal("a malformed deletion was not rejected")
+	}
+}
+
+func TestAMalformedOrUnknownAssessmentIsNotFound(t *testing.T) {
+	s, _ := newServer(platform.RelationTeacher, skillValid)
+	for _, id := range []string{"not-a-uuid", room} {
+		if w := call(t, s, http.MethodGet, "/v1/assessments/"+id, "", "teacher"); w.Code != http.StatusNotFound {
+			t.Errorf("%s: %d", id, w.Code)
 		}
 	}
 }

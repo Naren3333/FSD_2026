@@ -1,8 +1,7 @@
-import '@angular/compiler';
 import { describe, it, expect } from 'vitest';
-import { dollars, resetTime } from './usage';
+import { dollars, resetTime } from './format';
 
-describe('AI use meter', () => {
+describe('format', () => {
   it('shows dollars to the cent and never hides a real charge as zero', () => {
     expect(dollars(1.234)).toBe('$1.23');
     expect(dollars(5)).toBe('$5.00');

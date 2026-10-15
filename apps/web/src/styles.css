@@ -6,6 +6,11 @@
   --brand: #176b70;
   --border: #cbd7df;
   --danger: #a52b36;
+  /* Hover fill for light controls, the tint behind badges and the current item, the sidebar's accent, focus rings. */
+  --hover: #e8f0f3;
+  --brand-tint: #e7f1f1;
+  --accent: #91d4d2;
+  --focus: #b3780b;
   --scroll-thumb: #7b919f;
   --scroll-track: #e3ebef;
   --scroll-hover: #526779;
@@ -53,14 +58,17 @@ select,
 textarea {
   font: inherit;
 }
-button {
+button,
+a.button-link {
   min-height: 44px;
   border: 1px solid transparent;
   border-radius: 6px;
   padding: 10px 18px;
+  font-weight: 600;
+}
+button {
   background: var(--brand);
   color: white;
-  font-weight: 600;
   cursor: pointer;
   transition: background 0.15s;
 }
@@ -74,29 +82,21 @@ button:disabled {
   cursor: not-allowed;
   opacity: 0.55;
 }
-button.secondary {
+/* A link that leads to an action is styled as a secondary button. */
+button.secondary,
+a.button-link {
   background: var(--surface);
   color: var(--ink);
   border-color: var(--border);
 }
-button.secondary:hover:not(:disabled) {
-  background: #e8f0f3;
+button.secondary:hover:not(:disabled),
+a.button-link:hover {
+  background: var(--hover);
 }
-/* A link that leads to an action, styled as a secondary button. */
 a.button-link {
   display: inline-flex;
   align-items: center;
-  min-height: 44px;
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  padding: 10px 18px;
-  background: var(--surface);
-  color: var(--ink);
-  font-weight: 600;
   text-decoration: none;
-}
-a.button-link:hover {
-  background: #e8f0f3;
 }
 a {
   color: var(--brand);
@@ -105,7 +105,7 @@ a:hover {
   color: var(--ink);
 }
 :focus-visible {
-  outline: 3px solid #b3780b;
+  outline: 3px solid var(--focus);
   outline-offset: 3px;
 }
 input,
@@ -251,7 +251,7 @@ form button {
 .sidebar nav a.active {
   background: #345267;
   color: white;
-  box-shadow: inset 3px 0 #91d4d2;
+  box-shadow: inset 3px 0 var(--accent);
 }
 .sidebar-footer {
   margin-top: auto;
@@ -269,7 +269,7 @@ form button {
   width: 7px;
   height: 7px;
   border-radius: 50%;
-  background: #91d4d2;
+  background: var(--accent);
   margin-right: 6px;
 }
 main {
@@ -380,7 +380,7 @@ code,
   font-size: 0.7rem;
   font-weight: 600;
   letter-spacing: 0.02em;
-  background: #e7f1f1;
+  background: var(--brand-tint);
   color: #15555a;
   padding: 4px 8px;
   border-radius: 4px;
@@ -628,93 +628,6 @@ dialog::backdrop {
 .skip-link:focus {
   top: 10px;
 }
-@media (max-width: 1000px) {
-  main {
-    padding: 0 24px;
-  }
-  .split {
-    grid-template-columns: 1fr;
-  }
-  .identity-note {
-    max-width: 45%;
-  }
-  .account {
-    gap: 8px;
-  }
-  .account span {
-    max-width: 150px;
-  }
-}
-@media (max-width: 700px) {
-  .app-shell {
-    grid-template-columns: minmax(0, 1fr);
-  }
-  .sidebar {
-    padding: 20px;
-  }
-  .brand {
-    margin-bottom: 20px;
-  }
-  .sidebar-label,
-  .sidebar-footer {
-    display: none;
-  }
-  .sidebar nav {
-    display: flex;
-    overflow-x: auto;
-    gap: 8px;
-  }
-  .sidebar nav a {
-    flex-shrink: 0;
-  }
-  .sidebar nav a.active {
-    box-shadow: inset 0 -3px #91d4d2;
-  }
-  main {
-    padding: 0 20px;
-  }
-  .topbar {
-    min-height: 86px;
-  }
-  .workspace-label {
-    max-width: 100px;
-  }
-  .context-bar {
-    align-items: flex-start;
-    flex-direction: column;
-  }
-  .identity-note {
-    max-width: 100%;
-  }
-  .section-heading {
-    align-items: flex-start;
-  }
-  .section-heading button {
-    font-size: 0.75rem;
-    padding: 8px;
-    min-width: 90px;
-  }
-  .panel {
-    padding: 20px;
-  }
-  .welcome {
-    padding-top: 40px;
-  }
-  .inline-form {
-    display: block;
-  }
-  .learning-rail {
-    font-size: 0.7rem;
-    gap: 8px;
-  }
-  footer {
-    flex-direction: column;
-    gap: 8px;
-  }
-  .skip-link {
-    left: 20px;
-  }
-}
 @media (prefers-reduced-motion: reduce) {
   * {
     transition: none !important;
@@ -769,11 +682,17 @@ dialog::backdrop {
   width: 100%;
   margin-bottom: 12px;
 }
-.thread-list {
+/* Lists laid out as grids, without bullets or indent. */
+.thread-list,
+.conversation,
+.sources,
+.stats {
   list-style: none;
   margin: 0;
   padding: 0;
   display: grid;
+}
+.thread-list {
   gap: 4px;
 }
 .thread {
@@ -793,17 +712,14 @@ dialog::backdrop {
   white-space: nowrap;
 }
 .thread:hover:not(:disabled) {
-  background: #e8f0f3;
+  background: var(--hover);
 }
 .thread.active {
-  background: #e7f1f1;
+  background: var(--brand-tint);
   border-color: var(--brand);
 }
 .conversation {
-  list-style: none;
   margin: 0 0 24px;
-  padding: 0;
-  display: grid;
   gap: 16px;
 }
 .turn {
@@ -877,10 +793,6 @@ dialog::backdrop {
   font-size: 0.875rem;
 }
 .sources {
-  list-style: none;
-  margin: 0;
-  padding: 0;
-  display: grid;
   gap: 8px;
 }
 .sources li {
@@ -889,7 +801,7 @@ dialog::backdrop {
   padding: 0 12px;
 }
 .sources li:focus {
-  outline: 3px solid #b3780b;
+  outline: 3px solid var(--focus);
 }
 .sources summary {
   display: flex;
@@ -935,11 +847,6 @@ dialog::backdrop {
   flex-wrap: wrap;
   gap: 12px;
 }
-@media (max-width: 1000px) {
-  .chat-layout {
-    grid-template-columns: 1fr;
-  }
-}
 .usage {
   display: grid;
   grid-template-columns: auto auto;
@@ -968,16 +875,8 @@ dialog::backdrop {
   min-height: 36px;
   padding: 6px 10px;
 }
-@media (max-width: 700px) {
-  .usage {
-    max-width: 100%;
-  }
-}
 .stats {
-  list-style: none;
   margin: 24px 0;
-  padding: 0;
-  display: grid;
   grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
   gap: 16px;
 }
@@ -1015,4 +914,98 @@ dialog::backdrop {
 }
 .cell-value {
   font-weight: 600;
+}
+/* Breakpoints last, so they override every base rule above. */
+@media (max-width: 1000px) {
+  main {
+    padding: 0 24px;
+  }
+  .split {
+    grid-template-columns: 1fr;
+  }
+  .identity-note {
+    max-width: 45%;
+  }
+  .account {
+    gap: 8px;
+  }
+  .account span {
+    max-width: 150px;
+  }
+  .chat-layout {
+    grid-template-columns: 1fr;
+  }
+}
+@media (max-width: 700px) {
+  .app-shell {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .sidebar {
+    padding: 20px;
+  }
+  .brand {
+    margin-bottom: 20px;
+  }
+  .sidebar-label,
+  .sidebar-footer {
+    display: none;
+  }
+  .sidebar nav {
+    display: flex;
+    overflow-x: auto;
+    gap: 8px;
+  }
+  .sidebar nav a {
+    flex-shrink: 0;
+  }
+  .sidebar nav a.active {
+    box-shadow: inset 0 -3px var(--accent);
+  }
+  main {
+    padding: 0 20px;
+  }
+  .topbar {
+    min-height: 86px;
+  }
+  .workspace-label {
+    max-width: 100px;
+  }
+  .context-bar {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+  .identity-note {
+    max-width: 100%;
+  }
+  .section-heading {
+    align-items: flex-start;
+  }
+  .section-heading button {
+    font-size: 0.75rem;
+    padding: 8px;
+    min-width: 90px;
+  }
+  .panel {
+    padding: 20px;
+  }
+  .welcome {
+    padding-top: 40px;
+  }
+  .inline-form {
+    display: block;
+  }
+  .learning-rail {
+    font-size: 0.7rem;
+    gap: 8px;
+  }
+  footer {
+    flex-direction: column;
+    gap: 8px;
+  }
+  .skip-link {
+    left: 20px;
+  }
+  .usage {
+    max-width: 100%;
+  }
 }

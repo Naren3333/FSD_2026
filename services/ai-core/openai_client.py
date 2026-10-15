@@ -44,10 +44,22 @@ class StructuredOutputError(Exception):
 
 @dataclass(frozen=True)
 class Usage:
-    """OpenAI's token counts for one call; None when the stream ended without its usage chunk."""
+    """OpenAI's token counts for one call; None when the stream ended without its usage chunk. `cached_in` is the
+    part of `tokens_in` served from OpenAI's prompt cache, which is billed at the cached rate."""
 
     tokens_in: int | None
     tokens_out: int | None
+    cached_in: int = 0
+
+
+def usage_of(usage: Any) -> Usage:
+    """The token counts of an SDK response's (or stream chunk's) usage object, including cached prompt tokens;
+    Usage(None, None) when there is none."""
+    if usage is None:
+        return Usage(None, None)
+    details = getattr(usage, "prompt_tokens_details", None)
+    cached = getattr(details, "cached_tokens", None) or 0
+    return Usage(usage.prompt_tokens, usage.completion_tokens, cached)
 
 
 def get_client() -> AsyncOpenAI:
@@ -119,14 +131,16 @@ async def stream_chat(messages: list[Any], max_tokens: int) -> AsyncGenerator[st
         log.warning("stream_chat: model=%s ended without a usage chunk", settings.chat_model)
         yield Usage(None, None)
         return
+    counts = usage_of(usage)
     log.info(
-        "stream_chat: model=%s tokens_in=%d tokens_out=%d finish_reason=%s",
+        "stream_chat: model=%s tokens_in=%d cached_in=%d tokens_out=%d finish_reason=%s",
         settings.chat_model,
-        usage.prompt_tokens,
-        usage.completion_tokens,
+        counts.tokens_in,
+        counts.cached_in,
+        counts.tokens_out,
         finish_reason,
     )
-    yield Usage(usage.prompt_tokens, usage.completion_tokens)
+    yield counts
 
 
 @dataclass(frozen=True)
@@ -165,16 +179,13 @@ async def generate(
             raise StructuredOutputError(f"{name}: refused")
         if choice.finish_reason in ("length", "content_filter"):
             raise StructuredOutputError(f"{name}: finish_reason={choice.finish_reason}")
-    usage = (
-        Usage(result.usage.prompt_tokens, result.usage.completion_tokens)
-        if result.usage
-        else Usage(None, None)
-    )
+    usage = usage_of(result.usage)
     log.info(
-        "generate: %s model=%s tokens_in=%s tokens_out=%s finish_reason=%s",
+        "generate: %s model=%s tokens_in=%s cached_in=%s tokens_out=%s finish_reason=%s",
         name or "-",
         settings.chat_model,
         usage.tokens_in,
+        usage.cached_in,
         usage.tokens_out,
         choice.finish_reason,
     )

@@ -1,4 +1,4 @@
-import { Injectable, effect, inject, signal, untracked } from '@angular/core';
+import { Injectable, computed, effect, inject, signal, untracked } from '@angular/core';
 import { IdentityApi } from '../api/clients';
 import type { Classroom } from '../api/models';
 
@@ -8,6 +8,10 @@ export class ClassroomContext {
   private readonly identity = inject(IdentityApi);
   readonly classrooms = signal<Classroom[]>([]);
   readonly classroomId = signal('');
+  /** The current classroom's name, or '' when none is chosen. */
+  readonly classroomName = computed(
+    () => this.classrooms().find((room) => room.id === this.classroomId())?.name ?? '',
+  );
 
   /** Reloads the list, keeping the current classroom when it is still there. */
   async refresh(): Promise<void> {

@@ -1,9 +1,9 @@
 from collections import defaultdict
-from datetime import datetime
 from typing import Any, Literal
 from uuid import UUID
 
 from learning_transport import Contract
+from learning_transport.kafka import Envelope
 from pydantic import Field, model_validator
 
 
@@ -36,21 +36,13 @@ class Finalized(Contract):
         return self
 
 
-class Event(Contract):
-    event_id: UUID
-    event_type: str
-    schema_version: int = Field(ge=1, le=1)
-    timestamp: datetime
-    correlation_id: UUID
-    resource_id: UUID
+class Event(Envelope):
     data: Finalized
 
     @model_validator(mode="after")
     def finalized(self) -> "Event":
         if self.event_type != "grading.finalized.v1" or self.resource_id != self.data.evaluation_id:
             raise ValueError("Not a finalized grading event")
-        if self.timestamp.tzinfo is None:
-            raise ValueError("Timestamp must have a timezone")
         return self
 
 
@@ -59,21 +51,14 @@ class ClassroomDeleted(Contract):
     org_id: str = Field(min_length=1, max_length=200)
 
 
-class ClassroomDeletedEvent(Contract):
-    event_id: UUID
+class ClassroomDeletedEvent(Envelope):
     event_type: Literal["identity.classroom.deleted.v1"]
-    schema_version: int = Field(ge=1, le=1)
-    timestamp: datetime
-    correlation_id: UUID
-    resource_id: UUID
     data: ClassroomDeleted
 
     @model_validator(mode="after")
     def deleted(self) -> "ClassroomDeletedEvent":
         if self.resource_id != self.data.classroom_id:
             raise ValueError("Not this classroom's deletion")
-        if self.timestamp.tzinfo is None:
-            raise ValueError("Timestamp must have a timezone")
         return self
 
 

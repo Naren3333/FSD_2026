@@ -2,17 +2,10 @@ package main
 
 import (
 	"context"
-	"encoding/json"
 	"learning/platform"
 
 	"github.com/jackc/pgx/v5"
 )
-
-// classroomDeleted is Identity's identity.classroom.deleted.v1 event.
-type classroomDeleted struct {
-	Classroom string `json:"classroom_id"`
-	Org       string `json:"org_id"`
-}
 
 // folders is what purging needs from object storage.
 type folders interface {
@@ -27,9 +20,9 @@ type purger struct{ files folders }
 // leaves the rows in place and the retry removes whatever is left; deleting what is already gone changes nothing,
 // so a repeated event is harmless.
 func (p purger) purge(ctx context.Context, tx pgx.Tx, event platform.Event) error {
-	var v classroomDeleted
-	if json.Unmarshal(event.Data, &v) != nil || !platform.ID(v.Classroom) || v.Org == "" || event.Resource != v.Classroom {
-		return platform.InvalidEvent{Reason: "invalid classroom deletion"}
+	v, err := platform.DecodeClassroomDeleted(event)
+	if err != nil {
+		return err
 	}
 	rows, err := tx.Query(ctx, "DELETE FROM documents WHERE classroom_id=$1 AND org_id=$2 RETURNING id::text", v.Classroom, v.Org)
 	if err != nil {
@@ -39,7 +32,7 @@ func (p purger) purge(ctx context.Context, tx pgx.Tx, event platform.Event) erro
 	if err != nil {
 		return err
 	}
-	if _, err = tx.Exec(ctx, "DELETE FROM outbox WHERE body->'data'->>'classroom_id'=$1::text AND body->'data'->>'org_id'=$2", v.Classroom, v.Org); err != nil {
+	if err = platform.DiscardPending(ctx, tx, v); err != nil {
 		return err
 	}
 	for _, document := range documents {

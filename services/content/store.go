@@ -66,19 +66,11 @@ func (p pgStore) listDocuments(ctx context.Context, org, classroom string, teach
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
-	result := []Document{}
-	for rows.Next() {
+	return pgx.CollectRows(rows, func(row pgx.CollectableRow) (Document, error) {
 		var v Document
-		if err = scanDocument(rows, &v); err != nil {
-			return nil, err
-		}
-		result = append(result, v)
-	}
-	if rows.Err() != nil {
-		return nil, rows.Err()
-	}
-	return result, nil
+		err := scanDocument(row, &v)
+		return v, err
+	})
 }
 
 // findDocument returns the raw chunks JSON separately so the handler can

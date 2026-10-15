@@ -1,0 +1,5 @@
+@if (section.loading()) {
+  <p role="status" aria-live="polite">{{ loading }}</p>
+} @else if (section.error()) {
+  <p role="alert" class="error">{{ section.error() }}</p>
+}

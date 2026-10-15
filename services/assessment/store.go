@@ -23,9 +23,6 @@ type pgStore struct{ db *pgxpool.Pool }
 
 func (p pgStore) findAssessment(ctx context.Context, org, id string) (Assessment, error) {
 	var v Assessment
-	if !platform.ID(id) {
-		return v, pgx.ErrNoRows
-	}
 	var data []byte
 	err := p.db.QueryRow(ctx, "SELECT id,classroom_id,title,questions FROM assessments WHERE id=$1 AND org_id=$2", id, org).Scan(&v.ID, &v.Classroom, &v.Title, &data)
 	if err == nil {
@@ -62,19 +59,11 @@ func (p pgStore) listAssessments(ctx context.Context, org, classroomID, student 
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
-	result := []Summary{}
-	for rows.Next() {
+	return pgx.CollectRows(rows, func(row pgx.CollectableRow) (Summary, error) {
 		var v Summary
-		if err = rows.Scan(&v.ID, &v.Title, &v.Submitted); err != nil {
-			return nil, err
-		}
-		result = append(result, v)
-	}
-	if rows.Err() != nil {
-		return nil, rows.Err()
-	}
-	return result, nil
+		err := row.Scan(&v.ID, &v.Title, &v.Submitted)
+		return v, err
+	})
 }
 
 // insertSubmission stores the submission and emits the outbox event in one

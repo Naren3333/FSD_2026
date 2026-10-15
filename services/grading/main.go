@@ -30,7 +30,7 @@ func main() {
 			func(ctx context.Context) {
 				submissions.Consume(ctx, "assessment.submitted.v1", consume, &consumerRunning)
 			},
-			func(ctx context.Context) { classrooms.Consume(ctx, "identity.classroom.deleted.v1", purge, nil) },
+			func(ctx context.Context) { classrooms.Consume(ctx, platform.TopicClassroomDeleted, purge, nil) },
 		}, nil
 	})
 }

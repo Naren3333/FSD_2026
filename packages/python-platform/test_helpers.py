@@ -3,11 +3,14 @@ import json
 import logging
 from collections.abc import AsyncIterator
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any
 
 import httpx
 import pytest
-from fastapi import HTTPException
+from fastapi import Depends, HTTPException
+from fastapi.testclient import TestClient
+from pydantic import BaseModel
 
 from learning_transport import (
     RELATION_STUDENT,
@@ -15,11 +18,17 @@ from learning_transport import (
     IdentityClient,
     ServiceToken,
     UpstreamError,
+    actor,
+    application,
+    caller,
     read_events,
+    require_relation,
     requires,
     sse_event,
 )
+from learning_transport.kafka import Envelope, parse
 from learning_transport.logs import JsonFormatter
+from learning_transport.testing import as_caller, token_claims
 
 
 def run(coroutine: Any) -> Any:
@@ -27,7 +36,7 @@ def run(coroutine: Any) -> Any:
 
 
 def claims(*roles: str) -> Claims:
-    return Claims.from_token({"sub": "u1", "org_id": "o1", "realm_access": {"roles": list(roles)}})
+    return Claims.from_token(token_claims(*roles, sub="u1", org="o1"))
 
 
 def test_the_teacher_role_wins_for_an_account_with_both() -> None:
@@ -69,6 +78,78 @@ def test_identity_denial_is_none_and_an_outage_raises() -> None:
     with pytest.raises(UpstreamError) as error:
         run(identity(503).relation("Bearer t", "c1", "corr"))
     assert (error.value.service, error.value.status) == ("identity", 503)
+
+
+@pytest.mark.parametrize(
+    ("status", "body", "allowed", "expected"),
+    [
+        (200, {"relation": "student"}, ("teacher", "student"), ("student", None)),
+        (200, {"relation": "student"}, ("teacher",), (None, (403, "DENIED"))),
+        (403, None, ("teacher", "student"), (None, (403, "DENIED"))),
+        (503, None, ("teacher", "student"), (None, (503, "DEPENDENCY_UNAVAILABLE"))),
+    ],
+)
+def test_require_relation_maps_denial_to_403_and_an_outage_to_503(
+    status: int, body: dict[str, Any] | None, allowed: tuple[str, ...], expected: tuple[Any, Any]
+) -> None:
+    relation, error = expected
+    request = SimpleNamespace(
+        headers={"authorization": "Bearer t"}, state=SimpleNamespace(correlation_id="corr")
+    )
+    client = identity(status, body)
+    check = require_relation(client, request, "c1", allowed=allowed, denied=("DENIED", "no"))  # type: ignore[arg-type]
+    if error is None:
+        assert run(check) == relation
+        return
+    with pytest.raises(HTTPException) as raised:
+        run(check)
+    assert (raised.value.status_code, raised.value.detail["code"]) == error  # type: ignore[index]
+
+
+class Payload(BaseModel):
+    n: int
+
+
+class Event(Envelope):
+    data: Payload
+
+
+EVENT = {
+    "event_id": "00000000-0000-4000-8000-000000000001",
+    "event_type": "test.v1",
+    "schema_version": 1,
+    "timestamp": "2026-10-15T00:00:00+08:00",
+    "correlation_id": "00000000-0000-4000-8000-000000000002",
+    "resource_id": "00000000-0000-4000-8000-000000000003",
+    "data": {"n": 1},
+}
+
+
+def test_an_envelope_parses_or_is_none_for_dead_lettering() -> None:
+    event = parse(Event, json.dumps(EVENT).encode())
+    assert event is not None and event.data.n == 1
+    for broken in (
+        {**EVENT, "timestamp": "2026-10-15T00:00:00"},  # no time zone
+        {**EVENT, "schema_version": 2},
+        {**EVENT, "extra": True},
+        {k: v for k, v in EVENT.items() if k != "event_id"},
+    ):
+        assert parse(Event, json.dumps(broken).encode()) is None
+    assert parse(Event, None) is None and parse(Event, b"not json") is None
+
+
+def test_as_caller_overrides_the_verified_claims_for_the_block() -> None:
+    app = application("test-app")
+
+    @app.get("/me")
+    def me(claims: Claims = Depends(caller)) -> dict[str, Any]:
+        return {"sub": claims.subject, "org": claims.org, "roles": sorted(claims.roles)}
+
+    client = TestClient(app)
+    with as_caller(app, token_claims("teacher", sub="t1", org="o9")):
+        assert client.get("/me").json() == {"sub": "t1", "org": "o9", "roles": ["teacher"]}
+    assert actor not in app.dependency_overrides
+    assert client.get("/me").status_code == 401
 
 
 def test_a_service_token_is_cached_until_reset() -> None:

@@ -1,11 +1,5 @@
 import { test, expect, Page } from '@playwright/test';
-import { readFileSync } from 'node:fs';
-const env = Object.fromEntries(
-  readFileSync('../../.env', 'utf8')
-    .split(/\r?\n/)
-    .filter((l) => l && !l.startsWith('#'))
-    .map((l) => l.split('=')),
-);
+import { env, expectNoHorizontalScroll, login, teacherWithClassroom } from './helpers';
 const CHUNK = '11111111-1111-4111-8111-111111111111',
   FIGURE = '22222222-2222-4222-8222-222222222222',
   DOC = '33333333-3333-4333-8333-333333333333';
@@ -15,25 +9,6 @@ const PNG = Buffer.from(
   'base64',
 );
 
-async function login(page: Page, user: string, password: string) {
-  await page.goto('/');
-  await page.getByRole('button', { name: 'Sign in', exact: true }).click();
-  await page.getByLabel('Username or email').fill(user);
-  await page.getByLabel('Password', { exact: true }).fill(password);
-  await page.getByRole('button', { name: 'Sign In', exact: true }).click();
-  await expect(page.getByRole('button', { name: 'Sign out' })).toBeVisible();
-}
-async function teacherWithClassroom(page: Page, name: string) {
-  await login(page, 'teacher', env.TEACHER_PASSWORD);
-  await page
-    .getByRole('navigation', { name: 'Workspace' })
-    .getByRole('link', { name: 'Classrooms', exact: true })
-    .click();
-  await page.getByLabel('Classroom name', { exact: true }).fill(name);
-  await page.getByRole('button', { name: 'Create classroom', exact: true }).click();
-  await expect(page.getByText('Classroom created.', { exact: true })).toBeVisible();
-  await page.getByLabel('Current classroom').selectOption({ label: name });
-}
 const sse = (events: [string, unknown][]) =>
   events.map(([e, d]) => `event: ${e}\ndata: ${JSON.stringify(d)}\n\n`).join('');
 
@@ -231,7 +206,5 @@ test('chat streams cited answers, loads figures and reports failures', async ({ 
   await expect(page.getByRole('status').filter({ hasText: 'Answering…' })).toHaveCount(0);
   await expect(page.getByLabel('Current classroom')).toBeDisabled();
   await page.screenshot({ path: 'test-results/chat-desktop.png', fullPage: true });
-  await page.setViewportSize({ width: 390, height: 844 });
-  await page.screenshot({ path: 'test-results/chat-mobile.png', fullPage: true });
-  expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+  await expectNoHorizontalScroll(page, 'test-results/chat-mobile.png');
 });

@@ -25,6 +25,11 @@ def client_secret_key(client: str) -> str:
     return f"{client.upper().replace('-', '_')}_CLIENT_SECRET"
 
 
+def password_key(service: str) -> str:
+    """The .env key holding a service's database password."""
+    return f"{service.upper()}_DB_PASSWORD"
+
+
 def generate_secrets() -> dict[str, str]:
     keys = [
         "POSTGRES_PASSWORD",
@@ -33,7 +38,7 @@ def generate_secrets() -> dict[str, str]:
         *(key for _, _, key in PEOPLE),
         "S3_CONTENT_PASSWORD",
         *(client_secret_key(c) for c in AI_CLIENTS),
-        *(f"{s.upper()}_DB_PASSWORD" for s in SERVICES),
+        *(password_key(s) for s in SERVICES),
     ]
     values = {key: secrets.token_hex(20) for key in keys}
     values["S3_ROOT_USER"] = "local-admin"
@@ -45,7 +50,7 @@ def postgres_init(values: dict[str, str]) -> str:
     """Each service gets its own login role and database; no one else may connect to it."""
     sql = []
     for name in SERVICES:
-        password = values[f"{name.upper()}_DB_PASSWORD"]
+        password = values[password_key(name)]
         sql += [
             f"CREATE ROLE {name} LOGIN PASSWORD '{password}';",
             f"CREATE DATABASE {name} OWNER {name};",

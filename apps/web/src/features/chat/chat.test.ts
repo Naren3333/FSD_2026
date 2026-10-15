@@ -1,4 +1,3 @@
-import '@angular/compiler';
 import { describe, it, expect } from 'vitest';
 import type { Citation, DocumentRecord } from '../../api/models';
 import { SseParser } from '../../core/sse';
@@ -20,6 +19,7 @@ const cite = (id: string): Citation => ({
 });
 const doc = (change: Partial<DocumentRecord>): DocumentRecord => ({
   id: A,
+  classroom_id: B,
   title: 'T',
   mime_type: 'application/pdf',
   status: 'indexing',

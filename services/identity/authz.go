@@ -4,8 +4,6 @@ import (
 	"context"
 	"errors"
 	"learning/platform"
-
-	"github.com/jackc/pgx/v5"
 )
 
 // relation decides how the caller may access a classroom, optionally on behalf of a specific student: as its
@@ -17,7 +15,7 @@ func (s server) relation(ctx context.Context, c platform.Claims, classroom, stud
 		return "", nil
 	}
 	org, teacher, err := s.store.findClassroomOwner(ctx, classroom)
-	if errors.Is(err, pgx.ErrNoRows) {
+	if errors.Is(err, platform.ErrNotFound) {
 		return "", nil
 	}
 	if err != nil {

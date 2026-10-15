@@ -4,6 +4,7 @@ package platform
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -11,6 +12,7 @@ import (
 	"slices"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 )
 
 // Claims are the verified token claims services use: the user, their organization and realm roles.
@@ -129,4 +131,43 @@ func Teacher(w http.ResponseWriter, r *http.Request) bool {
 func Fail(w http.ResponseWriter, err error) {
 	slog.Error("operation_failed", "error_category", fmt.Sprintf("%T", err), "error", err.Error())
 	Error(w, http.StatusInternalServerError, "INTERNAL_ERROR", "The operation could not be completed.")
+}
+
+// ErrNotFound is what a store returns when the row asked for is absent. It is pgx.ErrNoRows, so a QueryRow(...).Scan
+// result passes through unchanged, and handlers and test doubles need not import pgx to name it.
+var ErrNotFound = pgx.ErrNoRows
+
+// Found reports whether a lookup succeeded. Otherwise it has written the response: 404 with message when err is
+// ErrNotFound, 500 for any other error.
+func Found(w http.ResponseWriter, err error, message string) bool {
+	switch {
+	case err == nil:
+		return true
+	case errors.Is(err, ErrNotFound):
+		NotFound(w, message)
+	default:
+		Fail(w, err)
+	}
+	return false
+}
+
+// Request builds a call to another service carrying ctx's correlation id.
+func Request(ctx context.Context, method, target string, body io.Reader) (*http.Request, error) {
+	req, err := http.NewRequestWithContext(ctx, method, target, body)
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("X-Correlation-ID", Correlation(ctx))
+	return req, nil
+}
+
+// Forward builds a body-less call to another service on behalf of r's caller: it carries the caller's own bearer
+// token, which the other service verifies again, and r's correlation id.
+func Forward(r *http.Request, method, target string) (*http.Request, error) {
+	req, err := Request(r.Context(), method, target, nil)
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Authorization", r.Header.Get("Authorization"))
+	return req, nil
 }

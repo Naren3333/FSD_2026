@@ -15,7 +15,6 @@ import (
 	"strings"
 
 	"github.com/google/uuid"
-	"github.com/jackc/pgx/v5"
 )
 
 // server answers Content's HTTP routes: documents and chunks in its store, originals and figure crops in object
@@ -50,7 +49,7 @@ var tooLarge = fmt.Sprintf("PDFs must be no larger than %d MiB and text document
 
 func (s server) upload(w http.ResponseWriter, r *http.Request) {
 	classroom := r.URL.Query().Get("classroom_id")
-	if !s.access.TeacherOf(w, r, classroom) {
+	if !platform.TeacherOf(s.access, w, r, classroom) {
 		return
 	}
 	title, docType, problem := uploadFields(r)
@@ -182,18 +181,8 @@ func (s server) list(w http.ResponseWriter, r *http.Request) {
 // visibleDocument looks a document up and checks the caller may see it in its classroom. A document the caller may
 // not see answers 404 like a missing one, so its existence doesn't leak. On failure the response is written.
 func (s server) visibleDocument(w http.ResponseWriter, r *http.Request, what string, find func(org string) (Document, error)) (Document, bool) {
-	notFound := what + " not found."
-	if !platform.ID(r.PathValue("id")) {
-		platform.NotFound(w, notFound)
-		return Document{}, false
-	}
-	v, err := find(platform.Actor(r).Org)
-	if errors.Is(err, pgx.ErrNoRows) {
-		platform.NotFound(w, notFound)
-		return Document{}, false
-	}
-	if err != nil {
-		platform.Fail(w, err)
+	v, ok := lookupDocument(w, r, what, find)
+	if !ok {
 		return Document{}, false
 	}
 	relation, ok := s.access.Relation(w, r, v.Classroom, "")
@@ -201,7 +190,22 @@ func (s server) visibleDocument(w http.ResponseWriter, r *http.Request, what str
 		return Document{}, false
 	}
 	if !visible(relation, v.DocType) {
+		platform.NotFound(w, what+" not found.")
+		return Document{}, false
+	}
+	return v, true
+}
+
+// lookupDocument finds the document the path names in the caller's organization, before any access check. On
+// failure the response is written: 404 for a malformed or unknown id.
+func lookupDocument(w http.ResponseWriter, r *http.Request, what string, find func(org string) (Document, error)) (Document, bool) {
+	notFound := what + " not found."
+	if !platform.ID(r.PathValue("id")) {
 		platform.NotFound(w, notFound)
+		return Document{}, false
+	}
+	v, err := find(platform.Actor(r).Org)
+	if !platform.Found(w, err, notFound) {
 		return Document{}, false
 	}
 	return v, true
@@ -252,24 +256,19 @@ func (s server) figure(w http.ResponseWriter, r *http.Request) {
 
 // reindex queues a PDF for indexing again: after a failure, or a PDF uploaded before indexing existed.
 func (s server) reindex(w http.ResponseWriter, r *http.Request) {
+	// The role check comes first so a student is refused before any lookup; TeacherOf decides below.
 	if !platform.Teacher(w, r) {
 		return
 	}
-	if !platform.ID(r.PathValue("id")) {
-		platform.NotFound(w, "Document not found.")
-		return
-	}
 	org := platform.Actor(r).Org
-	v, _, err := s.store.findDocument(r.Context(), org, r.PathValue("id"))
-	if errors.Is(err, pgx.ErrNoRows) {
-		platform.NotFound(w, "Document not found.")
+	v, ok := lookupDocument(w, r, "Document", func(org string) (Document, error) {
+		doc, _, err := s.store.findDocument(r.Context(), org, r.PathValue("id"))
+		return doc, err
+	})
+	if !ok {
 		return
 	}
-	if err != nil {
-		platform.Fail(w, err)
-		return
-	}
-	if !s.access.TeacherOf(w, r, v.Classroom) {
+	if !platform.TeacherOf(s.access, w, r, v.Classroom) {
 		return
 	}
 	if v.Type != mimePDF {

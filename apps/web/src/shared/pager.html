@@ -1,0 +1,11 @@
+@if (pages > 1) {
+  <nav class="pager" [attr.aria-label]="label">
+    <button class="secondary" (click)="go.emit(page - 1)" [disabled]="disabled || page === 0">
+      Previous
+    </button>
+    <span aria-live="polite">Page {{ page + 1 }} of {{ pages }} · {{ total }} {{ noun }}</span>
+    <button class="secondary" (click)="go.emit(page + 1)" [disabled]="disabled || page + 1 >= pages">
+      Next
+    </button>
+  </nav>
+}

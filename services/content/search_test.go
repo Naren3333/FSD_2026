@@ -5,7 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"learning/platform"
+	"learning/platform/platformtest"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -62,12 +62,12 @@ func TestBackoffDoublesToThirtyMinutes(t *testing.T) {
 }
 
 func TestTransient(t *testing.T) {
-	for _, err := range []error{&aiError{Status: 0, Code: "UNREACHABLE"}, &aiError{Status: 503, Code: "AI_PROVIDER_NOT_CONFIGURED"}, &aiError{Status: 502, Code: "AI_PROVIDER_FAILED"}, &aiError{Status: 429, Code: ""}, &aiError{Status: 401, Code: ""}, errors.New("storage down")} {
+	for _, err := range []error{&aiError{Status: 0, Code: "UNREACHABLE"}, &aiError{Status: http.StatusServiceUnavailable, Code: "AI_PROVIDER_NOT_CONFIGURED"}, &aiError{Status: http.StatusBadGateway, Code: "AI_PROVIDER_FAILED"}, &aiError{Status: http.StatusTooManyRequests, Code: ""}, &aiError{Status: http.StatusUnauthorized, Code: ""}, errors.New("storage down")} {
 		if !transient(err) {
 			t.Fatalf("%v should be retried", err)
 		}
 	}
-	for _, err := range []error{&aiError{Status: 422, Code: "VALIDATION_ERROR"}, &aiError{Status: 413, Code: "PAYLOAD_TOO_LARGE"}, &aiError{Status: 403, Code: "FORBIDDEN"}} {
+	for _, err := range []error{&aiError{Status: http.StatusUnprocessableEntity, Code: "VALIDATION_ERROR"}, &aiError{Status: http.StatusRequestEntityTooLarge, Code: "PAYLOAD_TOO_LARGE"}, &aiError{Status: http.StatusForbidden, Code: "FORBIDDEN"}} {
 		if transient(err) {
 			t.Fatalf("%v will fail again", err)
 		}
@@ -193,7 +193,7 @@ func TestErrorsCarryStatusAndCodeAndRefusedTokensAreDropped(t *testing.T) {
 	ai := f.client()
 	_, err := ai.ingest(t.Context(), "t", strings.NewReader("x"), 1, testBilled)
 	var e *aiError
-	if !errors.As(err, &e) || e.Status != 401 || e.Code != "UNAUTHENTICATED" || !transient(err) {
+	if !errors.As(err, &e) || e.Status != http.StatusUnauthorized || e.Code != "UNAUTHENTICATED" || !transient(err) {
 		t.Fatalf("%v", err)
 	}
 	ai.ingest(t.Context(), "t", strings.NewReader("x"), 1, testBilled)
@@ -254,14 +254,13 @@ func TestTheBilledUserIsSentAndTheSpendLimitIsRecognised(t *testing.T) {
 	if !ok || limit.Message != "used up" || limit.ResetsAt.IsZero() {
 		t.Fatalf("%#v", err)
 	}
-	if _, ok = spendLimit(&aiError{Status: 429, Code: "RATE_LIMITED"}); ok {
+	if _, ok = spendLimit(&aiError{Status: http.StatusTooManyRequests, Code: "RATE_LIMITED"}); ok {
 		t.Fatal("a provider rate limit is not the user's allowance")
 	}
 }
 
 func TestCallerAllowance(t *testing.T) {
-	var c platform.Claims
-	c.Subject, c.Org, c.Realm.Roles = "u", "org", []string{"student"}
+	c := platformtest.Claims("u", "student")
 	if caller(c).Role != "student" {
 		t.Fatal("student billed as teacher")
 	}

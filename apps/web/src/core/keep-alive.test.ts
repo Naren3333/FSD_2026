@@ -1,4 +1,3 @@
-import '@angular/compiler';
 import { describe, it, expect } from 'vitest';
 import type { ActivatedRouteSnapshot, DetachedRouteHandle } from '@angular/router';
 import { KeepAliveStrategy } from './keep-alive';

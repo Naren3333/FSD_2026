@@ -10,19 +10,11 @@ existing students are kept and given the saved password. Local development stack
 
 import json
 import secrets
-from pathlib import Path
 
 import httpx
+from local_stack import BASE, ROOT, admin_client, check, ensure_person, password_token
+from setup import ORG
 
-ROOT = Path(__file__).resolve().parents[1]
-ENV = dict(
-    line.split("=", 1)
-    for line in (ROOT / ".env").read_text().splitlines()
-    if line and not line.startswith("#")
-)
-KEYCLOAK = "http://localhost:8081"
-BASE = "http://localhost:8000/api"
-ORG = "local-school"
 STATE = ROOT / ".local" / "seed-students.json"
 STUDENTS = [
     ("Aisha", "Rahman"),
@@ -58,70 +50,9 @@ STUDENTS = [
 ]
 
 
-def check(response: httpx.Response) -> httpx.Response:
-    if response.is_error:
-        raise SystemExit(
-            f"{response.request.method} {response.request.url}: {response.status_code} {response.text}"
-        )
-    return response
-
-
-def admin_client() -> httpx.Client:
-    data = {
-        "client_id": "admin-cli",
-        "grant_type": "password",
-        "username": "admin",
-        "password": ENV["KEYCLOAK_ADMIN_PASSWORD"],
-    }
-    token = check(
-        httpx.post(f"{KEYCLOAK}/realms/master/protocol/openid-connect/token", data=data, timeout=15)
-    )
-    return httpx.Client(
-        base_url=f"{KEYCLOAK}/admin/realms/learning",
-        headers={"Authorization": "Bearer " + token.json()["access_token"]},
-        timeout=15,
-    )
-
-
-def ensure_student(admin: httpx.Client, username: str, first: str, last: str, password: str) -> None:
-    """Creates the student, or resets an existing one's password, then gives them the student role and the
-    organization. org_id is an unmanaged attribute that the admin API only keeps while the realm lets admins
-    edit those, so that is allowed just long enough to set it."""
-    found = check(admin.get("/users", params={"username": username, "exact": "true"})).json()
-    credential = {"type": "password", "value": password, "temporary": False}
-    if found:
-        user_id = found[0]["id"]
-        check(admin.put(f"/users/{user_id}/reset-password", json=credential))
-    else:
-        user = {
-            "username": username,
-            "enabled": True,
-            "emailVerified": True,
-            "firstName": first,
-            "lastName": last,
-            "email": f"{username}@example.test",
-            "credentials": [credential],
-        }
-        check(admin.post("/users", json=user))
-        user_id = check(admin.get("/users", params={"username": username, "exact": "true"})).json()[0]["id"]
-    role = check(admin.get("/roles/student")).json()
-    check(admin.post(f"/users/{user_id}/role-mappings/realm", json=[role]))
-    profile = check(admin.get("/users/profile")).json()
-    check(admin.put("/users/profile", json={**profile, "unmanagedAttributePolicy": "ADMIN_EDIT"}))
-    try:
-        user = check(admin.get(f"/users/{user_id}")).json()
-        attributes = {**(user.get("attributes") or {}), "org_id": [ORG]}
-        check(admin.put(f"/users/{user_id}", json={**user, "attributes": attributes}))
-    finally:
-        check(admin.put("/users/profile", json=profile))
-
-
 def register(username: str, password: str) -> None:
     """Signs the student in once, which registers them with Identity."""
-    data = {"client_id": "learning-e2e", "grant_type": "password", "username": username, "password": password}
-    token = check(
-        httpx.post(f"{KEYCLOAK}/realms/learning/protocol/openid-connect/token", data=data, timeout=15)
-    ).json()["access_token"]
+    token = password_token(username, password)
     profile = check(
         httpx.post(f"{BASE}/identity/me", json={}, headers={"Authorization": "Bearer " + token}, timeout=15)
     ).json()
@@ -138,7 +69,7 @@ def main() -> None:
         username = f"{first}.{last}".lower()
         # Keycloak's admin tokens last a minute, so each student gets a fresh one.
         with admin_client() as admin:
-            ensure_student(admin, username, first, last, password)
+            ensure_person(admin, username, first, last, password)
         register(username, password)
         print(f"{username:18} {first} {last}")
     print(f"\nPassword for all thirty: {password}  (saved in {STATE.relative_to(ROOT)})")

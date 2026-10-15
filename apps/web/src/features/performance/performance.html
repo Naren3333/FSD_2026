@@ -11,7 +11,7 @@
       <app-field
         controlId="performance-student"
         label="Student"
-        [hint]="classroomId() && !roster().length ? 'No students are enrolled in this classroom yet.' : ''"
+        [hint]="rosterHint()"
         error="Choose a student."
         [invalid]="form.controls.student.touched && form.controls.student.invalid"
       >
@@ -21,78 +21,87 @@
           aria-describedby="performance-student-help"
         >
           <option value="">Choose a student</option>
-          @for (student of roster(); track student.id) {
+          @for (student of roster.value() ?? []; track student.id) {
             <option [value]="student.id">{{ studentName(student) || student.id }}</option>
           }
         </select>
       </app-field>
+      @if (roster.error()) {
+        <p role="alert" class="error">{{ roster.error() }}</p>
+      }
     }
-    <button [disabled]="state.busy() || !classroomId()">
+    <button [disabled]="result.loading() || roster.loading() || !classroomId()">
       {{ session.isStudent() ? 'View my performance' : 'View performance' }}
     </button>
   </form>
   <app-status [state]="state" />
-  @if (result(); as data) {
-    @if (data.skills.length) {
-      <div class="table-scroll" tabindex="0" role="region" aria-label="Skill evidence table">
-        <table>
-          <caption>
-            Finalized evidence by skill
-          </caption>
-          <thead>
-            <tr>
-              <th scope="col">Skill</th>
-              <th scope="col">Attempted</th>
-              <th scope="col">Correct</th>
-              <th scope="col">Observed accuracy</th>
-              <th scope="col">Evidence</th>
-              <th scope="col">Focus</th>
-            </tr>
-          </thead>
-          <tbody>
-            @for (row of data.skills; track row.skill_id) {
+  <app-section-state [section]="result" loading="Loading performance…" />
+  @if (result.ready()) {
+    @if (result.value(); as data) {
+      @if (data.skills.length) {
+        <div class="table-scroll" tabindex="0" role="region" aria-label="Skill evidence table">
+          <table>
+            <caption>
+              Finalized evidence by skill
+            </caption>
+            <thead>
               <tr>
-                <th scope="row">
-                  @if (skill(row.skill_id); as name) {
-                    {{ name }}
-                  } @else {
-                    <span class="identifier">{{ row.skill_id }}</span>
-                  }
-                </th>
-                <td>{{ row.attempted | number }}</td>
-                <td>{{ row.correct | number }}</td>
-                <td>{{ row.observed_accuracy | percent: '1.0-1' }}</td>
-                <td>
-                  {{ row.evidence_status === 'insufficient_evidence' ? 'Insufficient evidence' : 'Observed' }}
-                </td>
-                <td>
-                  @if (row.weakness_indicator) {
-                    <span class="badge badge-danger">Needs practice</span>
-                  }
-                </td>
+                <th scope="col">Skill</th>
+                <th scope="col">Attempted</th>
+                <th scope="col">Correct</th>
+                <th scope="col">Observed accuracy</th>
+                <th scope="col">Evidence</th>
+                <th scope="col">Focus</th>
               </tr>
-            }
-          </tbody>
-        </table>
-      </div>
-      <p class="caption">
-        Fewer than five questions is reported as insufficient evidence. Needs practice marks a skill with five
-        or more questions and under 60% correct. These are reporting thresholds, not a statistical validation.
-      </p>
+            </thead>
+            <tbody>
+              @for (row of data.skills; track row.skill_id) {
+                <tr>
+                  <th scope="row">
+                    @if (skill(row.skill_id); as name) {
+                      {{ name }}
+                    } @else {
+                      <span class="identifier">{{ row.skill_id }}</span>
+                    }
+                  </th>
+                  <td>{{ row.attempted | number }}</td>
+                  <td>{{ row.correct | number }}</td>
+                  <td>{{ row.observed_accuracy | percent: '1.0-1' }}</td>
+                  <td>
+                    {{
+                      row.evidence_status === 'insufficient_evidence' ? 'Insufficient evidence' : 'Observed'
+                    }}
+                  </td>
+                  <td>
+                    @if (row.weakness_indicator) {
+                      <span class="badge badge-danger">Needs practice</span>
+                    }
+                  </td>
+                </tr>
+              }
+            </tbody>
+          </table>
+        </div>
+        <p class="caption">
+          Fewer than five questions is reported as insufficient evidence. Needs practice marks a skill with
+          five or more questions and under 60% correct. These are reporting thresholds, not a statistical
+          validation.
+        </p>
+      } @else {
+        <p class="empty">
+          No finalized assessment evidence for this student yet. Complete an assessment and ask the teacher to
+          review it.
+        </p>
+      }
     } @else {
       <p class="empty">
-        No finalized assessment evidence for this student yet. Complete an assessment and ask the teacher to
-        review it.
+        {{
+          session.isStudent()
+            ? 'Select a classroom to view your assessment evidence.'
+            : 'Select a classroom and student to view their actual assessment evidence.'
+        }}
       </p>
     }
-  } @else {
-    <p class="empty">
-      {{
-        session.isStudent()
-          ? 'Select a classroom to view your assessment evidence.'
-          : 'Select a classroom and student to view their actual assessment evidence.'
-      }}
-    </p>
   }
 </section>
 <aside class="ai-notice">

@@ -6,7 +6,6 @@ import httpx2
 import pytest
 from conftest import (
     BILLED,
-    SERVICE_CLAIMS,
     FakeOpenAI,
     FakeReranker,
     chat_response,
@@ -14,7 +13,7 @@ from conftest import (
     embedding_response,
 )
 from fastapi.testclient import TestClient
-from learning_transport import actor
+from learning_transport.testing import as_caller, token_claims
 
 from main import app
 
@@ -224,14 +223,8 @@ def test_no_anonymous_or_people_access(path: str, body: dict) -> None:
     client = TestClient(app)
     assert client.post(path, json=body).status_code == 401
     for role in ("student", "teacher"):
-        app.dependency_overrides[actor] = lambda role=role: {
-            **SERVICE_CLAIMS,
-            "realm_access": {"roles": [role]},
-        }
-        try:
+        with as_caller(app, token_claims(role, sub="content-indexer")):
             assert client.post(path, json=body).status_code == 403
-        finally:
-            app.dependency_overrides.clear()
 
 
 def test_ready_reports_only_whether_keys_are_set(api: TestClient) -> None:

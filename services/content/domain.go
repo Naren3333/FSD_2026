@@ -105,10 +105,7 @@ func extract(data []byte, kind string) ([]Chunk, string, error) {
 	}
 	chunks := []Chunk{}
 	for start := 0; start < len(runes); start += 1000 {
-		end := start + 1000
-		if end > len(runes) {
-			end = len(runes)
-		}
+		end := min(start+1000, len(runes))
 		chunks = append(chunks, Chunk{len(chunks), string(runes[start:end]), start, end})
 	}
 	return chunks, statusExtracted, nil

@@ -13,7 +13,7 @@ import pymupdf
 import pytest
 from fastapi.testclient import TestClient
 from httpx import Response
-from learning_transport import actor
+from learning_transport.testing import as_caller, token_claims
 from openai import AsyncOpenAI
 
 import main
@@ -53,7 +53,7 @@ def test_settings(monkeypatch: pytest.MonkeyPatch) -> settings.Settings:
     return current
 
 
-SERVICE_CLAIMS = {"sub": "content-indexer", "org_id": "test-org", "realm_access": {"roles": ["ai-client"]}}
+SERVICE_CLAIMS = token_claims("ai-client", sub="content-indexer")
 BILLED = {"user_id": "student-1", "org_id": "test-org", "role": "student"}
 BILLED_PARAMS = {"billed_user": "teacher-1", "billed_org": "test-org", "billed_role": "teacher"}
 
@@ -100,12 +100,8 @@ def ledger() -> Iterator[MemoryLedger]:
 def api() -> Iterator[TestClient]:
     """The app as a service account holding ai-client. The override is a test double for verified OIDC claims,
     never wired in the application."""
-    app.dependency_overrides[actor] = lambda: SERVICE_CLAIMS
-    try:
-        with TestClient(app) as client:
-            yield client
-    finally:
-        app.dependency_overrides.clear()
+    with as_caller(app, SERVICE_CLAIMS), TestClient(app) as client:
+        yield client
 
 
 def make_pdf(
@@ -382,9 +378,12 @@ def embedding_response(
 
 
 USAGE = {"prompt_tokens": 120, "completion_tokens": 7, "total_tokens": 127}
+CACHED_USAGE = {**USAGE, "prompt_tokens_details": {"cached_tokens": 100}}
 
 
-def chat_response(content: str | None, *, finish_reason: str = "stop", refusal: str | None = None) -> dict:
+def chat_response(
+    content: str | None, *, finish_reason: str = "stop", refusal: str | None = None, usage: dict = USAGE
+) -> dict:
     """A non-streamed chat completion."""
     return {
         "id": "chatcmpl-test",
@@ -398,7 +397,7 @@ def chat_response(content: str | None, *, finish_reason: str = "stop", refusal: 
                 "message": {"role": "assistant", "content": content, "refusal": refusal},
             }
         ],
-        "usage": USAGE,
+        "usage": usage,
     }
 
 

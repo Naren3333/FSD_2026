@@ -13,16 +13,36 @@ const (
 	RelationStudent = "student"
 )
 
-// ClassroomAccess decides what the caller may do in a classroom. Each method writes the error response itself
-// when it denies access or cannot decide.
+// ClassroomAccess answers how the caller may access a classroom. Relation writes the error response itself when it
+// denies access or cannot decide. The policy built on it (Access, TeacherOf) is in this package's functions, so the
+// real implementation and any test double share it.
 type ClassroomAccess interface {
 	// Relation reports how the caller may access the classroom (optionally on behalf of a student): as its
 	// teacher (RelationTeacher) or as an enrolled student (RelationStudent).
 	Relation(w http.ResponseWriter, r *http.Request, classroom, student string) (string, bool)
-	// Access reports whether the caller may access the classroom at all.
-	Access(w http.ResponseWriter, r *http.Request, classroom, student string) bool
-	// TeacherOf reports whether the caller is the classroom's own teacher.
-	TeacherOf(w http.ResponseWriter, r *http.Request, classroom string) bool
+}
+
+// Access reports whether the caller may access the classroom at all, writing the refusal when not.
+func Access(a ClassroomAccess, w http.ResponseWriter, r *http.Request, classroom, student string) bool {
+	_, ok := a.Relation(w, r, classroom, student)
+	return ok
+}
+
+// TeacherOf allows only the classroom's own teacher. The token's teacher role is not enough: an account with both
+// roles that is enrolled in someone else's classroom is a student there.
+func TeacherOf(a ClassroomAccess, w http.ResponseWriter, r *http.Request, classroom string) bool {
+	if !Teacher(w, r) {
+		return false
+	}
+	relation, ok := a.Relation(w, r, classroom, "")
+	if !ok {
+		return false
+	}
+	if relation != RelationTeacher {
+		Forbidden(w, "Only the classroom's teacher may do this.")
+		return false
+	}
+	return true
 }
 
 // Identity asks the Identity service, forwarding the caller's own token, so classroom policy stays with its owner.
@@ -36,29 +56,6 @@ func NewIdentity(base string, client *http.Client) *Identity {
 	return &Identity{base: base, client: client}
 }
 
-// Access delegates classroom policy to its owner and forwards the verified caller token.
-func (i *Identity) Access(w http.ResponseWriter, r *http.Request, classroom, student string) bool {
-	_, ok := i.Relation(w, r, classroom, student)
-	return ok
-}
-
-// TeacherOf allows only the classroom's own teacher. The token's teacher role is not enough: an account with both
-// roles that is enrolled in someone else's classroom is a student there.
-func (i *Identity) TeacherOf(w http.ResponseWriter, r *http.Request, classroom string) bool {
-	if !Teacher(w, r) {
-		return false
-	}
-	relation, ok := i.Relation(w, r, classroom, "")
-	if !ok {
-		return false
-	}
-	if relation != RelationTeacher {
-		Forbidden(w, "Only the classroom's teacher may do this.")
-		return false
-	}
-	return true
-}
-
 // Relation asks Identity how the caller may access the classroom. Teacher-only data must be gated on
 // RelationTeacher, not on the token role. On denial or failure it has already written the error response.
 func (i *Identity) Relation(w http.ResponseWriter, r *http.Request, classroom, student string) (string, bool) {
@@ -70,13 +67,11 @@ func (i *Identity) Relation(w http.ResponseWriter, r *http.Request, classroom, s
 	if student != "" {
 		target += "?" + url.Values{"student_id": {student}}.Encode()
 	}
-	req, err := http.NewRequestWithContext(r.Context(), http.MethodGet, target, nil)
+	req, err := Forward(r, http.MethodGet, target)
 	if err != nil {
 		Unavailable(w, "Authorization unavailable.")
 		return "", false
 	}
-	req.Header.Set("Authorization", r.Header.Get("Authorization"))
-	req.Header.Set("X-Correlation-ID", Correlation(r.Context()))
 	res, err := i.client.Do(req)
 	if err != nil {
 		Unavailable(w, "Authorization unavailable; retry later.")

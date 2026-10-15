@@ -3,7 +3,9 @@
     <p class="eyebrow">Give learning a structure</p>
     <h2>Curriculum</h2>
   </div>
-  <button class="secondary" (click)="load()" [disabled]="state.busy()">Refresh curriculum</button>
+  <button class="secondary" (click)="load()" [disabled]="state.busy() || nodes.loading()">
+    Refresh curriculum
+  </button>
 </div>
 <p>
   Subjects lead to courses, units, topics and skills. A standalone skill can support your first assessment.
@@ -12,13 +14,16 @@
   <section class="panel">
     <h3>Learning map</h3>
     <p class="caption">Up to 200 active curriculum nodes</p>
-    @for (node of nodes(); track node.id) {
-      <article class="record">
-        <span class="badge">{{ node.kind }}</span>
-        <strong>{{ node.name }}</strong>
-      </article>
-    } @empty {
-      <p class="empty">No curriculum yet. Add a skill to begin authoring an assessment.</p>
+    <app-section-state [section]="nodes" loading="Loading curriculum…" />
+    @if (nodes.ready()) {
+      @for (node of nodes.value() ?? []; track node.id) {
+        <article class="record">
+          <span class="badge">{{ node.kind }}</span>
+          <strong>{{ node.name }}</strong>
+        </article>
+      } @empty {
+        <p class="empty">No curriculum yet. Add a skill to begin authoring an assessment.</p>
+      }
     }
   </section>
   @if (session.isTeacher()) {
@@ -53,7 +58,7 @@
         >
           <select id="node-parent" formControlName="parent_id">
             <option value="">Standalone</option>
-            @for (node of nodes(); track node.id) {
+            @for (node of nodes.value() ?? []; track node.id) {
               <option [value]="node.id">{{ node.kind }} · {{ node.name }}</option>
             }
           </select>

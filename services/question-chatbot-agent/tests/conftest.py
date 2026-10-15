@@ -11,7 +11,8 @@ import httpx
 import pytest
 from fastapi import Request
 from fastapi.testclient import TestClient
-from learning_transport import actor
+from learning_transport import sse_event
+from learning_transport.testing import as_caller, token_claims
 
 import main
 from clients import Services
@@ -28,10 +29,6 @@ SETTINGS = Settings(
     client_id="question-chatbot-agent",
     client_secret="secret",
 )
-
-
-def claims(user: str = "s1", role: str = "student", org: str = "org") -> dict[str, Any]:
-    return {"sub": user, "org_id": org, "realm_access": {"roles": [role]}}
 
 
 class MemoryStore:
@@ -80,11 +77,11 @@ class MemoryStore:
 
 
 def chat_stream(deltas: list[str], fail: bool = False) -> str:
-    events = [f"event: delta\ndata: {json.dumps({'text': d})}\n\n" for d in deltas]
+    events = [sse_event("delta", {"text": d}) for d in deltas]
     if fail:
-        events.append('event: error\ndata: {"code":"AI_PROVIDER_FAILED","message":"x"}\n\n')
+        events.append(sse_event("error", {"code": "AI_PROVIDER_FAILED", "message": "x"}))
     else:
-        events.append('event: done\ndata: {"model_version":"gpt-test","usage_tokens":42}\n\n')
+        events.append(sse_event("done", {"model_version": "gpt-test", "usage_tokens": 42}))
     return "".join(events)
 
 
@@ -160,11 +157,8 @@ def api(fakes: Fakes, store: MemoryStore) -> Iterator[TestClient]:
     http = httpx.AsyncClient(transport=httpx.MockTransport(fakes.handle))
     main.app.state.settings, main.app.state.store = SETTINGS, store
     main.app.state.services, main.app.state.pending = Services(SETTINGS, http), set()
-    main.app.dependency_overrides[actor] = fake_actor
-    try:
+    with as_caller(main.app, fake_actor):
         yield TestClient(main.app)
-    finally:
-        main.app.dependency_overrides.clear()
 
 
 def fake_actor(request: Request) -> dict[str, Any]:
@@ -172,7 +166,7 @@ def fake_actor(request: Request) -> dict[str, Any]:
     role, anyone else is a student. Real JWT verification is tested in packages/python-platform."""
     user = request.headers["authorization"].removeprefix("Bearer ")
     role = "teacher" if user.startswith("t") else "parent" if user.startswith("x") else "student"
-    return claims(user, role)
+    return token_claims(role, sub=user, org="org")
 
 
 def as_user(user: str = "s1") -> dict[str, str]:

@@ -1,15 +1,19 @@
 import { NgTemplateOutlet } from '@angular/common';
 import { Component, inject, signal } from '@angular/core';
-import { FormControl, FormGroup, ReactiveFormsModule, Validators } from '@angular/forms';
+import { FormControl, FormGroup, ReactiveFormsModule } from '@angular/forms';
 import { ChatApi, ContentApi } from '../../api/clients';
 import type { ChatMessage, Citation, StreamEvent, Thread } from '../../api/models';
 import { AiUsage } from '../../core/ai-usage';
 import { ClassroomContext, onClassroomChange } from '../../core/classroom-context';
 import { UnsavedChanges } from '../../core/unsaved-changes';
 import { ActionState } from '../../shared/action-state';
+import { messageOf } from '../../shared/errors';
 import { FieldComponent } from '../../shared/field';
+import { dateTime, resetTime } from '../../shared/format';
+import { Section } from '../../shared/section';
+import { SectionStateComponent } from '../../shared/section-state';
 import { StatusComponent } from '../../shared/status';
-import { resetTime } from '../usage/usage';
+import { requiredText } from '../../shared/validators';
 import { Inline, markdown, pages } from './markdown';
 
 export const MAX_QUESTION = 1000;
@@ -22,7 +26,7 @@ const OUTCOME_NOTES: Record<string, string> = {
 @Component({
   selector: 'app-chat',
   standalone: true,
-  imports: [ReactiveFormsModule, FieldComponent, StatusComponent, NgTemplateOutlet],
+  imports: [ReactiveFormsModule, FieldComponent, StatusComponent, SectionStateComponent, NgTemplateOutlet],
   templateUrl: './chat.html',
 })
 export class ChatComponent {
@@ -33,11 +37,9 @@ export class ChatComponent {
   readonly state = new ActionState();
   readonly max = MAX_QUESTION;
   readonly notes = OUTCOME_NOTES;
-  readonly threads = signal<Thread[]>([]);
+  readonly threads = new Section<Thread[]>();
   readonly active = signal<Thread | null>(null);
-  readonly messages = signal<ChatMessage[]>([]);
-  readonly threadsLoading = signal(false);
-  readonly messagesLoading = signal(false);
+  readonly messages = new Section<ChatMessage[]>();
   readonly streaming = signal(false);
   readonly announcement = signal('');
   readonly tried = signal(false);
@@ -45,46 +47,34 @@ export class ChatComponent {
   readonly figureErrors = signal<Record<string, string>>({});
   streamingId = '';
   private controller: AbortController | null = null;
-  private threadRevision = 0;
-  private messageRevision = 0;
   readonly form = new FormGroup({
-    question: new FormControl('', {
-      nonNullable: true,
-      validators: [Validators.required, Validators.maxLength(MAX_QUESTION), Validators.pattern(/\S/)],
-    }),
+    question: new FormControl('', { nonNullable: true, validators: requiredText(MAX_QUESTION) }),
   });
 
   constructor() {
     inject(UnsavedChanges).track(() => this.form.dirty || this.streaming());
     onClassroomChange(() => {
       this.controller?.abort();
-      this.threads.set([]);
       this.reset();
       this.loadThreads();
     });
   }
+  /** Whether either list is loading; sending waits for both. */
+  loading(): boolean {
+    return this.threads.loading() || this.messages.loading();
+  }
   private reset(): void {
-    this.messageRevision++;
-    this.messagesLoading.set(false);
+    this.messages.clear();
     this.active.set(null);
-    this.messages.set([]);
     Object.values(this.figures()).forEach((url) => URL.revokeObjectURL(url));
     this.figures.set({});
     this.figureErrors.set({});
   }
   loadThreads(): void {
-    const id = this.classroomId(),
-      revision = ++this.threadRevision;
+    const id = this.classroomId();
+    this.threads.clear();
     if (!id) return;
-    this.threadsLoading.set(true);
-    void this.state.run(async () => {
-      try {
-        const { threads } = await this.chat.threads(id);
-        if (revision === this.threadRevision) this.threads.set(threads);
-      } finally {
-        if (revision === this.threadRevision) this.threadsLoading.set(false);
-      }
-    });
+    void this.threads.load(async () => (await this.chat.threads(id)).threads);
   }
   newThread(): void {
     this.reset();
@@ -94,16 +84,7 @@ export class ChatComponent {
   open(thread: Thread): void {
     this.reset();
     this.active.set(thread);
-    const revision = ++this.messageRevision;
-    this.messagesLoading.set(true);
-    void this.state.run(async () => {
-      try {
-        const { messages } = await this.chat.messages(thread.id);
-        if (revision === this.messageRevision) this.messages.set(messages);
-      } finally {
-        if (revision === this.messageRevision) this.messagesLoading.set(false);
-      }
-    });
+    void this.messages.load(async () => (await this.chat.messages(thread.id)).messages);
   }
 
   shortcut(event: KeyboardEvent): void {
@@ -113,7 +94,7 @@ export class ChatComponent {
     }
   }
   send(): void {
-    if (this.streaming()) return;
+    if (this.streaming() || this.loading()) return;
     this.tried.set(true);
     if (!this.state.validate(this.form)) return;
     const question = this.form.controls.question.value.trim(),
@@ -123,7 +104,7 @@ export class ChatComponent {
       if (!thread) {
         thread = await this.chat.createThread(classroom);
         this.active.set(thread);
-        this.threads.update((list) => [thread as Thread, ...list]);
+        this.threads.set([thread, ...(this.threads.value() ?? [])]);
       }
       const answer: ChatMessage = {
         id: 'streaming',
@@ -133,8 +114,8 @@ export class ChatComponent {
         citations: null,
         created_at: new Date().toISOString(),
       };
-      this.messages.update((list) => [
-        ...list,
+      this.messages.set([
+        ...(this.messages.value() ?? []),
         {
           id: 'asked',
           role: 'user',
@@ -152,7 +133,9 @@ export class ChatComponent {
       let started = false,
         failure = '';
       const update = (change: Partial<ChatMessage>) =>
-        this.messages.update((list) => list.map((m) => (m.id === answer.id ? { ...m, ...change } : m)));
+        this.messages.set(
+          (this.messages.value() ?? []).map((m) => (m.id === answer.id ? { ...m, ...change } : m)),
+        );
       try {
         await this.chat.ask(thread.id, question, this.controller.signal, (event: StreamEvent) => {
           if (!started) {
@@ -160,7 +143,7 @@ export class ChatComponent {
             this.form.reset();
             this.tried.set(false);
           }
-          const current = this.messages().find((m) => m.id === answer.id);
+          const current = this.messages.value()?.find((m) => m.id === answer.id);
           if (event.event === 'token')
             update({ content: (current?.content || '') + String(event.data['text'] ?? '') });
           else if (event.event === 'citations')
@@ -176,12 +159,13 @@ export class ChatComponent {
         });
       } catch (error) {
         if (!started) {
-          this.messages.update((list) => list.filter((m) => m.id !== answer.id && m.id !== 'asked'));
+          this.messages.set(
+            (this.messages.value() ?? []).filter((m) => m.id !== answer.id && m.id !== 'asked'),
+          );
           this.announcement.set('');
           throw error;
         }
-        if (!this.controller?.signal.aborted)
-          failure = error instanceof Error ? error.message : 'The answer stopped. Retry later.';
+        if (!this.controller?.signal.aborted) failure = messageOf(error, 'The answer stopped. Retry later.');
         update({ outcome: this.controller?.signal.aborted ? 'interrupted' : 'error' });
       } finally {
         this.streaming.set(false);
@@ -190,7 +174,7 @@ export class ChatComponent {
         // However the turn ended, it may have spent AI allowance.
         this.usage.refresh();
       }
-      const done = this.messages().find((m) => m.id === answer.id);
+      const done = this.messages.value()?.find((m) => m.id === answer.id);
       this.announcement.set(
         done?.outcome === 'answered'
           ? 'Answer complete.'
@@ -252,10 +236,7 @@ export class ChatComponent {
       .catch((error: unknown) =>
         this.figureErrors.update((e) => ({
           ...e,
-          [source.chunk_id]:
-            error instanceof Error
-              ? `The figure could not be loaded. ${error.message}`
-              : 'The figure could not be loaded.',
+          [source.chunk_id]: `The figure could not be loaded. ${messageOf(error, '')}`.trim(),
         })),
       );
   }
@@ -271,14 +252,10 @@ export class ChatComponent {
       })
       .catch((error: unknown) => {
         tab?.close();
-        this.state.error.set(
-          error instanceof Error
-            ? `The PDF could not be opened. ${error.message}`
-            : 'The PDF could not be opened.',
-        );
+        this.state.error.set(`The PDF could not be opened. ${messageOf(error, '')}`.trim());
       });
   }
   when(iso: string): string {
-    return new Date(iso).toLocaleString('en-SG', { dateStyle: 'medium', timeStyle: 'short' });
+    return dateTime(iso);
   }
 }

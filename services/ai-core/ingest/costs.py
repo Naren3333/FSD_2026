@@ -24,6 +24,8 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
+import openai_client
+
 log = logging.getLogger("ai-core.ingest.costs")
 
 
@@ -115,11 +117,10 @@ def answered(model: str, usage: Any, seconds: float, retries: int, kind: str | N
     c.calls += 1
     c.retries += retries
     c.seconds += seconds
-    if usage is not None:
-        c.prompt_tokens += usage.prompt_tokens or 0
-        c.completion_tokens += usage.completion_tokens or 0
-        details = getattr(usage, "prompt_tokens_details", None)
-        c.cached_tokens += (getattr(details, "cached_tokens", None) or 0) if details else 0
+    counts = openai_client.usage_of(usage)
+    c.prompt_tokens += counts.tokens_in or 0
+    c.completion_tokens += counts.tokens_out or 0
+    c.cached_tokens += counts.cached_in
 
 
 def retried(n: int = 1, kind: str | None = None) -> None:
@@ -140,8 +141,9 @@ def stage(name: str) -> Iterator[None]:
 
 def write(record: IngestCost, path: Path | None) -> None:
     """Log the record, and append it to `path` (JSON lines) when one is set. Never raises."""
-    line = json.dumps(record.to_json(), separators=(",", ":"))
-    log.info("ingest %s cost: %s", record.document_id, line)
+    fields = record.to_json()
+    log.info("ingest_cost", extra=fields)
+    line = json.dumps(fields, separators=(",", ":"))
     if path is None:
         return
     try:
@@ -149,4 +151,6 @@ def write(record: IngestCost, path: Path | None) -> None:
         with path.open("a", encoding="utf-8") as f:
             f.write(line + "\n")
     except OSError:
-        log.exception("ingest %s: could not append its cost record to %s", record.document_id, path)
+        log.exception(
+            "ingest_cost_not_appended", extra={"document_id": record.document_id, "path": str(path)}
+        )

@@ -1,12 +1,10 @@
 package main
 
 import (
-	"errors"
 	"learning/platform"
 	"net/http"
 
 	"github.com/google/uuid"
-	"github.com/jackc/pgx/v5"
 )
 
 // server answers Assessment's HTTP routes: assessments and submissions in its store, classroom access from
@@ -26,6 +24,7 @@ func (s server) routes(mux *http.ServeMux) {
 }
 
 func (s server) create(w http.ResponseWriter, r *http.Request) {
+	// The role check comes first so a student is refused before validation; TeacherOf decides below.
 	if !platform.Teacher(w, r) {
 		return
 	}
@@ -37,7 +36,7 @@ func (s server) create(w http.ResponseWriter, r *http.Request) {
 		platform.Invalid(w, err.Error())
 		return
 	}
-	if !s.access.TeacherOf(w, r, v.Classroom) {
+	if !platform.TeacherOf(s.access, w, r, v.Classroom) {
 		return
 	}
 	switch checkAll(r, s.skills, v.skillIDs()) {
@@ -61,7 +60,7 @@ func (s server) create(w http.ResponseWriter, r *http.Request) {
 
 func (s server) list(w http.ResponseWriter, r *http.Request) {
 	id := r.URL.Query().Get("classroom_id")
-	if !s.access.Access(w, r, id, "") {
+	if !platform.Access(s.access, w, r, id, "") {
 		return
 	}
 	actor := platform.Actor(r)
@@ -76,7 +75,7 @@ func (s server) list(w http.ResponseWriter, r *http.Request) {
 // progress is, for the classroom's teacher only, each assessment with how many students have submitted it.
 func (s server) progress(w http.ResponseWriter, r *http.Request) {
 	id := r.URL.Query().Get("classroom_id")
-	if !s.access.TeacherOf(w, r, id) {
+	if !platform.TeacherOf(s.access, w, r, id) {
 		return
 	}
 	result, err := s.store.listProgress(r.Context(), platform.Actor(r).Org, id)
@@ -87,14 +86,21 @@ func (s server) progress(w http.ResponseWriter, r *http.Request) {
 	platform.JSON(w, http.StatusOK, result)
 }
 
-func (s server) get(w http.ResponseWriter, r *http.Request) {
-	v, err := s.store.findAssessment(r.Context(), platform.Actor(r).Org, r.PathValue("id"))
-	if errors.Is(err, pgx.ErrNoRows) {
+// findAssessment looks up the assessment the path names in the caller's organization. On failure the response is
+// written: 404 for a malformed or unknown id.
+func (s server) findAssessment(w http.ResponseWriter, r *http.Request) (Assessment, bool) {
+	id := r.PathValue("id")
+	if !platform.ID(id) {
 		platform.NotFound(w, "Assessment not found.")
-		return
+		return Assessment{}, false
 	}
-	if err != nil {
-		platform.Fail(w, err)
+	v, err := s.store.findAssessment(r.Context(), platform.Actor(r).Org, id)
+	return v, platform.Found(w, err, "Assessment not found.")
+}
+
+func (s server) get(w http.ResponseWriter, r *http.Request) {
+	v, ok := s.findAssessment(w, r)
+	if !ok {
 		return
 	}
 	relation, ok := s.access.Relation(w, r, v.Classroom, "")
@@ -115,16 +121,11 @@ func (s server) submit(w http.ResponseWriter, r *http.Request) {
 		platform.Forbidden(w, "Only enrolled students may submit.")
 		return
 	}
-	v, err := s.store.findAssessment(r.Context(), c.Org, r.PathValue("id"))
-	if errors.Is(err, pgx.ErrNoRows) {
-		platform.NotFound(w, "Assessment not found.")
+	v, ok := s.findAssessment(w, r)
+	if !ok {
 		return
 	}
-	if err != nil {
-		platform.Fail(w, err)
-		return
-	}
-	if !s.access.Access(w, r, v.Classroom, c.Subject) {
+	if !platform.Access(s.access, w, r, v.Classroom, c.Subject) {
 		return
 	}
 	var input struct {

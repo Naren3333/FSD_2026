@@ -17,75 +17,20 @@ import secrets
 import sys
 import time
 
-import httpx
-from common import CLASSES, ENV, KEYCLOAK, PDF_DIR, STUDENT2, Session, check, corpus, load_state, save_state
+from common import CLASSES, PDF_DIR, STUDENT2, Session, corpus, load_state, save_state
+from local_stack import admin_client, check, ensure_person
 
 
 def ensure_student2(state: dict) -> None:
-    """Create eval-student2 (realm role student, org local-school) in the local realm if it doesn't exist."""
-    res = httpx.post(
-        f"{KEYCLOAK}/realms/master/protocol/openid-connect/token",
-        timeout=15,
-        data={
-            "client_id": "admin-cli",
-            "grant_type": "password",
-            "username": "admin",
-            "password": ENV["KEYCLOAK_ADMIN_PASSWORD"],
-        },
-    )
-    check(res)
-    admin = httpx.Client(
-        base_url=f"{KEYCLOAK}/admin/realms/learning",
-        headers={"Authorization": "Bearer " + res.json()["access_token"]},
-        timeout=15,
-    )
-    found = check(admin.get("/users", params={"username": STUDENT2, "exact": "true"})).json()
-    if found and "student2_password" in state:
-        user_id = found[0]["id"]
-    elif found:
+    """Create eval-student2 (realm role student, org local-school) in the local realm if it doesn't exist. Its
+    password is generated once and kept in the eval's state; an existing account without one gets a new one."""
+    known = "student2_password" in state
+    if not known:
         state["student2_password"] = secrets.token_hex(20)
-        user_id = found[0]["id"]
-        check(
-            admin.put(
-                f"/users/{user_id}/reset-password",
-                json={"type": "password", "value": state["student2_password"], "temporary": False},
-            )
+    with admin_client() as admin:
+        ensure_person(
+            admin, STUDENT2, "Eval", "Student", state["student2_password"], reset_password=not known
         )
-    else:
-        state["student2_password"] = secrets.token_hex(20)
-        credential = {"type": "password", "value": state["student2_password"], "temporary": False}
-        check(
-            admin.post(
-                "/users",
-                json={
-                    "username": STUDENT2,
-                    "enabled": True,
-                    "emailVerified": True,
-                    "firstName": "Eval",
-                    "lastName": "Student",
-                    "email": f"{STUDENT2}@example.test",
-                    "attributes": {"org_id": ["local-school"]},
-                    "credentials": [credential],
-                },
-            )
-        )
-        user_id = check(admin.get("/users", params={"username": STUDENT2, "exact": "true"})).json()[0]["id"]
-    role = check(admin.get("/roles/student")).json()
-    check(admin.post(f"/users/{user_id}/role-mappings/realm", json=[role]))
-    # org_id is an unmanaged attribute, which the admin API drops unless the realm allows admins to edit them. The
-    # seeded users got theirs from the realm import; allow admin edits just long enough to set this one.
-    profile = check(admin.get("/users/profile")).json()
-    check(admin.put("/users/profile", json={**profile, "unmanagedAttributePolicy": "ADMIN_EDIT"}))
-    try:
-        user = check(admin.get(f"/users/{user_id}")).json()
-        check(
-            admin.put(
-                f"/users/{user_id}",
-                json={**user, "attributes": {**(user.get("attributes") or {}), "org_id": ["local-school"]}},
-            )
-        )
-    finally:
-        check(admin.put("/users/profile", json=profile))
     save_state(state)
 
 

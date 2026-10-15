@@ -1,25 +1,7 @@
 import { Component, OnInit, inject } from '@angular/core';
 import type { Usage } from '../../api/models';
 import { AiUsage } from '../../core/ai-usage';
-
-/** Dollars as the meter shows them: cents, and never "$0.00" for spend that is real but under a cent. */
-export function dollars(value: number): string {
-  if (value > 0 && value < 0.005) return 'under $0.01';
-  return new Intl.NumberFormat('en-SG', {
-    style: 'currency',
-    currency: 'USD',
-    currencyDisplay: 'narrowSymbol',
-  }).format(value);
-}
-
-/** When the allowance comes back, in the viewer's local time: today's or tomorrow's date only when it matters. */
-export function resetTime(iso: string, now = new Date()): string {
-  const at = new Date(iso);
-  const time = at.toLocaleTimeString('en-SG', { hour: 'numeric', minute: '2-digit' });
-  return at.toDateString() === now.toDateString()
-    ? time
-    : `${time} on ${at.toLocaleDateString('en-SG', { day: 'numeric', month: 'short' })}`;
-}
+import { dollars, resetTime } from '../../shared/format';
 
 /** Today's AI spend against the daily allowance: chat, search and (for teachers) indexing their PDFs. */
 @Component({ selector: 'app-usage', standalone: true, templateUrl: './usage.html' })

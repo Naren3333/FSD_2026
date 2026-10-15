@@ -1,64 +1,67 @@
-import { Component, inject, signal } from '@angular/core';
-import { AssessmentApi, CurriculumApi, GradingApi } from '../../api/clients';
+import { Component, inject } from '@angular/core';
+import { AssessmentApi, GradingApi } from '../../api/clients';
 import type { Assessment, Evaluation, Evidence } from '../../api/models';
 import { ClassroomContext, onClassroomChange } from '../../core/classroom-context';
-import { ActionState } from '../../shared/action-state';
-import { assessmentsOf, promptOf, skillNames, total } from '../../shared/names';
-import { StatusComponent } from '../../shared/status';
+import { CurriculumNames } from '../../core/curriculum-names';
+import { date } from '../../shared/format';
+import { MarksPipe } from '../../shared/marks';
+import { assessmentsOf, promptOf } from '../../shared/names';
+import { Section } from '../../shared/section';
+import { SectionStateComponent } from '../../shared/section-state';
+
+/** A student's finalized results with the assessments they belong to. */
+interface Results {
+  results: Evaluation[];
+  assessments: Map<string, Assessment>;
+}
 
 /** A student's own finalized grades in the current classroom. Drafts stay with the teacher until finalized. */
 @Component({
   selector: 'app-results',
   standalone: true,
-  imports: [StatusComponent],
+  imports: [SectionStateComponent, MarksPipe],
   templateUrl: './results.html',
 })
 export class ResultsComponent {
   private readonly grading = inject(GradingApi);
   private readonly assessmentApi = inject(AssessmentApi);
-  private readonly curriculum = inject(CurriculumApi);
+  private readonly curriculum = inject(CurriculumNames);
   readonly classroomId = inject(ClassroomContext).classroomId;
-  readonly state = new ActionState();
-  readonly results = signal<Evaluation[]>([]);
-  private readonly assessments = signal(new Map<string, Assessment>());
-  private readonly skills = signal(new Map<string, string>());
-  readonly total = total;
+  readonly results = new Section<Results>();
 
   constructor() {
-    onClassroomChange(() => {
-      this.results.set([]);
-      this.load();
-    });
+    onClassroomChange(() => this.load());
   }
 
   load(): void {
     const classroomId = this.classroomId();
+    this.results.clear();
     if (!classroomId) return;
-    void this.state.run(async () => {
+    void this.results.load(async () => {
       const results = await this.grading.mine(classroomId);
       // The student's copy of each assessment: prompts and options, never the answer key.
-      const [assessments, nodes] = await Promise.all([
+      const [assessments] = await Promise.all([
         assessmentsOf(results, (id) => this.assessmentApi.get(id)),
-        this.curriculum.nodes(),
+        this.curriculum.need(results.flatMap((r) => r.evidence.map((e) => e.skill_id))),
       ]);
-      this.assessments.set(assessments);
-      this.skills.set(skillNames(nodes));
-      this.results.set(results);
+      return { results, assessments };
     });
   }
 
   title(result: Evaluation): string {
-    return this.assessments().get(result.assessment_id)?.title ?? 'Assessment';
+    return this.results.value()?.assessments.get(result.assessment_id)?.title ?? 'Assessment';
   }
   prompt(result: Evaluation, evidence: Evidence): string {
-    return promptOf(this.assessments(), result.assessment_id, evidence.question_id);
+    return promptOf(
+      this.results.value()?.assessments ?? new Map(),
+      result.assessment_id,
+      evidence.question_id,
+    );
   }
   skill(evidence: Evidence): string {
-    return this.skills().get(evidence.skill_id) ?? '';
+    return this.curriculum.skillName(evidence.skill_id);
   }
   finalizedOn(result: Evaluation): string {
-    return result.finalized_at
-      ? new Date(result.finalized_at).toLocaleDateString('en-SG', { dateStyle: 'medium' })
-      : '';
+    return result.finalized_at ? date(result.finalized_at) : '';
   }
 }

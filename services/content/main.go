@@ -28,7 +28,7 @@ func main() {
 		purge := purger{files}.purge
 		return []func(context.Context){
 			platform.Outbox{DB: a.DB}.Run, x.run, x.run,
-			func(ctx context.Context) { classrooms.Consume(ctx, "identity.classroom.deleted.v1", purge, nil) },
+			func(ctx context.Context) { classrooms.Consume(ctx, platform.TopicClassroomDeleted, purge, nil) },
 		}, nil
 	})
 }

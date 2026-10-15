@@ -4,7 +4,7 @@ Ported from fsd_test's shared tests."""
 import httpx2
 import openai
 import pytest
-from conftest import chat_response, chat_stream, configured, embedding_response
+from conftest import CACHED_USAGE, chat_response, chat_stream, configured, embedding_response
 
 import openai_client
 from openai_client import StructuredOutputError, Usage
@@ -136,6 +136,11 @@ async def test_stream_relays_tokens_in_order_then_usage(openai_fake):
     assert openai_fake.timeouts == [30]
 
 
+async def test_stream_usage_includes_cached_prompt_tokens(openai_fake):
+    openai_fake.replies.append(chat_stream(["a"], usage=CACHED_USAGE))
+    assert await collect() == ["a", Usage(120, 7, cached_in=100)]
+
+
 async def test_stream_skips_empty_deltas(openai_fake):
     openai_fake.replies.append(chat_stream(["a", "", "b"]))
     assert await collect() == ["a", "b", Usage(120, 7)]
@@ -176,6 +181,13 @@ async def test_breaking_out_early_closes_the_stream(openai_fake):
 
 
 # ---- generate
+
+
+async def test_reply_usage_includes_cached_prompt_tokens(openai_fake):
+    openai_fake.reply(json=chat_response("Hi", usage=CACHED_USAGE))
+    reply = await openai_client.generate(HELLO, 40)
+    assert reply.usage == Usage(120, 7, cached_in=100)
+
 
 REWRITE = '{"query": "stages of photosynthesis", "is_on_topic": true}'
 SCHEMA = {

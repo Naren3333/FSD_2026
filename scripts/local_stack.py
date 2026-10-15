@@ -1,0 +1,155 @@
+"""Helpers the local-stack scripts share: the generated .env, sign-in through the local Keycloak, its admin API, and
+PostgreSQL inside the Compose container. Local development stack only; the Keycloak calls need httpx.
+
+Scripts in scripts/ import this directly (`python scripts/<name>.py` puts scripts/ on the path); scripts/eval/common.py
+adds scripts/ to the path first."""
+
+import json
+import subprocess
+from collections.abc import Iterable, Iterator
+from functools import cache
+from pathlib import Path
+from typing import TYPE_CHECKING, Any
+
+from setup import ORG
+
+if TYPE_CHECKING:
+    import httpx
+
+ROOT = Path(__file__).resolve().parents[1]
+BASE = "http://localhost:8000/api"
+KEYCLOAK = "http://localhost:8081"
+TOKEN_URL = f"{KEYCLOAK}/realms/learning/protocol/openid-connect/token"
+ADMIN_TOKEN_URL = f"{KEYCLOAK}/realms/master/protocol/openid-connect/token"
+PSQL_TIMEOUT = 90  # seconds
+
+
+def read_env(path: Path = ROOT / ".env") -> dict[str, str]:
+    """The KEY=value lines of a .env file, skipping comments and lines without a value."""
+    lines = path.read_text(encoding="utf-8").splitlines()
+    return dict(line.split("=", 1) for line in lines if "=" in line and not line.startswith("#"))
+
+
+@cache
+def env() -> dict[str, str]:
+    """The repository's .env, made by scripts/setup.py, read once."""
+    return read_env()
+
+
+def check(response: "httpx.Response") -> "httpx.Response":
+    """The response, or exit with what went wrong."""
+    if response.is_error:
+        request = response.request
+        raise SystemExit(
+            f"{request.method} {request.url.path} -> {response.status_code}: {response.text[:300]}"
+        )
+    return response
+
+
+def password_token(username: str, password: str) -> str:
+    """A local person's access token, from the learning-e2e client's password grant (tests and evals only)."""
+    import httpx  # noqa: PLC0415 - only the scripts that sign in need httpx
+
+    data = {"client_id": "learning-e2e", "grant_type": "password", "username": username, "password": password}
+    res = httpx.post(TOKEN_URL, data=data, timeout=15)
+    if res.status_code != 200:
+        raise SystemExit(f"Local sign-in failed for {username}: {res.status_code}")
+    return str(res.json()["access_token"])
+
+
+def admin_client() -> "httpx.Client":
+    """The learning realm's admin API as the local Keycloak admin. Admin tokens last a minute: open a new client for
+    each batch of work."""
+    import httpx  # noqa: PLC0415 - only the scripts that use the admin API need httpx
+
+    data = {
+        "client_id": "admin-cli",
+        "grant_type": "password",
+        "username": "admin",
+        "password": env()["KEYCLOAK_ADMIN_PASSWORD"],
+    }
+    token = check(httpx.post(ADMIN_TOKEN_URL, data=data, timeout=15)).json()["access_token"]
+    return httpx.Client(
+        base_url=f"{KEYCLOAK}/admin/realms/learning", headers={"Authorization": "Bearer " + token}, timeout=15
+    )
+
+
+def ensure_person(  # noqa: PLR0913 - one local person's whole Keycloak record
+    admin: "httpx.Client",
+    username: str,
+    first: str,
+    last: str,
+    password: str,
+    *,
+    role: str = "student",
+    reset_password: bool = True,
+) -> str:
+    """Creates the person with `password`, or (with reset_password) gives an existing one that password, then the
+    realm role and the local organization. Returns their Keycloak id. org_id is an unmanaged attribute that the
+    admin API only keeps while the realm lets admins edit those, so that is allowed just long enough to set it."""
+    found = check(admin.get("/users", params={"username": username, "exact": "true"})).json()
+    credential = {"type": "password", "value": password, "temporary": False}
+    if found:
+        user_id = str(found[0]["id"])
+        if reset_password:
+            check(admin.put(f"/users/{user_id}/reset-password", json=credential))
+    else:
+        user = {
+            "username": username,
+            "enabled": True,
+            "emailVerified": True,
+            "firstName": first,
+            "lastName": last,
+            "email": f"{username}@example.test",
+            "credentials": [credential],
+        }
+        check(admin.post("/users", json=user))
+        user_id = str(
+            check(admin.get("/users", params={"username": username, "exact": "true"})).json()[0]["id"]
+        )
+    realm_role = check(admin.get(f"/roles/{role}")).json()
+    check(admin.post(f"/users/{user_id}/role-mappings/realm", json=[realm_role]))
+    profile = check(admin.get("/users/profile")).json()
+    check(admin.put("/users/profile", json={**profile, "unmanagedAttributePolicy": "ADMIN_EDIT"}))
+    try:
+        user = check(admin.get(f"/users/{user_id}")).json()
+        attributes = {**(user.get("attributes") or {}), "org_id": [ORG]}
+        check(admin.put(f"/users/{user_id}", json={**user, "attributes": attributes}))
+    finally:
+        check(admin.put("/users/profile", json=profile))
+    return user_id
+
+
+def psql(
+    sql: str, *, database: str = "postgres", user: str = "postgres", check: bool = True
+) -> subprocess.CompletedProcess[str]:
+    """Runs one statement in the Compose PostgreSQL as `user` (the superuser unless a service's own role is named):
+    unaligned, tuples only, tab-separated columns."""
+    command = ["docker", "compose", "exec", "-T", "postgres", "psql", "-U", user, "-d", database]
+    command += ["-v", "ON_ERROR_STOP=1", "-At", "-F", "\t", "-c", sql]
+    return subprocess.run(
+        command, cwd=ROOT, text=True, capture_output=True, check=check, timeout=PSQL_TIMEOUT
+    )
+
+
+def psql_value(sql: str, *, database: str = "postgres", user: str = "postgres") -> str:
+    """The single value a statement returns."""
+    return psql(sql, database=database, user=user).stdout.strip()
+
+
+def psql_rows(sql: str, *, database: str = "postgres", user: str = "postgres") -> list[list[str]]:
+    """The rows a statement returns, each a list of column texts."""
+    out = psql(sql, database=database, user=user).stdout
+    return [line.split("\t") for line in out.splitlines() if line]
+
+
+def sse_events(lines: Iterable[str]) -> Iterator[tuple[str, dict[str, Any]]]:
+    """(event name, JSON data) for each frame of a server-sent event stream, such as httpx's `iter_lines()`. The
+    synchronous twin of learning_transport.read_events, which the scripts don't import (they run without the
+    services' packages on the path)."""
+    event = ""
+    for line in lines:
+        if line.startswith("event:"):
+            event = line[6:].strip()
+        elif line.startswith("data:"):
+            yield event, json.loads(line[5:])

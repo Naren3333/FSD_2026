@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"learning/platform"
+	"time"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -42,44 +43,43 @@ func insertEvaluation(ctx context.Context, tx pgx.Tx, v Submitted, evidence []by
 	return err
 }
 
+// evaluationColumns are the columns scanEvaluation reads first.
+const evaluationColumns = "id,assessment_id,classroom_id,student_id,status,evidence"
+
+// scanEvaluation reads evaluationColumns, then any extra columns into more, and decodes the evidence. It also
+// returns the evidence as stored.
+func scanEvaluation(row pgx.Row, more ...any) (Evaluation, []byte, error) {
+	var v Evaluation
+	var data []byte
+	if err := row.Scan(append([]any{&v.ID, &v.Assessment, &v.Classroom, &v.Student, &v.Status, &data}, more...)...); err != nil {
+		return v, nil, err
+	}
+	return v, data, json.Unmarshal(data, &v.Evidence)
+}
+
 func (p pgStore) listEvaluations(ctx context.Context, org, classroom string) ([]Evaluation, error) {
-	rows, err := p.db.Query(ctx, "SELECT id,assessment_id,classroom_id,student_id,status,evidence FROM evaluations WHERE classroom_id=$1 AND org_id=$2 ORDER BY created_at DESC LIMIT 100", classroom, org)
+	rows, err := p.db.Query(ctx, "SELECT "+evaluationColumns+" FROM evaluations WHERE classroom_id=$1 AND org_id=$2 ORDER BY created_at DESC LIMIT 100", classroom, org)
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
-	result := []Evaluation{}
-	for rows.Next() {
-		var v Evaluation
-		var data []byte
-		if err = rows.Scan(&v.ID, &v.Assessment, &v.Classroom, &v.Student, &v.Status, &data); err != nil {
-			return nil, err
-		}
-		if err = json.Unmarshal(data, &v.Evidence); err != nil {
-			return nil, err
-		}
-		result = append(result, v)
-	}
-	if rows.Err() != nil {
-		return nil, rows.Err()
-	}
-	return result, nil
+	return pgx.CollectRows(rows, func(row pgx.CollectableRow) (Evaluation, error) {
+		v, _, err := scanEvaluation(row)
+		return v, err
+	})
 }
 
 // listFinalized is one student's finalized results in a classroom, newest first. Drafts never leave Grading for
 // students: a grade is the student's only once a teacher has finalized it.
 func (p pgStore) listFinalized(ctx context.Context, org, classroom, student string) ([]Evaluation, error) {
-	rows, err := p.db.Query(ctx, "SELECT id,assessment_id,classroom_id,student_id,status,evidence,finalized_at FROM evaluations WHERE classroom_id=$1 AND org_id=$2 AND student_id=$3 AND status='finalized' ORDER BY finalized_at DESC LIMIT 100", classroom, org, student)
+	rows, err := p.db.Query(ctx, "SELECT "+evaluationColumns+",finalized_at FROM evaluations WHERE classroom_id=$1 AND org_id=$2 AND student_id=$3 AND status='finalized' ORDER BY finalized_at DESC LIMIT 100", classroom, org, student)
 	if err != nil {
 		return nil, err
 	}
 	return pgx.CollectRows(rows, func(row pgx.CollectableRow) (Evaluation, error) {
-		var v Evaluation
-		var data []byte
-		if err := row.Scan(&v.ID, &v.Assessment, &v.Classroom, &v.Student, &v.Status, &data, &v.FinalizedAt); err != nil {
-			return v, err
-		}
-		return v, json.Unmarshal(data, &v.Evidence)
+		var finalized *time.Time
+		v, _, err := scanEvaluation(row, &finalized)
+		v.FinalizedAt = finalized
+		return v, err
 	})
 }
 
@@ -94,22 +94,17 @@ func (p pgStore) findClassroom(ctx context.Context, org, id string) (string, err
 // errAlreadyFinalized, errScoreOutOfBounds or errUnknownQuestion for the
 // business failures; any other error is an infrastructure failure.
 func (p pgStore) finalizeEvaluation(ctx context.Context, org, id, actor, reason string, overrides map[string]int) (Evaluation, error) {
-	var v Evaluation
 	tx, err := p.db.Begin(ctx)
 	if err != nil {
-		return v, err
+		return Evaluation{}, err
 	}
 	defer tx.Rollback(ctx)
-	var before []byte
-	err = tx.QueryRow(ctx, "SELECT id,assessment_id,classroom_id,student_id,status,evidence FROM evaluations WHERE id=$1 AND org_id=$2 FOR UPDATE", id, org).Scan(&v.ID, &v.Assessment, &v.Classroom, &v.Student, &v.Status, &before)
+	v, before, err := scanEvaluation(tx.QueryRow(ctx, "SELECT "+evaluationColumns+" FROM evaluations WHERE id=$1 AND org_id=$2 FOR UPDATE", id, org))
 	if err != nil {
 		return v, err
 	}
 	if v.Status != statusDraft {
 		return v, errAlreadyFinalized
-	}
-	if err = json.Unmarshal(before, &v.Evidence); err != nil {
-		return v, err
 	}
 	if err = applyOverrides(v.Evidence, overrides); err != nil {
 		return v, err

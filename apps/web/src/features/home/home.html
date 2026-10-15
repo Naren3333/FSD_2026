@@ -12,11 +12,8 @@
 } @else {
   <section class="panel dashboard-panel" aria-labelledby="todo-title">
     <h3 id="todo-title">To do</h3>
-    @if (assessments.loading()) {
-      <p role="status" aria-live="polite">Loading assessments…</p>
-    } @else if (assessments.error()) {
-      <p role="alert" class="error">{{ assessments.error() }}</p>
-    } @else {
+    <app-section-state [section]="assessments" loading="Loading assessments…" />
+    @if (assessments.ready()) {
       @for (item of toDo(); track item.id) {
         <article class="record roster-row">
           <strong>{{ item.title }}</strong>
@@ -54,15 +51,12 @@
 
   <section class="panel dashboard-panel" aria-labelledby="recent-title">
     <h3 id="recent-title">Recent results</h3>
-    @if (results.loading()) {
-      <p role="status" aria-live="polite">Loading results…</p>
-    } @else if (results.error()) {
-      <p role="alert" class="error">{{ results.error() }}</p>
-    } @else {
+    <app-section-state [section]="results" loading="Loading results…" />
+    @if (results.ready()) {
       @for (result of recent(); track result.id) {
         <article class="record roster-row">
           <strong>{{ title(result) }}</strong>
-          <span>{{ total(result.evidence).awarded }} / {{ total(result.evidence).possible }} marks</span>
+          <span>{{ result.evidence | marks }} marks</span>
         </article>
       } @empty {
         <p class="empty">No finalized results yet.</p>
@@ -75,14 +69,15 @@
 
   <section class="panel dashboard-panel" aria-labelledby="practise-title">
     <h3 id="practise-title">Skills to practise</h3>
-    @if (performance.loading()) {
-      <p role="status" aria-live="polite">Loading your skills…</p>
-    } @else if (performance.error()) {
-      <p role="alert" class="error">{{ performance.error() }}</p>
-    } @else {
+    <app-section-state [section]="performance" loading="Loading your skills…" />
+    @if (performance.ready()) {
       @for (metric of practise(); track metric.skill_id) {
         <article class="record roster-row">
-          <strong>{{ skill(metric.skill_id) }}</strong>
+          @if (skill(metric.skill_id); as name) {
+            <strong>{{ name }}</strong>
+          } @else {
+            <strong class="identifier">{{ metric.skill_id }}</strong>
+          }
           <span
             >{{ metric.correct }} of {{ metric.attempted }} correct ({{
               metric.observed_accuracy | percent: '1.0-0'

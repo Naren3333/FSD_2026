@@ -2,12 +2,11 @@ package main
 
 import (
 	"context"
+	"learning/platform"
 	"learning/platform/platformtest"
 	"net/http"
 	"net/http/httptest"
 	"testing"
-
-	"github.com/jackc/pgx/v5"
 )
 
 const (
@@ -38,7 +37,7 @@ func (m *memoryStore) listNodes(context.Context, string) ([]Node, error) { retur
 func (m *memoryStore) findNode(_ context.Context, _, id string) (Node, error) {
 	n, ok := m.nodes[id]
 	if !ok {
-		return Node{}, pgx.ErrNoRows
+		return Node{}, platform.ErrNotFound
 	}
 	return n, nil
 }
@@ -78,17 +77,17 @@ func TestANodeNeedsTheLevelAboveAsParent(t *testing.T) {
 		body   string
 		status int
 	}{
-		{`{"kind":"skill","name":"Simplify","parent_id":"` + topicID + `"}`, 201},
-		{`{"kind":"unit","name":"Number","parent_id":"` + topicID + `"}`, 422},
-		{`{"kind":"skill","name":"Simplify","parent_id":"` + skillA + `"}`, 422},
-		{`{"kind":"chapter","name":"Simplify"}`, 422},
+		{`{"kind":"skill","name":"Simplify","parent_id":"` + topicID + `"}`, http.StatusCreated},
+		{`{"kind":"unit","name":"Number","parent_id":"` + topicID + `"}`, http.StatusUnprocessableEntity},
+		{`{"kind":"skill","name":"Simplify","parent_id":"` + skillA + `"}`, http.StatusUnprocessableEntity},
+		{`{"kind":"chapter","name":"Simplify"}`, http.StatusUnprocessableEntity},
 	}
 	for _, tc := range cases {
 		if w := call(t, store, http.MethodPost, "/v1/nodes", tc.body, "teacher"); w.Code != tc.status {
 			t.Errorf("%s: %d %s", tc.body, w.Code, w.Body.String())
 		}
 	}
-	if w := call(t, store, http.MethodPost, "/v1/nodes", cases[0].body, "student"); w.Code != 403 {
+	if w := call(t, store, http.MethodPost, "/v1/nodes", cases[0].body, "student"); w.Code != http.StatusForbidden {
 		t.Fatalf("a student changed the curriculum: %d", w.Code)
 	}
 }
@@ -96,22 +95,22 @@ func TestANodeNeedsTheLevelAboveAsParent(t *testing.T) {
 func TestPrerequisitesRejectSelfReferenceAndCycles(t *testing.T) {
 	store := newMemoryStore()
 	path := func(id string) string { return "/v1/skills/" + id + "/prerequisites" }
-	if w := call(t, store, http.MethodPost, path(skillA), `{"prerequisite_id":"`+skillA+`"}`, "teacher"); w.Code != 422 {
+	if w := call(t, store, http.MethodPost, path(skillA), `{"prerequisite_id":"`+skillA+`"}`, "teacher"); w.Code != http.StatusUnprocessableEntity {
 		t.Fatalf("self prerequisite: %d", w.Code)
 	}
-	if w := call(t, store, http.MethodPost, path(skillA), `{"prerequisite_id":"`+skillB+`"}`, "teacher"); w.Code != 200 {
+	if w := call(t, store, http.MethodPost, path(skillA), `{"prerequisite_id":"`+skillB+`"}`, "teacher"); w.Code != http.StatusOK {
 		t.Fatalf("status %d", w.Code)
 	}
-	if w := call(t, store, http.MethodPost, path(skillB), `{"prerequisite_id":"`+skillA+`"}`, "teacher"); w.Code != 409 {
+	if w := call(t, store, http.MethodPost, path(skillB), `{"prerequisite_id":"`+skillA+`"}`, "teacher"); w.Code != http.StatusConflict {
 		t.Fatalf("cycle accepted: %d", w.Code)
 	}
 }
 
 func TestAMissingNodeIsNotFound(t *testing.T) {
-	if w := call(t, newMemoryStore(), http.MethodGet, "/v1/nodes/"+skillB[:35]+"9", "", "student"); w.Code != 404 {
+	if w := call(t, newMemoryStore(), http.MethodGet, "/v1/nodes/"+skillB[:35]+"9", "", "student"); w.Code != http.StatusNotFound {
 		t.Fatalf("status %d", w.Code)
 	}
-	if w := call(t, newMemoryStore(), http.MethodGet, "/v1/nodes/not-a-uuid", "", "student"); w.Code != 404 {
+	if w := call(t, newMemoryStore(), http.MethodGet, "/v1/nodes/not-a-uuid", "", "student"); w.Code != http.StatusNotFound {
 		t.Fatalf("status %d", w.Code)
 	}
 }

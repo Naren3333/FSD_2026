@@ -1,6 +1,8 @@
 package platform
 
 import (
+	"context"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -61,7 +63,7 @@ func TestTeacherOfNeedsTheTeacherRelation(t *testing.T) {
 	for _, tc := range cases {
 		a := identityStub(t, tc.status, tc.body)
 		w := httptest.NewRecorder()
-		if got := a.TeacherOf(w, asTeacher(httptest.NewRequest(http.MethodGet, "/", nil)), classroom); got != tc.allow || (!got && w.Code != tc.code) {
+		if got := TeacherOf(a, w, asTeacher(httptest.NewRequest(http.MethodGet, "/", nil)), classroom); got != tc.allow || (!got && w.Code != tc.code) {
 			t.Errorf("%d %s: allowed %v, status %d", tc.status, tc.body, got, w.Code)
 		}
 	}
@@ -88,5 +90,34 @@ func TestSlowRoutesGetTheirOwnDeadline(t *testing.T) {
 	}
 	if left["/health/upload"] < 4*time.Minute || left["/health/other"] > requestTimeout {
 		t.Fatalf("deadlines %v", left)
+	}
+}
+
+func TestFoundAnswersNotFoundOrFails(t *testing.T) {
+	cases := []struct {
+		err   error
+		found bool
+		code  int
+	}{
+		{nil, true, http.StatusOK},
+		{ErrNotFound, false, http.StatusNotFound},
+		{errors.Join(errors.New("wrapped"), ErrNotFound), false, http.StatusNotFound},
+		{errors.New("db down"), false, http.StatusInternalServerError},
+	}
+	for _, tc := range cases {
+		w := httptest.NewRecorder()
+		if got := Found(w, tc.err, "Thing not found."); got != tc.found || w.Code != tc.code {
+			t.Errorf("%v: found %v, status %d", tc.err, got, w.Code)
+		}
+	}
+}
+
+func TestForwardCarriesTheCallersTokenAndCorrelation(t *testing.T) {
+	r := httptest.NewRequest(http.MethodPost, "/", nil)
+	r.Header.Set("Authorization", "Bearer caller")
+	r = r.WithContext(context.WithValue(r.Context(), correlationKey, "corr-1"))
+	req, err := Forward(r, http.MethodGet, "http://curriculum/v1/nodes/x")
+	if err != nil || req.Header.Get("Authorization") != "Bearer caller" || req.Header.Get("X-Correlation-ID") != "corr-1" || req.Method != http.MethodGet {
+		t.Fatalf("%v %v", err, req)
 	}
 }

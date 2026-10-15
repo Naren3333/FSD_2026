@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/json"
+	"io"
 	"learning/platform"
 	"log/slog"
 	"net/http"
@@ -43,26 +44,34 @@ type curriculum struct {
 	client *http.Client
 }
 
-// check asks the curriculum service whether the node exists and is a skill.
+// check asks the curriculum service whether the node exists and is a skill. A node Curriculum says is missing or
+// refuses (4xx) is invalid; Curriculum failing (5xx) or answering with a body it cannot read is unavailable, so an
+// outage is never reported to the teacher as an invalid skill.
 func (c curriculum) check(r *http.Request, skill string) skillStatus {
-	req, err := http.NewRequestWithContext(r.Context(), http.MethodGet, c.base+"/v1/nodes/"+skill, nil)
+	req, err := platform.Forward(r, http.MethodGet, c.base+"/v1/nodes/"+skill)
 	if err != nil {
 		slog.Error("curriculum_request_invalid", "error", err.Error())
 		return skillUnavailable
 	}
-	req.Header.Set("Authorization", r.Header.Get("Authorization"))
-	req.Header.Set("X-Correlation-ID", platform.Correlation(r.Context()))
 	res, err := c.client.Do(req)
 	if err != nil {
 		return skillUnavailable
+	}
+	defer res.Body.Close()
+	switch {
+	case res.StatusCode >= http.StatusInternalServerError:
+		return skillUnavailable
+	case res.StatusCode != http.StatusOK:
+		return skillInvalid
 	}
 	var node struct {
 		ID   string `json:"id"`
 		Kind string `json:"kind"`
 	}
-	decoded := json.NewDecoder(res.Body).Decode(&node) == nil
-	res.Body.Close()
-	if res.StatusCode != http.StatusOK || !decoded || node.Kind != "skill" {
+	if json.NewDecoder(io.LimitReader(res.Body, 64<<10)).Decode(&node) != nil {
+		return skillUnavailable
+	}
+	if node.Kind != "skill" {
 		return skillInvalid
 	}
 	return skillValid

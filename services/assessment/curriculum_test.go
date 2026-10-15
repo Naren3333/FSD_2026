@@ -41,3 +41,43 @@ func TestSkillIDsAreDistinct(t *testing.T) {
 		t.Fatalf("got %v", got)
 	}
 }
+
+func TestCheckMapsCurriculumAnswers(t *testing.T) {
+	cases := []struct {
+		name   string
+		status int
+		body   string
+		want   skillStatus
+	}{
+		{"a skill", http.StatusOK, `{"id":"s","kind":"skill"}`, skillValid},
+		{"not a skill", http.StatusOK, `{"id":"s","kind":"topic"}`, skillInvalid},
+		{"missing", http.StatusNotFound, `{"error":{}}`, skillInvalid},
+		{"refused", http.StatusForbidden, `{}`, skillInvalid},
+		{"curriculum failing", http.StatusInternalServerError, `{}`, skillUnavailable},
+		{"curriculum unavailable", http.StatusServiceUnavailable, ``, skillUnavailable},
+		{"unreadable body", http.StatusOK, `<html>`, skillUnavailable},
+	}
+	for _, tc := range cases {
+		var auth string
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			auth = r.Header.Get("Authorization")
+			w.WriteHeader(tc.status)
+			_, _ = w.Write([]byte(tc.body))
+		}))
+		r := httptest.NewRequest(http.MethodPost, "/", nil)
+		r.Header.Set("Authorization", "Bearer caller")
+		got := curriculum{server.URL, server.Client()}.check(r, skill)
+		server.Close()
+		if got != tc.want || auth != "Bearer caller" {
+			t.Errorf("%s: got %d (token %q), want %d", tc.name, got, auth, tc.want)
+		}
+	}
+}
+
+func TestCheckIsUnavailableWhenCurriculumIsUnreachable(t *testing.T) {
+	server := httptest.NewServer(http.NotFoundHandler())
+	server.Close()
+	if got := (curriculum{server.URL, server.Client()}).check(httptest.NewRequest(http.MethodPost, "/", nil), skill); got != skillUnavailable {
+		t.Fatalf("got %d", got)
+	}
+}

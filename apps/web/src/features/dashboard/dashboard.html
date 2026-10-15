@@ -58,11 +58,8 @@
   <section class="panel dashboard-panel" aria-labelledby="submissions-title">
     <h3 id="submissions-title">Submissions</h3>
     <p class="caption">Up to 100 newest assessments</p>
-    @if (assessments.loading()) {
-      <p role="status" aria-live="polite">Loading assessments…</p>
-    } @else if (assessments.error()) {
-      <p role="alert" class="error">{{ assessments.error() }}</p>
-    } @else {
+    <app-section-state [section]="assessments" loading="Loading assessments…" />
+    @if (assessments.ready()) {
       @for (item of assessments.value(); track item.id) {
         <article class="record roster-row">
           <strong>{{ item.title }}</strong>
@@ -82,11 +79,8 @@
       Observed accuracy from finalized grades, {{ pageSize }} students at a time. Choose a student for their
       full performance.
     </p>
-    @if (performance.loading()) {
-      <p role="status" aria-live="polite">Loading class skills…</p>
-    } @else if (performance.error()) {
-      <p role="alert" class="error">{{ performance.error() }}</p>
-    } @else if (performance.value(); as data) {
+    <app-section-state [section]="performance" loading="Loading class skills…" />
+    @if (performance.ready() && performance.value(); as data) {
       @if (!data.total) {
         <p class="empty">
           No students enrolled yet. Enroll them under <a routerLink="/classrooms">Classrooms</a>.
@@ -117,7 +111,13 @@
             <tbody>
               @for (skillId of skillRows(); track skillId) {
                 <tr>
-                  <th scope="row">{{ skill(skillId) }}</th>
+                  <th scope="row">
+                    @if (skill(skillId); as name) {
+                      {{ name }}
+                    } @else {
+                      <span class="identifier">{{ skillId }}</span>
+                    }
+                  </th>
                   @for (student of data.students; track student.student_id) {
                     <td>
                       @if (metric(student.student_id, skillId); as m) {
@@ -143,15 +143,13 @@
           correct. These are reporting thresholds, not a mastery measure.
         </p>
       }
-      @if (pages() > 1) {
-        <nav class="pager" aria-label="Class skills pages">
-          <button class="secondary" (click)="goTo(page() - 1)" [disabled]="page() === 0">Previous</button>
-          <span aria-live="polite">Page {{ page() + 1 }} of {{ pages() }} · {{ data.total }} students</span>
-          <button class="secondary" (click)="goTo(page() + 1)" [disabled]="page() + 1 >= pages()">
-            Next
-          </button>
-        </nav>
-      }
+      <app-pager
+        label="Class skills pages"
+        [page]="page()"
+        [pageSize]="pageSize"
+        [total]="data.total"
+        (go)="goTo($event)"
+      />
     }
   </section>
 }

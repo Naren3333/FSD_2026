@@ -10,11 +10,10 @@ import logging
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Literal, Protocol
+from typing import Literal, Protocol
 
 from learning_transport import Contract, failure
-from learning_transport.db import open_async_pool
-from psycopg_pool import AsyncConnectionPool
+from learning_transport.db import AsyncPooled
 from pydantic import Field
 
 from settings import get_settings
@@ -102,13 +101,8 @@ class Ledger(Protocol):
     async def close(self) -> None: ...
 
 
-class PostgresLedger:
-    def __init__(self, pool: AsyncConnectionPool[Any]) -> None:
-        self.pool = pool
-
-    @classmethod
-    async def open(cls, url: str) -> "PostgresLedger":
-        return cls(await open_async_pool(url, MIGRATIONS))
+class PostgresLedger(AsyncPooled):
+    MIGRATIONS = MIGRATIONS
 
     async def today(self, billed: Billed) -> Usage:
         # The day boundary is computed by PostgreSQL, which carries the time zone database.
@@ -144,13 +138,6 @@ class PostgresLedger:
                     correlation_id,
                 ),
             )
-
-    async def ping(self) -> None:
-        async with self.pool.connection() as conn:
-            await conn.execute("SELECT 1")
-
-    async def close(self) -> None:
-        await self.pool.close()
 
 
 def over_limit(usage: Usage) -> bool:

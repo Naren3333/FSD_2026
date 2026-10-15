@@ -5,9 +5,8 @@ import json
 from pathlib import Path
 from typing import Any, Protocol
 
-from learning_transport.db import open_async_pool
+from learning_transport.db import AsyncPooled
 from psycopg.types.json import Jsonb
-from psycopg_pool import AsyncConnectionPool
 
 MIGRATIONS = Path(__file__).parent / "migrations"
 TITLE_CHARS = 80
@@ -32,20 +31,8 @@ class Store(Protocol):
     async def save_answer(self, thread_id: str, answer: dict[str, Any]) -> str: ...
 
 
-class PostgresStore:
-    def __init__(self, pool: AsyncConnectionPool[Any]) -> None:
-        self.pool = pool
-
-    @classmethod
-    async def open(cls, url: str) -> "PostgresStore":
-        return cls(await open_async_pool(url, MIGRATIONS))
-
-    async def close(self) -> None:
-        await self.pool.close()
-
-    async def ping(self) -> None:
-        async with self.pool.connection() as conn:
-            await conn.execute("SELECT 1")
+class PostgresStore(AsyncPooled):
+    MIGRATIONS = MIGRATIONS
 
     async def create_thread(self, org: str, user: str, role: str, classroom_id: str) -> dict[str, Any]:
         async with self.pool.connection() as conn:

@@ -5,8 +5,6 @@ import (
 	"learning/platform"
 	"net/http"
 	"strings"
-
-	"github.com/jackc/pgx/v5"
 )
 
 // server answers Grading's HTTP routes from its store, with classroom access from Identity.
@@ -24,7 +22,7 @@ func (s server) routes(mux *http.ServeMux) {
 
 func (s server) list(w http.ResponseWriter, r *http.Request) {
 	classroom := r.URL.Query().Get("classroom_id")
-	if !s.access.TeacherOf(w, r, classroom) {
+	if !platform.TeacherOf(s.access, w, r, classroom) {
 		return
 	}
 	result, err := s.store.listEvaluations(r.Context(), platform.Actor(r).Org, classroom)
@@ -38,7 +36,7 @@ func (s server) list(w http.ResponseWriter, r *http.Request) {
 // counts is, for the classroom's teacher only, how many of its evaluations need grading and how many are final.
 func (s server) counts(w http.ResponseWriter, r *http.Request) {
 	classroom := r.URL.Query().Get("classroom_id")
-	if !s.access.TeacherOf(w, r, classroom) {
+	if !platform.TeacherOf(s.access, w, r, classroom) {
 		return
 	}
 	result, err := s.store.countEvaluations(r.Context(), platform.Actor(r).Org, classroom)
@@ -90,15 +88,10 @@ func (s server) finalize(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	classroom, err := s.store.findClassroom(r.Context(), platform.Actor(r).Org, r.PathValue("id"))
-	if errors.Is(err, pgx.ErrNoRows) {
-		platform.NotFound(w, "Evaluation not found.")
+	if !platform.Found(w, err, "Evaluation not found.") {
 		return
 	}
-	if err != nil {
-		platform.Fail(w, err)
-		return
-	}
-	if !s.access.TeacherOf(w, r, classroom) {
+	if !platform.TeacherOf(s.access, w, r, classroom) {
 		return
 	}
 	v, err := s.store.finalizeEvaluation(r.Context(), platform.Actor(r).Org, r.PathValue("id"), platform.Actor(r).Subject, input.Reason, input.Overrides)

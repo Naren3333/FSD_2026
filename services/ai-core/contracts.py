@@ -1,17 +1,9 @@
 from typing import Any, Literal, Self
-from uuid import UUID
 
 from learning_transport import Contract
 from pydantic import Field, model_validator
 
 from spend import Billed
-
-
-class SourceReference(Contract):
-    document_id: UUID
-    revision: int = Field(ge=1)
-    chunk_ordinal: int = Field(ge=0)
-    source_sha256: str = Field(pattern=r"^[a-f0-9]{64}$")
 
 
 class Message(Contract):

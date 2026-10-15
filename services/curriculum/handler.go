@@ -1,13 +1,11 @@
 package main
 
 import (
-	"errors"
 	"learning/platform"
 	"net/http"
 	"strings"
 
 	"github.com/google/uuid"
-	"github.com/jackc/pgx/v5"
 )
 
 // server answers Curriculum's HTTP routes from its store.
@@ -37,12 +35,7 @@ func (s server) get(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	v, err := s.store.findNode(r.Context(), platform.Actor(r).Org, r.PathValue("id"))
-	if errors.Is(err, pgx.ErrNoRows) {
-		platform.NotFound(w, "Node not found.")
-		return
-	}
-	if err != nil {
-		platform.Fail(w, err)
+	if !platform.Found(w, err, "Node not found.") {
 		return
 	}
 	platform.JSON(w, http.StatusOK, v)

@@ -47,9 +47,9 @@ func (s storage) check(ctx context.Context) error {
 	return nil
 }
 
+// put stores a small object held in memory, such as a figure crop.
 func (s storage) put(ctx context.Context, key string, data []byte, contentType string) error {
-	_, err := s.client.PutObject(ctx, s.bucket, key, bytes.NewReader(data), int64(len(data)), minio.PutObjectOptions{ContentType: contentType})
-	return err
+	return s.upload(ctx, key, bytes.NewReader(data), int64(len(data)), contentType)
 }
 
 // upload streams an original of known size into the bucket.

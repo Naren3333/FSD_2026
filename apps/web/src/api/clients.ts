@@ -1,5 +1,6 @@
 import { Injectable, inject } from '@angular/core';
 import { Gateway } from '../core/gateway';
+import { isPdf } from '../shared/files';
 import type {
   Assessment,
   AssessmentProgress,
@@ -9,15 +10,17 @@ import type {
   Classroom,
   DocType,
   DocumentRecord,
+  Enrollment,
   Evaluation,
   GradingCounts,
   Node,
+  NewAssessment,
   NodeInput,
   Performance,
   Profile,
-  Question,
   StreamEvent,
   Student,
+  Submission,
   Thread,
   Usage,
 } from './models';
@@ -41,17 +44,17 @@ export class IdentityApi {
     return this.gateway.request('identity', '/classrooms', { method: 'POST', body: { name } });
   }
   /** Deletes the classroom for its teacher. Its students lose access; its work is kept but no longer reachable. */
-  deleteClassroom(classroomId: string): Promise<void> {
+  deleteClassroom(classroomId: string): Promise<{ classroom_id: string }> {
     return this.gateway.request('identity', `/classrooms/${id(classroomId)}`, { method: 'DELETE' });
   }
   /** Enrolls one of the organization's students by account id. */
-  enroll(classroomId: string, studentId: string): Promise<void> {
+  enroll(classroomId: string, studentId: string): Promise<Enrollment> {
     return this.gateway.request('identity', `/classrooms/${id(classroomId)}/enrollments`, {
       method: 'POST',
       body: { student_id: studentId },
     });
   }
-  unenroll(classroomId: string, studentId: string): Promise<void> {
+  unenroll(classroomId: string, studentId: string): Promise<Enrollment> {
     return this.gateway.request('identity', `/classrooms/${id(classroomId)}/enrollments/${id(studentId)}`, {
       method: 'DELETE',
     });
@@ -91,11 +94,10 @@ export class ContentApi {
   }
   upload(classroomId: string, title: string, docType: DocType, file: File): Promise<DocumentRecord> {
     const query = `classroom_id=${id(classroomId)}&title=${id(title)}&doc_type=${id(docType)}`;
-    const pdf = file.name.toLowerCase().endsWith('.pdf');
     return this.gateway.request('content', `/documents?${query}`, {
       method: 'POST',
       body: file,
-      contentType: pdf ? 'application/pdf' : 'text/plain',
+      contentType: isPdf(file) ? 'application/pdf' : 'text/plain',
       timeout: UPLOAD_TIMEOUT,
     });
   }
@@ -112,13 +114,6 @@ export class ContentApi {
   original(documentId: string): Promise<string> {
     return this.gateway.objectUrl('content', `/documents/${id(documentId)}/original`);
   }
-}
-
-/** What a teacher sends to create an assessment; Assessment assigns the ids. */
-export interface NewAssessment {
-  classroom_id: string;
-  title: string;
-  questions: Omit<Question, 'id'>[];
 }
 
 @Injectable({ providedIn: 'root' })
@@ -140,7 +135,7 @@ export class AssessmentApi {
   create(assessment: NewAssessment): Promise<Assessment> {
     return this.gateway.request('assessment', '/assessments', { method: 'POST', body: assessment });
   }
-  submit(assessmentId: string, answers: Record<string, string>): Promise<void> {
+  submit(assessmentId: string, answers: Record<string, string>): Promise<Submission> {
     return this.gateway.request('assessment', `/assessments/${id(assessmentId)}/submissions`, {
       method: 'POST',
       body: { answers },

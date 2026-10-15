@@ -2,6 +2,7 @@ package main
 
 import (
 	"learning/platform"
+	"learning/platform/platformtest"
 	"testing"
 )
 
@@ -16,11 +17,7 @@ func TestClassroomName(t *testing.T) {
 	}
 }
 
-func claims(subject string, roles ...string) platform.Claims {
-	c := platform.Claims{Subject: subject, Org: "org"}
-	c.Realm.Roles = roles
-	return c
-}
+var claims = platformtest.Claims
 
 func TestDecideRelation(t *testing.T) {
 	enrolled := map[string]bool{"student-1": true, "dual": true}

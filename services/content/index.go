@@ -11,6 +11,7 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
@@ -298,10 +299,8 @@ func truncate(s string, n int) string {
 	if len(s) <= n {
 		return s
 	}
-	for n > 0 && !utf8RuneStart(s[n]) {
+	for n > 0 && !utf8.RuneStart(s[n]) {
 		n--
 	}
 	return s[:n]
 }
-
-func utf8RuneStart(b byte) bool { return b&0xC0 != 0x80 }

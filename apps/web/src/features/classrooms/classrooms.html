@@ -57,39 +57,46 @@
   <section class="panel roster" aria-labelledby="roster-title">
     <div class="section-heading">
       <h3 id="roster-title">Students in {{ classroomName() || 'this classroom' }}</h3>
-      <button class="secondary" (click)="loadRoster()" [disabled]="rosterState.busy() || !classroomId()">
+      <button
+        class="secondary"
+        (click)="loadRoster()"
+        [disabled]="rosterState.busy() || roster.loading() || !classroomId()"
+      >
         Refresh students
       </button>
     </div>
     <p class="caption">Up to 500 students, by name</p>
-    @for (student of roster(); track student.id) {
-      <article class="record roster-row">
-        <div>
-          <strong>{{ studentName(student) || 'Name not recorded yet' }}</strong>
-          @if (student.username && student.username !== studentName(student)) {
-            <span class="caption">{{ student.username }}</span>
-          }
-          @if (!studentName(student)) {
-            <span class="identifier">{{ student.id }}</span>
-          }
-        </div>
-        <button
-          class="secondary"
-          (click)="confirmRemove(student)"
-          [disabled]="rosterState.busy()"
-          [attr.aria-label]="'Remove ' + (studentName(student) || student.id) + ' from the classroom'"
-        >
-          Remove
-        </button>
-      </article>
-    } @empty {
-      <p class="empty">
-        {{
-          classroomId()
-            ? 'No students enrolled yet. Enroll them from All students below.'
-            : 'Select a classroom to see its students.'
-        }}
-      </p>
+    <app-section-state [section]="roster" loading="Loading students…" />
+    @if (roster.ready()) {
+      @for (student of roster.value() ?? []; track student.id) {
+        <article class="record roster-row">
+          <div>
+            <strong>{{ studentName(student) || 'Name not recorded yet' }}</strong>
+            @if (student.username && student.username !== studentName(student)) {
+              <span class="caption">{{ student.username }}</span>
+            }
+            @if (!studentName(student)) {
+              <span class="identifier">{{ student.id }}</span>
+            }
+          </div>
+          <button
+            class="secondary"
+            (click)="confirmRemove(student)"
+            [disabled]="rosterState.busy()"
+            [attr.aria-label]="'Remove ' + (studentName(student) || student.id) + ' from the classroom'"
+          >
+            Remove
+          </button>
+        </article>
+      } @empty {
+        <p class="empty">
+          {{
+            classroomId()
+              ? 'No students enrolled yet. Enroll them from All students below.'
+              : 'Select a classroom to see its students.'
+          }}
+        </p>
+      }
     }
     @if (!removing()) {
       <app-status [state]="rosterState" />
@@ -100,7 +107,11 @@
   <section class="panel roster" aria-labelledby="everyone-title">
     <div class="section-heading">
       <h3 id="everyone-title">All students</h3>
-      <button class="secondary" (click)="loadEveryone()" [disabled]="everyoneState.busy()">
+      <button
+        class="secondary"
+        (click)="loadEveryone()"
+        [disabled]="everyoneState.busy() || everyone.loading()"
+      >
         Refresh all students
       </button>
     </div>
@@ -115,80 +126,77 @@
         (input)="searchFor($any($event.target).value)"
       />
     </app-field>
-    @for (student of shown(); track student.id) {
-      <article class="record roster-row">
-        <div>
-          <strong>{{ studentName(student) }}</strong>
-          @if (student.username !== studentName(student)) {
-            <span class="caption">{{ student.username }}</span>
+    <app-section-state [section]="everyone" loading="Loading students…" />
+    @if (everyone.ready()) {
+      @for (student of everyone.value()?.students ?? []; track student.id) {
+        <article class="record roster-row">
+          <div>
+            <strong>{{ studentName(student) }}</strong>
+            @if (student.username !== studentName(student)) {
+              <span class="caption">{{ student.username }}</span>
+            }
+          </div>
+          @if (enrolled().has(student.id)) {
+            <span class="badge badge-plain">Enrolled</span>
+          } @else {
+            <button
+              class="secondary"
+              (click)="enrollStudent(student)"
+              [disabled]="everyoneState.busy() || !classroomId()"
+              [attr.aria-label]="
+                'Enroll ' + studentName(student) + ' in ' + (classroomName() || 'this classroom')
+              "
+            >
+              Enroll
+            </button>
           }
-        </div>
-        @if (enrolled().has(student.id)) {
-          <span class="badge badge-plain">Enrolled</span>
-        } @else {
-          <button
-            class="secondary"
-            (click)="enrollStudent(student)"
-            [disabled]="everyoneState.busy() || !classroomId()"
-            [attr.aria-label]="
-              'Enroll ' + studentName(student) + ' in ' + (classroomName() || 'this classroom')
-            "
-          >
-            Enroll
-          </button>
-        }
-      </article>
-    } @empty {
-      <p class="empty">
-        {{
-          search().trim()
-            ? 'No students match that search.'
-            : 'No students have signed in yet. Students appear here after their first sign-in.'
-        }}
-      </p>
+        </article>
+      } @empty {
+        <p class="empty">
+          {{
+            search().trim()
+              ? 'No students match that search.'
+              : 'No students have signed in yet. Students appear here after their first sign-in.'
+          }}
+        </p>
+      }
     }
-    @if (pages() > 1) {
-      <nav class="pager" aria-label="All students pages">
-        <button
-          class="secondary"
-          (click)="goTo(page() - 1)"
-          [disabled]="everyoneState.busy() || page() === 0"
-        >
-          Previous
-        </button>
-        <span aria-live="polite">Page {{ page() + 1 }} of {{ pages() }} · {{ total() }} students</span>
-        <button
-          class="secondary"
-          (click)="goTo(page() + 1)"
-          [disabled]="everyoneState.busy() || page() + 1 >= pages()"
-        >
-          Next
-        </button>
-      </nav>
-    }
+    <app-pager
+      label="All students pages"
+      [page]="page()"
+      [pageSize]="pageSize"
+      [total]="everyone.value()?.total ?? 0"
+      [disabled]="everyoneState.busy() || everyone.loading()"
+      (go)="goTo($event)"
+    />
     <app-status [state]="everyoneState" />
   </section>
 }
-<dialog #removeDialog aria-labelledby="remove-title" (close)="closeRemove()">
-  <h2 id="remove-title">Remove this student?</h2>
+<app-confirm-dialog
+  #removeDialog
+  dialogId="remove"
+  heading="Remove this student?"
+  confirmLabel="Remove student"
+  [state]="rosterState"
+  (confirm)="remove()"
+  (closed)="closeRemove()"
+>
   @if (removing(); as student) {
     <p>
       {{ studentName(student) || student.id }} will lose access to {{ classroomName() || 'this classroom' }}.
       Their submissions and grades are kept, and you can enroll them again later.
     </p>
   }
-  <div class="actions">
-    <button type="button" class="secondary" autofocus (click)="closeRemove()" [disabled]="rosterState.busy()">
-      Cancel
-    </button>
-    <button type="button" (click)="remove()" [disabled]="rosterState.busy()">Remove student</button>
-  </div>
-  @if (removing()) {
-    <app-status [state]="rosterState" />
-  }
-</dialog>
-<dialog #deleteDialog aria-labelledby="delete-title" (close)="closeDelete()">
-  <h2 id="delete-title">Delete this classroom?</h2>
+</app-confirm-dialog>
+<app-confirm-dialog
+  #deleteDialog
+  dialogId="delete"
+  heading="Delete this classroom?"
+  confirmLabel="Delete classroom"
+  [state]="state"
+  (confirm)="deleteClassroom()"
+  (closed)="closeDelete()"
+>
   @if (deleting(); as classroom) {
     <p>
       {{ classroom.name }} will disappear for you and its students, along with access to its materials,
@@ -196,13 +204,4 @@
       are permanently deleted. Their accounts are kept.
     </p>
   }
-  <div class="actions">
-    <button type="button" class="secondary" autofocus (click)="closeDelete()" [disabled]="state.busy()">
-      Cancel
-    </button>
-    <button type="button" (click)="deleteClassroom()" [disabled]="state.busy()">Delete classroom</button>
-  </div>
-  @if (deleting()) {
-    <app-status [state]="state" />
-  }
-</dialog>
+</app-confirm-dialog>

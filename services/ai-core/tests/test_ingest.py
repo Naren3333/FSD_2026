@@ -9,7 +9,6 @@ from pathlib import Path
 
 import pytest
 from conftest import (
-    SERVICE_CLAIMS,
     FakeOpenAI,
     configured,
     ingested,
@@ -23,7 +22,7 @@ from conftest import (
 )
 from fastapi.testclient import TestClient
 from httpx import Response
-from learning_transport import actor
+from learning_transport.testing import as_caller, token_claims
 
 import main
 from ingest import VisionConfig, vision
@@ -203,8 +202,5 @@ def test_more_than_50_mib_is_refused(api: TestClient, monkeypatch: pytest.Monkey
 def test_people_cannot_ingest() -> None:
     client = TestClient(app)
     assert post(client, textbook()).status_code == 401
-    app.dependency_overrides[actor] = lambda: {**SERVICE_CLAIMS, "realm_access": {"roles": ["teacher"]}}
-    try:
+    with as_caller(app, token_claims("teacher", sub="content-indexer")):
         assert post(client, textbook()).status_code == 403
-    finally:
-        app.dependency_overrides.clear()

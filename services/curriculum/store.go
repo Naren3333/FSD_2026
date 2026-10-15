@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
@@ -25,25 +26,18 @@ func (p pgStore) listNodes(ctx context.Context, org string) ([]Node, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
-	result := []Node{}
-	for rows.Next() {
-		var v Node
-		if err = rows.Scan(&v.ID, &v.Kind, &v.Name, &v.Parent); err != nil {
-			return nil, err
-		}
-		result = append(result, v)
-	}
-	if rows.Err() != nil {
-		return nil, rows.Err()
-	}
-	return result, nil
+	return pgx.CollectRows(rows, func(row pgx.CollectableRow) (Node, error) { return scanNode(row) })
+}
+
+// scanNode reads the columns id,kind,name,parent_id.
+func scanNode(row pgx.Row) (Node, error) {
+	var v Node
+	err := row.Scan(&v.ID, &v.Kind, &v.Name, &v.Parent)
+	return v, err
 }
 
 func (p pgStore) findNode(ctx context.Context, org, id string) (Node, error) {
-	var v Node
-	err := p.db.QueryRow(ctx, "SELECT id,kind,name,parent_id FROM nodes WHERE id=$1 AND org_id=$2 AND NOT archived", id, org).Scan(&v.ID, &v.Kind, &v.Name, &v.Parent)
-	return v, err
+	return scanNode(p.db.QueryRow(ctx, "SELECT id,kind,name,parent_id FROM nodes WHERE id=$1 AND org_id=$2 AND NOT archived", id, org))
 }
 
 // findKind returns the kind of an active node in the organization.

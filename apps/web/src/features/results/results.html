@@ -3,7 +3,7 @@
     <p class="eyebrow">Reviewed by your teacher</p>
     <h2>My results</h2>
   </div>
-  <button class="secondary" (click)="load()" [disabled]="state.busy() || !classroomId()">
+  <button class="secondary" (click)="load()" [disabled]="results.loading() || !classroomId()">
     Refresh results
   </button>
 </div>
@@ -13,37 +13,39 @@
 </p>
 <section class="panel">
   <p class="caption">Up to 100 most recent results</p>
-  @for (result of results(); track result.id) {
-    <article class="grade">
-      <div>
-        <span class="badge">Finalized{{ finalizedOn(result) ? ' ' + finalizedOn(result) : '' }}</span>
-        <h3>{{ title(result) }}</h3>
-        <p>
-          <strong>{{ total(result.evidence).awarded }} / {{ total(result.evidence).possible }}</strong>
-          marks
-        </p>
-      </div>
-      <div class="evidence-list">
-        @for (evidence of result.evidence; track evidence.question_id; let index = $index) {
+  <app-section-state [section]="results" loading="Loading results…" />
+  @if (results.ready()) {
+    @for (result of results.value()?.results ?? []; track result.id) {
+      <article class="grade">
+        <div>
+          <span class="badge">Finalized{{ finalizedOn(result) ? ' ' + finalizedOn(result) : '' }}</span>
+          <h3>{{ title(result) }}</h3>
           <p>
-            <span class="badge" [class.badge-danger]="!evidence.correct">
-              {{ evidence.correct ? 'Correct' : 'Incorrect' }}
-            </span>
-            <strong>{{ evidence.awarded }} / {{ evidence.possible }}</strong>
-            · {{ prompt(result, evidence) || 'Question ' + (index + 1) }}
-            <span class="caption">Skill: {{ skill(evidence) || 'not in the curriculum' }}</span>
+            <strong>{{ result.evidence | marks }}</strong>
+            marks
           </p>
-        }
-      </div>
-    </article>
-  } @empty {
-    <p class="empty">
-      {{
-        classroomId()
-          ? 'No finalized results yet. After you submit an assessment, your teacher reviews it and your result appears here.'
-          : 'Select a classroom to continue.'
-      }}
-    </p>
+        </div>
+        <div class="evidence-list">
+          @for (evidence of result.evidence; track evidence.question_id; let index = $index) {
+            <p>
+              <span class="badge" [class.badge-danger]="!evidence.correct">
+                {{ evidence.correct ? 'Correct' : 'Incorrect' }}
+              </span>
+              <strong>{{ evidence.awarded }} / {{ evidence.possible }}</strong>
+              · {{ prompt(result, evidence) || 'Question ' + (index + 1) }}
+              <span class="caption">Skill: {{ skill(evidence) || 'not in the curriculum' }}</span>
+            </p>
+          }
+        </div>
+      </article>
+    } @empty {
+      <p class="empty">
+        {{
+          classroomId()
+            ? 'No finalized results yet. After you submit an assessment, your teacher reviews it and your result appears here.'
+            : 'Select a classroom to continue.'
+        }}
+      </p>
+    }
   }
 </section>
-<app-status [state]="state" />

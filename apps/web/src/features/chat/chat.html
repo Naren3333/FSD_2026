@@ -6,7 +6,7 @@
   <button
     class="secondary"
     (click)="loadThreads()"
-    [disabled]="state.busy() || streaming() || !classroomId()"
+    [disabled]="state.busy() || streaming() || threads.loading() || !classroomId()"
   >
     Refresh conversations
   </button>
@@ -22,11 +22,10 @@
     <button class="secondary new-thread" (click)="newThread()" [disabled]="streaming() || !classroomId()">
       New conversation
     </button>
-    @if (threadsLoading()) {
-      <p class="empty" aria-busy="true">Loading conversations…</p>
-    } @else {
+    <app-section-state [section]="threads" loading="Loading conversations…" />
+    @if (threads.ready()) {
       <ul class="thread-list">
-        @for (thread of threads(); track thread.id) {
+        @for (thread of threads.value() ?? []; track thread.id) {
           <li>
             <button
               class="thread"
@@ -53,11 +52,10 @@
   </section>
   <section class="panel conversation-panel" aria-labelledby="conversation-heading">
     <h3 id="conversation-heading">{{ active()?.title || 'New conversation' }}</h3>
-    @if (messagesLoading()) {
-      <p class="empty" aria-busy="true">Loading messages…</p>
-    } @else {
+    <app-section-state [section]="messages" loading="Loading messages…" />
+    @if (messages.ready()) {
       <ol class="conversation" [attr.aria-busy]="streaming()">
-        @for (message of messages(); track message.id) {
+        @for (message of messages.value() ?? []; track message.id) {
           <li class="turn" [class.answer]="message.role === 'assistant'">
             <span class="speaker">{{ message.role === 'user' ? 'You' : 'Assistant' }}</span>
             @if (message.role === 'user') {
@@ -213,7 +211,7 @@
         ></textarea>
       </app-field>
       <div class="chat-actions">
-        <button [disabled]="state.busy() || streaming() || !classroomId()">Send question</button>
+        <button [disabled]="state.busy() || streaming() || loading() || !classroomId()">Send question</button>
         @if (streaming()) {
           <button type="button" class="secondary" (click)="stop()">Stop answer</button>
         }

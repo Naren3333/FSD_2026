@@ -45,7 +45,7 @@ func (p pgStore) registerUser(ctx context.Context, org, subject, role, username,
 }
 
 // findClassroomOwner returns the classroom's organization and teacher.
-// It returns pgx.ErrNoRows when the classroom does not exist or was deleted.
+// It returns platform.ErrNotFound when the classroom does not exist or was deleted.
 func (p pgStore) findClassroomOwner(ctx context.Context, classroom string) (org, teacher string, err error) {
 	err = p.db.QueryRow(ctx, "SELECT org_id,teacher_id FROM classrooms WHERE id=$1 AND deleted_at IS NULL", classroom).Scan(&org, &teacher)
 	return org, teacher, err
@@ -67,19 +67,11 @@ func (p pgStore) listClassrooms(ctx context.Context, org, subject string, isTeac
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
-	result := []Classroom{}
-	for rows.Next() {
+	return pgx.CollectRows(rows, func(row pgx.CollectableRow) (Classroom, error) {
 		var v Classroom
-		if err = rows.Scan(&v.ID, &v.Name, &v.Teacher); err != nil {
-			return nil, err
-		}
-		result = append(result, v)
-	}
-	if rows.Err() != nil {
-		return nil, rows.Err()
-	}
-	return result, nil
+		err := row.Scan(&v.ID, &v.Name, &v.Teacher)
+		return v, err
+	})
 }
 
 func (p pgStore) studentExists(ctx context.Context, student, org string) (bool, error) {
@@ -141,10 +133,6 @@ func scanStudent(row pgx.CollectableRow) (Student, error) {
 	return v, err
 }
 
-// ClassroomDeleted is the identity.classroom.deleted.v1 topic: every service that keeps data for a classroom
-// removes it when the classroom is deleted.
-const ClassroomDeleted = "identity.classroom.deleted.v1"
-
 // deleteClassroom marks the classroom deleted, unenrolls its students and announces it, in one transaction, so no
 // student stays tied to it and every other service purges its data for it. The students' accounts are untouched.
 // The classroom row is kept as the record that it was deleted.
@@ -159,7 +147,7 @@ func (p pgStore) deleteClassroom(ctx context.Context, classroom, org string) err
 		_, err = tx.Exec(ctx, "DELETE FROM enrollments WHERE classroom_id=$1", classroom)
 	}
 	if err == nil {
-		err = platform.Emit(ctx, tx, ClassroomDeleted, classroom, map[string]string{"classroom_id": classroom, "org_id": org})
+		err = platform.Emit(ctx, tx, platform.TopicClassroomDeleted, classroom, platform.ClassroomDeleted{Classroom: classroom, Org: org})
 	}
 	if err == nil {
 		err = tx.Commit(ctx)

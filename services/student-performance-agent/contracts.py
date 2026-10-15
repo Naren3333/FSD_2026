@@ -4,13 +4,6 @@ from learning_transport import Contract
 from pydantic import Field, model_validator
 
 
-class SourceReference(Contract):
-    document_id: UUID
-    revision: int = Field(ge=1)
-    chunk_ordinal: int = Field(ge=0)
-    source_sha256: str = Field(pattern=r"^[a-f0-9]{64}$")
-
-
 class SkillSummary(Contract):
     skill_id: UUID
     attempted: int = Field(ge=0)

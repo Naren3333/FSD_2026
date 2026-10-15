@@ -1,5 +1,6 @@
 import { signal } from '@angular/core';
 import { FormGroup } from '@angular/forms';
+import { messageOf } from './errors';
 
 /** The busy flag, success message and error of one section's actions. */
 export class ActionState {
@@ -15,7 +16,7 @@ export class ActionState {
       await action();
       this.message.set(success);
     } catch (error) {
-      this.error.set(error instanceof Error ? error.message : 'The operation failed. Retry later.');
+      this.error.set(messageOf(error, 'The operation failed. Retry later.'));
     } finally {
       this.busy.set(false);
     }

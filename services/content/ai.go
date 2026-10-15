@@ -153,7 +153,7 @@ func (a *aiCore) embed(ctx context.Context, text string, who billed) ([]float32,
 		return nil, "", err
 	}
 	if len(out.Vectors) != 1 || len(out.Vectors[0]) != dimensions {
-		return nil, "", &aiError{Status: 502, Code: "UNEXPECTED_EMBEDDING"}
+		return nil, "", &aiError{Status: http.StatusBadGateway, Code: "UNEXPECTED_EMBEDDING"}
 	}
 	return out.Vectors[0], out.ModelVersion, nil
 }
@@ -168,7 +168,7 @@ func (a *aiCore) rerank(ctx context.Context, query string, passages []passage, w
 		return nil, err
 	}
 	if len(out.Scores) != len(passages) {
-		return nil, &aiError{Status: 502, Code: "UNEXPECTED_SCORES"}
+		return nil, &aiError{Status: http.StatusBadGateway, Code: "UNEXPECTED_SCORES"}
 	}
 	return out.Scores, nil
 }
@@ -180,14 +180,13 @@ func (a *aiCore) call(ctx context.Context, path, contentType string, body io.Rea
 	if err != nil {
 		return &aiError{Code: "TOKEN_UNAVAILABLE"}
 	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, a.base+path, body)
+	req, err := platform.Request(ctx, http.MethodPost, a.base+path, body)
 	if err != nil {
 		return err
 	}
 	req.ContentLength = size
 	req.Header.Set("Content-Type", contentType)
 	req.Header.Set("Authorization", "Bearer "+token)
-	req.Header.Set("X-Correlation-ID", platform.Correlation(ctx))
 	res, err := a.client.Do(req)
 	if err != nil {
 		return &aiError{Code: "UNREACHABLE"}
@@ -208,7 +207,7 @@ func (a *aiCore) call(ctx context.Context, path, contentType string, body io.Rea
 		return &aiError{res.StatusCode, e.Error.Code, e.Error.Message, e.Error.ResetsAt}
 	}
 	if err = json.NewDecoder(res.Body).Decode(out); err != nil {
-		return &aiError{Status: 502, Code: "UNREADABLE_RESPONSE"}
+		return &aiError{Status: http.StatusBadGateway, Code: "UNREADABLE_RESPONSE"}
 	}
 	return nil
 }

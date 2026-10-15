@@ -7,6 +7,7 @@ import httpx2
 import pytest
 from conftest import (
     BILLED,
+    CACHED_USAGE,
     FakeOpenAI,
     FakeReranker,
     MemoryLedger,
@@ -18,6 +19,7 @@ from conftest import (
 from fastapi.testclient import TestClient
 
 import billing
+import openai_client
 import settings
 import spend
 from ingest import costs
@@ -77,6 +79,34 @@ def test_generate_is_charged(api: TestClient, openai_fake: FakeOpenAI, ledger: M
     assert api.post("/v1/inference", json=GENERATE).status_code == 200
     settle(ledger, 1)
     assert ledger.charges[0][1].operation == "generate" and not ledger.charges[0][1].estimated
+
+
+def test_cached_prompt_tokens_are_charged_at_the_cached_rate(
+    api: TestClient,
+    openai_fake: FakeOpenAI,
+    ledger: MemoryLedger,
+    test_settings: settings.Settings,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    priced = configured(model_prices={test_settings.chat_model: (1.0, 0.1, 2.0)})
+    monkeypatch.setattr("spend.get_settings", lambda: priced)
+    openai_fake.reply(json=chat_response("Hello!", usage=CACHED_USAGE))
+    openai_fake.replies.append(chat_stream(["Hel", "lo"], usage=CACHED_USAGE))
+    assert api.post("/v1/inference", json=GENERATE).status_code == 200
+    assert api.post("/v1/inference", json={**GENERATE, "stream": True}).status_code == 200
+    settle(ledger, 2)
+    expected = spend.cost(test_settings.chat_model, 120, 7, cached_in=100)
+    assert expected < spend.cost(test_settings.chat_model, 120, 7)
+    for _, charge in ledger.charges:
+        assert (charge.tokens_in, charge.tokens_out) == (120, 7)
+        assert charge.cost_usd == pytest.approx(expected)
+
+
+def test_an_estimated_reply_has_no_cached_tokens() -> None:
+    usage = openai_client.Usage(None, 7, cached_in=100)
+    charge = billing.reply_charge("stream", "gpt-6-luna", "abcd" * 10, "reply", usage)
+    assert charge.estimated and charge.tokens_in == 10
+    assert charge.cost_usd == pytest.approx(spend.cost("gpt-6-luna", 10, 7))
 
 
 def test_a_stream_is_charged_once(api: TestClient, openai_fake: FakeOpenAI, ledger: MemoryLedger) -> None:
@@ -145,6 +175,7 @@ def test_ingest_charges_per_model() -> None:
     record = costs.IngestCost("doc")
     record.of("page").model, record.of("page").calls = "gpt-5.4-mini", 2
     record.of("page").prompt_tokens, record.of("page").completion_tokens = 1000, 200
+    record.of("page").cached_tokens = 400
     record.of("describe").model, record.of("describe").calls = "gpt-5.4-mini", 1
     record.of("describe").prompt_tokens = 500
     record.of("cached").model = "gpt-6-luna"  # only cache hits: nothing to pay
@@ -154,6 +185,7 @@ def test_ingest_charges_per_model() -> None:
         ("gpt-5.4-mini", 1500, 200),
         ("text-embedding-3-small", 3000, 0),
     ]
+    assert charges[0].cost_usd == pytest.approx(spend.cost("gpt-5.4-mini", 1500, 200, cached_in=400))
 
 
 def test_price_overrides_are_read_from_json() -> None:

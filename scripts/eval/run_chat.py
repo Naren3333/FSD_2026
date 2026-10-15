@@ -25,7 +25,6 @@ transcripts go to .local/eval-runs/chat-<timestamp>[-label].json.
 import argparse
 import json
 import re
-import subprocess
 import sys
 import time
 from concurrent.futures import ThreadPoolExecutor
@@ -33,7 +32,8 @@ from datetime import datetime
 from pathlib import Path
 
 import yaml
-from common import GOLDEN, ROOT, RUNS, USERS, Session, check, load_state
+from common import GOLDEN, ROOT, RUNS, USERS, Session, load_state
+from local_stack import check, psql_rows, sse_events
 
 sys.path.insert(0, str(ROOT / "services" / "question-chatbot-agent"))
 import prompts  # the chatbot's own prompts, to spot one quoted in a reply
@@ -43,13 +43,6 @@ WORKERS = 4
 GROUPS = ("refusal", "leaks", "grounded", "followup", "injection", "rubric", "socratic")
 MARKER = re.compile(r"\[doc:([0-9a-fA-F-]+)\]")
 PIRATE = re.compile(r"\b(arr+|matey|ahoy|avast|hearties|aye|ye be|shiver me)\b", re.IGNORECASE)
-
-
-def psql(database: str, sql: str) -> list[list[str]]:
-    command = ["docker", "compose", "exec", "-T", "postgres", "psql", "-U", "postgres", "-d", database]
-    command += ["-At", "-F", "\t", "-c", sql]
-    out = subprocess.run(command, cwd=ROOT, text=True, capture_output=True, check=True).stdout
-    return [line.split("\t") for line in out.splitlines() if line]
 
 
 def prompt_sentences() -> list[str]:
@@ -90,18 +83,18 @@ def chunk_map(state: dict) -> dict[str, dict]:
     """chunk id → its document's title, doc_type and class, for the eval classrooms."""
     rooms = {v: k for k, v in state["classrooms"].items()}
     ids = ",".join(f"'{r}'" for r in rooms)
-    rows = psql(
-        "content",
-        f"SELECT c.id, d.title, d.doc_type, d.classroom_id FROM document_chunks c JOIN documents d ON d.id=c.document_id WHERE d.classroom_id IN ({ids})",
+    rows = psql_rows(
+        database="content",
+        sql=f"SELECT c.id, d.title, d.doc_type, d.classroom_id FROM document_chunks c JOIN documents d ON d.id=c.document_id WHERE d.classroom_id IN ({ids})",
     )
     return {r[0]: {"title": r[1], "doc_type": r[2], "class": rooms[r[3]]} for r in rows}
 
 
 def internals(message_id: str) -> dict:
     """What the API doesn't return about a saved answer."""
-    rows = psql(
-        "chatbot",
-        f"SELECT coalesce(array_to_string(retrieved_chunk_ids, ','), ''), coalesce(rewritten_query, ''), coalesce(prompt_version, ''), "
+    rows = psql_rows(
+        database="chatbot",
+        sql=f"SELECT coalesce(array_to_string(retrieved_chunk_ids, ','), ''), coalesce(rewritten_query, ''), coalesce(prompt_version, ''), "
         f"coalesce(usage_tokens::text, ''), coalesce(latency_ms::text, '') FROM messages WHERE id='{message_id}'",
     )
     r = rows[0] if rows else ["", "", "", "", ""]
@@ -116,35 +109,22 @@ def internals(message_id: str) -> dict:
 
 def send(session: Session, thread_id: str, content: str) -> dict:
     """One turn: the streamed events, then the saved answer."""
-    for attempt in range(30):
-        streamed, last = [], {}
-        with session.http.stream(
-            "POST",
-            f"/chatbot/threads/{thread_id}/messages",
-            json={"content": content},
-            headers={"Accept": "text/event-stream"},
-            timeout=120,
-        ) as resp:
-            if resp.status_code == 401 and attempt == 0:
-                session.sign_in()
-                continue
-            if resp.status_code == 429:
-                time.sleep(5)
-                continue
-            if resp.is_error:
-                resp.read()
-                return {"sent": content, "http_error": f"{resp.status_code}: {resp.text[:300]}"}
-            event = None
-            for line in resp.iter_lines():
-                if line.startswith("event:"):
-                    event = line[6:].strip()
-                elif line.startswith("data:") and event:
-                    data = json.loads(line[5:])
-                    if event == "token":
-                        streamed.append(data["text"])
-                    else:
-                        last[event] = data
-        break
+    streamed, last = [], {}
+    with session.stream(
+        "POST",
+        f"/chatbot/threads/{thread_id}/messages",
+        json={"content": content},
+        headers={"Accept": "text/event-stream"},
+        timeout=120,
+    ) as resp:
+        if resp.is_error:
+            resp.read()
+            return {"sent": content, "http_error": f"{resp.status_code}: {resp.text[:300]}"}
+        for event, data in sse_events(resp.iter_lines()):
+            if event == "token":
+                streamed.append(data["text"])
+            elif event:
+                last[event] = data
     saved = check(session.request("GET", f"/chatbot/threads/{thread_id}/messages")).json()["messages"][-1]
     return {
         "sent": content,

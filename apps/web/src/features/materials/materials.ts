@@ -1,17 +1,21 @@
 import { Component, ElementRef, OnDestroy, ViewChild, inject, signal } from '@angular/core';
-import { FormControl, FormGroup, ReactiveFormsModule, Validators } from '@angular/forms';
+import { FormControl, FormGroup, ReactiveFormsModule } from '@angular/forms';
 import { ContentApi } from '../../api/clients';
-import type { DocType, DocumentRecord } from '../../api/models';
+import type { DocType, DocumentRecord, FailureReason } from '../../api/models';
 import { ClassroomContext, onClassroomChange } from '../../core/classroom-context';
 import { Session } from '../../core/session';
 import { UnsavedChanges } from '../../core/unsaved-changes';
 import { ActionState } from '../../shared/action-state';
 import { FieldComponent } from '../../shared/field';
+import { isPdf } from '../../shared/files';
+import { Section } from '../../shared/section';
+import { SectionStateComponent } from '../../shared/section-state';
 import { StatusComponent } from '../../shared/status';
+import { requiredText } from '../../shared/validators';
 
 const MIB = 1024 * 1024;
 export const LIMITS = { pdf: 50 * MIB, txt: 5 * MIB };
-const FAILURES: Record<string, string> = {
+const FAILURES: Record<FailureReason, string> = {
   NO_TEXT_LAYER: 'the PDF has no readable text layer',
   ENCRYPTED: 'the PDF is password protected',
   CORRUPT: 'the PDF could not be read',
@@ -44,7 +48,7 @@ export function describe(doc: DocumentRecord): { label: string; detail: string }
     case 'failed':
       return {
         label: 'Indexing failed',
-        detail: `Not available to the assistant: ${FAILURES[doc.failure_reason || ''] || 'an unknown error occurred'}.`,
+        detail: `Not available to the assistant: ${(doc.failure_reason && FAILURES[doc.failure_reason]) || 'an unknown error occurred'}.`,
       };
     default:
       return {
@@ -57,7 +61,7 @@ export function describe(doc: DocumentRecord): { label: string; detail: string }
 @Component({
   selector: 'app-materials',
   standalone: true,
-  imports: [ReactiveFormsModule, FieldComponent, StatusComponent],
+  imports: [ReactiveFormsModule, FieldComponent, StatusComponent, SectionStateComponent],
   templateUrl: './materials.html',
 })
 export class MaterialsComponent implements OnDestroy {
@@ -65,57 +69,43 @@ export class MaterialsComponent implements OnDestroy {
   private readonly content = inject(ContentApi);
   readonly classroomId = inject(ClassroomContext).classroomId;
   readonly state = new ActionState();
-  readonly documents = signal<DocumentRecord[]>([]);
+  readonly documents = new Section<DocumentRecord[]>();
   readonly file = signal<File | null>(null);
   readonly polling = signal(false);
   readonly types = DOC_TYPES;
   @ViewChild('fileInput') fileInput?: ElementRef<HTMLInputElement>;
-  private revision = 0;
   private timer: ReturnType<typeof setTimeout> | undefined;
   readonly form = new FormGroup({
-    title: new FormControl('', {
-      nonNullable: true,
-      validators: [Validators.required, Validators.maxLength(160), Validators.pattern(/\S/)],
-    }),
+    title: new FormControl('', { nonNullable: true, validators: requiredText(160) }),
     doc_type: new FormControl<DocType>('teaching_material', { nonNullable: true }),
   });
 
   constructor() {
     inject(UnsavedChanges).track(() => this.form.dirty);
-    onClassroomChange(() => {
-      this.documents.set([]);
-      this.load();
-    });
+    onClassroomChange(() => this.load());
   }
 
   ngOnDestroy(): void {
     clearTimeout(this.timer);
   }
   load(): void {
-    const id = this.classroomId(),
-      revision = ++this.revision;
+    const id = this.classroomId();
+    this.documents.clear();
     this.schedule();
     if (!id) return;
-    void this.state.run(async () => {
-      const docs = await this.content.documents(id);
-      if (revision === this.revision) this.show(docs);
-    });
+    void this.documents.load(() => this.content.documents(id)).then(() => this.schedule());
   }
   /** While a PDF is indexing, re-reads the list quietly; a failed read stops until the next manual refresh. */
   private schedule(): void {
     clearTimeout(this.timer);
-    this.polling.set(this.documents().some((d) => d.status === 'indexing'));
+    this.polling.set(!!this.documents.value()?.some((d) => d.status === 'indexing'));
     if (!this.polling()) return;
-    const id = this.classroomId(),
-      revision = this.revision;
+    const id = this.classroomId();
     this.timer = setTimeout(() => {
-      if (revision !== this.revision || this.state.busy()) return this.schedule();
-      this.content.documents(id).then(
-        (docs) => {
-          if (revision === this.revision) this.show(docs);
-        },
-        () => this.polling.set(false),
-      );
+      if (this.documents.loading() || this.state.busy()) return this.schedule();
+      void this.documents
+        .poll(() => this.content.documents(id))
+        .then((read) => (read ? this.schedule() : this.polling.set(false)));
     }, 5000);
   }
   private show(docs: DocumentRecord[]): void {
@@ -130,7 +120,7 @@ export class MaterialsComponent implements OnDestroy {
   }
   selectFile(event: Event): void {
     const file = (event.target as HTMLInputElement).files?.[0] || null;
-    const pdf = !!file && /\.pdf$/i.test(file.name);
+    const pdf = !!file && isPdf(file);
     if (
       file &&
       (file.size === 0 || !/\.(txt|pdf)$/i.test(file.name) || file.size > (pdf ? LIMITS.pdf : LIMITS.txt))
@@ -149,7 +139,7 @@ export class MaterialsComponent implements OnDestroy {
       this.state.error.set('Choose a file to upload.');
       return;
     }
-    const pdf = file.name.toLowerCase().endsWith('.pdf');
+    const pdf = isPdf(file);
     const { title, doc_type } = this.form.getRawValue();
     void this.state.run(
       async () => {

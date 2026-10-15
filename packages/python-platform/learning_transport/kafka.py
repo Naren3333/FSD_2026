@@ -6,9 +6,14 @@ import logging
 import os
 import threading
 from collections.abc import Callable
+from datetime import datetime
 from typing import Any
+from uuid import UUID
 
 from confluent_kafka import Consumer, KafkaException, Message, Producer
+from pydantic import BaseModel, Field, ValidationError, field_validator
+
+from learning_transport.errors import Contract
 
 RESTART_FIRST, RESTART_MAX = 5.0, 60.0  # seconds a stopped consumer waits before its next session
 PROCESS_ATTEMPTS = 5  # tries to process a message before the session stops uncommitted
@@ -19,6 +24,34 @@ DEAD_LETTER_TIMEOUT = 12  # seconds to wait for the broker to confirm a dead-let
 Handler = Callable[[str, bytes | None], bool]
 
 log = logging.getLogger("learning_transport.kafka")
+
+
+class Envelope(Contract):
+    """The fields every business event carries (contracts/events). A service's event model extends this with its own
+    `data` payload model, and narrows `event_type` and checks `resource_id` against its payload itself."""
+
+    event_id: UUID
+    event_type: str
+    schema_version: int = Field(ge=1, le=1)
+    timestamp: datetime
+    correlation_id: UUID
+    resource_id: UUID
+
+    @field_validator("timestamp")
+    @classmethod
+    def zoned(cls, timestamp: datetime) -> datetime:
+        if timestamp.tzinfo is None:
+            raise ValueError("Timestamp must have a timezone")
+        return timestamp
+
+
+def parse[M: BaseModel](model: type[M], value: bytes | None) -> M | None:
+    """A message's value validated against its contract, or None when it does not match: the handler then returns
+    False, so the message is dead-lettered rather than retried."""
+    try:
+        return model.model_validate_json(value or b"")
+    except (ValidationError, ValueError):
+        return None
 
 
 def restart_wait(previous: float | None, progressed: bool) -> float:

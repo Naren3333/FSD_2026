@@ -3,7 +3,7 @@
     <p class="eyebrow">A teacher makes the final decision</p>
     <h2>Grading review</h2>
   </div>
-  <button class="secondary" (click)="load()" [disabled]="state.busy() || !classroomId()">
+  <button class="secondary" (click)="load()" [disabled]="state.busy() || grades.loading() || !classroomId()">
     Refresh grades
   </button>
 </div>
@@ -13,61 +13,71 @@
 </p>
 <section class="panel">
   <p class="caption">Up to 100 most recent evaluations</p>
-  @for (grade of grades(); track grade.id) {
-    <article class="grade">
-      <div>
-        <span class="badge" [class.badge-plain]="grade.status === 'draft'">
-          {{ grade.status === 'draft' ? 'Draft' : 'Finalized' }}
-        </span>
-        <h3>
-          @if (studentName(grade); as name) {
-            {{ name }}
-          } @else {
-            Student not on the roster
-            <span class="identifier">{{ grade.student_id }}</span>
-          }
-        </h3>
-        <p>
-          {{ title(grade) || 'Assessment' }} ·
-          <strong>{{ total(grade.evidence).awarded }} / {{ total(grade.evidence).possible }}</strong>
-          marks
-        </p>
-      </div>
-      <div class="evidence-list">
-        @for (evidence of grade.evidence; track evidence.question_id) {
-          <p>
-            <strong>{{ evidence.awarded }} / {{ evidence.possible }}</strong>
-            · {{ evidence.correct ? 'Correct' : 'Incorrect' }} ·
-            @if (prompt(grade, evidence); as text) {
-              {{ text }}
+  <app-section-state [section]="grades" loading="Loading grades…" />
+  @if (grades.ready()) {
+    @for (grade of grades.value()?.grades ?? []; track grade.id) {
+      <article class="grade">
+        <div>
+          <span class="badge" [class.badge-plain]="grade.status === 'draft'">
+            {{ grade.status === 'draft' ? 'Draft' : 'Finalized' }}
+          </span>
+          <h3>
+            @if (studentName(grade); as name) {
+              {{ name }}
             } @else {
-              Question
-              <span class="identifier">{{ evidence.question_id }}</span>
+              Student not on the roster
+              <span class="identifier">{{ grade.student_id }}</span>
             }
-            <span class="caption">Skill: {{ skill(evidence) || 'not in the curriculum' }}</span>
+          </h3>
+          <p>
+            {{ title(grade) || 'Assessment' }} ·
+            <strong>{{ grade.evidence | marks }}</strong>
+            marks
           </p>
+        </div>
+        <div class="evidence-list">
+          @for (evidence of grade.evidence; track evidence.question_id) {
+            <p>
+              <strong>{{ evidence.awarded }} / {{ evidence.possible }}</strong>
+              · {{ evidence.correct ? 'Correct' : 'Incorrect' }} ·
+              @if (prompt(grade, evidence); as text) {
+                {{ text }}
+              } @else {
+                Question
+                <span class="identifier">{{ evidence.question_id }}</span>
+              }
+              <span class="caption">Skill: {{ skill(evidence) || 'not in the curriculum' }}</span>
+            </p>
+          }
+        </div>
+        @if (grade.status === 'draft') {
+          <button (click)="review(grade)" [disabled]="state.busy()">Review grade</button>
         }
-      </div>
-      @if (grade.status === 'draft') {
-        <button (click)="review(grade)" [disabled]="state.busy()">Review grade</button>
-      }
-    </article>
-  } @empty {
-    <p class="empty">
-      No grading evidence yet. Student submissions will appear here after processing. Refresh to check again.
-    </p>
+      </article>
+    } @empty {
+      <p class="empty">
+        No grading evidence yet. Student submissions will appear here after processing. Refresh to check
+        again.
+      </p>
+    }
   }
 </section>
 @if (!selected()) {
   <app-status [state]="state" />
 }
-<dialog #dialog aria-labelledby="review-title" (close)="close()">
-  <h2 id="review-title">Finalize this grade?</h2>
+<app-confirm-dialog
+  #dialog
+  dialogId="review"
+  heading="Finalize this grade?"
+  confirmLabel="Finalize grade"
+  [state]="state"
+  (confirm)="finalize()"
+  (closed)="close()"
+>
   @if (selected(); as grade) {
     <p>
       <strong>{{ studentName(grade) || grade.student_id }}</strong>
-      · {{ title(grade) || 'Assessment' }} · {{ total(grade.evidence).awarded }} /
-      {{ total(grade.evidence).possible }} marks
+      · {{ title(grade) || 'Assessment' }} · {{ grade.evidence | marks }} marks
     </p>
   }
   <p>
@@ -85,18 +95,8 @@
         formControlName="reason"
         rows="4"
         maxlength="1000"
-        style="resize: none"
         aria-describedby="review-reason-help"
       ></textarea>
     </app-field>
-    <div class="actions">
-      <button type="button" class="secondary" autofocus (click)="close()" [disabled]="state.busy()">
-        Cancel
-      </button>
-      <button [disabled]="state.busy()">Finalize grade</button>
-    </div>
-    @if (selected()) {
-      <app-status [state]="state" />
-    }
   </form>
-</dialog>
+</app-confirm-dialog>
