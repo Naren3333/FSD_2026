@@ -16,6 +16,12 @@ Content indexing (stage 3) needs no reset: Content's migration `002_indexing.sql
 
 The Postgres image also changed from Alpine to Debian (pgvector), so text-index collations differ. Recreating the volume is the clean path. Keeping data means reindexing every database (`REINDEX DATABASE <name>;` as each owner) after the switch, plus adding the clients and extension by hand.
 
+## Assessment lifecycle and AI marking (ADR 0004)
+
+An existing local setup needs one upgrade with the stack up: `python scripts/upgrade_local.py` adds `GRADING_MARKER_CLIENT_SECRET` to `.env`, creates the `grading-marker` client in the running Keycloak (its service account gets `ai-client`), and rewrites `.local/learning-realm.json` so a fresh Keycloak volume has it too. Then `docker compose up -d --build` (Assessment, Grading and Analytics migrations apply on start and keep existing data; `kafka-init` creates `assessment.submitted.v2`, `grading.finalized.v2` and their `.dlq` topics) and `docker compose restart kong` (CORS now allows `PUT`). Grading will not start without the new secret.
+
+Pending AI suggestions are in Grading's `marking_jobs` table: `attempts`, `run_after` and `last_error` explain a waiting one, for example `AI_PROVIDER_NOT_CONFIGURED` until provider keys are set or `AI_SPEND_LIMIT` until the teacher's allowance resets. A job is deleted when its suggestion is stored or the grade is finalized. Suggestions never change a mark, so a stuck job only means the teacher marks that question without help.
+
 ## Test students
 
 `python scripts/seed_students.py` adds thirty local test students (aisha.rahman, ben.tan and so on) to the Keycloak realm and signs each in once so a teacher can enroll them by username. They share one generated password, printed at the end and kept in `.local/seed-students.json`. Re-running keeps them and their password.

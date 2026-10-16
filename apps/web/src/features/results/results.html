@@ -8,8 +8,8 @@
   </button>
 </div>
 <p>
-  Your teacher reviews each submission before its grade is final. Results appear here once finalized; work
-  still under review is not shown.
+  Your teacher reviews each submission before its grade is final. Results appear here once your teacher
+  finalizes and releases them; work still under review is not shown.
 </p>
 <section class="panel">
   <p class="caption">Up to 100 most recent results</p>
@@ -18,7 +18,12 @@
     @for (result of results.value()?.results ?? []; track result.id) {
       <article class="grade">
         <div>
-          <span class="badge">Finalized{{ finalizedOn(result) ? ' ' + finalizedOn(result) : '' }}</span>
+          <span class="tag-row">
+            <span class="badge">Finalized{{ finalizedOn(result) ? ' ' + finalizedOn(result) : '' }}</span>
+            @if (result.late) {
+              <span class="badge badge-plain">Submitted late</span>
+            }
+          </span>
           <h3>{{ title(result) }}</h3>
           <p>
             <strong>{{ result.evidence | marks }}</strong>
@@ -29,12 +34,20 @@
           @for (evidence of result.evidence; track evidence.question_id; let index = $index) {
             <p>
               <span class="badge" [class.badge-danger]="!evidence.correct">
-                {{ evidence.correct ? 'Correct' : 'Incorrect' }}
+                {{ outcome(evidence) }}
               </span>
               <strong>{{ evidence.awarded }} / {{ evidence.possible }}</strong>
               · {{ prompt(result, evidence) || 'Question ' + (index + 1) }}
               <span class="caption">Skill: {{ skill(evidence) || 'not in the curriculum' }}</span>
             </p>
+            @if (result.answers[evidence.question_id]; as answer) {
+              <p class="caption">Your answer</p>
+              <p class="answer-text">{{ answer }}</p>
+            }
+            @if (evidence.feedback) {
+              <p class="caption">Feedback from your teacher</p>
+              <p class="answer-text">{{ evidence.feedback }}</p>
+            }
           }
         </div>
       </article>

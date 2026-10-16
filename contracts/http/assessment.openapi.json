@@ -53,12 +53,53 @@
                       },
                       "submitted": {
                         "type": "boolean"
+                      },
+                      "status": {
+                        "enum": [
+                          "draft",
+                          "published"
+                        ]
+                      },
+                      "opens_at": {
+                        "type": [
+                          "string",
+                          "null"
+                        ],
+                        "format": "date-time"
+                      },
+                      "due_at": {
+                        "type": [
+                          "string",
+                          "null"
+                        ],
+                        "format": "date-time"
+                      },
+                      "late_policy": {
+                        "enum": [
+                          "accept_flagged",
+                          "reject"
+                        ]
+                      },
+                      "question_count": {
+                        "type": "integer",
+                        "minimum": 1,
+                        "maximum": 50
+                      },
+                      "points": {
+                        "type": "integer",
+                        "minimum": 1
                       }
                     },
                     "required": [
                       "id",
                       "title",
-                      "submitted"
+                      "submitted",
+                      "status",
+                      "opens_at",
+                      "due_at",
+                      "late_policy",
+                      "question_count",
+                      "points"
                     ],
                     "additionalProperties": false
                   },
@@ -314,7 +355,9 @@
                           "type": {
                             "enum": [
                               "multiple_choice",
-                              "numerical"
+                              "numerical",
+                              "short_answer",
+                              "free_response"
                             ]
                           },
                           "options": {
@@ -328,11 +371,93 @@
                             }
                           },
                           "answer": {
-                            "type": "string",
-                            "minLength": 1
+                            "type": "string"
                           },
                           "tolerance": {
                             "type": "string"
+                          },
+                          "accepted_answers": {
+                            "type": "array",
+                            "items": {
+                              "type": "string",
+                              "minLength": 1
+                            },
+                            "minItems": 1,
+                            "maxItems": 20
+                          },
+                          "case_sensitive": {
+                            "type": "boolean"
+                          },
+                          "rubric": {
+                            "type": "object",
+                            "properties": {
+                              "criteria": {
+                                "type": "array",
+                                "items": {
+                                  "type": "object",
+                                  "properties": {
+                                    "id": {
+                                      "type": "string",
+                                      "minLength": 1
+                                    },
+                                    "title": {
+                                      "type": "string",
+                                      "minLength": 1
+                                    },
+                                    "levels": {
+                                      "type": "array",
+                                      "items": {
+                                        "type": "object",
+                                        "properties": {
+                                          "points": {
+                                            "type": "integer",
+                                            "minimum": 0,
+                                            "maximum": 100
+                                          },
+                                          "descriptor": {
+                                            "type": "string",
+                                            "minLength": 1
+                                          }
+                                        },
+                                        "required": [
+                                          "points",
+                                          "descriptor"
+                                        ],
+                                        "additionalProperties": false
+                                      },
+                                      "minItems": 2,
+                                      "maxItems": 6
+                                    }
+                                  },
+                                  "required": [
+                                    "id",
+                                    "title",
+                                    "levels"
+                                  ],
+                                  "additionalProperties": false
+                                },
+                                "minItems": 1,
+                                "maxItems": 10
+                              },
+                              "model_answer": {
+                                "type": "string",
+                                "maxLength": 5000
+                              }
+                            },
+                            "required": [
+                              "criteria"
+                            ],
+                            "additionalProperties": false
+                          },
+                          "max_length": {
+                            "type": "integer",
+                            "minimum": 1,
+                            "maximum": 20000
+                          },
+                          "points": {
+                            "type": "integer",
+                            "minimum": 1,
+                            "maximum": 100
                           },
                           "skill_id": {
                             "type": "string",
@@ -346,19 +471,69 @@
                           "options",
                           "answer",
                           "tolerance",
+                          "points",
                           "skill_id"
                         ],
                         "additionalProperties": false
                       },
                       "minItems": 1,
                       "maxItems": 50
+                    },
+                    "status": {
+                      "enum": [
+                        "draft",
+                        "published"
+                      ]
+                    },
+                    "opens_at": {
+                      "type": [
+                        "string",
+                        "null"
+                      ],
+                      "format": "date-time"
+                    },
+                    "due_at": {
+                      "type": [
+                        "string",
+                        "null"
+                      ],
+                      "format": "date-time"
+                    },
+                    "late_policy": {
+                      "enum": [
+                        "accept_flagged",
+                        "reject"
+                      ]
+                    },
+                    "release_policy": {
+                      "enum": [
+                        "on_finalize",
+                        "manual"
+                      ]
+                    },
+                    "ai_marking": {
+                      "type": "boolean"
+                    },
+                    "published_at": {
+                      "type": [
+                        "string",
+                        "null"
+                      ],
+                      "format": "date-time"
                     }
                   },
                   "required": [
                     "id",
                     "classroom_id",
                     "title",
-                    "questions"
+                    "questions",
+                    "status",
+                    "opens_at",
+                    "due_at",
+                    "late_policy",
+                    "release_policy",
+                    "ai_marking",
+                    "published_at"
                   ],
                   "additionalProperties": false
                 }
@@ -599,7 +774,9 @@
                         "type": {
                           "enum": [
                             "multiple_choice",
-                            "numerical"
+                            "numerical",
+                            "short_answer",
+                            "free_response"
                           ]
                         },
                         "options": {
@@ -613,11 +790,92 @@
                           }
                         },
                         "answer": {
-                          "type": "string",
-                          "minLength": 1
+                          "type": "string"
                         },
                         "tolerance": {
                           "type": "string"
+                        },
+                        "accepted_answers": {
+                          "type": "array",
+                          "items": {
+                            "type": "string",
+                            "minLength": 1
+                          },
+                          "minItems": 1,
+                          "maxItems": 20
+                        },
+                        "case_sensitive": {
+                          "type": "boolean"
+                        },
+                        "rubric": {
+                          "type": "object",
+                          "properties": {
+                            "criteria": {
+                              "type": "array",
+                              "items": {
+                                "type": "object",
+                                "properties": {
+                                  "id": {
+                                    "type": "string",
+                                    "minLength": 1
+                                  },
+                                  "title": {
+                                    "type": "string",
+                                    "minLength": 1
+                                  },
+                                  "levels": {
+                                    "type": "array",
+                                    "items": {
+                                      "type": "object",
+                                      "properties": {
+                                        "points": {
+                                          "type": "integer",
+                                          "minimum": 0,
+                                          "maximum": 100
+                                        },
+                                        "descriptor": {
+                                          "type": "string",
+                                          "minLength": 1
+                                        }
+                                      },
+                                      "required": [
+                                        "points",
+                                        "descriptor"
+                                      ],
+                                      "additionalProperties": false
+                                    },
+                                    "minItems": 2,
+                                    "maxItems": 6
+                                  }
+                                },
+                                "required": [
+                                  "title",
+                                  "levels"
+                                ],
+                                "additionalProperties": false
+                              },
+                              "minItems": 1,
+                              "maxItems": 10
+                            },
+                            "model_answer": {
+                              "type": "string",
+                              "maxLength": 5000
+                            }
+                          },
+                          "required": [
+                            "criteria"
+                          ],
+                          "additionalProperties": false
+                        },
+                        "max_length": {
+                          "type": "integer",
+                          "minimum": 1,
+                          "maximum": 20000
+                        },
+                        "points": {
+                          "type": "integer",
+                          "minimum": 1,
+                          "maximum": 100
                         },
                         "skill_id": {
                           "type": "string",
@@ -627,15 +885,47 @@
                       "required": [
                         "prompt",
                         "type",
-                        "options",
-                        "answer",
-                        "tolerance",
                         "skill_id"
                       ],
                       "additionalProperties": false
                     },
                     "minItems": 1,
                     "maxItems": 50
+                  },
+                  "status": {
+                    "enum": [
+                      "draft",
+                      "published"
+                    ]
+                  },
+                  "opens_at": {
+                    "type": [
+                      "string",
+                      "null"
+                    ],
+                    "format": "date-time"
+                  },
+                  "due_at": {
+                    "type": [
+                      "string",
+                      "null"
+                    ],
+                    "format": "date-time"
+                  },
+                  "late_policy": {
+                    "enum": [
+                      "accept_flagged",
+                      "reject"
+                    ]
+                  },
+                  "release_policy": {
+                    "enum": [
+                      "on_finalize",
+                      "manual"
+                    ]
+                  },
+                  "ai_marking": {
+                    "type": "boolean"
                   }
                 },
                 "required": [
@@ -685,12 +975,27 @@
                       "submissions": {
                         "type": "integer",
                         "minimum": 0
+                      },
+                      "status": {
+                        "enum": [
+                          "draft",
+                          "published"
+                        ]
+                      },
+                      "due_at": {
+                        "type": [
+                          "string",
+                          "null"
+                        ],
+                        "format": "date-time"
                       }
                     },
                     "required": [
                       "id",
                       "title",
-                      "submissions"
+                      "submissions",
+                      "status",
+                      "due_at"
                     ],
                     "additionalProperties": false
                   },
@@ -960,7 +1265,9 @@
                               "type": {
                                 "enum": [
                                   "multiple_choice",
-                                  "numerical"
+                                  "numerical",
+                                  "short_answer",
+                                  "free_response"
                                 ]
                               },
                               "options": {
@@ -974,11 +1281,93 @@
                                 }
                               },
                               "answer": {
-                                "type": "string",
-                                "minLength": 1
+                                "type": "string"
                               },
                               "tolerance": {
                                 "type": "string"
+                              },
+                              "accepted_answers": {
+                                "type": "array",
+                                "items": {
+                                  "type": "string",
+                                  "minLength": 1
+                                },
+                                "minItems": 1,
+                                "maxItems": 20
+                              },
+                              "case_sensitive": {
+                                "type": "boolean"
+                              },
+                              "rubric": {
+                                "type": "object",
+                                "properties": {
+                                  "criteria": {
+                                    "type": "array",
+                                    "items": {
+                                      "type": "object",
+                                      "properties": {
+                                        "id": {
+                                          "type": "string",
+                                          "minLength": 1
+                                        },
+                                        "title": {
+                                          "type": "string",
+                                          "minLength": 1
+                                        },
+                                        "levels": {
+                                          "type": "array",
+                                          "items": {
+                                            "type": "object",
+                                            "properties": {
+                                              "points": {
+                                                "type": "integer",
+                                                "minimum": 0,
+                                                "maximum": 100
+                                              },
+                                              "descriptor": {
+                                                "type": "string",
+                                                "minLength": 1
+                                              }
+                                            },
+                                            "required": [
+                                              "points",
+                                              "descriptor"
+                                            ],
+                                            "additionalProperties": false
+                                          },
+                                          "minItems": 2,
+                                          "maxItems": 6
+                                        }
+                                      },
+                                      "required": [
+                                        "id",
+                                        "title",
+                                        "levels"
+                                      ],
+                                      "additionalProperties": false
+                                    },
+                                    "minItems": 1,
+                                    "maxItems": 10
+                                  },
+                                  "model_answer": {
+                                    "type": "string",
+                                    "maxLength": 5000
+                                  }
+                                },
+                                "required": [
+                                  "criteria"
+                                ],
+                                "additionalProperties": false
+                              },
+                              "max_length": {
+                                "type": "integer",
+                                "minimum": 1,
+                                "maximum": 20000
+                              },
+                              "points": {
+                                "type": "integer",
+                                "minimum": 1,
+                                "maximum": 100
                               },
                               "skill_id": {
                                 "type": "string",
@@ -992,19 +1381,69 @@
                               "options",
                               "answer",
                               "tolerance",
+                              "points",
                               "skill_id"
                             ],
                             "additionalProperties": false
                           },
                           "minItems": 1,
                           "maxItems": 50
+                        },
+                        "status": {
+                          "enum": [
+                            "draft",
+                            "published"
+                          ]
+                        },
+                        "opens_at": {
+                          "type": [
+                            "string",
+                            "null"
+                          ],
+                          "format": "date-time"
+                        },
+                        "due_at": {
+                          "type": [
+                            "string",
+                            "null"
+                          ],
+                          "format": "date-time"
+                        },
+                        "late_policy": {
+                          "enum": [
+                            "accept_flagged",
+                            "reject"
+                          ]
+                        },
+                        "release_policy": {
+                          "enum": [
+                            "on_finalize",
+                            "manual"
+                          ]
+                        },
+                        "ai_marking": {
+                          "type": "boolean"
+                        },
+                        "published_at": {
+                          "type": [
+                            "string",
+                            "null"
+                          ],
+                          "format": "date-time"
                         }
                       },
                       "required": [
                         "id",
                         "classroom_id",
                         "title",
-                        "questions"
+                        "questions",
+                        "status",
+                        "opens_at",
+                        "due_at",
+                        "late_policy",
+                        "release_policy",
+                        "ai_marking",
+                        "published_at"
                       ],
                       "additionalProperties": false
                     },
@@ -1040,7 +1479,9 @@
                               "type": {
                                 "enum": [
                                   "multiple_choice",
-                                  "numerical"
+                                  "numerical",
+                                  "short_answer",
+                                  "free_response"
                                 ]
                               },
                               "options": {
@@ -1053,6 +1494,16 @@
                                   "minLength": 1
                                 }
                               },
+                              "max_length": {
+                                "type": "integer",
+                                "minimum": 1,
+                                "maximum": 20000
+                              },
+                              "points": {
+                                "type": "integer",
+                                "minimum": 1,
+                                "maximum": 100
+                              },
                               "skill_id": {
                                 "type": "string",
                                 "format": "uuid"
@@ -1063,23 +1514,1364 @@
                               "prompt",
                               "type",
                               "options",
+                              "points",
                               "skill_id"
                             ],
                             "additionalProperties": false
                           },
                           "minItems": 1,
                           "maxItems": 50
+                        },
+                        "opens_at": {
+                          "type": [
+                            "string",
+                            "null"
+                          ],
+                          "format": "date-time"
+                        },
+                        "due_at": {
+                          "type": [
+                            "string",
+                            "null"
+                          ],
+                          "format": "date-time"
+                        },
+                        "late_policy": {
+                          "enum": [
+                            "accept_flagged",
+                            "reject"
+                          ]
                         }
                       },
                       "required": [
                         "id",
                         "classroom_id",
                         "title",
-                        "questions"
+                        "questions",
+                        "opens_at",
+                        "due_at",
+                        "late_policy"
                       ],
                       "additionalProperties": false
                     }
                   ]
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthenticated",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "minLength": 1
+                        },
+                        "message": {
+                          "type": "string",
+                          "minLength": 1
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message"
+                      ],
+                      "additionalProperties": false
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "minLength": 1
+                        },
+                        "message": {
+                          "type": "string",
+                          "minLength": 1
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message"
+                      ],
+                      "additionalProperties": false
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "minLength": 1
+                        },
+                        "message": {
+                          "type": "string",
+                          "minLength": 1
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message"
+                      ],
+                      "additionalProperties": false
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "State conflict",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "minLength": 1
+                        },
+                        "message": {
+                          "type": "string",
+                          "minLength": 1
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message"
+                      ],
+                      "additionalProperties": false
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "minLength": 1
+                        },
+                        "message": {
+                          "type": "string",
+                          "minLength": 1
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message"
+                      ],
+                      "additionalProperties": false
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Dependency unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "minLength": 1
+                        },
+                        "message": {
+                          "type": "string",
+                          "minLength": 1
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message"
+                      ],
+                      "additionalProperties": false
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          }
+        }
+      },
+      "put": {
+        "operationId": "PUT_v1_assessments_id",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "id": {
+                      "type": "string",
+                      "format": "uuid"
+                    },
+                    "classroom_id": {
+                      "type": "string",
+                      "format": "uuid"
+                    },
+                    "title": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "questions": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "id": {
+                            "type": "string",
+                            "format": "uuid"
+                          },
+                          "prompt": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 2000
+                          },
+                          "type": {
+                            "enum": [
+                              "multiple_choice",
+                              "numerical",
+                              "short_answer",
+                              "free_response"
+                            ]
+                          },
+                          "options": {
+                            "type": [
+                              "array",
+                              "null"
+                            ],
+                            "items": {
+                              "type": "string",
+                              "minLength": 1
+                            }
+                          },
+                          "answer": {
+                            "type": "string"
+                          },
+                          "tolerance": {
+                            "type": "string"
+                          },
+                          "accepted_answers": {
+                            "type": "array",
+                            "items": {
+                              "type": "string",
+                              "minLength": 1
+                            },
+                            "minItems": 1,
+                            "maxItems": 20
+                          },
+                          "case_sensitive": {
+                            "type": "boolean"
+                          },
+                          "rubric": {
+                            "type": "object",
+                            "properties": {
+                              "criteria": {
+                                "type": "array",
+                                "items": {
+                                  "type": "object",
+                                  "properties": {
+                                    "id": {
+                                      "type": "string",
+                                      "minLength": 1
+                                    },
+                                    "title": {
+                                      "type": "string",
+                                      "minLength": 1
+                                    },
+                                    "levels": {
+                                      "type": "array",
+                                      "items": {
+                                        "type": "object",
+                                        "properties": {
+                                          "points": {
+                                            "type": "integer",
+                                            "minimum": 0,
+                                            "maximum": 100
+                                          },
+                                          "descriptor": {
+                                            "type": "string",
+                                            "minLength": 1
+                                          }
+                                        },
+                                        "required": [
+                                          "points",
+                                          "descriptor"
+                                        ],
+                                        "additionalProperties": false
+                                      },
+                                      "minItems": 2,
+                                      "maxItems": 6
+                                    }
+                                  },
+                                  "required": [
+                                    "id",
+                                    "title",
+                                    "levels"
+                                  ],
+                                  "additionalProperties": false
+                                },
+                                "minItems": 1,
+                                "maxItems": 10
+                              },
+                              "model_answer": {
+                                "type": "string",
+                                "maxLength": 5000
+                              }
+                            },
+                            "required": [
+                              "criteria"
+                            ],
+                            "additionalProperties": false
+                          },
+                          "max_length": {
+                            "type": "integer",
+                            "minimum": 1,
+                            "maximum": 20000
+                          },
+                          "points": {
+                            "type": "integer",
+                            "minimum": 1,
+                            "maximum": 100
+                          },
+                          "skill_id": {
+                            "type": "string",
+                            "format": "uuid"
+                          }
+                        },
+                        "required": [
+                          "id",
+                          "prompt",
+                          "type",
+                          "options",
+                          "answer",
+                          "tolerance",
+                          "points",
+                          "skill_id"
+                        ],
+                        "additionalProperties": false
+                      },
+                      "minItems": 1,
+                      "maxItems": 50
+                    },
+                    "status": {
+                      "enum": [
+                        "draft",
+                        "published"
+                      ]
+                    },
+                    "opens_at": {
+                      "type": [
+                        "string",
+                        "null"
+                      ],
+                      "format": "date-time"
+                    },
+                    "due_at": {
+                      "type": [
+                        "string",
+                        "null"
+                      ],
+                      "format": "date-time"
+                    },
+                    "late_policy": {
+                      "enum": [
+                        "accept_flagged",
+                        "reject"
+                      ]
+                    },
+                    "release_policy": {
+                      "enum": [
+                        "on_finalize",
+                        "manual"
+                      ]
+                    },
+                    "ai_marking": {
+                      "type": "boolean"
+                    },
+                    "published_at": {
+                      "type": [
+                        "string",
+                        "null"
+                      ],
+                      "format": "date-time"
+                    }
+                  },
+                  "required": [
+                    "id",
+                    "classroom_id",
+                    "title",
+                    "questions",
+                    "status",
+                    "opens_at",
+                    "due_at",
+                    "late_policy",
+                    "release_policy",
+                    "ai_marking",
+                    "published_at"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthenticated",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "minLength": 1
+                        },
+                        "message": {
+                          "type": "string",
+                          "minLength": 1
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message"
+                      ],
+                      "additionalProperties": false
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "minLength": 1
+                        },
+                        "message": {
+                          "type": "string",
+                          "minLength": 1
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message"
+                      ],
+                      "additionalProperties": false
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "minLength": 1
+                        },
+                        "message": {
+                          "type": "string",
+                          "minLength": 1
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message"
+                      ],
+                      "additionalProperties": false
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "State conflict",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "minLength": 1
+                        },
+                        "message": {
+                          "type": "string",
+                          "minLength": 1
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message"
+                      ],
+                      "additionalProperties": false
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "minLength": 1
+                        },
+                        "message": {
+                          "type": "string",
+                          "minLength": 1
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message"
+                      ],
+                      "additionalProperties": false
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Dependency unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "minLength": 1
+                        },
+                        "message": {
+                          "type": "string",
+                          "minLength": 1
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message"
+                      ],
+                      "additionalProperties": false
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "classroom_id": {
+                    "type": "string",
+                    "format": "uuid"
+                  },
+                  "title": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 160
+                  },
+                  "questions": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "prompt": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 2000
+                        },
+                        "type": {
+                          "enum": [
+                            "multiple_choice",
+                            "numerical",
+                            "short_answer",
+                            "free_response"
+                          ]
+                        },
+                        "options": {
+                          "type": [
+                            "array",
+                            "null"
+                          ],
+                          "items": {
+                            "type": "string",
+                            "minLength": 1
+                          }
+                        },
+                        "answer": {
+                          "type": "string"
+                        },
+                        "tolerance": {
+                          "type": "string"
+                        },
+                        "accepted_answers": {
+                          "type": "array",
+                          "items": {
+                            "type": "string",
+                            "minLength": 1
+                          },
+                          "minItems": 1,
+                          "maxItems": 20
+                        },
+                        "case_sensitive": {
+                          "type": "boolean"
+                        },
+                        "rubric": {
+                          "type": "object",
+                          "properties": {
+                            "criteria": {
+                              "type": "array",
+                              "items": {
+                                "type": "object",
+                                "properties": {
+                                  "id": {
+                                    "type": "string",
+                                    "minLength": 1
+                                  },
+                                  "title": {
+                                    "type": "string",
+                                    "minLength": 1
+                                  },
+                                  "levels": {
+                                    "type": "array",
+                                    "items": {
+                                      "type": "object",
+                                      "properties": {
+                                        "points": {
+                                          "type": "integer",
+                                          "minimum": 0,
+                                          "maximum": 100
+                                        },
+                                        "descriptor": {
+                                          "type": "string",
+                                          "minLength": 1
+                                        }
+                                      },
+                                      "required": [
+                                        "points",
+                                        "descriptor"
+                                      ],
+                                      "additionalProperties": false
+                                    },
+                                    "minItems": 2,
+                                    "maxItems": 6
+                                  }
+                                },
+                                "required": [
+                                  "title",
+                                  "levels"
+                                ],
+                                "additionalProperties": false
+                              },
+                              "minItems": 1,
+                              "maxItems": 10
+                            },
+                            "model_answer": {
+                              "type": "string",
+                              "maxLength": 5000
+                            }
+                          },
+                          "required": [
+                            "criteria"
+                          ],
+                          "additionalProperties": false
+                        },
+                        "max_length": {
+                          "type": "integer",
+                          "minimum": 1,
+                          "maximum": 20000
+                        },
+                        "points": {
+                          "type": "integer",
+                          "minimum": 1,
+                          "maximum": 100
+                        },
+                        "skill_id": {
+                          "type": "string",
+                          "format": "uuid"
+                        }
+                      },
+                      "required": [
+                        "prompt",
+                        "type",
+                        "skill_id"
+                      ],
+                      "additionalProperties": false
+                    },
+                    "minItems": 1,
+                    "maxItems": 50
+                  },
+                  "status": {
+                    "enum": [
+                      "draft",
+                      "published"
+                    ]
+                  },
+                  "opens_at": {
+                    "type": [
+                      "string",
+                      "null"
+                    ],
+                    "format": "date-time"
+                  },
+                  "due_at": {
+                    "type": [
+                      "string",
+                      "null"
+                    ],
+                    "format": "date-time"
+                  },
+                  "late_policy": {
+                    "enum": [
+                      "accept_flagged",
+                      "reject"
+                    ]
+                  },
+                  "release_policy": {
+                    "enum": [
+                      "on_finalize",
+                      "manual"
+                    ]
+                  },
+                  "ai_marking": {
+                    "type": "boolean"
+                  }
+                },
+                "required": [
+                  "classroom_id",
+                  "title",
+                  "questions"
+                ],
+                "additionalProperties": false
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "operationId": "DELETE_v1_assessments_id",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "id": {
+                      "type": "string",
+                      "format": "uuid"
+                    }
+                  },
+                  "required": [
+                    "id"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthenticated",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "minLength": 1
+                        },
+                        "message": {
+                          "type": "string",
+                          "minLength": 1
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message"
+                      ],
+                      "additionalProperties": false
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "minLength": 1
+                        },
+                        "message": {
+                          "type": "string",
+                          "minLength": 1
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message"
+                      ],
+                      "additionalProperties": false
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "minLength": 1
+                        },
+                        "message": {
+                          "type": "string",
+                          "minLength": 1
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message"
+                      ],
+                      "additionalProperties": false
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "State conflict",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "minLength": 1
+                        },
+                        "message": {
+                          "type": "string",
+                          "minLength": 1
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message"
+                      ],
+                      "additionalProperties": false
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "minLength": 1
+                        },
+                        "message": {
+                          "type": "string",
+                          "minLength": 1
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message"
+                      ],
+                      "additionalProperties": false
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Dependency unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "minLength": 1
+                        },
+                        "message": {
+                          "type": "string",
+                          "minLength": 1
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message"
+                      ],
+                      "additionalProperties": false
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/assessments/{id}/publish": {
+      "post": {
+        "operationId": "POST_v1_assessments_id_publish",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "id": {
+                      "type": "string",
+                      "format": "uuid"
+                    },
+                    "classroom_id": {
+                      "type": "string",
+                      "format": "uuid"
+                    },
+                    "title": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "questions": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "id": {
+                            "type": "string",
+                            "format": "uuid"
+                          },
+                          "prompt": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 2000
+                          },
+                          "type": {
+                            "enum": [
+                              "multiple_choice",
+                              "numerical",
+                              "short_answer",
+                              "free_response"
+                            ]
+                          },
+                          "options": {
+                            "type": [
+                              "array",
+                              "null"
+                            ],
+                            "items": {
+                              "type": "string",
+                              "minLength": 1
+                            }
+                          },
+                          "answer": {
+                            "type": "string"
+                          },
+                          "tolerance": {
+                            "type": "string"
+                          },
+                          "accepted_answers": {
+                            "type": "array",
+                            "items": {
+                              "type": "string",
+                              "minLength": 1
+                            },
+                            "minItems": 1,
+                            "maxItems": 20
+                          },
+                          "case_sensitive": {
+                            "type": "boolean"
+                          },
+                          "rubric": {
+                            "type": "object",
+                            "properties": {
+                              "criteria": {
+                                "type": "array",
+                                "items": {
+                                  "type": "object",
+                                  "properties": {
+                                    "id": {
+                                      "type": "string",
+                                      "minLength": 1
+                                    },
+                                    "title": {
+                                      "type": "string",
+                                      "minLength": 1
+                                    },
+                                    "levels": {
+                                      "type": "array",
+                                      "items": {
+                                        "type": "object",
+                                        "properties": {
+                                          "points": {
+                                            "type": "integer",
+                                            "minimum": 0,
+                                            "maximum": 100
+                                          },
+                                          "descriptor": {
+                                            "type": "string",
+                                            "minLength": 1
+                                          }
+                                        },
+                                        "required": [
+                                          "points",
+                                          "descriptor"
+                                        ],
+                                        "additionalProperties": false
+                                      },
+                                      "minItems": 2,
+                                      "maxItems": 6
+                                    }
+                                  },
+                                  "required": [
+                                    "id",
+                                    "title",
+                                    "levels"
+                                  ],
+                                  "additionalProperties": false
+                                },
+                                "minItems": 1,
+                                "maxItems": 10
+                              },
+                              "model_answer": {
+                                "type": "string",
+                                "maxLength": 5000
+                              }
+                            },
+                            "required": [
+                              "criteria"
+                            ],
+                            "additionalProperties": false
+                          },
+                          "max_length": {
+                            "type": "integer",
+                            "minimum": 1,
+                            "maximum": 20000
+                          },
+                          "points": {
+                            "type": "integer",
+                            "minimum": 1,
+                            "maximum": 100
+                          },
+                          "skill_id": {
+                            "type": "string",
+                            "format": "uuid"
+                          }
+                        },
+                        "required": [
+                          "id",
+                          "prompt",
+                          "type",
+                          "options",
+                          "answer",
+                          "tolerance",
+                          "points",
+                          "skill_id"
+                        ],
+                        "additionalProperties": false
+                      },
+                      "minItems": 1,
+                      "maxItems": 50
+                    },
+                    "status": {
+                      "enum": [
+                        "draft",
+                        "published"
+                      ]
+                    },
+                    "opens_at": {
+                      "type": [
+                        "string",
+                        "null"
+                      ],
+                      "format": "date-time"
+                    },
+                    "due_at": {
+                      "type": [
+                        "string",
+                        "null"
+                      ],
+                      "format": "date-time"
+                    },
+                    "late_policy": {
+                      "enum": [
+                        "accept_flagged",
+                        "reject"
+                      ]
+                    },
+                    "release_policy": {
+                      "enum": [
+                        "on_finalize",
+                        "manual"
+                      ]
+                    },
+                    "ai_marking": {
+                      "type": "boolean"
+                    },
+                    "published_at": {
+                      "type": [
+                        "string",
+                        "null"
+                      ],
+                      "format": "date-time"
+                    }
+                  },
+                  "required": [
+                    "id",
+                    "classroom_id",
+                    "title",
+                    "questions",
+                    "status",
+                    "opens_at",
+                    "due_at",
+                    "late_policy",
+                    "release_policy",
+                    "ai_marking",
+                    "published_at"
+                  ],
+                  "additionalProperties": false
                 }
               }
             }
@@ -1319,11 +3111,15 @@
                     },
                     "status": {
                       "const": "submitted"
+                    },
+                    "late": {
+                      "type": "boolean"
                     }
                   },
                   "required": [
                     "id",
-                    "status"
+                    "status",
+                    "late"
                   ],
                   "additionalProperties": false
                 }
@@ -1547,6 +3343,530 @@
                     "additionalProperties": {
                       "type": "string",
                       "minLength": 1
+                    }
+                  }
+                },
+                "required": [
+                  "answers"
+                ],
+                "additionalProperties": false
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/assessments/{id}/saved-answers": {
+      "get": {
+        "operationId": "GET_v1_assessments_id_saved-answers",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "answers": {
+                      "type": "object",
+                      "additionalProperties": {
+                        "type": "string"
+                      }
+                    },
+                    "saved_at": {
+                      "type": [
+                        "string",
+                        "null"
+                      ],
+                      "format": "date-time"
+                    }
+                  },
+                  "required": [
+                    "answers",
+                    "saved_at"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthenticated",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "minLength": 1
+                        },
+                        "message": {
+                          "type": "string",
+                          "minLength": 1
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message"
+                      ],
+                      "additionalProperties": false
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "minLength": 1
+                        },
+                        "message": {
+                          "type": "string",
+                          "minLength": 1
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message"
+                      ],
+                      "additionalProperties": false
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "minLength": 1
+                        },
+                        "message": {
+                          "type": "string",
+                          "minLength": 1
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message"
+                      ],
+                      "additionalProperties": false
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "State conflict",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "minLength": 1
+                        },
+                        "message": {
+                          "type": "string",
+                          "minLength": 1
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message"
+                      ],
+                      "additionalProperties": false
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "minLength": 1
+                        },
+                        "message": {
+                          "type": "string",
+                          "minLength": 1
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message"
+                      ],
+                      "additionalProperties": false
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Dependency unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "minLength": 1
+                        },
+                        "message": {
+                          "type": "string",
+                          "minLength": 1
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message"
+                      ],
+                      "additionalProperties": false
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          }
+        }
+      },
+      "put": {
+        "operationId": "PUT_v1_assessments_id_saved-answers",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "answers": {
+                      "type": "object",
+                      "additionalProperties": {
+                        "type": "string"
+                      }
+                    },
+                    "saved_at": {
+                      "type": [
+                        "string",
+                        "null"
+                      ],
+                      "format": "date-time"
+                    }
+                  },
+                  "required": [
+                    "answers",
+                    "saved_at"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthenticated",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "minLength": 1
+                        },
+                        "message": {
+                          "type": "string",
+                          "minLength": 1
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message"
+                      ],
+                      "additionalProperties": false
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "minLength": 1
+                        },
+                        "message": {
+                          "type": "string",
+                          "minLength": 1
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message"
+                      ],
+                      "additionalProperties": false
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "minLength": 1
+                        },
+                        "message": {
+                          "type": "string",
+                          "minLength": 1
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message"
+                      ],
+                      "additionalProperties": false
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "State conflict",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "minLength": 1
+                        },
+                        "message": {
+                          "type": "string",
+                          "minLength": 1
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message"
+                      ],
+                      "additionalProperties": false
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "minLength": 1
+                        },
+                        "message": {
+                          "type": "string",
+                          "minLength": 1
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message"
+                      ],
+                      "additionalProperties": false
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Dependency unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "minLength": 1
+                        },
+                        "message": {
+                          "type": "string",
+                          "minLength": 1
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message"
+                      ],
+                      "additionalProperties": false
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "answers": {
+                    "type": "object",
+                    "additionalProperties": {
+                      "type": "string"
                     }
                   }
                 },

@@ -7,7 +7,7 @@ import (
 	"github.com/jackc/pgx/v5"
 )
 
-// purge removes a deleted classroom's assessments and their submissions, with any of its submission events not yet
+// purge removes a deleted classroom's assessments with their submissions and saved work, with any of its submission events not yet
 // published. Deleting what is already gone changes nothing, so a repeated event is harmless.
 func purge(ctx context.Context, tx pgx.Tx, event platform.Event) error {
 	v, err := platform.DecodeClassroomDeleted(event)
@@ -15,6 +15,7 @@ func purge(ctx context.Context, tx pgx.Tx, event platform.Event) error {
 		return err
 	}
 	statements := []string{
+		"DELETE FROM saved_answers WHERE assessment_id IN (SELECT id FROM assessments WHERE classroom_id=$1 AND org_id=$2)",
 		"DELETE FROM submissions WHERE assessment_id IN (SELECT id FROM assessments WHERE classroom_id=$1 AND org_id=$2)",
 		"DELETE FROM assessments WHERE classroom_id=$1 AND org_id=$2",
 	}

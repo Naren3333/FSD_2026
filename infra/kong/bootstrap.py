@@ -28,7 +28,7 @@ config = {
         # one shared budget. Each signed-in session's bearer token gets its own instead.
         {"name": "rate-limiting", "config": {"minute": 120, "policy": "local", "limit_by": "header", "header_name": "authorization"}},
         {"name": "request-size-limiting", "config": {"allowed_payload_size": 6}},
-        {"name": "cors", "config": {"origins": ["http://localhost:4200"], "methods": ["GET", "POST", "PATCH", "DELETE", "OPTIONS"], "headers": ["Authorization", "Content-Type", "X-Correlation-ID"], "exposed_headers": ["X-Correlation-ID", "X-Request-ID"], "preflight_continue": False}},
+        {"name": "cors", "config": {"origins": ["http://localhost:4200"], "methods": ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"], "headers": ["Authorization", "Content-Type", "X-Correlation-ID"], "exposed_headers": ["X-Correlation-ID", "X-Request-ID"], "preflight_continue": False}},
     ],
 }
 Path("/output/kong.json").write_text(json.dumps(config), encoding="utf-8")

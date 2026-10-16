@@ -8,18 +8,57 @@
   </button>
 </div>
 <p>
-  Deterministic scores are drafts until you review and finalize them. Only finalized evidence reaches the
+  Automatic marks and AI suggestions are drafts until you review and finalize them. Short answers that match
+  no accepted answer and written responses wait for you to mark. Only finalized evidence reaches the
   performance dashboard.
 </p>
 <section class="panel">
-  <p class="caption">Up to 100 most recent evaluations</p>
+  <div class="filter-row">
+    <app-field controlId="review-assessment" label="Assessment" hint="Choose one to see all of its grades.">
+      <select
+        id="review-assessment"
+        [formControl]="filter"
+        (change)="choose()"
+        aria-describedby="review-assessment-help"
+      >
+        <option value="">Newest grades in the classroom</option>
+        @for (item of published.value() ?? []; track item.id) {
+          <option [value]="item.id">{{ item.title }}</option>
+        }
+      </select>
+    </app-field>
+    @if (assessmentId() && unreleased(); as count) {
+      <div>
+        <p class="caption">
+          {{ count }} finalized {{ count === 1 ? 'grade is' : 'grades are' }} hidden from students until you
+          release them.
+        </p>
+        <button (click)="askRelease()" [disabled]="state.busy()">Release results</button>
+      </div>
+    }
+  </div>
+  <app-section-state [section]="published" loading="Loading assessments…" />
+  <p class="caption">
+    {{ assessmentId() ? 'Up to 500 grades, oldest submission first' : 'Up to 100 most recent evaluations' }}
+  </p>
   <app-section-state [section]="grades" loading="Loading grades…" />
   @if (grades.ready()) {
     @for (grade of grades.value()?.grades ?? []; track grade.id) {
       <article class="grade">
         <div>
-          <span class="badge" [class.badge-plain]="grade.status === 'draft'">
-            {{ grade.status === 'draft' ? 'Draft' : 'Finalized' }}
+          <span class="tag-row">
+            <span class="badge" [class.badge-plain]="grade.status === 'draft'">
+              {{ grade.status === 'draft' ? 'Draft' : 'Finalized' }}
+            </span>
+            @if (grade.status === 'draft' && toMark(grade); as count) {
+              <span class="badge badge-danger">{{ count }} to mark</span>
+            }
+            @if (grade.late) {
+              <span class="badge badge-danger">Late</span>
+            }
+            @if (grade.status === 'finalized' && !grade.released_at) {
+              <span class="badge badge-plain">Not released</span>
+            }
           </span>
           <h3>
             @if (studentName(grade); as name) {
@@ -33,25 +72,167 @@
             {{ title(grade) || 'Assessment' }} ·
             <strong>{{ grade.evidence | marks }}</strong>
             marks
+            @if (submittedAt(grade); as when) {
+              · submitted {{ when }}
+            }
           </p>
         </div>
-        <div class="evidence-list">
-          @for (evidence of grade.evidence; track evidence.question_id) {
-            <p>
-              <strong>{{ evidence.awarded }} / {{ evidence.possible }}</strong>
-              · {{ evidence.correct ? 'Correct' : 'Incorrect' }} ·
-              @if (prompt(grade, evidence); as text) {
-                {{ text }}
-              } @else {
-                Question
-                <span class="identifier">{{ evidence.question_id }}</span>
-              }
-              <span class="caption">Skill: {{ skill(evidence) || 'not in the curriculum' }}</span>
-            </p>
+        @if (selected()?.id !== grade.id) {
+          <div class="evidence-list">
+            @for (evidence of grade.evidence; track evidence.question_id) {
+              <p>
+                <strong>{{ evidence.awarded }} / {{ evidence.possible }}</strong>
+                · {{ outcome(evidence) }} ·
+                @if (prompt(grade, evidence); as text) {
+                  {{ text }}
+                } @else {
+                  Question
+                  <span class="identifier">{{ evidence.question_id }}</span>
+                }
+                <span class="caption">Skill: {{ skill(evidence) || 'not in the curriculum' }}</span>
+              </p>
+            }
+          </div>
+          @if (grade.status === 'draft') {
+            <button (click)="review(grade)" [disabled]="state.busy()">Review grade</button>
           }
-        </div>
-        @if (grade.status === 'draft') {
-          <button (click)="review(grade)" [disabled]="state.busy()">Review grade</button>
+        } @else if (selected(); as current) {
+          <form
+            class="marking"
+            novalidate
+            [formGroup]="marks"
+            (ngSubmit)="saveMarks()"
+            [attr.aria-label]="'Marking ' + (studentName(grade) || 'this student')"
+          >
+            <h4 tabindex="-1" [id]="'marking-' + grade.id">Mark each question</h4>
+            @for (evidence of current.evidence; track evidence.question_id; let n = $index) {
+              <section class="mark-question" [formGroupName]="evidence.question_id">
+                <h4>
+                  Question {{ n + 1 }} · {{ evidence.possible }}
+                  {{ evidence.possible === 1 ? 'mark' : 'marks' }}
+                </h4>
+                <p>{{ prompt(grade, evidence) || 'Question' }}</p>
+                <p class="caption">Student's answer</p>
+                <p class="answer-text">{{ grade.answers[evidence.question_id] || '(blank)' }}</p>
+                @if (evidence.suggestion; as suggestion) {
+                  <div
+                    class="suggestion"
+                    role="group"
+                    [attr.aria-label]="'AI suggestion for question ' + (n + 1)"
+                  >
+                    <p><strong>AI suggestion</strong> · check it before using it</p>
+                    @if (suggestion.status === 'ready') {
+                      <p>
+                        Suggests {{ suggestion.awarded }} / {{ evidence.possible }}
+                        @if (suggestion.confidence) {
+                          · {{ suggestion.confidence }} confidence
+                        }
+                      </p>
+                      @for (c of suggestion.criteria ?? []; track c.criterion_id) {
+                        <p>
+                          <strong>{{ levelName(grade, evidence, c.criterion_id, c.points) }}</strong> ·
+                          {{ c.rationale }}
+                        </p>
+                        @for (quote of c.evidence_quotes; track $index) {
+                          <blockquote>“{{ quote }}”</blockquote>
+                        }
+                      }
+                      @if (suggestion.feedback) {
+                        <p>Suggested feedback: {{ suggestion.feedback }}</p>
+                      }
+                      @for (flag of suggestion.flags ?? []; track flag) {
+                        <p class="error">{{ flagText(flag) }}</p>
+                      }
+                      <button
+                        type="button"
+                        class="secondary"
+                        (click)="useSuggestion(grade, evidence)"
+                        [disabled]="state.busy()"
+                      >
+                        Use suggestion for question {{ n + 1 }}
+                      </button>
+                    } @else {
+                      <p aria-live="polite">{{ suggestionReason(suggestion) }}</p>
+                    }
+                  </div>
+                }
+                @if (question(grade, evidence)?.rubric; as rubric) {
+                  <div formGroupName="criteria">
+                    @for (criterion of rubric.criteria; track criterion.id) {
+                      <fieldset class="levels">
+                        <legend>{{ criterion.title }}</legend>
+                        @for (level of criterion.levels; track level.points) {
+                          <label class="check">
+                            <input type="radio" [formControlName]="criterion.id!" [value]="level.points" />
+                            <span
+                              ><strong>{{ level.points }}</strong> · {{ level.descriptor }}</span
+                            >
+                          </label>
+                        }
+                        @if (
+                          marks.get([evidence.question_id, 'criteria', criterion.id!])?.touched &&
+                          marks.get([evidence.question_id, 'criteria', criterion.id!])?.invalid
+                        ) {
+                          <small class="error">Choose a level.</small>
+                        }
+                      </fieldset>
+                    }
+                  </div>
+                } @else {
+                  <app-field
+                    [controlId]="'mark-' + evidence.question_id"
+                    [label]="'Marks for question ' + (n + 1)"
+                    [hint]="
+                      evidence.needs_marking
+                        ? 'Give 0–' + evidence.possible + '.'
+                        : 'Marked automatically. Change it only to override.'
+                    "
+                    [error]="'Give 0–' + evidence.possible + '.'"
+                    [invalid]="
+                      !!marks.get([evidence.question_id, 'awarded'])?.touched &&
+                      !!marks.get([evidence.question_id, 'awarded'])?.invalid
+                    "
+                  >
+                    <input
+                      [id]="'mark-' + evidence.question_id"
+                      type="number"
+                      min="0"
+                      [max]="evidence.possible"
+                      formControlName="awarded"
+                      [attr.aria-describedby]="'mark-' + evidence.question_id + '-help'"
+                    />
+                  </app-field>
+                }
+                <app-field
+                  [controlId]="'feedback-' + evidence.question_id"
+                  [label]="'Feedback on question ' + (n + 1) + ' (optional)'"
+                  hint="The student sees this with their result."
+                  error="Feedback is at most 2000 characters."
+                  [invalid]="
+                    !!marks.get([evidence.question_id, 'feedback'])?.touched &&
+                    !!marks.get([evidence.question_id, 'feedback'])?.invalid
+                  "
+                >
+                  <textarea
+                    [id]="'feedback-' + evidence.question_id"
+                    formControlName="feedback"
+                    rows="3"
+                    maxlength="2000"
+                    [attr.aria-describedby]="'feedback-' + evidence.question_id + '-help'"
+                  ></textarea>
+                </app-field>
+              </section>
+            }
+            <div class="button-row">
+              <button class="secondary" [disabled]="state.busy()">Save marks</button>
+              <button type="button" (click)="askFinalize()" [disabled]="state.busy()">
+                Finalize this grade
+              </button>
+              <button type="button" class="secondary" (click)="stopMarking()" [disabled]="state.busy()">
+                Close
+              </button>
+            </div>
+          </form>
         }
       </article>
     } @empty {
@@ -62,7 +243,7 @@
     }
   }
 </section>
-@if (!selected()) {
+@if (!finalizing() && !releasing()) {
   <app-status [state]="state" />
 }
 <app-confirm-dialog
@@ -77,11 +258,11 @@
   @if (selected(); as grade) {
     <p>
       <strong>{{ studentName(grade) || grade.student_id }}</strong>
-      · {{ title(grade) || 'Assessment' }} · {{ grade.evidence | marks }} marks
+      · {{ title(grade) || 'Assessment' }} · {{ grade.evidence | marks }} marks before any unsaved changes
     </p>
   }
   <p>
-    Finalization publishes this student's scores to their performance record. A finalized grade cannot be
+    Finalization records this student's scores in their performance record. A finalized grade cannot be
     changed.
   </p>
   <form novalidate [formGroup]="form" (ngSubmit)="finalize()">
@@ -99,4 +280,19 @@
       ></textarea>
     </app-field>
   </form>
+</app-confirm-dialog>
+<app-confirm-dialog
+  #releaseDialog
+  dialogId="release"
+  heading="Release these results?"
+  confirmLabel="Release results"
+  [state]="releaseState"
+  (confirm)="release()"
+  (closed)="releasing.set(false)"
+>
+  <p>
+    Students will see their finalized grades and feedback for
+    <strong>{{ assessmentTitle(assessmentId()) }}</strong
+    >. Grades you finalize later stay hidden until you release again. This cannot be undone.
+  </p>
 </app-confirm-dialog>

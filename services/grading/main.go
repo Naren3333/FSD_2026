@@ -1,5 +1,6 @@
-// Command grading is the Grading service: draft scores computed from submissions, which a classroom's teacher
-// reviews and finalizes.
+// Command grading is the Grading service: draft scores computed from submissions, with AI-suggested marks for the
+// questions that need the teacher when an assessment asks for them, which a classroom's teacher marks, finalizes
+// and releases to students.
 package main
 
 import (
@@ -23,13 +24,19 @@ func main() {
 			}
 			return platform.KafkaReady(ctx)
 		})
-		submissions := platform.Consumer{DB: a.DB, Group: "grading-v1"}
+		// v1 submissions keep their consumer group, so events published before v2 are still graded once.
+		submissionsV1 := platform.Consumer{DB: a.DB, Group: "grading-v1"}
+		submissions := platform.Consumer{DB: a.DB, Group: "grading-submitted-v2"}
 		classrooms := platform.Consumer{DB: a.DB, Group: "grading-classrooms-v1"}
+		marking := marker{a.DB, aiSuggester{platform.NewAICore()}}
 		return []func(context.Context){
 			platform.Outbox{DB: a.DB}.Run,
+			func(ctx context.Context) { submissionsV1.Consume(ctx, topicSubmittedV1, consume, nil) },
 			func(ctx context.Context) {
-				submissions.Consume(ctx, "assessment.submitted.v1", consume, &consumerRunning)
+				submissions.Consume(ctx, topicSubmittedV2, consume, &consumerRunning)
 			},
+			marking.Run,
+			marking.Run,
 			func(ctx context.Context) { classrooms.Consume(ctx, platform.TopicClassroomDeleted, purge, nil) },
 		}, nil
 	})

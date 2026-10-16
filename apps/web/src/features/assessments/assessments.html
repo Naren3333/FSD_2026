@@ -12,8 +12,12 @@
   </button>
 </div>
 <p>
-  Author an objective question or open an assessment to submit your work. Published assessments are immutable;
-  each student can submit once.
+  @if (session.isTeacher()) {
+    Build an assessment as a draft, then publish it when it is ready. Students never see drafts, and a
+    published assessment cannot change. Each student can submit once.
+  } @else {
+    Open an assessment to answer it. Your answers are saved as you type until you submit; you can submit once.
+  }
 </p>
 <div class="split">
   <section class="panel">
@@ -24,17 +28,49 @@
       @for (item of assessments.value() ?? []; track item.id) {
         <article class="record">
           <strong>{{ item.title }}</strong>
-          @if (session.isStudent() && item.submitted) {
-            <span class="badge">Submitted</span>
-          }
-          <button class="secondary" (click)="open(item.id)" [disabled]="state.busy()">Open assessment</button>
+          <span class="tag-row">
+            @if (item.status === 'draft') {
+              <span class="badge badge-plain">Draft</span>
+            }
+            @if (session.isStudent() && item.submitted) {
+              <span class="badge">Submitted</span>
+            }
+            @if (dueBadge(item); as badge) {
+              <span class="badge badge-danger">{{ badge }}</span>
+            }
+          </span>
+          <span class="caption">
+            {{ item.question_count }} {{ item.question_count === 1 ? 'question' : 'questions' }} ·
+            {{ item.points }} {{ item.points === 1 ? 'mark' : 'marks' }}
+            @if (schedule(item); as when) {
+              · {{ when }}
+            }
+          </span>
+          <span class="button-row">
+            <button class="secondary" (click)="open(item.id)" [disabled]="state.busy()">
+              {{ session.isTeacher() ? 'Preview' : 'Open' }} assessment
+            </button>
+            @if (session.isTeacher() && item.status === 'draft') {
+              <button class="secondary" (click)="edit(item.id)" [disabled]="state.busy()">
+                Edit draft<span class="visually-hidden"> {{ item.title }}</span>
+              </button>
+              <button class="secondary" (click)="publish(item)" [disabled]="state.busy()">
+                Publish<span class="visually-hidden"> {{ item.title }}</span>
+              </button>
+              <button class="secondary" (click)="confirmDelete(item)" [disabled]="state.busy()">
+                Delete draft<span class="visually-hidden"> {{ item.title }}</span>
+              </button>
+            }
+          </span>
         </article>
       } @empty {
         <p class="empty">
           {{
-            classroomId()
-              ? 'No assessments yet. Create one using a curriculum skill.'
-              : 'Select a classroom to continue.'
+            !classroomId()
+              ? 'Select a classroom to continue.'
+              : session.isTeacher()
+                ? 'No assessments yet. Create one using a curriculum skill.'
+                : 'No assessments yet. Your teacher has not published any.'
           }}
         </p>
       }
@@ -42,54 +78,108 @@
     @if (selected(); as assessment) {
       <div class="separated">
         <h3>{{ assessment.title }}</h3>
+        @if (schedule(assessment); as when) {
+          <p class="caption">
+            {{ when }}.
+            {{
+              assessment.late_policy === 'reject'
+                ? 'Late work is not accepted.'
+                : 'Late work is accepted and marked as late.'
+            }}
+          </p>
+        }
         <form novalidate [formGroup]="answers" (ngSubmit)="submit()">
           @for (question of assessment.questions; track question.id) {
             <app-field
               [controlId]="'answer-' + question.id"
               [label]="question.prompt"
+              [hint]="answerHint(question)"
               [invalid]="!!answers.get(question.id!)?.touched && !!answers.get(question.id!)?.invalid"
+              [error]="
+                question.type === 'free_response'
+                  ? 'Write an answer of at most ' + (question.max_length ?? 5000) + ' characters.'
+                  : 'This field is required.'
+              "
             >
-              @if (question.type === 'numerical') {
-                <input
-                  [id]="'answer-' + question.id"
-                  [formControlName]="question.id!"
-                  inputmode="decimal"
-                  [attr.aria-describedby]="'answer-' + question.id + '-help'"
-                />
-              } @else {
-                <select [id]="'answer-' + question.id" [formControlName]="question.id!">
-                  <option value="">Choose an answer</option>
-                  @for (option of question.options; track option) {
-                    <option [value]="option">{{ option }}</option>
-                  }
-                </select>
+              @switch (question.type) {
+                @case ('numerical') {
+                  <input
+                    [id]="'answer-' + question.id"
+                    [formControlName]="question.id!"
+                    inputmode="decimal"
+                    [attr.aria-describedby]="'answer-' + question.id + '-help'"
+                  />
+                }
+                @case ('multiple_choice') {
+                  <select
+                    [id]="'answer-' + question.id"
+                    [formControlName]="question.id!"
+                    [attr.aria-describedby]="'answer-' + question.id + '-help'"
+                  >
+                    <option value="">Choose an answer</option>
+                    @for (option of question.options; track option) {
+                      <option [value]="option">{{ option }}</option>
+                    }
+                  </select>
+                }
+                @case ('short_answer') {
+                  <input
+                    [id]="'answer-' + question.id"
+                    [formControlName]="question.id!"
+                    maxlength="500"
+                    [attr.aria-describedby]="'answer-' + question.id + '-help'"
+                  />
+                }
+                @case ('free_response') {
+                  <textarea
+                    [id]="'answer-' + question.id"
+                    [formControlName]="question.id!"
+                    rows="8"
+                    class="answer-box"
+                    [attr.maxlength]="question.max_length ?? 5000"
+                    [attr.aria-describedby]="'answer-' + question.id + '-help'"
+                  ></textarea>
+                }
               }
             </app-field>
           }
           @if (session.isStudent()) {
+            <p class="caption" aria-live="polite">{{ saveNote() }}</p>
             <p class="caption">
-              {{
-                submitted()
-                  ? 'You have submitted this assessment. Your teacher will review the grade.'
-                  : 'Submission is final. Check your answers before submitting.'
-              }}
+              @if (submitted()) {
+                You have submitted this assessment. Your teacher will review the grade.
+              } @else if (due() === 'closed') {
+                This assessment is past its due date and no longer takes submissions.
+              } @else if (due() === 'late') {
+                The due date has passed. You can still submit; your teacher will see it was late.
+              } @else {
+                Submission is final. Check your answers before submitting.
+              }
             </p>
-            <button [disabled]="state.busy() || submitted()">
+            <button [disabled]="state.busy() || submitted() || due() === 'closed'">
               {{ submitted() ? 'Submitted' : 'Submit answers' }}
             </button>
           } @else {
-            <p class="caption">Teacher preview. Students see the question without its answer key.</p>
+            <p class="caption">
+              Teacher preview. Students see the questions without answer keys, accepted answers or rubrics.
+            </p>
           }
-          <button type="reset" class="secondary clear-form" [disabled]="state.busy()">Clear form</button>
+          @if (!submitted() && due() !== 'closed') {
+            <button type="reset" class="secondary clear-form" [disabled]="state.busy()">Clear form</button>
+          }
         </form>
       </div>
     }
   </section>
   @if (session.isTeacher()) {
-    <section class="panel">
-      <h3>Create an assessment</h3>
-      <p class="caption">This editor authors one question. The API supports up to 50 questions.</p>
-      <form novalidate [formGroup]="form" (ngSubmit)="create()">
+    <section class="panel" aria-labelledby="editor-title">
+      <h3 id="editor-title">
+        {{ editing() ? 'Edit draft: ' + editing()!.title : 'Create an assessment' }}
+      </h3>
+      <p class="caption">
+        Up to {{ maxQuestions }} questions. Save a draft at any time; publishing makes it final.
+      </p>
+      <form novalidate [formGroup]="form" (ngSubmit)="save(false)">
         <app-field
           controlId="assessment-title"
           label="Assessment title"
@@ -102,78 +192,330 @@
             aria-describedby="assessment-title-help"
           />
         </app-field>
-        <app-field
-          controlId="question-prompt"
-          label="Question"
-          [invalid]="form.controls.prompt.touched && form.controls.prompt.invalid"
-        >
-          <textarea
-            id="question-prompt"
-            formControlName="prompt"
-            rows="4"
-            maxlength="2000"
-            aria-describedby="question-prompt-help"
-          ></textarea>
-        </app-field>
-        <app-field
-          controlId="question-skill"
-          label="Curriculum skill"
-          [invalid]="form.controls.skill_id.touched && form.controls.skill_id.invalid"
-        >
-          <select id="question-skill" formControlName="skill_id">
-            <option value="">Choose a skill</option>
-            @for (skill of skills(); track skill.id) {
-              <option [value]="skill.id">{{ skill.name }}</option>
+
+        @for (question of questions.controls; track question; let i = $index) {
+          <fieldset class="question-set" [formGroup]="question">
+            <legend>Question {{ i + 1 }}</legend>
+            <app-field
+              [controlId]="'question-' + i + '-prompt'"
+              label="Question"
+              [invalid]="question.controls.prompt.touched && question.controls.prompt.invalid"
+            >
+              <textarea
+                [id]="'question-' + i + '-prompt'"
+                formControlName="prompt"
+                rows="3"
+                maxlength="2000"
+                [attr.aria-describedby]="'question-' + i + '-prompt-help'"
+              ></textarea>
+            </app-field>
+            <div class="field-row">
+              <app-field [controlId]="'question-' + i + '-type'" label="Question type">
+                <select [id]="'question-' + i + '-type'" formControlName="type">
+                  <option value="numerical">Numerical</option>
+                  <option value="multiple_choice">Multiple choice</option>
+                  <option value="short_answer">Short answer</option>
+                  <option value="free_response">Written response</option>
+                </select>
+              </app-field>
+              @if (question.controls.type.value === 'free_response') {
+                <app-field
+                  [controlId]="'question-' + i + '-points'"
+                  label="Marks"
+                  hint="The rubric's top levels added up."
+                >
+                  <input
+                    [id]="'question-' + i + '-points'"
+                    [value]="rubricPoints(question)"
+                    readonly
+                    [attr.aria-describedby]="'question-' + i + '-points-help'"
+                  />
+                </app-field>
+              } @else {
+                <app-field
+                  [controlId]="'question-' + i + '-points'"
+                  label="Marks"
+                  hint="1–100."
+                  error="Give 1–100 marks."
+                  [invalid]="question.controls.points.touched && question.controls.points.invalid"
+                >
+                  <input
+                    [id]="'question-' + i + '-points'"
+                    type="number"
+                    min="1"
+                    max="100"
+                    formControlName="points"
+                    [attr.aria-describedby]="'question-' + i + '-points-help'"
+                  />
+                </app-field>
+              }
+            </div>
+            <app-field
+              [controlId]="'question-' + i + '-skill'"
+              label="Curriculum skill"
+              [invalid]="question.controls.skill_id.touched && question.controls.skill_id.invalid"
+            >
+              <select
+                [id]="'question-' + i + '-skill'"
+                formControlName="skill_id"
+                [attr.aria-describedby]="'question-' + i + '-skill-help'"
+              >
+                <option value="">Choose a skill</option>
+                @for (skill of skills(); track skill.id) {
+                  <option [value]="skill.id">{{ skill.name }}</option>
+                }
+              </select>
+            </app-field>
+            @switch (question.controls.type.value) {
+              @case ('multiple_choice') {
+                <app-field
+                  [controlId]="'question-' + i + '-options'"
+                  label="Answer options"
+                  hint="One option per line; 2–8 unique options."
+                  error="Give 2–8 unique options, one per line."
+                  [invalid]="question.controls.options.touched && question.controls.options.invalid"
+                >
+                  <textarea
+                    [id]="'question-' + i + '-options'"
+                    formControlName="options"
+                    rows="4"
+                    [attr.aria-describedby]="'question-' + i + '-options-help'"
+                  ></textarea>
+                </app-field>
+                <app-field
+                  [controlId]="'question-' + i + '-key'"
+                  label="Correct answer"
+                  hint="Use the exact option text."
+                  [invalid]="question.controls.answer.touched && question.controls.answer.invalid"
+                >
+                  <input
+                    [id]="'question-' + i + '-key'"
+                    formControlName="answer"
+                    [attr.aria-describedby]="'question-' + i + '-key-help'"
+                  />
+                </app-field>
+              }
+              @case ('numerical') {
+                <div class="field-row">
+                  <app-field
+                    [controlId]="'question-' + i + '-key'"
+                    label="Correct answer"
+                    [invalid]="question.controls.answer.touched && question.controls.answer.invalid"
+                  >
+                    <input
+                      [id]="'question-' + i + '-key'"
+                      formControlName="answer"
+                      inputmode="decimal"
+                      [attr.aria-describedby]="'question-' + i + '-key-help'"
+                    />
+                  </app-field>
+                  <app-field
+                    [controlId]="'question-' + i + '-tolerance'"
+                    label="Numerical tolerance"
+                    hint="Use 0 for an exact match."
+                  >
+                    <input
+                      [id]="'question-' + i + '-tolerance'"
+                      formControlName="tolerance"
+                      inputmode="decimal"
+                      [attr.aria-describedby]="'question-' + i + '-tolerance-help'"
+                    />
+                  </app-field>
+                </div>
+              }
+              @case ('short_answer') {
+                <app-field
+                  [controlId]="'question-' + i + '-accepted'"
+                  label="Accepted answers"
+                  hint="One per line. A matching answer gets full marks; any other answer comes to you to mark."
+                  error="Give 1–20 accepted answers, one per line."
+                  [invalid]="question.controls.accepted.touched && question.controls.accepted.invalid"
+                >
+                  <textarea
+                    [id]="'question-' + i + '-accepted'"
+                    formControlName="accepted"
+                    rows="3"
+                    [attr.aria-describedby]="'question-' + i + '-accepted-help'"
+                  ></textarea>
+                </app-field>
+                <label class="check">
+                  <input type="checkbox" formControlName="case_sensitive" />
+                  Capital letters must match
+                </label>
+              }
+              @case ('free_response') {
+                <app-field
+                  [controlId]="'question-' + i + '-length'"
+                  label="Longest answer, in characters"
+                  hint="Up to 20,000."
+                  error="Allow 1–20,000 characters."
+                  [invalid]="question.controls.max_length.touched && question.controls.max_length.invalid"
+                >
+                  <input
+                    [id]="'question-' + i + '-length'"
+                    type="number"
+                    min="1"
+                    max="20000"
+                    formControlName="max_length"
+                    [attr.aria-describedby]="'question-' + i + '-length-help'"
+                  />
+                </app-field>
+                <div class="rubric" formArrayName="criteria">
+                  <h4>Rubric</h4>
+                  @for (criterion of question.controls.criteria.controls; track criterion; let c = $index) {
+                    <div class="criterion" [formGroupName]="c">
+                      <app-field
+                        [controlId]="'question-' + i + '-criterion-' + c + '-title'"
+                        [label]="'Criterion ' + (c + 1)"
+                        [invalid]="criterion.controls.title.touched && criterion.controls.title.invalid"
+                      >
+                        <input
+                          [id]="'question-' + i + '-criterion-' + c + '-title'"
+                          formControlName="title"
+                          maxlength="200"
+                          [attr.aria-describedby]="'question-' + i + '-criterion-' + c + '-title-help'"
+                        />
+                      </app-field>
+                      <app-field
+                        [controlId]="'question-' + i + '-criterion-' + c + '-levels'"
+                        [label]="'Criterion ' + (c + 1) + ' levels'"
+                        hint='One level per line, as "points: what work at this level shows". 2–6 levels.'
+                        error='Give 2–6 levels, one per line, as "points: description", each with its own points from 0 to 100.'
+                        [invalid]="criterion.controls.levels.touched && criterion.controls.levels.invalid"
+                      >
+                        <textarea
+                          [id]="'question-' + i + '-criterion-' + c + '-levels'"
+                          formControlName="levels"
+                          rows="4"
+                          [attr.aria-describedby]="'question-' + i + '-criterion-' + c + '-levels-help'"
+                        ></textarea>
+                      </app-field>
+                      @if (question.controls.criteria.length > 1) {
+                        <button type="button" class="secondary" (click)="removeCriterion(question, c)">
+                          Remove criterion {{ c + 1 }}
+                        </button>
+                      }
+                    </div>
+                  }
+                  @if (question.controls.criteria.length < maxCriteria) {
+                    <button type="button" class="secondary" (click)="addCriterion(question, i)">
+                      Add criterion
+                    </button>
+                  }
+                </div>
+                <app-field
+                  [controlId]="'question-' + i + '-model'"
+                  label="Model answer (optional)"
+                  hint="For you and AI suggestions only; students never see it."
+                >
+                  <textarea
+                    [id]="'question-' + i + '-model'"
+                    formControlName="model_answer"
+                    rows="4"
+                    maxlength="5000"
+                    [attr.aria-describedby]="'question-' + i + '-model-help'"
+                  ></textarea>
+                </app-field>
+              }
             }
-          </select>
-        </app-field>
+            @if (questions.length > 1) {
+              <button type="button" class="secondary" (click)="removeQuestion(i)">
+                Remove question {{ i + 1 }}
+              </button>
+            }
+          </fieldset>
+        }
+        @if (questions.length < maxQuestions) {
+          <button type="button" class="secondary add-question" (click)="addQuestion()">Add question</button>
+        }
+
+        <fieldset class="question-set">
+          <legend>Schedule and grading</legend>
+          <div class="field-row">
+            <app-field
+              controlId="assessment-opens"
+              label="Opens (optional)"
+              hint="Hidden from students until then."
+            >
+              <input
+                id="assessment-opens"
+                type="datetime-local"
+                formControlName="opens_at"
+                aria-describedby="assessment-opens-help"
+              />
+            </app-field>
+            <app-field controlId="assessment-due" label="Due (optional)" hint="Must be after it opens.">
+              <input
+                id="assessment-due"
+                type="datetime-local"
+                formControlName="due_at"
+                aria-describedby="assessment-due-help"
+              />
+            </app-field>
+          </div>
+          <app-field controlId="assessment-late" label="After the due date">
+            <select id="assessment-late" formControlName="late_policy">
+              <option value="accept_flagged">Accept late work and mark it late</option>
+              <option value="reject">Stop taking submissions</option>
+            </select>
+          </app-field>
+          <app-field controlId="assessment-release" label="When students see grades">
+            <select id="assessment-release" formControlName="release_policy">
+              <option value="on_finalize">As soon as I finalize each grade</option>
+              <option value="manual">When I release the results</option>
+            </select>
+          </app-field>
+          <label class="check">
+            <input type="checkbox" formControlName="ai_marking" />
+            Suggest marks with AI for questions I mark
+          </label>
+          <p class="caption">
+            {{
+              canSuggest()
+                ? 'Suggestions are drafts for you to accept or change, and use your daily AI allowance. Students never see them.'
+                : 'Available when the assessment has a short-answer or written-response question.'
+            }}
+          </p>
+        </fieldset>
+
+        <div class="button-row">
+          <button [disabled]="state.busy() || !classroomId()">
+            {{ editing() ? 'Save draft' : 'Create draft' }}
+          </button>
+          <button type="button" (click)="save(true)" [disabled]="state.busy() || !classroomId()">
+            Publish assessment
+          </button>
+          @if (editing()) {
+            <button type="button" class="secondary" (click)="cancelEdit()" [disabled]="state.busy()">
+              Stop editing
+            </button>
+          } @else {
+            <button type="button" class="secondary" (click)="cancelEdit()" [disabled]="state.busy()">
+              Clear form
+            </button>
+          }
+        </div>
         <app-section-state [section]="skillsState" loading="Loading curriculum skills…" />
-        <app-field controlId="question-type" label="Question type">
-          <select id="question-type" formControlName="type">
-            <option value="numerical">Numerical</option>
-            <option value="multiple_choice">Multiple choice</option>
-          </select>
-        </app-field>
-        @if (form.controls.type.value === 'multiple_choice') {
-          <app-field
-            controlId="question-options"
-            label="Answer options"
-            hint="One option per line; 2–8 unique options."
-          >
-            <textarea
-              id="question-options"
-              formControlName="options"
-              rows="4"
-              aria-describedby="question-options-help"
-            ></textarea>
-          </app-field>
-        }
-        <app-field
-          controlId="question-key"
-          label="Correct answer"
-          hint="For multiple choice, use the exact option text."
-          [invalid]="form.controls.answer.touched && form.controls.answer.invalid"
-        >
-          <input id="question-key" formControlName="answer" aria-describedby="question-key-help" />
-        </app-field>
-        @if (form.controls.type.value === 'numerical') {
-          <app-field
-            controlId="question-tolerance"
-            label="Numerical tolerance"
-            hint="Use 0 for an exact match."
-          >
-            <input
-              id="question-tolerance"
-              formControlName="tolerance"
-              inputmode="decimal"
-              aria-describedby="question-tolerance-help"
-            />
-          </app-field>
-        }
-        <button [disabled]="state.busy() || !classroomId()">Create assessment</button>
-        <button type="reset" class="secondary clear-form" [disabled]="state.busy()">Clear form</button>
       </form>
     </section>
   }
 </div>
-<app-status [state]="state" />
+@if (!deleting()) {
+  <app-status [state]="state" />
+}
+<app-confirm-dialog
+  #deleteDialog
+  dialogId="delete-draft"
+  heading="Delete this draft?"
+  confirmLabel="Delete draft"
+  [state]="deleteState"
+  (confirm)="remove()"
+  (closed)="deleting.set(null)"
+>
+  @if (deleting(); as item) {
+    <p>
+      <strong>{{ item.title }}</strong> and its questions will be deleted. Students have never seen it. This
+      cannot be undone.
+    </p>
+  }
+</app-confirm-dialog>

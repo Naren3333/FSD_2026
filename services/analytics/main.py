@@ -69,7 +69,7 @@ def ready(request: Request) -> dict[str, str]:
 def skill_evidence(pool: ConnectionPool[Any], org: str, classroom_id: UUID, student_id: str) -> list[Any]:
     with pool.connection() as conn:
         return conn.execute(
-            "SELECT skill_id,correct FROM evidence WHERE org_id=%s AND classroom_id=%s AND student_id=%s",
+            "SELECT skill_id,correct,awarded,possible FROM evidence WHERE org_id=%s AND classroom_id=%s AND student_id=%s",
             (org, classroom_id, student_id),
         ).fetchall()
 
@@ -82,7 +82,7 @@ MAX_PAGE = 50
 def class_evidence(pool: ConnectionPool[Any], org: str, classroom_id: UUID, students: list[str]) -> list[Any]:
     with pool.connection() as conn:
         return conn.execute(
-            "SELECT student_id,skill_id,correct FROM evidence WHERE org_id=%s AND classroom_id=%s"
+            "SELECT student_id,skill_id,correct,awarded,possible FROM evidence WHERE org_id=%s AND classroom_id=%s"
             " AND student_id = ANY(%s)",
             (org, classroom_id, students),
         ).fetchall()

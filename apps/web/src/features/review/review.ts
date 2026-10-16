@@ -1,19 +1,28 @@
-import { Component, ViewChild, inject, signal } from '@angular/core';
+import { Component, DestroyRef, ViewChild, computed, inject, signal } from '@angular/core';
 import { FormControl, FormGroup, ReactiveFormsModule } from '@angular/forms';
 import { AssessmentApi, GradingApi, IdentityApi } from '../../api/clients';
-import type { Assessment, Evaluation, Evidence } from '../../api/models';
+import type { Assessment, AssessmentSummary, Evaluation, Evidence, Question } from '../../api/models';
 import { ClassroomContext, onClassroomChange } from '../../core/classroom-context';
 import { CurriculumNames } from '../../core/curriculum-names';
 import { UnsavedChanges } from '../../core/unsaved-changes';
 import { ActionState } from '../../shared/action-state';
 import { ConfirmDialogComponent } from '../../shared/confirm-dialog';
 import { FieldComponent } from '../../shared/field';
+import { dateTime } from '../../shared/format';
 import { MarksPipe } from '../../shared/marks';
 import { assessmentsOf, promptOf, studentNames } from '../../shared/names';
 import { Section } from '../../shared/section';
 import { SectionStateComponent } from '../../shared/section-state';
 import { StatusComponent } from '../../shared/status';
 import { requiredText } from '../../shared/validators';
+import {
+  applySuggestion,
+  flagText,
+  markingForm,
+  marksOf,
+  suggestionReason,
+  type MarkingForm,
+} from './marking';
 
 /** A classroom's evaluations with the names of their students and assessments. */
 interface Grades {
@@ -21,6 +30,9 @@ interface Grades {
   students: Map<string, string>;
   assessments: Map<string, Assessment>;
 }
+
+/** How often an open grade re-reads AI suggestions that are still being prepared. */
+const SUGGESTION_POLL = 5000;
 
 @Component({
   selector: 'app-review',
@@ -42,28 +54,74 @@ export class ReviewComponent {
   private readonly curriculum = inject(CurriculumNames);
   readonly classroomId = inject(ClassroomContext).classroomId;
   readonly state = new ActionState();
+  /** Releasing an assessment's results, in its confirmation dialog. */
+  readonly releaseState = new ActionState();
   readonly grades = new Section<Grades>();
+  /** The classroom's published assessments, to choose one to mark. */
+  readonly published = new Section<AssessmentSummary[]>();
+  readonly filter = new FormControl('', { nonNullable: true });
+  /** The assessment whose grades are shown; '' for the classroom's newest grades. */
+  readonly assessmentId = signal('');
+  /** The draft being marked. */
   readonly selected = signal<Evaluation | null>(null);
+  readonly finalizing = signal(false);
+  readonly releasing = signal(false);
+  marks: MarkingForm = new FormGroup({});
   @ViewChild('dialog') dialog?: ConfirmDialogComponent;
+  @ViewChild('releaseDialog') releaseDialog?: ConfirmDialogComponent;
   readonly form = new FormGroup({
     reason: new FormControl('', { nonNullable: true, validators: requiredText(1000) }),
   });
+  /** The chosen assessment's finalized grades its students cannot see yet. */
+  readonly unreleased = computed(() => {
+    const id = this.assessmentId();
+    return (this.grades.value()?.grades ?? []).filter(
+      (g) => g.assessment_id === id && g.status === 'finalized' && !g.released_at,
+    ).length;
+  });
+  readonly flagText = flagText;
+  readonly suggestionReason = suggestionReason;
+  private poll: ReturnType<typeof setInterval> | undefined;
 
   constructor() {
-    inject(UnsavedChanges).track(() => this.form.dirty);
-    onClassroomChange(() => this.load());
+    inject(UnsavedChanges).track(() => this.form.dirty || this.marks.dirty);
+    inject(DestroyRef).onDestroy(() => clearInterval(this.poll));
+    onClassroomChange(() => {
+      this.filter.setValue('');
+      this.assessmentId.set('');
+      this.load();
+    });
   }
 
   load(): void {
     const classroomId = this.classroomId();
     this.grades.clear();
+    this.published.clear();
+    this.stopMarking();
     if (!classroomId) return;
-    void this.grades.load(() => this.read(classroomId));
+    const assessmentId = this.assessmentId();
+    void this.grades.load(() => this.read(classroomId, assessmentId));
+    void this.published.load(async () =>
+      (await this.assessmentApi.list(classroomId)).filter((a) => a.status === 'published'),
+    );
+  }
+
+  /** Shows the grades of the assessment the filter names, or the newest of all. */
+  choose(): void {
+    if (this.marks.dirty) {
+      this.state.error.set('Save or close the grade you are marking first.');
+      this.filter.setValue(this.assessmentId());
+      return;
+    }
+    this.assessmentId.set(this.filter.value);
+    this.stopMarking();
+    const classroomId = this.classroomId();
+    if (classroomId) void this.grades.load(() => this.read(classroomId, this.filter.value));
   }
 
   /** The evaluations with the names of their students, assessments, questions and skills. */
-  private async read(classroomId: string): Promise<Grades> {
-    const grades = await this.grading.evaluations(classroomId);
+  private async read(classroomId: string, assessmentId: string): Promise<Grades> {
+    const grades = await this.grading.evaluations(classroomId, assessmentId);
     const [roster, assessments] = await Promise.all([
       this.identity.roster(classroomId),
       assessmentsOf(grades, (id) => this.assessmentApi.get(id)),
@@ -82,29 +140,166 @@ export class ReviewComponent {
   prompt(grade: Evaluation, evidence: Evidence): string {
     return promptOf(this.grades.value()?.assessments ?? new Map(), grade.assessment_id, evidence.question_id);
   }
+  question(grade: Evaluation, evidence: Evidence): Question | undefined {
+    return this.grades
+      .value()
+      ?.assessments.get(grade.assessment_id)
+      ?.questions.find((q) => q.id === evidence.question_id);
+  }
   skill(evidence: Evidence): string {
     return this.curriculum.skillName(evidence.skill_id);
   }
+  toMark(grade: Evaluation): number {
+    return grade.evidence.filter((e) => e.needs_marking).length;
+  }
+  outcome(evidence: Evidence): string {
+    if (evidence.needs_marking) return 'Needs marking';
+    if (evidence.marked_by === 'teacher') return 'Marked by you';
+    return evidence.correct ? 'Correct' : 'Incorrect';
+  }
+  submittedAt(grade: Evaluation): string {
+    return grade.submitted_at ? dateTime(grade.submitted_at) : '';
+  }
+
+  // --- Marking ---------------------------------------------------------------------------------------------
 
   review(grade: Evaluation): void {
+    if (this.marks.dirty && this.selected()?.id !== grade.id) {
+      this.state.error.set('Save or close the grade you are marking first.');
+      return;
+    }
+    const questions = this.grades.value()?.assessments.get(grade.assessment_id)?.questions ?? [];
+    this.marks = markingForm(grade.evidence, questions);
     this.selected.set(grade);
+    this.state.error.set('');
+    this.watchSuggestions();
+    setTimeout(() => document.getElementById(`marking-${grade.id}`)?.focus());
+  }
+
+  stopMarking(): void {
+    clearInterval(this.poll);
+    this.marks = new FormGroup({});
+    this.selected.set(null);
+  }
+
+  useSuggestion(grade: Evaluation, evidence: Evidence): void {
+    const marks = this.marks.controls[evidence.question_id];
+    if (marks && evidence.suggestion?.status === 'ready') applySuggestion(marks, evidence.suggestion);
+  }
+
+  levelName(grade: Evaluation, evidence: Evidence, criterionId: string, points: number): string {
+    const criterion = this.question(grade, evidence)?.rubric?.criteria.find((c) => c.id === criterionId);
+    const level = criterion?.levels.find((l) => l.points === points);
+    return `${criterion?.title ?? 'Criterion'}: ${points} (${level?.descriptor ?? 'level'})`;
+  }
+
+  saveMarks(): void {
+    const grade = this.selected();
+    if (!grade) return;
+    const marks = marksOf(this.marks, grade.evidence);
+    if (!Object.keys(marks).length) {
+      this.state.error.set('Nothing to save: no marks or feedback changed.');
+      return;
+    }
+    void this.state.run(async () => {
+      this.replace(await this.grading.mark(grade.id, marks));
+    }, 'Marks saved. The grade is still a draft.');
+  }
+
+  /** Puts a re-read grade in the list and, when it is the one being marked, in the marking form. */
+  private replace(grade: Evaluation): void {
+    const current = this.grades.value();
+    if (current)
+      this.grades.set({ ...current, grades: current.grades.map((g) => (g.id === grade.id ? grade : g)) });
+    if (this.selected()?.id === grade.id) {
+      const questions = current?.assessments.get(grade.assessment_id)?.questions ?? [];
+      this.marks = markingForm(grade.evidence, questions);
+      this.selected.set(grade);
+    }
+  }
+
+  /** While a suggestion is being prepared, re-reads the grade so it appears without a refresh. */
+  private watchSuggestions(): void {
+    clearInterval(this.poll);
+    this.poll = setInterval(() => {
+      const grade = this.selected();
+      if (!grade || !grade.evidence.some((e) => e.suggestion?.status === 'pending')) {
+        clearInterval(this.poll);
+        return;
+      }
+      void this.grading.evaluations(this.classroomId(), grade.assessment_id).then(
+        (rows) => {
+          const fresh = rows.find((r) => r.id === grade.id);
+          if (!fresh || this.selected()?.id !== grade.id) return;
+          // Only the suggestions change here, so the teacher's unsaved marks stay.
+          const suggestions = new Map(fresh.evidence.map((e) => [e.question_id, e.suggestion]));
+          this.selected.set({
+            ...grade,
+            evidence: grade.evidence.map((e) => ({ ...e, suggestion: suggestions.get(e.question_id) })),
+          });
+        },
+        () => undefined,
+      );
+    }, SUGGESTION_POLL);
+  }
+
+  askFinalize(): void {
+    if (!this.selected() || !this.state.validate(this.marks)) return;
+    this.finalizing.set(true);
     this.form.reset();
     this.dialog?.show();
   }
 
   close(): void {
     this.form.reset();
-    this.selected.set(null);
+    this.finalizing.set(false);
     this.dialog?.close();
   }
 
   finalize(): void {
     const grade = this.selected();
     if (!grade || !this.state.validate(this.form)) return;
-    void this.state.run(async () => {
-      await this.grading.finalize(grade.id, this.form.controls.reason.value);
-      this.close();
-      this.grades.set(await this.read(this.classroomId()));
-    }, 'Grade finalized. Performance will update after event processing.');
+    const marks = marksOf(this.marks, grade.evidence);
+    void this.state.run(
+      async () => {
+        await this.grading.finalize(grade.id, this.form.controls.reason.value, marks);
+        this.close();
+        this.stopMarking();
+        this.grades.set(await this.read(this.classroomId(), this.assessmentId()));
+      },
+      grade.release_policy === 'manual'
+        ? 'Grade finalized. Students see it when you release the results.'
+        : 'Grade finalized. Performance will update after event processing.',
+    );
+  }
+
+  // --- Releasing -------------------------------------------------------------------------------------------
+
+  askRelease(): void {
+    this.releasing.set(true);
+    this.releaseState.error.set('');
+    this.releaseDialog?.show();
+  }
+
+  closeRelease(): void {
+    this.releasing.set(false);
+    this.releaseDialog?.close();
+  }
+
+  release(): void {
+    const assessmentId = this.assessmentId();
+    if (!assessmentId) return;
+    void this.releaseState.run(async () => {
+      const result = await this.grading.release(assessmentId);
+      this.closeRelease();
+      this.grades.set(await this.read(this.classroomId(), assessmentId));
+      this.state.message.set(
+        `${result.released} ${result.released === 1 ? 'result' : 'results'} released to students.`,
+      );
+    });
+  }
+
+  assessmentTitle(id: string): string {
+    return this.published.value()?.find((a) => a.id === id)?.title ?? 'this assessment';
   }
 }

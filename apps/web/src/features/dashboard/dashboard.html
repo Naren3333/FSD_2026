@@ -16,7 +16,10 @@
         <span class="stat-label">Needs grading</span>
         @if (counts.value(); as c) {
           <strong class="stat-value">{{ c.drafts }}</strong>
-          <span class="caption">{{ c.finalized }} finalized · Open Grading review</span>
+          <span class="caption"
+            >{{ c.finalized }} finalized{{ c.unreleased ? ' · ' + c.unreleased + ' not released' : '' }} ·
+            Open Grading review</span
+          >
         } @else {
           <strong class="stat-value">{{ counts.loading() ? '…' : '–' }}</strong>
           <span class="caption">{{ counts.loading() ? 'Loading…' : 'Unavailable' }}</span>

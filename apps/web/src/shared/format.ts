@@ -30,3 +30,8 @@ export function date(iso: string): string {
 export function dateTime(iso: string): string {
   return new Date(iso).toLocaleString(LOCALE, { dateStyle: 'medium', timeStyle: 'short' });
 }
+
+/** A time of day, such as "3:05 pm". */
+export function time(iso: string): string {
+  return new Date(iso).toLocaleTimeString(LOCALE, { hour: 'numeric', minute: '2-digit' });
+}

@@ -1,6 +1,6 @@
-"""Analytics' events: grading.finalized.v1 stores each finalized evaluation's evidence once (inbox), and
-identity.classroom.deleted.v1 purges a deleted classroom's evidence. Messages that don't match the contract are
-dead-lettered; learning_transport.kafka runs the consumer."""
+"""Analytics' events: grading.finalized.v2 (and v1, from before points) stores each finalized evaluation's evidence
+once (inbox), and identity.classroom.deleted.v1 purges a deleted classroom's evidence. Messages that don't match the
+contract are dead-lettered; learning_transport.kafka runs the consumer."""
 
 import threading
 from typing import Any
@@ -8,9 +8,8 @@ from typing import Any
 from learning_transport.kafka import Handler, consume, parse
 from psycopg_pool import ConnectionPool
 
-from domain import ClassroomDeletedEvent, Event
+from domain import FINALIZED_V1, FINALIZED_V2, ClassroomDeletedEvent, Event
 
-FINALIZED = "grading.finalized.v1"
 CLASSROOM_DELETED = "identity.classroom.deleted.v1"
 GROUP = "analytics-v1"
 
@@ -95,4 +94,4 @@ def handler(pool: ConnectionPool[Any]) -> Handler:
 
 
 def run(pool: ConnectionPool[Any], stop: threading.Event, connected: threading.Event) -> None:
-    consume(GROUP, [FINALIZED, CLASSROOM_DELETED], handler(pool), stop, connected)
+    consume(GROUP, [FINALIZED_V1, FINALIZED_V2, CLASSROOM_DELETED], handler(pool), stop, connected)

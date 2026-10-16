@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"learning/platform"
 	"learning/platform/platformtest"
 	"net/http"
 	"net/http/httptest"
@@ -159,7 +160,7 @@ func newFakeAICore(t *testing.T) *fakeAICore {
 }
 
 func (f *fakeAICore) client() *aiCore {
-	return &aiCore{base: f.URL, tokens: &tokenSource{url: f.URL + "/token", id: "content-indexer", secret: "secret", client: f.Client()}, client: f.Client()}
+	return &aiCore{platform.AICore{Base: f.URL, Tokens: &platform.ServiceToken{URL: f.URL + "/token", ID: "content-indexer", Secret: "secret", Client: f.Client()}, Client: f.Client()}}
 }
 
 func TestIngestSendsThePDFAndDecodesFigures(t *testing.T) {
@@ -236,7 +237,7 @@ func TestRerankSendsThePassagePartsForAICoreToJoin(t *testing.T) {
 }
 
 // testBilled is the user test calls to ai-core are made for.
-var testBilled = billed{"teacher-1", "org", "teacher"}
+var testBilled = billed{UserID: "teacher-1", OrgID: "org", Role: "teacher"}
 
 func TestTheBilledUserIsSentAndTheSpendLimitIsRecognised(t *testing.T) {
 	f := newFakeAICore(t)

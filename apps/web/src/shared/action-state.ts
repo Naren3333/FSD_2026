@@ -26,7 +26,7 @@ export class ActionState {
     if (form.invalid) {
       this.error.set('Check the highlighted fields before continuing.');
       setTimeout(() =>
-        Array.from(document.querySelectorAll<HTMLElement>('form .ng-invalid:not(form)'))
+        Array.from(document.querySelectorAll<HTMLElement>('form :is(input, select, textarea).ng-invalid'))
           .find((el) => !el.closest('[hidden]'))
           ?.focus(),
       );

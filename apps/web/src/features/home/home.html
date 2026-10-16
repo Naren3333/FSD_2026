@@ -16,7 +16,12 @@
     @if (assessments.ready()) {
       @for (item of toDo(); track item.id) {
         <article class="record roster-row">
-          <strong>{{ item.title }}</strong>
+          <div>
+            <strong>{{ item.title }}</strong>
+            @if (due(item); as when) {
+              <span class="caption" [class.error]="overdue(item)">{{ when }}</span>
+            }
+          </div>
           <a class="button-link" routerLink="/assessments" [queryParams]="{ open: item.id }">
             Start {{ item.title }}
           </a>
@@ -38,7 +43,7 @@
     @if (waiting(); as count) {
       <p>
         {{ count }} {{ count === 1 ? 'submission is' : 'submissions are' }} waiting for your teacher's review.
-        Grades appear once your teacher finalizes them.
+        Grades appear once your teacher finalizes and releases them.
       </p>
     } @else if (waiting() === 0) {
       <p class="empty">Nothing waiting. Every submission has a final grade.</p>

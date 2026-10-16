@@ -36,11 +36,28 @@ test('teacher and student complete a real assessment through Kong', async ({ bro
   await teacher.getByRole('link', { name: 'Assessments', exact: true }).click();
   await teacher.getByRole('button', { name: 'Refresh assessments' }).click();
   await teacher.getByLabel('Assessment title').fill('Browser assessment ' + suffix);
-  await teacher.getByLabel('Question', { exact: true }).fill('What is 0.1 plus 0.2?');
-  await teacher.getByLabel('Curriculum skill').selectOption({ label: 'Browser skill ' + suffix });
-  await teacher.getByLabel('Correct answer').fill('0.3');
-  await teacher.getByRole('button', { name: 'Create assessment', exact: true }).click();
-  await expect(teacher.getByText('Assessment created.', { exact: true })).toBeVisible();
+  const first = teacher.getByRole('group', { name: 'Question 1' });
+  await first.getByLabel('Question', { exact: true }).fill('What is 0.1 plus 0.2?');
+  await first.getByLabel('Curriculum skill').selectOption({ label: 'Browser skill ' + suffix });
+  await first.getByLabel('Correct answer').fill('0.3');
+  // A written response is marked by the teacher against its rubric; the new question keeps the skill.
+  await teacher.getByRole('button', { name: 'Add question', exact: true }).click();
+  const second = teacher.getByRole('group', { name: 'Question 2' });
+  await expect(second.getByLabel('Question', { exact: true })).toBeFocused();
+  await second.getByLabel('Question', { exact: true }).fill('Why is 0.1 plus 0.2 not exactly 0.3 in binary?');
+  await second.getByLabel('Question type').selectOption('free_response');
+  await second.getByLabel('Criterion 1', { exact: true }).fill('Reasoning');
+  await second.getByLabel('Criterion 1 levels').fill('0: Missing\n2: Explains rounding');
+  await expect(second.getByLabel('Marks')).toHaveValue('2');
+  await teacher.screenshot({ path: 'test-results/editor-desktop.png', fullPage: true });
+  // A draft stays with the teacher until it is published.
+  await teacher.getByRole('button', { name: 'Create draft', exact: true }).click();
+  await expect(teacher.getByText('Draft created.', { exact: true })).toBeVisible();
+  await expect(
+    teacher.getByRole('heading', { name: 'Edit draft: Browser assessment ' + suffix }),
+  ).toBeVisible();
+  await teacher.getByRole('button', { name: 'Publish assessment', exact: true }).click();
+  await expect(teacher.getByText('Assessment published.', { exact: true })).toBeVisible();
   await student.getByRole('button', { name: 'Refresh classrooms' }).click();
   await student.getByLabel('Current classroom').selectOption({ label: 'Browser ' + suffix });
   // Home lists the new assessment as to do and opens it.
@@ -48,6 +65,11 @@ test('teacher and student complete a real assessment through Kong', async ({ bro
   await todo.getByRole('link', { name: 'Start Browser assessment ' + suffix }).click();
   await expect(student).toHaveURL(/\/assessments\?open=/);
   await student.getByLabel('What is 0.1 plus 0.2?').fill('0.30');
+  await student
+    .getByLabel('Why is 0.1 plus 0.2 not exactly 0.3 in binary?')
+    .fill('Neither number has an exact binary form, so both are rounded.');
+  // Work is saved as the student types.
+  await expect(student.getByText(/^Saved at /)).toBeVisible();
   await student.getByRole('button', { name: 'Submit answers', exact: true }).click();
   await expect(
     student.getByText('Answers submitted. Your teacher will review the grade.', { exact: true }),
@@ -63,14 +85,28 @@ test('teacher and student complete a real assessment through Kong', async ({ bro
   }).toPass({ timeout: 30000 });
   // The review shows names, not ids: the student, the assessment, the question and its skill.
   await expect(teacher.getByRole('heading', { name: 'Student Local', exact: true })).toBeVisible();
-  await expect(teacher.getByText('Browser assessment ' + suffix, { exact: false })).toBeVisible();
+  await expect(
+    teacher.locator('article').getByText('Browser assessment ' + suffix, { exact: false }),
+  ).toBeVisible();
   await expect(teacher.getByText('What is 0.1 plus 0.2?', { exact: false })).toBeVisible();
-  await expect(teacher.getByText('Skill: Browser skill ' + suffix, { exact: true })).toBeVisible();
+  await expect(teacher.getByText('Skill: Browser skill ' + suffix, { exact: true })).toHaveCount(2);
   // A draft is the teacher's alone until it is finalized.
   await student.getByRole('link', { name: 'My results', exact: true }).click();
   await student.getByRole('button', { name: 'Refresh results' }).click();
   await expect(student.getByText(/No finalized results yet/)).toBeVisible();
+  // The written response waits for the teacher, who marks it with the rubric and then finalizes.
+  await expect(teacher.getByText('1 to mark', { exact: true })).toBeVisible();
   await teacher.getByRole('button', { name: 'Review grade', exact: true }).click();
+  await expect(
+    teacher.getByText('Neither number has an exact binary form, so both are rounded.'),
+  ).toBeVisible();
+  await teacher.getByRole('button', { name: 'Finalize this grade', exact: true }).click();
+  await expect(teacher.getByText('Check the highlighted fields before continuing.')).toBeVisible();
+  await teacher.getByRole('radio', { name: /Explains rounding/ }).check();
+  await teacher.getByLabel('Feedback on question 2 (optional)').fill('Clear reasoning.');
+  await teacher.screenshot({ path: 'test-results/marking-desktop.png', fullPage: true });
+  await teacher.getByRole('button', { name: 'Finalize this grade', exact: true }).click();
+  await expect(teacher.getByRole('button', { name: 'Cancel', exact: true })).toBeFocused();
   await teacher.getByLabel('Review notes').fill('Reviewed exact decimal answer.');
   await teacher.getByRole('button', { name: 'Finalize grade', exact: true }).click();
   await expect(
@@ -80,8 +116,9 @@ test('teacher and student complete a real assessment through Kong', async ({ bro
   await expect(
     student.getByRole('heading', { name: 'Browser assessment ' + suffix, exact: true }),
   ).toBeVisible();
-  await expect(student.getByText('Correct', { exact: true })).toBeVisible();
-  await expect(student.getByText('Skill: Browser skill ' + suffix, { exact: true })).toBeVisible();
+  await expect(student.getByText('Correct', { exact: true })).toHaveCount(2);
+  await expect(student.getByText('Clear reasoning.', { exact: true })).toBeVisible();
+  await expect(student.getByText('Skill: Browser skill ' + suffix, { exact: true })).toHaveCount(2);
   await student.getByRole('link', { name: 'My progress', exact: true }).click();
   await expect(async () => {
     await student.getByRole('button', { name: 'View my performance' }).click();
@@ -109,6 +146,12 @@ test('teacher and student complete a real assessment through Kong', async ({ bro
   await expect(teacher.getByRole('cell', { name: '100%' })).toBeVisible();
   await student.screenshot({ path: 'test-results/performance-desktop.png', fullPage: true });
   await expectNoHorizontalScroll(student, 'test-results/performance-mobile.png');
+  // The editor and the grading review fit a phone screen.
+  await teacherMenu.getByRole('link', { name: 'Assessments', exact: true }).click();
+  await expect(teacher.getByRole('heading', { name: 'Create an assessment' })).toBeVisible();
+  await expectNoHorizontalScroll(teacher, 'test-results/assessments-mobile.png');
+  await teacherMenu.getByRole('link', { name: 'Grading review', exact: true }).click();
+  await expectNoHorizontalScroll(teacher, 'test-results/review-mobile.png');
   // Removing asks first, with Cancel focused; the student then no longer sees the classroom.
   await teacherMenu.getByRole('link', { name: 'Classrooms', exact: true }).click();
   await roster.getByRole('button', { name: 'Remove Student Local from the classroom' }).click();

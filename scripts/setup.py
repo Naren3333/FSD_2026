@@ -10,7 +10,8 @@ ROOT = Path(__file__).resolve().parents[1]
 # ai-core's usage ledger (ADR 0003).
 SERVICES = ["identity", "curriculum", "content", "assessment", "grading", "analytics", "chatbot", "aicore"]
 # Service accounts that call the private AI services (client-credentials grant, `ai-client` role).
-AI_CLIENTS = ["content-indexer", "question-chatbot-agent"]
+# grading-marker asks for AI marking suggestions (ADR 0004).
+AI_CLIENTS = ["content-indexer", "question-chatbot-agent", "grading-marker"]
 # Local people: username, realm role, and the .env key holding their password.
 PEOPLE = [
     ("teacher", "teacher", "TEACHER_PASSWORD"),
@@ -143,19 +144,21 @@ def clients(values: dict[str, str]) -> list[dict[str, Any]]:
         "directAccessGrantsEnabled": True,
         "protocolMappers": PERSON_MAPPERS,
     }
-    services = [
-        {
-            "clientId": client,
-            "publicClient": False,
-            "secret": values[client_secret_key(client)],
-            "standardFlowEnabled": False,
-            "directAccessGrantsEnabled": False,
-            "serviceAccountsEnabled": True,
-            "protocolMappers": SERVICE_MAPPERS,
-        }
-        for client in AI_CLIENTS
-    ]
+    services = [service_client(client, values[client_secret_key(client)]) for client in AI_CLIENTS]
     return [web, e2e, *services]
+
+
+def service_client(client: str, secret: str) -> dict[str, Any]:
+    """A confidential client-credentials client for a service account."""
+    return {
+        "clientId": client,
+        "publicClient": False,
+        "secret": secret,
+        "standardFlowEnabled": False,
+        "directAccessGrantsEnabled": False,
+        "serviceAccountsEnabled": True,
+        "protocolMappers": SERVICE_MAPPERS,
+    }
 
 
 def realm(values: dict[str, str]) -> dict[str, Any]:

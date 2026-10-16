@@ -87,6 +87,10 @@ def request(client: httpx.Client, method: str, path: str, status: int = 200, **k
     """Sends a request through the gateway, checks its status, and validates the JSON response against the
     service's committed OpenAPI contract."""
     response = client.request(method, path, **kwargs)
+    if response.status_code == 429 and status != 429 and "API rate limit exceeded" in response.text:
+        # Kong's limit of 120 requests a minute covers this whole run; wait for the next minute and try once more.
+        time.sleep(61 - time.time() % 60)
+        response = client.request(method, path, **kwargs)
     assert response.status_code == status, (
         f"{method} {path}: expected {status}, got {response.status_code}: {response.text[:400]}"
     )
@@ -335,14 +339,21 @@ def assess_and_grade(u: Users, room_id: str) -> Graded:
     first, second = (q["id"] for q in assessment["questions"])
     submissions = f"/assessment/assessments/{assessment['id']}/submissions"
     listed = f"/assessment/assessments?classroom_id={room_id}"
-    entry = {"id": assessment["id"], "title": "Decimal test"}
-    assert {**entry, "submitted": False} in request(u.student, "GET", listed)
+    entry = {
+        "id": assessment["id"],
+        "title": "Decimal test",
+        "status": "published",
+        "question_count": 2,
+        "points": 2,
+    }
+    assert {**entry, "submitted": False} in summaries(request(u.student, "GET", listed), entry)
     answers = {"answers": {first: "0.30", second: "word"}}
     submission = request(u.student, "POST", submissions, 201, json=answers)
+    assert submission["late"] is False
     request(u.student, "POST", submissions, 409, json=answers)
     # The list says who is asking has submitted: the student has, the teacher has not.
-    assert {**entry, "submitted": True} in request(u.student, "GET", listed)
-    assert {**entry, "submitted": False} in request(u.teacher, "GET", listed)
+    assert {**entry, "submitted": True} in summaries(request(u.student, "GET", listed), entry)
+    assert {**entry, "submitted": False} in summaries(request(u.teacher, "GET", listed), entry)
 
     evaluations = f"/grading/evaluations?classroom_id={room_id}"
     grades = eventually(
@@ -385,12 +396,17 @@ def assess_and_grade(u: Users, room_id: str) -> Graded:
     return Graded(submission["id"], grade["id"], performance, result["skills"])
 
 
+def summaries(rows: list[dict[str, Any]], entry: dict[str, Any]) -> list[dict[str, Any]]:
+    """The assessment list's rows cut down to entry's fields and `submitted`."""
+    return [{k: row[k] for k in [*entry, "submitted"]} for row in rows]
+
+
 def replayed_events(u: Users, room_id: str, graded: Graded) -> None:
     """Consumers survive a restart, and replayed or re-identified events change nothing."""
     docker("restart", "grading", "analytics")
-    replay("assessment", "assessment.submitted.v1", graded.submission_id)
-    replay("grading", "grading.finalized.v1", graded.grade_id)
-    duplicate_id = replay("grading", "grading.finalized.v1", graded.grade_id, fresh_id=True)
+    replay("assessment", "assessment.submitted.v2", graded.submission_id)
+    replay("grading", "grading.finalized.v2", graded.grade_id)
+    duplicate_id = replay("grading", "grading.finalized.v2", graded.grade_id, fresh_id=True)
     eventually(
         lambda: sql_value("analytics", f"SELECT count(*) FROM inbox WHERE event_id='{duplicate_id}'"),
         lambda value: value == "1",
@@ -409,7 +425,7 @@ def class_dashboard(u: Users, room_id: str, graded: Graded) -> None:
         {"title": a["title"], "submissions": a["submissions"]} for a in request(u.teacher, "GET", progress)
     ]
     counts = f"/grading/evaluations/counts{query}"
-    assert request(u.teacher, "GET", counts) == {"drafts": 0, "finalized": 1}
+    assert request(u.teacher, "GET", counts) == {"drafts": 0, "finalized": 1, "unreleased": 0}
     performance = f"/analytics/performance{query}&limit=50"
     page = request(u.teacher, "GET", performance)
     assert page["total"] >= 1 and page["offset"] == 0
@@ -419,6 +435,161 @@ def class_dashboard(u: Users, room_id: str, graded: Graded) -> None:
     for path in [progress, counts, performance]:
         request(u.student, "GET", path, 403)
         request(u.other, "GET", path, 403)
+
+
+@dataclass
+class Late:
+    assessment_id: str
+    skill_id: str
+    short: str  # the short-answer question
+    free: str  # the free-response question
+    answers: dict[str, str]
+
+
+def lifecycle(u: Users, room_id: str) -> Late:
+    """Drafts stay with the teacher until published, and a published assessment cannot change. Students save work,
+    and submit after the due date, flagged late."""
+    skill = request(
+        u.teacher, "POST", "/curriculum/nodes", 201,
+        json={"kind": "skill", "name": "Integration photosynthesis", "parent_id": None},
+    )  # fmt: skip
+    rubric = {
+        "criteria": [
+            {
+                "title": "Accuracy",
+                "levels": [
+                    {"points": 0, "descriptor": "Wrong"},
+                    {"points": 2, "descriptor": "Partly right"},
+                    {"points": 4, "descriptor": "Right"},
+                ],
+            },
+            {
+                "title": "Clarity",
+                "levels": [{"points": 0, "descriptor": "Unclear"}, {"points": 1, "descriptor": "Clear"}],
+            },
+        ],
+        "model_answer": "Plants use light energy to turn carbon dioxide and water into glucose and oxygen.",
+    }
+    questions = [
+        {
+            "prompt": "Which gas do plants give off?",
+            "type": "short_answer",
+            "accepted_answers": ["oxygen"],
+            "points": 2,
+        },
+        {"prompt": "Explain photosynthesis.", "type": "free_response", "rubric": rubric, "max_length": 2000},
+    ]
+    due = time.time() + 8
+    draft = {
+        "classroom_id": room_id,
+        "title": "Photosynthesis draft",
+        "status": "draft",
+        "questions": [{**q, "skill_id": skill["id"]} for q in questions],
+        "due_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(due)),
+        "late_policy": "accept_flagged",
+        "release_policy": "manual",
+        "ai_marking": True,
+    }
+    created = request(u.teacher, "POST", "/assessment/assessments", 201, json=draft)
+    path = f"/assessment/assessments/{created['id']}"
+    assert created["status"] == "draft" and created["questions"][1]["points"] == 5
+    listed = f"/assessment/assessments?classroom_id={room_id}"
+    # A draft is the teacher's alone: students neither see nor open it.
+    assert created["id"] not in [a["id"] for a in request(u.student, "GET", listed)]
+    request(u.student, "GET", path, 404)
+    request(u.other, "PUT", path, 403, json={**draft, "title": "Forbidden"})
+    edited = request(u.teacher, "PUT", path, json={**draft, "title": "Photosynthesis"})
+    assert edited["title"] == "Photosynthesis"
+    spare = request(u.teacher, "POST", "/assessment/assessments", 201, json={**draft, "title": "Spare draft"})
+    request(u.teacher, "DELETE", f"/assessment/assessments/{spare['id']}")
+    request(u.teacher, "GET", f"/assessment/assessments/{spare['id']}", 404)
+
+    published = request(u.teacher, "POST", f"{path}/publish")
+    assert published["status"] == "published"
+    request(u.teacher, "POST", f"{path}/publish", 409)
+    request(u.teacher, "PUT", path, 409, json=draft)
+    request(u.teacher, "DELETE", path, 409)
+    public = request(u.student, "GET", path)
+    assert all(k not in q for q in public["questions"] for k in ["answer", "accepted_answers", "rubric"])
+    short, free = (q["id"] for q in published["questions"])
+
+    # Saved work comes back until it is submitted.
+    saved = f"{path}/saved-answers"
+    request(u.student, "PUT", saved, json={"answers": {free: "Plants make"}})
+    assert request(u.student, "GET", saved)["answers"] == {free: "Plants make"}
+    request(u.teacher, "GET", saved, 403)
+    time.sleep(max(0.0, due - time.time()) + 1)
+    answers = {short: "O2 gas", free: "Plants use light to make glucose and give off oxygen."}
+    submission = request(u.student, "POST", f"{path}/submissions", 201, json={"answers": answers})
+    assert submission["late"] is True
+    assert request(u.student, "GET", saved)["answers"] == {}
+    return Late(created["id"], skill["id"], short, free, answers)
+
+
+def marking(u: Users, room_id: str, late: Late) -> None:
+    """The teacher marks short answers and rubric questions (with AI suggestions queued, never applied),
+    finalizes, and releases results by hand; analytics counts part marks."""
+    short, free, answers = late.short, late.free, late.answers
+
+    # Neither answer can be marked automatically: the short answer matches no accepted answer. Each gets an AI
+    # suggestion, which waits for ai-core (without provider keys it stays pending with the reason).
+    evaluations = f"/grading/evaluations?classroom_id={room_id}&assessment_id={late.assessment_id}"
+    [grade] = eventually(lambda: request(u.teacher, "GET", evaluations), lambda rows: len(rows) == 1, "draft")
+    assert grade["late"] and grade["answers"] == answers and grade["release_policy"] == "manual"
+    assert [e["needs_marking"] for e in grade["evidence"]] == [True, True]
+    tried = eventually(
+        lambda: request(u.teacher, "GET", evaluations)[0],
+        lambda v: all(
+            e["suggestion"]["status"] != "pending" or e["suggestion"].get("reason") for e in v["evidence"]
+        ),
+        "AI marking attempt",
+    )
+    assert all(e["awarded"] == 0 and "marked_by" not in e for e in tried["evidence"])
+    request(u.teacher, "GET", f"/grading/evaluations?classroom_id={room_id}&assessment_id=nope", 422)
+
+    finalize = f"/grading/evaluations/{grade['id']}/finalize"
+    request(u.teacher, "POST", finalize, 422, json={"reason": "Too early"})
+    marks = f"/grading/evaluations/{grade['id']}/marks"
+    request(u.teacher, "POST", marks, 422, json={"marks": {free: {"criteria": {"c1": 3, "c2": 1}}}})
+    request(u.teacher, "POST", marks, 422, json={"marks": {short: {"awarded": 3}}})
+    request(u.student, "POST", marks, 403, json={"marks": {short: {"awarded": 2}}})
+    request(u.other, "POST", marks, 403, json={"marks": {short: {"awarded": 2}}})
+    feedback = "Name the products and where the energy comes from."
+    marked = request(
+        u.teacher, "POST", marks,
+        json={
+            "marks": {
+                short: {"awarded": 2, "feedback": "O2 is oxygen: accepted."},
+                free: {"criteria": {"c1": 2, "c2": 1}, "feedback": feedback},
+            }
+        },
+    )  # fmt: skip
+    assert marked["status"] == "draft" and [e["awarded"] for e in marked["evidence"]] == [2, 3]
+    request(u.teacher, "POST", finalize, json={"reason": "Marked by hand"})
+
+    # Finalized but not released: the student sees nothing yet.
+    mine = f"/grading/evaluations/mine?classroom_id={room_id}"
+    assert grade["id"] not in [r["id"] for r in request(u.student, "GET", mine)]
+    counts = request(u.teacher, "GET", f"/grading/evaluations/counts?classroom_id={room_id}")
+    assert counts == {"drafts": 0, "finalized": 2, "unreleased": 1}
+    release = "/grading/evaluations/release"
+    request(u.student, "POST", release, 403, json={"assessment_id": late.assessment_id})
+    request(u.other, "POST", release, 403, json={"assessment_id": late.assessment_id})
+    assert request(u.teacher, "POST", release, json={"assessment_id": late.assessment_id})["released"] == 1
+    assert request(u.teacher, "POST", release, json={"assessment_id": late.assessment_id})["released"] == 0
+    [result] = [r for r in request(u.student, "GET", mine) if r["id"] == grade["id"]]
+    assert [(e["awarded"], e["possible"]) for e in result["evidence"]] == [(2, 2), (3, 5)]
+    assert result["evidence"][1]["feedback"] == feedback and result["late"]
+    assert all("suggestion" not in e and "criteria" not in e for e in result["evidence"])
+
+    performance = f"/analytics/performance/{u.student_id}?classroom_id={room_id}"
+    observed = eventually(
+        lambda: request(u.teacher, "GET", performance)["skills"],
+        lambda skills: any(s["skill_id"] == late.skill_id for s in skills),
+        "part marks in analytics",
+    )
+    [part] = [s for s in observed if s["skill_id"] == late.skill_id]
+    assert (part["attempted"], part["correct"], part["marks_awarded"], part["marks_possible"]) == (2, 1, 5, 7)
 
 
 def unenroll(u: Users, room_id: str) -> None:
@@ -431,7 +602,7 @@ def unenroll(u: Users, room_id: str) -> None:
     assert request(u.teacher, "GET", f"/identity/classrooms/{room_id}/students") == []
     request(u.student, "GET", f"/grading/evaluations/mine?classroom_id={room_id}", 403)
     assert room_id not in [r["id"] for r in request(u.student, "GET", "/identity/classrooms")]
-    assert len(request(u.teacher, "GET", f"/grading/evaluations?classroom_id={room_id}")) == 1
+    assert len(request(u.teacher, "GET", f"/grading/evaluations?classroom_id={room_id}")) == 2
 
 
 def delete_classroom(u: Users, room_id: str, graded: Graded) -> None:
@@ -477,7 +648,7 @@ def delete_classroom(u: Users, room_id: str, graded: Graded) -> None:
     # A repeated deletion and a late submission change nothing.
     duplicate_id = replay("identity", "identity.classroom.deleted.v1", room, fresh_id=True)
     late_id = str(uuid4())
-    publish("assessment.submitted.v1", {**late_submission, "event_id": late_id})
+    publish("assessment.submitted.v2", {**late_submission, "event_id": late_id})
     eventually(
         lambda: sql_value("content", f"SELECT count(*) FROM inbox WHERE event_id='{duplicate_id}'"),
         lambda value: value == "1",
@@ -503,7 +674,13 @@ def databases() -> None:
         isolation = psql("SELECT 1", database=database, user=user, check=False)
         assert isolation.returncode != 0 and "permission denied" in isolation.stderr.lower(), (user, database)
     versions = "SELECT string_agg(version::text, ',' ORDER BY version) FROM schema_migrations"
-    for service, expected in [("content", "1,2"), ("identity", "1,2,3,4,5")]:
+    for service, expected in [
+        ("content", "1,2"),
+        ("identity", "1,2,3,4,5"),
+        ("assessment", "1,2"),
+        ("grading", "1,2,3"),
+        ("analytics", "1,2,3"),
+    ]:
         migrations = sql_value(service, versions)
         assert migrations == expected, (service, migrations)
     vector = sql_value("content", "SELECT count(*) FROM pg_extension WHERE extname='vector'")
@@ -512,7 +689,7 @@ def databases() -> None:
 
 def ai_service_accounts(u: Users) -> None:
     """Service accounts reach the private AI service (200 with provider keys, 503 without); people do not."""
-    for client_id in ["content-indexer", "question-chatbot-agent"]:
+    for client_id in ["content-indexer", "question-chatbot-agent", "grading-marker"]:
         assert ai_core_status(service_token(client_id)) in (200, 503)
     assert ai_core_status(u.student.headers["Authorization"].removeprefix("Bearer ")) == 403
 
@@ -534,6 +711,7 @@ def main() -> None:
     graded = assess_and_grade(users, room_id)
     replayed_events(users, room_id, graded)
     class_dashboard(users, room_id, graded)
+    marking(users, room_id, lifecycle(users, room_id))
     unenroll(users, room_id)
     delete_classroom(users, room_id, graded)
     databases()
@@ -544,6 +722,8 @@ def main() -> None:
         "S3 upload/extraction, PDF indexing jobs, teacher-only rubrics, search access, chat threads and streaming, "
         "AI spend allowance, answer-key secrecy, submissions, draft grading, teacher finalization, students' own "
         "finalized results, the class dashboard's counts and class performance, Kafka analytics, consumer restart, duplicate event and business-key idempotency, "
+        "draft and scheduled assessments, saved answers, late submissions, short-answer and rubric marking, "
+        "AI marking suggestions, manual release, part marks in analytics, "
         "student privacy, database isolation, numbered migrations, pgvector, AI service accounts, per-session rate limiting."
     )
 

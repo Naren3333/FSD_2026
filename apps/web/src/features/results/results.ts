@@ -15,7 +15,8 @@ interface Results {
   assessments: Map<string, Assessment>;
 }
 
-/** A student's own finalized grades in the current classroom. Drafts stay with the teacher until finalized. */
+/** A student's own released grades in the current classroom. Drafts stay with the teacher until finalized, and some
+ * assessments' grades until the teacher releases them. */
 @Component({
   selector: 'app-results',
   standalone: true,
@@ -60,6 +61,10 @@ export class ResultsComponent {
   }
   skill(evidence: Evidence): string {
     return this.curriculum.skillName(evidence.skill_id);
+  }
+  outcome(evidence: Evidence): string {
+    if (evidence.correct) return 'Correct';
+    return evidence.awarded > 0 ? 'Part marks' : 'Incorrect';
   }
   finalizedOn(result: Evaluation): string {
     return result.finalized_at ? date(result.finalized_at) : '';

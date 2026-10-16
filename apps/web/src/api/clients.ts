@@ -14,10 +14,12 @@ import type {
   Evaluation,
   GradingCounts,
   Node,
+  Mark,
   NewAssessment,
   NodeInput,
   Performance,
   Profile,
+  SavedAnswers,
   StreamEvent,
   Student,
   Submission,
@@ -132,8 +134,36 @@ export class AssessmentApi {
   get(assessmentId: string): Promise<Assessment> {
     return this.gateway.request('assessment', `/assessments/${id(assessmentId)}`);
   }
+  /** Creates a draft, or publishes at once when its status says so. */
   create(assessment: NewAssessment): Promise<Assessment> {
     return this.gateway.request('assessment', '/assessments', { method: 'POST', body: assessment });
+  }
+  /** Replaces a draft; a published assessment cannot change. */
+  update(assessmentId: string, assessment: NewAssessment): Promise<Assessment> {
+    return this.gateway.request('assessment', `/assessments/${id(assessmentId)}`, {
+      method: 'PUT',
+      body: assessment,
+    });
+  }
+  publish(assessmentId: string): Promise<Assessment> {
+    return this.gateway.request('assessment', `/assessments/${id(assessmentId)}/publish`, {
+      method: 'POST',
+      body: {},
+    });
+  }
+  /** Deletes a draft; published assessments are kept. */
+  remove(assessmentId: string): Promise<{ id: string }> {
+    return this.gateway.request('assessment', `/assessments/${id(assessmentId)}`, { method: 'DELETE' });
+  }
+  /** The signed-in student's unsubmitted work. */
+  saved(assessmentId: string): Promise<SavedAnswers> {
+    return this.gateway.request('assessment', `/assessments/${id(assessmentId)}/saved-answers`);
+  }
+  save(assessmentId: string, answers: Record<string, string>): Promise<{ saved_at: string }> {
+    return this.gateway.request('assessment', `/assessments/${id(assessmentId)}/saved-answers`, {
+      method: 'PUT',
+      body: { answers },
+    });
   }
   submit(assessmentId: string, answers: Record<string, string>): Promise<Submission> {
     return this.gateway.request('assessment', `/assessments/${id(assessmentId)}/submissions`, {
@@ -147,25 +177,39 @@ export class AssessmentApi {
 export class GradingApi {
   private readonly gateway = inject(Gateway);
 
-  evaluations(classroomId: string): Promise<Evaluation[]> {
-    return this.gateway.request('grading', `/evaluations?classroom_id=${id(classroomId)}`);
+  /** The classroom's 100 newest evaluations, or all (up to 500) of one assessment's, with students' answers. */
+  evaluations(classroomId: string, assessmentId = ''): Promise<Evaluation[]> {
+    const query = new URLSearchParams({ classroom_id: classroomId });
+    if (assessmentId) query.set('assessment_id', assessmentId);
+    return this.gateway.request('grading', `/evaluations?${query}`);
   }
   /** For the classroom's teacher: how many grades are drafts waiting for review, and how many are final. */
   counts(classroomId: string): Promise<GradingCounts> {
     return this.gateway.request('grading', `/evaluations/counts?classroom_id=${id(classroomId)}`);
   }
-  /** The signed-in student's finalized results in the classroom; drafts are never returned. */
+  /** The signed-in student's released results in the classroom; drafts are never returned. */
   mine(classroomId: string): Promise<Evaluation[]> {
     return this.gateway.request('grading', `/evaluations/mine?classroom_id=${id(classroomId)}`);
   }
-  finalize(
-    evaluationId: string,
-    reason: string,
-    overrides: Record<string, number> = {},
-  ): Promise<Evaluation> {
+  /** Saves the teacher's marks on a draft without finalizing it. */
+  mark(evaluationId: string, marks: Record<string, Mark>): Promise<Evaluation> {
+    return this.gateway.request('grading', `/evaluations/${id(evaluationId)}/marks`, {
+      method: 'POST',
+      body: { marks },
+    });
+  }
+  /** Finalizes a draft, with any last marks; refused while a question still needs marking. */
+  finalize(evaluationId: string, reason: string, marks: Record<string, Mark> = {}): Promise<Evaluation> {
     return this.gateway.request('grading', `/evaluations/${id(evaluationId)}/finalize`, {
       method: 'POST',
-      body: { reason, overrides },
+      body: { reason, marks },
+    });
+  }
+  /** Shows an assessment's finalized grades to its students. */
+  release(assessmentId: string): Promise<{ assessment_id: string; released: number }> {
+    return this.gateway.request('grading', '/evaluations/release', {
+      method: 'POST',
+      body: { assessment_id: assessmentId },
     });
   }
 }

@@ -78,23 +78,64 @@ export interface StreamEvent {
 }
 /** The fields a new node needs: its level, name and the node one level above it. */
 export type NodeInput = Omit<Node, 'id'>;
+export type QuestionType = 'numerical' | 'multiple_choice' | 'short_answer' | 'free_response';
+/** One level of a rubric criterion: its points and what work at that level looks like. */
+export interface Level {
+  points: number;
+  descriptor: string;
+}
+export interface Criterion {
+  /** Assigned by Assessment (c1, c2, …). */
+  id?: string;
+  title: string;
+  levels: Level[];
+}
+/** How a free response is marked; for the classroom's teacher only. */
+export interface Rubric {
+  criteria: Criterion[];
+  model_answer?: string;
+}
+/** A question. Answer keys, accepted answers and rubrics come only to the classroom's teacher. */
 export interface Question {
   id?: string;
   prompt: string;
-  type: 'numerical' | 'multiple_choice';
+  type: QuestionType;
   options: string[];
   answer?: string;
   tolerance?: string;
+  accepted_answers?: string[];
+  case_sensitive?: boolean;
+  rubric?: Rubric;
+  /** A free response's character limit. */
+  max_length?: number;
+  /** For a free response, the rubric's total. */
+  points: number;
   skill_id: string;
 }
-export interface Assessment {
+export type AssessmentStatus = 'draft' | 'published';
+/** Late work is accepted and flagged for the teacher, or refused after the due date. */
+export type LatePolicy = 'accept_flagged' | 'reject';
+/** Students see a finalized grade at once, or when the teacher releases the assessment's results. */
+export type ReleasePolicy = 'on_finalize' | 'manual';
+/** An assessment's dates and policies, as its teacher sets them. */
+export interface AssessmentSettings {
+  status: AssessmentStatus;
+  opens_at: string | null;
+  due_at: string | null;
+  late_policy: LatePolicy;
+  release_policy: ReleasePolicy;
+  ai_marking: boolean;
+}
+/** An assessment. Students get only the questions, dates and late policy. */
+export interface Assessment extends Partial<AssessmentSettings> {
   id: string;
   classroom_id: string;
   title: string;
   questions: Question[];
+  published_at?: string | null;
 }
-/** What a teacher sends to create an assessment; Assessment assigns the ids. */
-export interface NewAssessment {
+/** What a teacher sends to create or replace a draft; Assessment assigns the ids. */
+export interface NewAssessment extends AssessmentSettings {
   classroom_id: string;
   title: string;
   questions: Omit<Question, 'id'>[];
@@ -103,6 +144,34 @@ export interface NewAssessment {
 export interface Submission {
   id: string;
   status: 'submitted';
+  /** Submitted after the due date. */
+  late: boolean;
+}
+/** A student's unsubmitted work on an assessment. */
+export interface SavedAnswers {
+  answers: Record<string, string>;
+  saved_at: string | null;
+}
+export interface CriterionScore {
+  criterion_id: string;
+  points: number;
+}
+/** An AI-suggested mark for a question the teacher marks. Never a grade: the teacher accepts, edits or ignores it. */
+export interface Suggestion {
+  status: 'pending' | 'ready' | 'failed';
+  criteria?: {
+    criterion_id: string;
+    points: number;
+    evidence_quotes: string[];
+    rationale: string;
+  }[];
+  awarded: number;
+  feedback?: string;
+  confidence?: 'low' | 'medium' | 'high';
+  flags?: string[];
+  model?: string;
+  /** Why it failed or still waits, such as the teacher's daily AI allowance. */
+  reason?: string;
 }
 export interface Evidence {
   question_id: string;
@@ -110,6 +179,12 @@ export interface Evidence {
   correct: boolean;
   awarded: number;
   possible: number;
+  /** The teacher still has to mark this question. */
+  needs_marking?: boolean;
+  marked_by?: 'auto' | 'teacher';
+  criteria?: CriterionScore[];
+  feedback?: string;
+  suggestion?: Suggestion;
 }
 export interface Evaluation {
   id: string;
@@ -118,8 +193,18 @@ export interface Evaluation {
   student_id: string;
   status: 'draft' | 'finalized';
   evidence: Evidence[];
-  /** On a student's own results only. */
-  finalized_at?: string;
+  answers: Record<string, string>;
+  late: boolean;
+  submitted_at?: string | null;
+  release_policy?: ReleasePolicy;
+  finalized_at?: string | null;
+  released_at?: string | null;
+}
+/** The teacher's marking of one question: a level for each rubric criterion, or the points awarded. */
+export interface Mark {
+  criteria?: Record<string, number>;
+  awarded?: number;
+  feedback?: string;
 }
 /** The signed-in user's AI spend today against their daily allowance (ADR 0003). */
 export interface Usage {
@@ -130,8 +215,12 @@ export interface Usage {
 export interface SkillMetric {
   skill_id: string;
   attempted: number;
+  /** Questions answered with full marks. */
   correct: number;
   observed_accuracy: number;
+  /** Marks earned out of marks possible, which shows part marks. */
+  marks_awarded?: number;
+  marks_possible?: number;
   /** Fewer than five attempts is too few to judge. */
   evidence_status: 'insufficient_evidence' | 'observed';
   /** Five or more attempts under 60% correct. */
@@ -159,6 +248,12 @@ export interface AssessmentSummary {
   id: string;
   title: string;
   submitted: boolean;
+  status: AssessmentStatus;
+  opens_at: string | null;
+  due_at: string | null;
+  late_policy: LatePolicy;
+  question_count: number;
+  points: number;
 }
 /** How many students have submitted an assessment. */
 export interface AssessmentProgress {
@@ -175,4 +270,6 @@ export interface Enrollment {
 export interface GradingCounts {
   drafts: number;
   finalized: number;
+  /** Finalized grades students cannot see until the teacher releases them. */
+  unreleased: number;
 }

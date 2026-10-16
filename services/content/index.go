@@ -144,7 +144,7 @@ func (x indexer) ingest(ctx context.Context, j job) (ingestResult, error) {
 	}
 	defer object.Close()
 	// The teacher who uploaded the document pays for its model calls.
-	return x.ai.ingest(ctx, j.title, object, size, billed{j.owner, j.org, "teacher"})
+	return x.ai.ingest(ctx, j.title, object, size, billed{UserID: j.owner, OrgID: j.org, Role: "teacher"})
 }
 
 // validate rejects an ingest result Content cannot store as-is, rather than storing part of it.

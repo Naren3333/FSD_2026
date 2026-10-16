@@ -285,6 +285,16 @@
             "minimum": 0.0,
             "title": "Observed Accuracy"
           },
+          "marks_awarded": {
+            "type": "integer",
+            "minimum": 0.0,
+            "title": "Marks Awarded"
+          },
+          "marks_possible": {
+            "type": "integer",
+            "minimum": 1.0,
+            "title": "Marks Possible"
+          },
           "evidence_status": {
             "type": "string",
             "enum": [
@@ -305,10 +315,13 @@
           "attempted",
           "correct",
           "observed_accuracy",
+          "marks_awarded",
+          "marks_possible",
           "evidence_status",
           "weakness_indicator"
         ],
-        "title": "SkillMetric"
+        "title": "SkillMetric",
+        "description": "A skill's finalized evidence: questions attempted and answered with full marks, and the marks earned out of\nthe marks possible (which shows part marks)."
       },
       "StudentPerformance": {
         "properties": {

@@ -67,8 +67,9 @@ services:
     - -ec
     command:
     - for topic in content.uploaded.v1 content.indexed.v1 assessment.submitted.v1 grading.finalized.v1
-      identity.classroom.deleted.v1 assessment.submitted.v1.dlq grading.finalized.v1.dlq
-      identity.classroom.deleted.v1.dlq; do /opt/kafka/bin/kafka-topics.sh
+      assessment.submitted.v2 grading.finalized.v2 identity.classroom.deleted.v1
+      assessment.submitted.v1.dlq grading.finalized.v1.dlq assessment.submitted.v2.dlq
+      grading.finalized.v2.dlq identity.classroom.deleted.v1.dlq; do /opt/kafka/bin/kafka-topics.sh
       --bootstrap-server kafka:9092 --create --if-not-exists --topic $$topic --partitions
       3 --replication-factor 1; done
   # S3-compatible document storage. MinIO's images stopped being publicly downloadable, so this is
@@ -249,6 +250,11 @@ services:
       DATABASE_URL: postgresql://grading:${GRADING_DB_PASSWORD}@postgres:5432/grading?sslmode=disable
       IDENTITY_URL: http://identity:8080
       KAFKA_BROKERS: kafka:9092
+      # AI marking suggestions (ADR 0004), billed to the assessment's teacher through ai-core.
+      AI_CORE_URL: http://ai-core:8080
+      AI_TOKEN_URL: http://keycloak:8080/realms/learning/protocol/openid-connect/token
+      AI_CLIENT_ID: grading-marker
+      AI_CLIENT_SECRET: ${GRADING_MARKER_CLIENT_SECRET:?Run scripts/setup.py or scripts/upgrade_local.py}
     depends_on:
       keycloak:
         condition: service_started

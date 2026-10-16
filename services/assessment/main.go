@@ -1,5 +1,5 @@
-// Command assessment is the Assessment service: immutable quizzes and student submissions, published as
-// assessment.submitted events.
+// Command assessment is the Assessment service: draft and published assessments, student submissions and saved
+// work, with submissions published as assessment.submitted events.
 package main
 
 import (

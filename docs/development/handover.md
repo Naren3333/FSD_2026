@@ -17,7 +17,7 @@ services/{analytics,ai-core,question-generation-agent,
                                    Independent Python apps, requirements, tests, Dockerfiles
 packages/platform/                 Go HTTP/auth/db/event operational helpers
 packages/python-platform/          Python auth, errors, JSON logging, Identity and token clients, SSE, DB pools
-contracts/{http,events}/            Ten OpenAPI documents, three event schemas
+contracts/{http,events}/            Ten OpenAPI documents, the implemented event schemas
 infra/                             Kong config generator, restricted storage policy
 scripts/                           Setup, checks, readiness, contracts and real integration
 docs/                              Original brief, inspection plan, ADR, architecture, operations
@@ -145,14 +145,23 @@ Each part loads and fails on its own (the shared `Section` helper, now in `share
 
 Kong's rate limit (120 requests a minute) was counted per Kong consumer, and every user signs in through the one `keycloak` consumer, so the whole school shared one budget. Once Home and the Class dashboard each loaded several sections at once, CI's browser test hit 429s right after `integration.py`, failing at a different step each run. `infra/kong/bootstrap.py` now limits by the `Authorization` header, so each signed-in session has its own 120 a minute; a new sign-in starts a new budget. Check: `integration.py` `rate_limit_per_session` (one session gets 429 after 125 requests while another session is still served).
 
+## Assessment lifecycle, teacher marking and AI suggestions (2026-10-16, ADR 0004)
+
+- **Assessment:** drafts (`PUT`, `DELETE`, `POST /publish`), `opens_at`, `due_at`, late policy (accept and flag, or refuse with `409 CLOSED`), release policy, `ai_marking`, points per question, short answers with accepted answers, free responses with rubrics and an optional model answer, and students' saved answers (`GET`/`PUT /saved-answers`). The list returns `status`, dates, `question_count` and `points`; a submission returns `late`. Events move to `assessment.submitted.v2`. Migration `002_lifecycle.sql`.
+- **Grading:** reads v1 and v2 submissions. Unmatched short answers and free responses get `needs_marking`; `POST /v1/evaluations/{id}/marks` saves rubric levels, points and feedback on a draft; finalize takes `marks` and refuses with `NEEDS_MARKING`; `POST /v1/evaluations/release` releases an assessment's results; `GET /v1/evaluations?assessment_id=` lists one assessment's grades; counts add `unreleased`. AI suggestions come from `marking_jobs` workers through ai-core as `grading-marker`, billed to the assessment's creator, and are checked against the rubric before they are stored. Events move to `grading.finalized.v2` with part marks. Migration `003_marking.sql`. The shared Go package gained the ai-core client and service token Content already used.
+- **Analytics:** reads both finalized versions; skills add `marks_awarded` and `marks_possible`. Migration `003_partial_credit.sql` widens the evidence checks.
+- **Web:** a multi-question editor (four types, rubric levels as "points: description" lines, marks, schedule, late and release policies, AI suggestions), draft edit/publish/delete with a confirmation dialog, students' due dates, character counts and autosave, an inline marking form in Grading review with rubric levels, feedback and the AI suggestion with its quotes, a per-assessment filter with Release results, feedback and answers on My results, due dates on Home, and unreleased grades on the Class dashboard.
+- **Checks:** Go unit tests for each new rule (`services/assessment`, `services/grading` including `marker_test.go`), Analytics tests, web unit tests (`editor.test.ts`, `marking.test.ts`), `integration.py` steps `lifecycle` and `marking`, and `e2e/workflow.spec.ts` (draft, publish, written response, autosave, rubric marking, feedback).
+- **Not built yet:** the marking scheme from Content as extra AI context, a second opinion for low-confidence suggestions, a question bank, resits, and teacher-agreement metrics.
+
 ## Incomplete requirements and risks
 
 The full requested definition of done is **not claimed**. The coherent core workflow is implemented, but these requirements remain incomplete or narrower than the full brief:
 
-- Separate reusable question-bank CRUD, assessment drafts/publication scheduling, assignments with due dates, resits, and richer rubric/draft-feedback workflows. Assessments currently publish immediately and support one submission.
+- Separate reusable question-bank CRUD and resits. Each student can submit an assessment once.
 - Document revision workflows beyond revision 1, lesson-plan persistence, and the question generation and performance interpretation agents.
 - Topic-level analytics, assessment trends, richer teacher summaries and durable archival/reconciliation beyond Kafka's configured 30-day retention.
-- Complete CRUD/pagination in the UI. Lists are capped; the assessment editor authors one question, and teacher override editing is API-only.
+- Complete pagination in the UI. Lists are capped (one assessment's grades at 500).
 - Production Kafka TLS/SASL/ACLs, deployment network policies, per-service machine identities, managed OIDC persistence, automated signing-key rollover, separate migration/runtime roles, backups/restore testing, secret management and dependency/image vulnerability audits.
 - Neon configuration is supported by service URLs but was not tested against a live Neon project; pgvector is installed for Content's chunk embeddings.
 - S3/SQL atomicity requires a staged-upload saga and orphan reconciliation. Ambiguous commits retain originals to avoid deleting a possibly committed document. No destructive cleanup is scheduled.

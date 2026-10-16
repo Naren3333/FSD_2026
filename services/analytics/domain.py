@@ -6,16 +6,24 @@ from learning_transport import Contract
 from learning_transport.kafka import Envelope
 from pydantic import Field, model_validator
 
+FINALIZED_V1 = "grading.finalized.v1"
+FINALIZED_V2 = "grading.finalized.v2"
+
 
 class Evidence(Contract):
+    """One question's finalized marks. A question is correct only with full marks; since v2 a question is worth up
+    to 100 points and may earn part of them."""
+
     question_id: UUID
     skill_id: UUID
     correct: bool
-    awarded: int = Field(ge=0, le=1, strict=True)
-    possible: int = Field(ge=1, le=1, strict=True)
+    awarded: int = Field(ge=0, le=100, strict=True)
+    possible: int = Field(ge=1, le=100, strict=True)
 
     @model_validator(mode="after")
     def consistent(self) -> "Evidence":
+        if self.awarded > self.possible:
+            raise ValueError("Awarded more than possible")
         if self.correct != (self.awarded == self.possible):
             raise ValueError("Correctness and awarded score disagree")
         return self
@@ -41,8 +49,10 @@ class Event(Envelope):
 
     @model_validator(mode="after")
     def finalized(self) -> "Event":
-        if self.event_type != "grading.finalized.v1" or self.resource_id != self.data.evaluation_id:
+        if self.event_type not in (FINALIZED_V1, FINALIZED_V2) or self.resource_id != self.data.evaluation_id:
             raise ValueError("Not a finalized grading event")
+        if self.event_type == FINALIZED_V1 and any(e.possible != 1 for e in self.data.evidence):
+            raise ValueError("A v1 question is worth one point")
         return self
 
 
@@ -63,10 +73,15 @@ class ClassroomDeletedEvent(Envelope):
 
 
 class SkillMetric(Contract):
+    """A skill's finalized evidence: questions attempted and answered with full marks, and the marks earned out of
+    the marks possible (which shows part marks)."""
+
     skill_id: UUID
     attempted: int = Field(ge=1)
     correct: int = Field(ge=0)
     observed_accuracy: float = Field(ge=0, le=1)
+    marks_awarded: int = Field(ge=0)
+    marks_possible: int = Field(ge=1)
     evidence_status: Literal["insufficient_evidence", "observed"]
     weakness_indicator: bool
 
@@ -74,6 +89,8 @@ class SkillMetric(Contract):
     def evidence_matches(self) -> "SkillMetric":
         if self.correct > self.attempted or self.observed_accuracy != round(self.correct / self.attempted, 4):
             raise ValueError("Accuracy must match the observed counts")
+        if self.marks_awarded > self.marks_possible or self.marks_possible < self.attempted:
+            raise ValueError("Marks must match the observed questions")
         expected = "insufficient_evidence" if self.attempted < 5 else "observed"
         if self.evidence_status != expected:
             raise ValueError("Evidence status does not match the reporting threshold")
@@ -120,19 +137,24 @@ def by_student(students: list[str], rows: list[dict[str, Any]]) -> list[dict[str
 
 
 def summarize(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    counts: dict[str, list[int]] = defaultdict(lambda: [0, 0])
+    """Each skill's counts from evidence rows (skill_id, correct, awarded, possible)."""
+    counts: dict[str, list[int]] = defaultdict(lambda: [0, 0, 0, 0])
     for row in rows:
-        skill = str(row["skill_id"])
-        counts[skill][0] += 1
-        counts[skill][1] += int(row["correct"])
+        skill = counts[str(row["skill_id"])]
+        skill[0] += 1
+        skill[1] += int(row["correct"])
+        skill[2] += int(row["awarded"])
+        skill[3] += int(row["possible"])
     return [
         {
             "skill_id": skill,
             "attempted": n,
             "correct": correct,
             "observed_accuracy": round(correct / n, 4),
+            "marks_awarded": awarded,
+            "marks_possible": possible,
             "evidence_status": "insufficient_evidence" if n < 5 else "observed",
             "weakness_indicator": n >= 5 and correct / n < 0.6,
         }
-        for skill, (n, correct) in sorted(counts.items())
+        for skill, (n, correct, awarded, possible) in sorted(counts.items())
     ]

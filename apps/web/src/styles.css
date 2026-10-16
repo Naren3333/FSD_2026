@@ -1009,3 +1009,122 @@ dialog::backdrop {
     max-width: 100%;
   }
 }
+/* Assessment editor, answers and marking. */
+.question-set {
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 18px;
+  margin: 0 0 18px;
+  min-width: 0;
+}
+.question-set legend {
+  font-weight: 600;
+  padding: 0 6px;
+}
+.field-row {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 0 16px;
+}
+.rubric {
+  border-top: 1px solid var(--border);
+  padding-top: 16px;
+  margin-bottom: 18px;
+}
+h4 {
+  font-size: 0.95rem;
+  margin: 0 0 12px;
+}
+.criterion {
+  border-left: 3px solid var(--brand-tint);
+  padding-left: 12px;
+  margin-bottom: 16px;
+}
+label.check {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 44px;
+  font-weight: 400;
+  margin: 0;
+}
+label.check input {
+  width: 20px;
+  min-height: 20px;
+  height: 20px;
+  margin: 0;
+  flex-shrink: 0;
+}
+.button-row,
+.tag-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 12px;
+  align-items: center;
+}
+.add-question {
+  margin-bottom: 18px;
+}
+.answer-box {
+  resize: vertical;
+}
+.answer-text {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  color: var(--ink);
+  background: var(--canvas);
+  border-radius: 6px;
+  padding: 10px 12px;
+  margin: 0 0 12px;
+}
+.mark-question {
+  border-top: 1px solid var(--border);
+  padding: 16px 0;
+}
+.levels {
+  border: 0;
+  padding: 0;
+  margin: 0 0 12px;
+  min-width: 0;
+}
+.levels legend {
+  font-size: 0.9rem;
+  font-weight: 600;
+  margin-bottom: 6px;
+}
+.levels label.check {
+  align-items: flex-start;
+  padding: 10px 0;
+}
+.levels label.check input {
+  margin-top: 2px;
+}
+.suggestion {
+  border: 1px solid var(--border);
+  border-left: 4px solid #678b9b;
+  border-radius: 8px;
+  background: #eaf0f4;
+  padding: 14px 16px;
+  margin: 0 0 12px;
+}
+.suggestion p {
+  font-size: 0.875rem;
+  margin: 0 0 8px;
+}
+.suggestion blockquote {
+  margin: 0 0 8px;
+  padding-left: 10px;
+  border-left: 2px solid var(--border);
+  font-size: 0.85rem;
+  color: var(--ink);
+}
+.filter-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px 24px;
+  align-items: flex-end;
+}
+.filter-row app-field {
+  flex: 1 1 260px;
+  margin-bottom: 0;
+}

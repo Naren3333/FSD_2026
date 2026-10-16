@@ -6,7 +6,9 @@ import type { AssessmentSummary, Evaluation, Performance } from '../../api/model
 import { ClassroomContext, onClassroomChange } from '../../core/classroom-context';
 import { CurriculumNames } from '../../core/curriculum-names';
 import { Session } from '../../core/session';
+import { dateTime } from '../../shared/format';
 import { MarksPipe } from '../../shared/marks';
+import { dueState } from '../assessments/editor';
 import { Section } from '../../shared/section';
 import { SectionStateComponent } from '../../shared/section-state';
 
@@ -33,7 +35,12 @@ export class HomeComponent {
   /** Recent results shown here; the rest are under My results. */
   readonly recentCount = 3;
 
-  readonly toDo = computed(() => this.assessments.value()?.filter((a) => !a.submitted) ?? []);
+  /** Assessments still to submit that still take submissions, soonest due first; those with no due date last. */
+  readonly toDo = computed(() =>
+    (this.assessments.value() ?? [])
+      .filter((a) => !a.submitted && dueState(a.due_at, a.late_policy) !== 'closed')
+      .sort((a, b) => (a.due_at ?? '9999').localeCompare(b.due_at ?? '9999')),
+  );
   /** Submitted assessments with no finalized result yet. Needs both lists, so it waits for both. */
   readonly waiting = computed(() => {
     const assessments = this.assessments.value();
@@ -69,6 +76,15 @@ export class HomeComponent {
       await this.curriculum.need(performance.skills.map((s) => s.skill_id));
       return performance;
     });
+  }
+
+  /** "Due 13 Oct 2026, 3:00 pm", or "Overdue since …" once past; '' without a due date. */
+  due(item: AssessmentSummary): string {
+    if (!item.due_at) return '';
+    return this.overdue(item) ? `Overdue since ${dateTime(item.due_at)}` : `Due ${dateTime(item.due_at)}`;
+  }
+  overdue(item: AssessmentSummary): boolean {
+    return dueState(item.due_at, item.late_policy) === 'late';
   }
 
   title(result: Evaluation): string {

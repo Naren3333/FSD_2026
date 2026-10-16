@@ -15,7 +15,7 @@ export type Service =
   | 'chatbot';
 
 export interface RequestOptions {
-  method?: 'GET' | 'POST' | 'PATCH' | 'DELETE';
+  method?: 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE';
   /** JSON, or a File sent as is with `contentType`. */
   body?: unknown;
   contentType?: string;

@@ -48,7 +48,8 @@
               <tr>
                 <th scope="col">Skill</th>
                 <th scope="col">Attempted</th>
-                <th scope="col">Correct</th>
+                <th scope="col">Full marks</th>
+                <th scope="col">Marks earned</th>
                 <th scope="col">Observed accuracy</th>
                 <th scope="col">Evidence</th>
                 <th scope="col">Focus</th>
@@ -66,6 +67,13 @@
                   </th>
                   <td>{{ row.attempted | number }}</td>
                   <td>{{ row.correct | number }}</td>
+                  <td>
+                    @if (row.marks_possible) {
+                      {{ row.marks_awarded | number }} of {{ row.marks_possible | number }}
+                    } @else {
+                      –
+                    }
+                  </td>
                   <td>{{ row.observed_accuracy | percent: '1.0-1' }}</td>
                   <td>
                     {{
@@ -83,9 +91,10 @@
           </table>
         </div>
         <p class="caption">
-          Fewer than five questions is reported as insufficient evidence. Needs practice marks a skill with
-          five or more questions and under 60% correct. These are reporting thresholds, not a statistical
-          validation.
+          Full marks counts questions answered for every mark; marks earned includes part marks on written
+          answers. Fewer than five questions is reported as insufficient evidence. Needs practice marks a
+          skill with five or more questions and under 60% correct. These are reporting thresholds, not a
+          statistical validation.
         </p>
       } @else {
         <p class="empty">

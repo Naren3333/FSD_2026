@@ -39,13 +39,6 @@ question = obj(
         "skill_id": UUID,
     }
 )
-question_input = obj({k: v for k, v in question["properties"].items() if k != "id"})
-public_question = obj({k: v for k, v in question["properties"].items() if k not in ["answer", "tolerance"]})
-assessment = obj({"id": UUID, "classroom_id": UUID, "title": TEXT, "questions": array(question, 1, 50)})
-public_assessment = {
-    **assessment,
-    "properties": {**assessment["properties"], "questions": array(public_question, 1, 50)},
-}
 evidence = obj(
     {
         "question_id": UUID,
@@ -54,6 +47,164 @@ evidence = obj(
         "awarded": {"type": "integer", "minimum": 0, "maximum": 1},
         "possible": {"const": 1},
     }
+)
+# Assessment and grading since ADR 0004: points, short answers, free responses with rubrics, drafts and dates.
+# `question` and `evidence` above stay as the v1 events carry them.
+NULLABLE_TIME = {"type": ["string", "null"], "format": "date-time"}
+QUESTION_TYPES = {"enum": ["multiple_choice", "numerical", "short_answer", "free_response"]}
+POINTS = {"type": "integer", "minimum": 1, "maximum": 100}
+level = obj({"points": {"type": "integer", "minimum": 0, "maximum": 100}, "descriptor": TEXT})
+criterion = obj({"id": TEXT, "title": TEXT, "levels": array(level, 2, 6)})
+rubric = obj(
+    {"criteria": array(criterion, 1, 10), "model_answer": {"type": "string", "maxLength": 5000}}, ["criteria"]
+)
+question_fields = {
+    "id": UUID,
+    "prompt": {"type": "string", "minLength": 1, "maxLength": 2000},
+    "type": QUESTION_TYPES,
+    "options": {"type": ["array", "null"], "items": TEXT},
+    "answer": {"type": "string"},
+    "tolerance": {"type": "string"},
+    "accepted_answers": array(TEXT, 1, 20),
+    "case_sensitive": {"type": "boolean"},
+    "rubric": rubric,
+    "max_length": {"type": "integer", "minimum": 1, "maximum": 20000},
+    "points": POINTS,
+    "skill_id": UUID,
+}
+question_v2 = obj(
+    question_fields, ["id", "prompt", "type", "options", "answer", "tolerance", "points", "skill_id"]
+)
+# A criterion's id is assigned by Assessment, so a teacher sends criteria without one.
+input_rubric = obj(
+    {
+        "criteria": array(
+            obj({"id": TEXT, "title": TEXT, "levels": array(level, 2, 6)}, ["title", "levels"]), 1, 10
+        ),
+        "model_answer": {"type": "string", "maxLength": 5000},
+    },
+    ["criteria"],
+)
+question_input = obj(
+    {**{k: v for k, v in question_fields.items() if k != "id"}, "rubric": input_rubric},
+    ["prompt", "type", "skill_id"],
+)
+public_question = obj(
+    {k: question_fields[k] for k in ["id", "prompt", "type", "options", "max_length", "points", "skill_id"]},
+    ["id", "prompt", "type", "options", "points", "skill_id"],
+)
+STATUS = {"enum": ["draft", "published"]}
+LATE = {"enum": ["accept_flagged", "reject"]}
+RELEASE = {"enum": ["on_finalize", "manual"]}
+settings = {
+    "status": STATUS,
+    "opens_at": NULLABLE_TIME,
+    "due_at": NULLABLE_TIME,
+    "late_policy": LATE,
+    "release_policy": RELEASE,
+    "ai_marking": {"type": "boolean"},
+}
+assessment = obj(
+    {
+        "id": UUID,
+        "classroom_id": UUID,
+        "title": TEXT,
+        "questions": array(question_v2, 1, 50),
+        **settings,
+        "published_at": NULLABLE_TIME,
+    }
+)
+assessment_input = obj(
+    {
+        "classroom_id": UUID,
+        "title": {"type": "string", "minLength": 1, "maxLength": 160},
+        "questions": array(question_input, 1, 50),
+        **settings,
+    },
+    ["classroom_id", "title", "questions"],
+)
+public_assessment = obj(
+    {
+        "id": UUID,
+        "classroom_id": UUID,
+        "title": TEXT,
+        "questions": array(public_question, 1, 50),
+        "opens_at": NULLABLE_TIME,
+        "due_at": NULLABLE_TIME,
+        "late_policy": LATE,
+    }
+)
+assessment_summary = obj(
+    {
+        "id": UUID,
+        "title": TEXT,
+        "submitted": {"type": "boolean"},
+        "status": STATUS,
+        "opens_at": NULLABLE_TIME,
+        "due_at": NULLABLE_TIME,
+        "late_policy": LATE,
+        "question_count": {"type": "integer", "minimum": 1, "maximum": 50},
+        "points": {"type": "integer", "minimum": 1},
+    }
+)
+saved_answers = obj(
+    {"answers": {"type": "object", "additionalProperties": {"type": "string"}}, "saved_at": NULLABLE_TIME}
+)
+ANSWERS = {"type": "object", "additionalProperties": {"type": "string"}}
+criterion_score = obj({"criterion_id": TEXT, "points": {"type": "integer", "minimum": 0, "maximum": 100}})
+suggestion = obj(
+    {
+        "status": {"enum": ["pending", "ready", "failed"]},
+        "criteria": array(
+            obj(
+                {
+                    "criterion_id": TEXT,
+                    "points": {"type": "integer", "minimum": 0, "maximum": 100},
+                    "evidence_quotes": array({"type": "string"}),
+                    "rationale": {"type": "string"},
+                }
+            ),
+            maximum=10,
+        ),
+        "awarded": {"type": "integer", "minimum": 0, "maximum": 100},
+        "feedback": {"type": "string"},
+        "confidence": {"enum": ["high", "medium", "low"]},
+        "flags": array({"type": "string"}),
+        "model": {"type": "string"},
+        "reason": {"type": "string"},
+    },
+    ["status", "awarded"],
+)
+MARKS = {
+    "question_id": UUID,
+    "skill_id": UUID,
+    "correct": {"type": "boolean"},
+    "awarded": {"type": "integer", "minimum": 0, "maximum": 100},
+    "possible": POINTS,
+}
+evidence_v2 = obj(
+    {
+        **MARKS,
+        "needs_marking": {"type": "boolean"},
+        "marked_by": {"enum": ["auto", "teacher"]},
+        "criteria": array(criterion_score, maximum=10),
+        "feedback": {"type": "string", "maxLength": 2000},
+        "suggestion": suggestion,
+    },
+    list(MARKS),
+)
+final_evidence = obj(MARKS)
+own_evidence = obj({**MARKS, "feedback": {"type": "string", "maxLength": 2000}}, list(MARKS))
+mark = obj(
+    {
+        "criteria": {
+            "type": "object",
+            "additionalProperties": {"type": "integer", "minimum": 0, "maximum": 100},
+        },
+        "awarded": {"type": "integer", "minimum": 0, "maximum": 100},
+        "feedback": {"type": "string", "maxLength": 2000},
+    },
+    [],
 )
 chunk = obj(
     {
@@ -140,14 +291,27 @@ evaluation = obj(
         "classroom_id": UUID,
         "student_id": TEXT,
         "status": {"enum": ["draft", "finalized"]},
-        "evidence": array(evidence, 1, 50),
+        "evidence": array(evidence_v2, 1, 50),
+        "answers": ANSWERS,
+        "late": {"type": "boolean"},
+        "submitted_at": NULLABLE_TIME,
+        "release_policy": RELEASE,
+        "finalized_at": NULLABLE_TIME,
+        "released_at": NULLABLE_TIME,
     }
 )
 own_result = obj(
     {
-        **evaluation["properties"],
+        "id": UUID,
+        "assessment_id": UUID,
+        "classroom_id": UUID,
+        "student_id": TEXT,
         "status": {"const": "finalized"},
+        "evidence": array(own_evidence, 1, 50),
+        "answers": ANSWERS,
+        "late": {"type": "boolean"},
         "finalized_at": {"type": "string", "format": "date-time"},
+        "released_at": {"type": "string", "format": "date-time"},
     }
 )
 NAME = {"type": "string"}
@@ -166,7 +330,7 @@ def operation(method, path, body, response, code=200, query=()):
         {
             "name": q,
             "in": "query",
-            "required": q != "student_id",
+            "required": q not in ("student_id", "assessment_id"),
             "schema": TEXT if q in ("student_id", "title") else UUID,
         }
         for q in query
@@ -289,53 +453,72 @@ operations = {
         operation("POST", "/v1/search", search_request, search_response),
     ],
     "assessment": [
-        operation(
-            "GET",
-            "/v1/assessments",
-            None,
-            array(obj({"id": UUID, "title": TEXT, "submitted": {"type": "boolean"}})),
-            query=["classroom_id"],
-        ),
-        operation(
-            "POST",
-            "/v1/assessments",
-            obj(
-                {
-                    "classroom_id": UUID,
-                    "title": {"type": "string", "minLength": 1, "maxLength": 160},
-                    "questions": array(question_input, 1, 50),
-                }
-            ),
-            assessment,
-            201,
-        ),
+        operation("GET", "/v1/assessments", None, array(assessment_summary), query=["classroom_id"]),
+        operation("POST", "/v1/assessments", assessment_input, assessment, 201),
         operation(
             "GET",
             "/v1/assessments/progress",
             None,
-            array(obj({"id": UUID, "title": TEXT, "submissions": {"type": "integer", "minimum": 0}})),
+            array(
+                obj(
+                    {
+                        "id": UUID,
+                        "title": TEXT,
+                        "submissions": {"type": "integer", "minimum": 0},
+                        "status": STATUS,
+                        "due_at": NULLABLE_TIME,
+                    }
+                )
+            ),
             query=["classroom_id"],
         ),
         operation("GET", "/v1/assessments/{id}", None, {"oneOf": [assessment, public_assessment]}),
+        operation("PUT", "/v1/assessments/{id}", assessment_input, assessment),
+        operation("DELETE", "/v1/assessments/{id}", None, obj({"id": UUID})),
+        operation("POST", "/v1/assessments/{id}/publish", None, assessment),
         operation(
             "POST",
             "/v1/assessments/{id}/submissions",
             obj({"answers": {"type": "object", "additionalProperties": TEXT}}),
-            obj({"id": UUID, "status": {"const": "submitted"}}),
+            obj({"id": UUID, "status": {"const": "submitted"}, "late": {"type": "boolean"}}),
             201,
         ),
+        operation("GET", "/v1/assessments/{id}/saved-answers", None, saved_answers),
+        operation("PUT", "/v1/assessments/{id}/saved-answers", obj({"answers": ANSWERS}), saved_answers),
     ],
     "grading": [
-        operation("GET", "/v1/evaluations", None, array(evaluation), query=["classroom_id"]),
+        operation(
+            "GET",
+            "/v1/evaluations",
+            None,
+            array(evaluation, maximum=500),
+            query=["classroom_id", "assessment_id"],
+        ),
         operation("GET", "/v1/evaluations/mine", None, array(own_result), query=["classroom_id"]),
         operation(
             "GET",
             "/v1/evaluations/counts",
             None,
             obj(
-                {"drafts": {"type": "integer", "minimum": 0}, "finalized": {"type": "integer", "minimum": 0}}
+                {
+                    "drafts": {"type": "integer", "minimum": 0},
+                    "finalized": {"type": "integer", "minimum": 0},
+                    "unreleased": {"type": "integer", "minimum": 0},
+                }
             ),
             query=["classroom_id"],
+        ),
+        operation(
+            "POST",
+            "/v1/evaluations/release",
+            obj({"assessment_id": UUID}),
+            obj({"assessment_id": UUID, "released": {"type": "integer", "minimum": 0}}),
+        ),
+        operation(
+            "POST",
+            "/v1/evaluations/{id}/marks",
+            obj({"marks": {"type": "object", "additionalProperties": mark, "minProperties": 1}}),
+            evaluation,
         ),
         operation(
             "POST",
@@ -345,8 +528,9 @@ operations = {
                     "reason": {"type": "string", "minLength": 1, "maxLength": 1000},
                     "overrides": {
                         "type": "object",
-                        "additionalProperties": {"type": "integer", "minimum": 0, "maximum": 1},
+                        "additionalProperties": {"type": "integer", "minimum": 0, "maximum": 100},
                     },
+                    "marks": {"type": "object", "additionalProperties": mark},
                 },
                 ["reason"],
             ),
@@ -486,6 +670,23 @@ payloads = {
             "answers": {"type": "object", "additionalProperties": TEXT},
         }
     ),
+    "assessment.submitted.v2": obj(
+        {
+            "submission_id": UUID,
+            "assessment_id": UUID,
+            "classroom_id": UUID,
+            "org_id": TEXT,
+            "student_id": TEXT,
+            "questions": array(question_v2, 1, 50),
+            "answers": {"type": "object", "additionalProperties": TEXT},
+            "late": {"type": "boolean"},
+            "submitted_at": {"type": "string", "format": "date-time"},
+            "release_policy": RELEASE,
+            "ai_marking": {"type": "boolean"},
+            # The teacher whose AI allowance pays for AI marking; empty for assessments made before it was recorded.
+            "teacher_id": {"type": "string"},
+        }
+    ),
     "grading.finalized.v1": obj(
         {
             "evaluation_id": UUID,
@@ -494,6 +695,16 @@ payloads = {
             "org_id": TEXT,
             "student_id": TEXT,
             "evidence": array(evidence, 1, 50),
+        }
+    ),
+    "grading.finalized.v2": obj(
+        {
+            "evaluation_id": UUID,
+            "assessment_id": UUID,
+            "classroom_id": UUID,
+            "org_id": TEXT,
+            "student_id": TEXT,
+            "evidence": array(final_evidence, 1, 50),
         }
     ),
 }
