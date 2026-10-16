@@ -517,6 +517,14 @@ def ai_service_accounts(u: Users) -> None:
     assert ai_core_status(u.student.headers["Authorization"].removeprefix("Bearer ")) == 403
 
 
+def rate_limit_per_session() -> None:
+    """Kong's rate limit is each signed-in session's own: one session using it up leaves others unaffected."""
+    busy, other = login("teacher", "TEACHER_PASSWORD"), login("student", "STUDENT_PASSWORD")
+    statuses = [busy.get("/identity/classrooms").status_code for _ in range(125)]
+    assert statuses.count(429) > 0, "Kong did not rate limit a session making 125 requests in a minute"
+    request(other, "GET", "/identity/classrooms")
+
+
 def main() -> None:
     users = sign_in()
     room_id = classroom(users)["id"]
@@ -530,12 +538,13 @@ def main() -> None:
     delete_classroom(users, room_id, graded)
     databases()
     ai_service_accounts(users)
+    rate_limit_per_session()
     print(
         "PASS: gateway auth, classroom isolation, enrollment by username, rosters, the school's student list, unenrollment, classroom deletion and its cross-service purge, curriculum, "
         "S3 upload/extraction, PDF indexing jobs, teacher-only rubrics, search access, chat threads and streaming, "
         "AI spend allowance, answer-key secrecy, submissions, draft grading, teacher finalization, students' own "
         "finalized results, the class dashboard's counts and class performance, Kafka analytics, consumer restart, duplicate event and business-key idempotency, "
-        "student privacy, database isolation, numbered migrations, pgvector, AI service accounts."
+        "student privacy, database isolation, numbered migrations, pgvector, AI service accounts, per-session rate limiting."
     )
 
 

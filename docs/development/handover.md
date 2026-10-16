@@ -141,6 +141,10 @@ Students now land on Home (`/home`, student-only, first in their menu) for the c
 
 Each part loads and fails on its own (the shared `Section` helper, now in `shared/section.ts`, also used by the Class dashboard). On Assessments, students see a Submitted badge, and opening an assessment they already submitted shows it as submitted instead of offering a submit that would be refused. Checks: Assessment unit test `TestTheListSaysWhetherTheStudentSubmitted`, `integration.py` (`assess_and_grade` checks the flag for the student before and after submitting, and for the teacher), `e2e/workflow.spec.ts` (landing, starting from To do, the waiting count).
 
+## Per-session gateway rate limit (2026-10-16)
+
+Kong's rate limit (120 requests a minute) was counted per Kong consumer, and every user signs in through the one `keycloak` consumer, so the whole school shared one budget. Once Home and the Class dashboard each loaded several sections at once, CI's browser test hit 429s right after `integration.py`, failing at a different step each run. `infra/kong/bootstrap.py` now limits by the `Authorization` header, so each signed-in session has its own 120 a minute; a new sign-in starts a new budget. Check: `integration.py` `rate_limit_per_session` (one session gets 429 after 125 requests while another session is still served).
+
 ## Incomplete requirements and risks
 
 The full requested definition of done is **not claimed**. The coherent core workflow is implemented, but these requirements remain incomplete or narrower than the full brief:
