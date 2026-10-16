@@ -85,7 +85,8 @@ const evaluationColumns = "id,assessment_id,classroom_id,student_id,status,evide
 func scanEvaluation(row pgx.Row, more ...any) (Evaluation, []byte, error) {
 	var v Evaluation
 	var data, answers []byte
-	columns := []any{&v.ID, &v.Assessment, &v.Classroom, &v.Student, &v.Status, &data, &answers, &v.Late, &v.SubmittedAt, &v.ReleasePolicy, &v.FinalizedAt, &v.ReleasedAt}
+	columns := make([]any, 0, 12+len(more))
+	columns = append(columns, &v.ID, &v.Assessment, &v.Classroom, &v.Student, &v.Status, &data, &answers, &v.Late, &v.SubmittedAt, &v.ReleasePolicy, &v.FinalizedAt, &v.ReleasedAt)
 	if err := row.Scan(append(columns, more...)...); err != nil {
 		return v, nil, err
 	}

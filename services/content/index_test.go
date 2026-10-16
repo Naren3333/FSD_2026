@@ -104,9 +104,9 @@ func newFixture(t *testing.T) *fixture {
 	f.s = server{store: pgStore{db}, ai: f.ai.client()}
 	f.ai.ingest = f.reply(indexedResult())
 	f.ai.scores = func(w http.ResponseWriter, r *http.Request) {
-		var body struct{ Documents []string }
+		var body struct{ Passages []json.RawMessage }
 		json.NewDecoder(r.Body).Decode(&body)
-		scores := make([]float64, len(body.Documents))
+		scores := make([]float64, len(body.Passages))
 		for i := range scores {
 			scores[i] = float64(i) // reverses the RRF order
 		}

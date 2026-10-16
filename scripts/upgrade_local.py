@@ -12,7 +12,7 @@ import json
 import secrets
 from pathlib import Path
 
-from local_stack import ROOT, admin_client, check, psql_value, read_env
+from local_stack import ROOT, admin_client, check, psql, psql_value, read_env
 from setup import AI_CLIENTS, SERVICES, client_secret_key, password_key, realm, service_client
 
 
@@ -69,9 +69,15 @@ def main() -> None:
     if not env_path.exists():
         raise SystemExit("No .env: run scripts/setup.py for a new setup.")
     env = add_missing_secrets(env_path)
+    refresh_realm_import(env)
+    # Compose refuses to start while .env lacks a secret, so the secrets come first and the stack may be down.
+    if psql("SELECT 1", check=False).returncode != 0:
+        raise SystemExit(
+            "Secrets are in .env, but the stack is not running. Start it with `docker compose up -d --build`, "
+            "wait for `python scripts/wait_ready.py`, then run this script again."
+        )
     add_missing_databases(env)
     add_missing_clients(env)
-    refresh_realm_import(env)
     print("Local setup is up to date. Run: docker compose up -d --build")
 
 

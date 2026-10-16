@@ -1,4 +1,7 @@
-"""Export versioned HTTP and Kafka schemas. Python HTTP schemas come from FastAPI."""
+"""Export versioned HTTP and Kafka schemas. Python HTTP schemas come from FastAPI.
+
+With --check nothing is written: it lists every contract that differs from the code and exits 1 if any does.
+"""
 
 import json
 import os
@@ -24,8 +27,17 @@ def array(item, minimum=0, maximum=100):
     return {"type": "array", "items": item, "minItems": minimum, "maxItems": maximum}
 
 
+CHECK = "--check" in sys.argv[1:]
+stale = []  # with --check, the contracts that differ from the code
+
+
 def save(path, data):
-    (ROOT / path).write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
+    text = json.dumps(data, indent=2) + "\n"
+    target = ROOT / path
+    if not CHECK:
+        target.write_text(text, encoding="utf-8")
+    elif not target.exists() or target.read_text(encoding="utf-8") != text:
+        stale.append(path)
 
 
 question = obj(
@@ -740,4 +752,10 @@ for name in [
         text=True,
     )
     save(f"contracts/http/{name}.openapi.json", json.loads(data))
-print(f"Exported ten HTTP contracts and {len(payloads)} implemented event schemas.")
+if CHECK and stale:
+    raise SystemExit(
+        "Out of date; run python scripts/export_contracts.py and review the diff:\n  " + "\n  ".join(stale)
+    )
+print(
+    f"{'Checked' if CHECK else 'Exported'} ten HTTP contracts and {len(payloads)} implemented event schemas."
+)

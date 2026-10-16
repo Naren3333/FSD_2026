@@ -42,11 +42,12 @@ npx playwright install chromium
 cd ../..
 python scripts/check.py
 python scripts/integration.py
+python scripts/db_tests.py
 cd apps/web
 npm run test:e2e
 ```
 
-Integration and browser tests require the Docker stack to be running.
+Integration, database and browser tests require the Docker stack to be running; `check.py` does not, and its web tests can time out while the stack loads the machine. `check.py` runs its checks in parallel (`--serial` runs them one at a time, `--keep-going` reports every failure instead of stopping at the first) and lists any tests that skipped themselves. It also fails if any contract in `contracts/` differs from what the code produces; `python scripts/export_contracts.py` regenerates them.
 
 `check.py` fails on unformatted web code; run `npm run format` in `apps/web` to fix it. Component templates live in `.html` files next to their components.
 
