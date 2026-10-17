@@ -151,6 +151,7 @@ describe('a chat answer that fails', () => {
     await send('What is a fraction?');
     expect(page.state.error()).toBe('The chatbot is unavailable.');
     expect(page.form.controls.question.value).toBe('What is a fraction?');
+    expect(page.form.dirty).toBe(true);
     expect(page.messages.value()).toEqual([]);
     expect(usage.refresh).toHaveBeenCalled();
   });

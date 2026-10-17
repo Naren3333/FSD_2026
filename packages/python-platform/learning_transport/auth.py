@@ -1,6 +1,7 @@
 """Bearer-token verification and the caller's identity. Identity comes only from a verified token, never from
 headers or request bodies."""
 
+import logging
 import os
 import threading
 import time
@@ -9,6 +10,7 @@ from dataclasses import dataclass
 from functools import lru_cache
 from typing import Any
 
+import httpx
 import jwt
 from fastapi import Depends, Request
 
@@ -18,33 +20,71 @@ TEACHER, STUDENT, AI_CLIENT = "teacher", "student", "ai-client"
 LEEWAY = 30  # seconds of clock skew allowed between the identity provider and this service (exp, iat, nbf)
 REFETCH_INTERVAL = 30.0  # seconds between key set refetches for a key id the cached set lacks
 
+log = logging.getLogger("learning_transport.auth")
 
-class KeySet(jwt.PyJWKClient):
-    """PyJWKClient refetching the key set for an unknown key id at most once per REFETCH_INTERVAL. The stock
-    client refetches on every such token, so tokens with made-up key ids would each wait up to its timeout on the
-    identity provider (and hammer it); a key the provider really rotated in is still picked up within the
-    interval."""
 
-    def __init__(self, uri: str, **kwargs: Any) -> None:
-        super().__init__(uri, **kwargs)
-        self._refetch_lock = threading.Lock()
+class KeySet:
+    """The identity provider's signing keys (its JWKS), cached for `lifespan` seconds. A token naming a key id the
+    cached set lacks refetches the set at most once per REFETCH_INTERVAL, so tokens with made-up key ids don't each
+    wait on the identity provider (and hammer it), while a key the provider really rotated in is still picked up
+    within the interval. A failed fetch keeps the keys already held and is retried no sooner than REFETCH_INTERVAL,
+    so an identity provider outage doesn't make every request wait on it. `fetch` replaces the HTTP request in
+    tests."""
+
+    def __init__(
+        self,
+        uri: str,
+        *,
+        timeout: float = 5,
+        lifespan: float = 300,
+        fetch: Callable[[], Any] | None = None,
+    ) -> None:
+        self._fetch = fetch or (lambda: httpx.get(uri, timeout=timeout).raise_for_status().json())
+        self._lifespan = lifespan
+        self._lock = threading.Lock()  # one fetch at a time; the others then see its result
+        self._keys: dict[str, jwt.PyJWK] = {}
+        self._fetched: float | None = None
         self._refetched = -REFETCH_INTERVAL
 
-    def get_signing_key(self, kid: str) -> jwt.PyJWK:
-        key = self.match_kid(self.get_signing_keys(), kid)
+    def signing_key(self, token: str) -> jwt.PyJWK:
+        """The key that signed token, by the key id in its (unverified) header. PyJWTError when there is none."""
+        kid = jwt.get_unverified_header(token).get("kid")
+        if not isinstance(kid, str):
+            raise jwt.InvalidTokenError("The token names no signing key.")
+        key = self._keys.get(kid)
+        if key is None or self._stale(time.monotonic()):
+            with self._lock:  # one fetch at a time; the others then see its result
+                now = time.monotonic()
+                if self._stale(now):
+                    self._load(now)
+                elif kid not in self._keys and now - self._refetched >= REFETCH_INTERVAL:
+                    self._refetched = now
+                    self._load(now)
+                key = self._keys.get(kid)
         if key is None:
-            with self._refetch_lock:  # one refetch at a time; the others then see its result
-                refresh = time.monotonic() - self._refetched >= REFETCH_INTERVAL
-                if refresh:
-                    self._refetched = time.monotonic()
-                key = self.match_kid(self.get_signing_keys(refresh=refresh), kid)
-        if key is None:
-            raise jwt.PyJWKClientError(f'Unable to find a signing key that matches: "{kid}"')
+            raise jwt.InvalidTokenError(f"No signing key matches {kid!r}.")
         return key
+
+    def _stale(self, now: float) -> bool:
+        return self._fetched is None or now - self._fetched >= self._lifespan
+
+    def _load(self, now: float) -> None:
+        try:
+            data = self._fetch()
+            if not isinstance(data, dict):
+                raise jwt.PyJWKSetError("the key set is not a JSON object")
+            keys = jwt.PyJWKSet.from_dict(data).keys
+        except (httpx.HTTPError, ValueError, jwt.PyJWTError) as error:
+            log.warning("fetching the identity provider's key set failed: %s", error)
+            # Try again after REFETCH_INTERVAL, not on every request meanwhile.
+            self._fetched = now - self._lifespan + REFETCH_INTERVAL
+            return
+        self._keys = {k.key_id: k for k in keys if k.key_id and k.public_key_use in ("sig", None)}
+        self._fetched = now
 
 
 @lru_cache
-def keyset() -> jwt.PyJWKClient:
+def keyset() -> KeySet:
     return KeySet(os.environ["OIDC_JWKS_URL"], timeout=5, lifespan=300)
 
 
@@ -56,7 +96,7 @@ def actor(request: Request) -> dict[str, Any]:
         raise failure(401, "UNAUTHENTICATED", "Sign in to continue.")
     try:
         token = auth[7:]
-        key = keyset().get_signing_key_from_jwt(token)
+        key = keyset().signing_key(token)
         claims = jwt.decode(
             token,
             key.key,
@@ -66,7 +106,7 @@ def actor(request: Request) -> dict[str, Any]:
             options={"require": ["exp", "iat", "sub", "org_id"]},
             leeway=LEEWAY,
         )
-    except (jwt.PyJWTError, jwt.PyJWKClientError):
+    except jwt.PyJWTError:
         raise failure(401, "UNAUTHENTICATED", "The session is invalid or expired.") from None
     if not claims.get("sub") or not claims.get("org_id"):
         raise failure(401, "UNAUTHENTICATED", "Identity claims are missing.")

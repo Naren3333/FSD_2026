@@ -189,12 +189,14 @@ class Recorder:
 
 
 def test_storing_and_purging_lock_the_classroom_before_its_tombstone():
-    from consumer import CLASSROOM_LOCK, process, purge
+    from learning_transport.db import LOCK
+
+    from consumer import process, purge
     from domain import ClassroomDeletedEvent, Event
 
     stored = Recorder()
     process(stored, Event.model_validate(finalized("grading.finalized.v2", 1)))  # type: ignore[arg-type]
-    assert stored.statements.index(CLASSROOM_LOCK) < next(
+    assert stored.statements.index(LOCK) < next(
         i for i, s in enumerate(stored.statements) if "purged_classrooms" in s
     )
     room = str(uuid4())
@@ -209,7 +211,7 @@ def test_storing_and_purging_lock_the_classroom_before_its_tombstone():
     }
     purged = Recorder()
     purge(purged, ClassroomDeletedEvent.model_validate(deletion))  # type: ignore[arg-type]
-    assert purged.statements[0] == CLASSROOM_LOCK
+    assert purged.statements[0] == LOCK
 
 
 def test_consumer_group_can_be_overridden(monkeypatch):

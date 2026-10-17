@@ -16,7 +16,7 @@ func purge(ctx context.Context, tx pgx.Tx, event platform.Event) error {
 		return err
 	}
 	// Waits for assessments being created in the classroom, and makes later ones see it purged.
-	if _, err = tx.Exec(ctx, "SELECT pg_advisory_xact_lock($1::int, hashtext($2::uuid::text))", classroomLock, v.Classroom); err != nil {
+	if err = platform.Lock(ctx, tx, platform.LockClassroom, v.Classroom); err != nil {
 		return err
 	}
 	statements := []string{

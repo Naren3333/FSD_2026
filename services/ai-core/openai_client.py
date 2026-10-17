@@ -208,22 +208,48 @@ async def generate(
     return Completion(choice.message.content or "", usage, choice.finish_reason)
 
 
-async def call[T](fn: Callable[[], Awaitable[T]]) -> T:
-    """Run one SDK call with this module's retries (see the module docstring)."""
-    for attempt in range(1, MAX_ATTEMPTS + 1):
+@dataclass
+class Attempts:
+    """How many times call has tried its function so far: attempts beyond the first are retries."""
+
+    count: int = 0
+
+
+async def call[T](
+    fn: Callable[[], Awaitable[T]],
+    *,
+    delay: Callable[[openai.OpenAIError, int], float | None] | None = None,
+    attempts: Attempts | None = None,
+) -> T:
+    """Run one SDK call with retries. `delay` gives the seconds to wait after a failed attempt (numbered from 1)
+    before the next, or None to raise the error; the default is this module's policy (see the module docstring).
+    Errors that aren't OpenAI's are never retried. `attempts`, when given, counts the attempts made."""
+    wait = delay or default_delay
+    if attempts is None:
+        attempts = Attempts()
+    while True:
+        attempts.count += 1
         try:
             return await fn()
         except openai.OpenAIError as exc:
-            if attempt == MAX_ATTEMPTS or not retryable(exc):
-                raise
-            delay = _delay(exc, attempt)
-            if delay > MAX_DELAY:
+            seconds = wait(exc, attempts.count)
+            if seconds is None:
                 raise
             log.warning(
-                "OpenAI call failed (attempt %d/%d), retrying in %.2fs: %s", attempt, MAX_ATTEMPTS, delay, exc
+                "OpenAI call failed (attempt %d), retrying in %.2fs: %s", attempts.count, seconds, exc
             )
-            await _sleep(delay)
-    raise AssertionError("unreachable")
+            await _sleep(seconds)
+
+
+def default_delay(exc: openai.OpenAIError, attempt: int) -> float | None:
+    """This module's policy: MAX_ATTEMPTS attempts at retryable errors, after OpenAI's Retry-After when it sends
+    one (up to MAX_DELAY) and otherwise exponential backoff with full jitter."""
+    if attempt >= MAX_ATTEMPTS or not retryable(exc):
+        return None
+    after = retry_after(exc)
+    if after is None:
+        return backoff(attempt)
+    return after if after <= MAX_DELAY else None
 
 
 def deterministic_options(model: str) -> dict[str, Any]:
@@ -265,9 +291,3 @@ def retry_after(exc: openai.OpenAIError) -> float | None:
 def backoff(attempt: int) -> float:
     """Exponential backoff with full jitter."""
     return random.uniform(0, min(BACKOFF_CAP, BASE_DELAY * 2 ** (attempt - 1)))
-
-
-def _delay(exc: openai.OpenAIError, attempt: int) -> float:
-    """OpenAI's Retry-After when given, otherwise exponential backoff with full jitter."""
-    after = retry_after(exc)
-    return backoff(attempt) if after is None else after

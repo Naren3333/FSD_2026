@@ -180,6 +180,12 @@ Kong's rate limit (120 requests a minute) was counted per Kong consumer, and eve
 - **Purge time limit:** `platform.Consumer` takes an optional `Timeout` per attempt (default 10 seconds); Content's classroom-deletion consumer uses 5 minutes, so deleting a large classroom's documents, vectors and objects can finish instead of rolling back on every retry and blocking that consumer.
 - **Still open from the review:** an ingest's allowance is checked only before it starts (its page and chunk caps bound what one upload can cost).
 
+## Cleanups (2026-10-17)
+
+- **One advisory-lock scheme:** `platform.Lock`/`LockShared` (Go, `packages/platform/lock.go`) and `learning_transport.db.lock`/`lock_async` (Python) take a transaction-scoped lock on a named scope and key, hashed with `hashtextextended(scope || ':' || key, 0)` in both languages. Migrations, classroom purges (Content, Assessment, Analytics, the chatbot), Curriculum's prerequisite inserts and Assessment's saved work all use it; the magic ids (314159, 271828) are gone. Lock ids changed, so stop every replica of a service before starting the new version rather than rolling it.
+- **No reliance on library internals:** `learning_transport.auth.KeySet` fetches and caches the JWKS itself (public PyJWT and httpx APIs) instead of subclassing `PyJWKClient`; a failed fetch keeps the keys already held and is retried after `REFETCH_INTERVAL`. ai-core's vision calls retry through `openai_client.call` with their own delay policy instead of a second loop calling `openai_client._sleep`. `platform.ServiceToken` shares one fetch through `x/sync/singleflight`, run apart from the caller that started it, so that caller giving up no longer fails the others.
+- **Chat draft kept as unsaved work:** a question restored after a refused send marks the form dirty again, so the classroom can't be switched away from it (a regression from the clear-on-send change, caught by Playwright).
+
 ## Incomplete requirements and risks
 
 The full requested definition of done is **not claimed**. The coherent core workflow is implemented, but these requirements remain incomplete or narrower than the full brief:

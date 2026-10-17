@@ -20,11 +20,6 @@ var errAlreadySubmitted = errors.New("already submitted")
 // errClassroomPurged is insertAssessment's answer for a classroom that has been deleted and purged.
 var errClassroomPurged = errors.New("the classroom was deleted")
 
-// classroomLock, with the classroom, serializes a classroom's purge against new assessments in it: an insert holds
-// it shared, the purge exclusively, so an insert either commits before the purge (which then deletes it) or sees the
-// classroom in purged_classrooms.
-const classroomLock = 271828
-
 // store is a classroom's assessments and its students' submissions and saved work.
 type store interface {
 	findAssessment(ctx context.Context, org, id string) (Assessment, error)
@@ -85,7 +80,9 @@ func (p pgStore) insertAssessment(ctx context.Context, org string, v Assessment)
 		return err
 	}
 	defer tx.Rollback(ctx)
-	if _, err = tx.Exec(ctx, "SELECT pg_advisory_xact_lock_shared($1::int, hashtext($2::uuid::text))", classroomLock, v.Classroom); err != nil {
+	// Shared with other inserts, exclusive against the classroom's purge: an insert either commits before the purge
+	// (which then deletes it) or sees the classroom in purged_classrooms.
+	if err = platform.LockShared(ctx, tx, platform.LockClassroom, v.Classroom); err != nil {
 		return err
 	}
 	var purged bool
@@ -221,8 +218,7 @@ func (p pgStore) findSaved(ctx context.Context, assessment, student string) (Sav
 // lockStudentWork serializes one student's saving and submitting of one assessment until tx ends, so saved work
 // cannot be written after the submission that deletes it.
 func lockStudentWork(ctx context.Context, tx pgx.Tx, assessment, student string) error {
-	_, err := tx.Exec(ctx, "SELECT pg_advisory_xact_lock(hashtextextended($1::text||'/'||$2::text,0))", assessment, student)
-	return err
+	return platform.Lock(ctx, tx, platform.LockStudentWork, assessment+"/"+student)
 }
 
 // saveAnswers replaces the student's saved work, unless they have already submitted (errAlreadySubmitted).

@@ -10,6 +10,7 @@ import os
 import threading
 from typing import Any
 
+from learning_transport.db import LOCK_CLASSROOM, lock
 from learning_transport.kafka import Handler, consume, parse
 from psycopg_pool import ConnectionPool
 
@@ -17,8 +18,6 @@ from domain import FINALIZED_V1, FINALIZED_V2, ClassroomDeletedEvent, Event
 
 CLASSROOM_DELETED = "identity.classroom.deleted.v1"
 DEFAULT_GROUP = "analytics-v1"  # KAFKA_GROUP overrides it, e.g. to rebuild from the start of the topics
-# A transaction-scoped lock on one classroom, taken before reading or writing its tombstone.
-CLASSROOM_LOCK = "SELECT pg_advisory_xact_lock(hashtextextended(%s::text, 0))"
 
 
 def process(pool: ConnectionPool[Any], event: Event) -> None:
@@ -32,7 +31,7 @@ def process(pool: ConnectionPool[Any], event: Event) -> None:
         if inserted is None:
             return
         data = event.data
-        conn.execute(CLASSROOM_LOCK, (data.classroom_id,))
+        lock(conn, LOCK_CLASSROOM, data.classroom_id)
         purged = conn.execute(
             "SELECT 1 FROM purged_classrooms WHERE classroom_id=%s", (data.classroom_id,)
         ).fetchone()
@@ -69,7 +68,7 @@ def purge(pool: ConnectionPool[Any], event: ClassroomDeletedEvent) -> None:
     not stored. Deleting what is already gone changes nothing, so a repeated event is harmless."""
     data = event.data
     with pool.connection() as conn, conn.transaction():
-        conn.execute(CLASSROOM_LOCK, (data.classroom_id,))
+        lock(conn, LOCK_CLASSROOM, data.classroom_id)
         conn.execute(
             "INSERT INTO purged_classrooms(classroom_id,org_id) VALUES(%s,%s) ON CONFLICT DO NOTHING",
             (data.classroom_id, data.org_id),

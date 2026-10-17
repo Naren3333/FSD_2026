@@ -10,7 +10,12 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"golang.org/x/sync/singleflight"
 )
+
+// fetchTimeout bounds one token fetch, which runs apart from its callers' contexts (see Get).
+const fetchTimeout = 10 * time.Second
 
 // ServiceToken is a service account's client-credentials access token, cached until shortly before it expires.
 // Services that call the private AI service use one (docs/decisions/0002-ai-integration.md).
@@ -20,41 +25,37 @@ type ServiceToken struct {
 	mu              sync.Mutex
 	token           string
 	expires         time.Time
-	fetching        chan struct{} // closed when the fetch in progress ends; nil when none is
+	fetches         singleflight.Group
 }
 
-// Get returns the cached token, or fetches a new one from the token endpoint. Only one fetch runs at a time, and the
-// lock is not held during it: other callers wait for its result only as long as their own ctx allows, and fetch
-// themselves if it failed.
+// Get returns the cached token, or fetches a new one from the token endpoint. Only one fetch runs at a time, shared
+// by every caller that needs it: it runs apart from any one caller's ctx (up to fetchTimeout), and each caller waits
+// for it only as long as its own ctx allows. A failed fetch is not cached, so the next caller fetches again.
 func (t *ServiceToken) Get(ctx context.Context) (string, error) {
-	for {
+	t.mu.Lock()
+	token, valid := t.token, t.token != "" && time.Now().Before(t.expires)
+	t.mu.Unlock()
+	if valid {
+		return token, nil
+	}
+	result := t.fetches.DoChan("token", func() (any, error) {
+		fetchCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), fetchTimeout)
+		defer cancel()
+		token, expires, err := t.fetch(fetchCtx)
+		if err != nil {
+			return "", err
+		}
 		t.mu.Lock()
-		if t.token != "" && time.Now().Before(t.expires) {
-			token := t.token
-			t.mu.Unlock()
-			return token, nil
-		}
-		if t.fetching == nil {
-			done := make(chan struct{})
-			t.fetching = done
-			t.mu.Unlock()
-			token, expires, err := t.fetch(ctx)
-			t.mu.Lock()
-			if err == nil {
-				t.token, t.expires = token, expires
-			}
-			t.fetching = nil
-			close(done)
-			t.mu.Unlock()
-			return token, err
-		}
-		wait := t.fetching
+		t.token, t.expires = token, expires
 		t.mu.Unlock()
-		select {
-		case <-wait:
-		case <-ctx.Done():
-			return "", ctx.Err()
-		}
+		return token, nil
+	})
+	select {
+	case r := <-result:
+		token, _ := r.Val.(string)
+		return token, r.Err
+	case <-ctx.Done():
+		return "", ctx.Err()
 	}
 }
 

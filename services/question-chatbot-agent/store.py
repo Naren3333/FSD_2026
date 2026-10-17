@@ -5,16 +5,13 @@ import json
 from pathlib import Path
 from typing import Any, Protocol
 
-from learning_transport.db import AsyncPooled
+from learning_transport.db import LOCK_CLASSROOM, AsyncPooled, lock_async
 from psycopg.types.json import Jsonb
 
 MIGRATIONS = Path(__file__).parent / "migrations"
 TITLE_CHARS = 80
 THREAD_COLUMNS = "id, classroom_id, role, title, created_at, last_message_at"
 MESSAGE_COLUMNS = "id, role, content, outcome, citations, created_at"
-# A transaction-scoped lock on one classroom: creating a thread and purging the classroom take it, so a thread is
-# never created in a classroom whose purge is committing.
-CLASSROOM_LOCK = "SELECT pg_advisory_xact_lock(hashtextextended(%s::text, 0))"
 
 
 class Store(Protocol):
@@ -43,7 +40,9 @@ class PostgresStore(AsyncPooled):
 
     async def create_thread(self, org: str, user: str, role: str, classroom_id: str) -> dict[str, Any] | None:
         async with self.pool.connection() as conn, conn.transaction():
-            await conn.execute(CLASSROOM_LOCK, (classroom_id,))
+            # The classroom's purge takes the same lock, so a thread is never created in a classroom whose purge is
+            # committing.
+            await lock_async(conn, LOCK_CLASSROOM, classroom_id)
             cur = await conn.execute(
                 f"INSERT INTO threads (org_id, user_id, role, classroom_id) SELECT %s,%s,%s,%s"
                 f" WHERE NOT EXISTS (SELECT 1 FROM purged_classrooms WHERE classroom_id=%s)"

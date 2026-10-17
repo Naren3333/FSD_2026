@@ -8,6 +8,7 @@ require (
 	github.com/google/uuid v1.6.0
 	github.com/jackc/pgx/v5 v5.7.6
 	github.com/segmentio/kafka-go v0.4.49
+	golang.org/x/sync v0.13.0
 )
 
 require (
@@ -18,6 +19,5 @@ require (
 	github.com/pierrec/lz4/v4 v4.1.15 // indirect
 	golang.org/x/crypto v0.37.0 // indirect
 	golang.org/x/oauth2 v0.28.0 // indirect
-	golang.org/x/sync v0.13.0 // indirect
 	golang.org/x/text v0.24.0 // indirect
 )

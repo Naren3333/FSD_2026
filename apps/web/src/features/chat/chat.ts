@@ -113,8 +113,11 @@ export class ChatComponent {
     // The question moves into the conversation at once; it comes back only if it was never asked.
     this.form.reset();
     this.tried.set(false);
+    // A restored question is unsaved work again, so the shell keeps the classroom until it is sent or cleared.
     const restore = () => {
-      if (!this.form.controls.question.value) this.form.controls.question.setValue(question);
+      if (this.form.controls.question.value) return;
+      this.form.controls.question.setValue(question);
+      this.form.markAsDirty();
     };
     void this.state.run(async () => {
       let thread = this.active();

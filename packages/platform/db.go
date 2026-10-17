@@ -8,9 +8,6 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
-// migrationLock serializes migrations when several replicas of a service start at once.
-const migrationLock = 314159
-
 // OpenDB connects to url and applies the service's numbered migrations (migrations/NNN_name.sql in the given file
 // system, normally an embed.FS) plus bootstrap, under an advisory lock, before returning the pool.
 func OpenDB(ctx context.Context, url string, migrations fs.FS, bootstrap string) (*pgxpool.Pool, error) {
@@ -45,7 +42,7 @@ func applyMigrations(ctx context.Context, db *pgxpool.Pool, ordered []Migration,
 		return err
 	}
 	defer tx.Rollback(ctx)
-	if _, err = tx.Exec(ctx, "SELECT pg_advisory_xact_lock($1)", migrationLock); err != nil {
+	if err = Lock(ctx, tx, LockMigrations, ""); err != nil {
 		return err
 	}
 	if err = migrate(ctx, tx, ordered, bootstrap); err != nil {

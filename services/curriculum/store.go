@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"errors"
+	"learning/platform"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -97,19 +98,15 @@ const (
 	prerequisiteCycle
 )
 
-// prerequisiteLock, with the organization, serializes one organization's prerequisite inserts, so two concurrent
-// edges cannot together form a cycle. Organizations don't wait for each other: their graphs never connect.
-const prerequisiteLock = 271828
-
-// insertPrerequisite runs under the organization's advisory lock so concurrent inserts
-// cannot race past the cycle check.
+// insertPrerequisite runs under the organization's advisory lock so two concurrent edges cannot together race past
+// the cycle check. Organizations don't wait for each other: their graphs never connect.
 func (p pgStore) insertPrerequisite(ctx context.Context, org, id, prerequisite string) (prerequisiteResult, error) {
 	tx, err := p.db.Begin(ctx)
 	if err != nil {
 		return prerequisiteAdded, err
 	}
 	defer tx.Rollback(ctx)
-	if _, err = tx.Exec(ctx, "SELECT pg_advisory_xact_lock($1::int, hashtext($2))", prerequisiteLock, org); err != nil {
+	if err = platform.Lock(ctx, tx, platform.LockPrerequisites, org); err != nil {
 		return prerequisiteAdded, err
 	}
 	var count int

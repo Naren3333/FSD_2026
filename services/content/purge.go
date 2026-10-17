@@ -31,7 +31,7 @@ func (p purger) purge(ctx context.Context, tx pgx.Tx, event platform.Event) erro
 		return err
 	}
 	// Waits for uploads into the classroom that are committing, and makes later ones see it purged.
-	if _, err = tx.Exec(ctx, "SELECT pg_advisory_xact_lock($1::int, hashtext($2::uuid::text))", classroomLock, v.Classroom); err != nil {
+	if err = platform.Lock(ctx, tx, platform.LockClassroom, v.Classroom); err != nil {
 		return err
 	}
 	if _, err = tx.Exec(ctx, "INSERT INTO purged_classrooms(classroom_id,org_id) VALUES($1,$2) ON CONFLICT DO NOTHING", v.Classroom, v.Org); err != nil {

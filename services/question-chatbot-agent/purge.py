@@ -6,11 +6,10 @@ from typing import Any, Literal
 from uuid import UUID
 
 from learning_transport import Contract
+from learning_transport.db import LOCK_CLASSROOM, lock
 from learning_transport.kafka import Envelope, consume, parse
 from psycopg_pool import ConnectionPool
 from pydantic import Field, model_validator
-
-from store import CLASSROOM_LOCK
 
 TOPIC = "identity.classroom.deleted.v1"
 GROUP = "question-chatbot-agent-v1"
@@ -41,7 +40,7 @@ def purge(pool: ConnectionPool[Any], value: bytes | None) -> bool:
         return False
     data = event.data
     with pool.connection() as conn, conn.transaction():
-        conn.execute(CLASSROOM_LOCK, (data.classroom_id,))
+        lock(conn, LOCK_CLASSROOM, data.classroom_id)
         conn.execute(
             "INSERT INTO purged_classrooms(classroom_id,org_id) VALUES(%s,%s) ON CONFLICT DO NOTHING",
             (data.classroom_id, data.org_id),

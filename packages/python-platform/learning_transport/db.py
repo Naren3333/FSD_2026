@@ -7,16 +7,20 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, ClassVar, Self
 
+from psycopg import AsyncConnection, Connection
 from psycopg.rows import dict_row
 from psycopg_pool import AsyncConnectionPool, ConnectionPool
 
 CONNECTION_OPTIONS: dict[str, Any] = {"row_factory": dict_row, "options": "-c statement_timeout=10000"}
 MAX_CONNECTIONS = 8
 CONNECT_TIMEOUT = 15  # seconds to wait for the first connection at startup
-MIGRATION_LOCK = 314159  # the Go services' advisory lock id: serializes replicas migrating at once
 
 MIGRATION_NAME = re.compile(r"^(\d{3})_[a-z0-9_]+\.sql$")
-LOCK = "SELECT pg_advisory_xact_lock(%s)"
+# Lock scopes, as in the Go platform package (lock.go): a scope and its key hash to one transaction-scoped advisory
+# lock, derived exactly as the Go services derive it.
+LOCK_MIGRATIONS = "migrations"  # no key: serializes replicas migrating at once
+LOCK_CLASSROOM = "classroom"  # a classroom's purge against new rows in it
+LOCK = "SELECT pg_advisory_xact_lock(hashtextextended(%s::text || ':' || %s::text, 0))"
 CREATE_LEDGER = (
     "CREATE TABLE IF NOT EXISTS schema_migrations"
     "(version integer PRIMARY KEY, applied_at timestamptz NOT NULL DEFAULT now())"
@@ -52,6 +56,16 @@ def migrations(directory: Path) -> list[Migration]:
     return found
 
 
+def lock(conn: Connection[Any], scope: str, key: object) -> None:
+    """Take the exclusive advisory lock on (scope, key) until conn's transaction ends."""
+    conn.execute(LOCK, (scope, str(key)))
+
+
+async def lock_async(conn: AsyncConnection[Any], scope: str, key: object) -> None:
+    """lock, on an async connection."""
+    await conn.execute(LOCK, (scope, str(key)))
+
+
 def pending(steps: list[Migration], applied: set[int]) -> list[Migration]:
     return [m for m in steps if m.version not in applied]
 
@@ -63,7 +77,7 @@ async def open_async_pool(url: str, directory: Path) -> AsyncConnectionPool[Any]
     )
     await pool.open(wait=True, timeout=CONNECT_TIMEOUT)
     async with pool.connection() as conn, conn.transaction():
-        await conn.execute(LOCK, (MIGRATION_LOCK,))
+        await lock_async(conn, LOCK_MIGRATIONS, "")
         await conn.execute(CREATE_LEDGER)
         cur = await conn.execute(APPLIED)
         for m in pending(steps, {row["version"] for row in await cur.fetchall()}):
@@ -79,7 +93,7 @@ def open_pool(url: str, directory: Path) -> ConnectionPool[Any]:
     )
     pool.open(wait=True, timeout=CONNECT_TIMEOUT)
     with pool.connection() as conn, conn.transaction():
-        conn.execute(LOCK, (MIGRATION_LOCK,))
+        lock(conn, LOCK_MIGRATIONS, "")
         conn.execute(CREATE_LEDGER)
         applied = {row["version"] for row in conn.execute(APPLIED).fetchall()}
         for m in pending(steps, applied):

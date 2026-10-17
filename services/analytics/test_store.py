@@ -10,11 +10,11 @@ from uuid import uuid4
 
 import psycopg
 import pytest
-from learning_transport.db import migrations
+from learning_transport.db import LOCK_CLASSROOM, lock, migrations
 from psycopg.rows import dict_row
 from psycopg_pool import ConnectionPool
 
-from consumer import CLASSROOM_LOCK, process, purge
+from consumer import process, purge
 from domain import ClassroomDeletedEvent, Event
 from main import MIGRATIONS
 from test_domain import finalized
@@ -132,7 +132,7 @@ def test_a_grade_waits_for_a_purge_of_its_classroom_in_progress(pool):
     room = str(uuid4())
     event = grade(room)
     with pool.connection() as conn, conn.transaction():
-        conn.execute(CLASSROOM_LOCK, (room,))
+        lock(conn, LOCK_CLASSROOM, room)
         conn.execute("INSERT INTO purged_classrooms(classroom_id,org_id) VALUES(%s,'org')", (room,))
         thread, done = in_thread(lambda: process(pool, event))
         wait_for_lock(pool, done)
@@ -144,7 +144,7 @@ def test_a_purge_waits_for_a_grade_of_its_classroom_in_progress(pool):
     """A grade holding the classroom's lock commits its evidence first; the purge then removes it."""
     room = str(uuid4())
     with pool.connection() as conn, conn.transaction():
-        conn.execute(CLASSROOM_LOCK, (room,))
+        lock(conn, LOCK_CLASSROOM, room)
         thread, done = in_thread(lambda: purge(pool, deletion(room)))
         wait_for_lock(pool, done)
         event = grade(room)

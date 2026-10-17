@@ -27,11 +27,6 @@ type store interface {
 // pgStore is the store in the service's own Postgres database.
 type pgStore struct{ db *pgxpool.Pool }
 
-// classroomLock, with the classroom, serializes a classroom's purge against uploads into it: an upload holds it
-// shared while it inserts, a purge exclusively, so the purge removes every upload committed before it and every
-// later upload sees the classroom in purged_classrooms.
-const classroomLock = 314159
-
 // errClassroomPurged is insertDocument's answer for a classroom that has been deleted and purged.
 var errClassroomPurged = errors.New("the classroom was deleted")
 
@@ -48,7 +43,9 @@ func (p pgStore) insertDocument(ctx context.Context, d newDocument) (commitAttem
 	if err != nil {
 		return false, err
 	}
-	if _, err = tx.Exec(ctx, "SELECT pg_advisory_xact_lock_shared($1::int, hashtext($2::uuid::text))", classroomLock, d.Classroom); err != nil {
+	// Shared with other uploads, exclusive against the classroom's purge: the purge removes every upload committed
+	// before it, and every later upload sees the classroom in purged_classrooms.
+	if err = platform.LockShared(ctx, tx, platform.LockClassroom, d.Classroom); err != nil {
 		return false, err
 	}
 	var purged bool

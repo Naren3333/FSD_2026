@@ -6,6 +6,7 @@ import time
 from types import SimpleNamespace
 from typing import Any
 
+import httpx
 import jwt
 import pytest
 from cryptography.hazmat.primitives import serialization
@@ -23,7 +24,7 @@ def test_real_jwt_validation(monkeypatch: Any) -> None:
     monkeypatch.setattr(
         auth,
         "keyset",
-        lambda: SimpleNamespace(get_signing_key_from_jwt=lambda _: SimpleNamespace(key=key.public_key())),
+        lambda: SimpleNamespace(signing_key=lambda _: SimpleNamespace(key=key.public_key())),
     )
     monkeypatch.setenv("OIDC_ISSUER", "https://identity.example.test")
     monkeypatch.setenv("OIDC_AUDIENCE", "learning")
@@ -63,32 +64,70 @@ def jwks(*keys: tuple[str, Any]) -> dict[str, Any]:
     return {"keys": [{**jwt.algorithms.RSAAlgorithm.to_jwk(k, as_dict=True), "kid": kid} for kid, k in keys]}
 
 
+def token_for(kid: str) -> str:
+    """A token whose header names kid; key lookup reads only the header."""
+    return jwt.encode({"sub": "s"}, "secret", algorithm="HS256", headers={"kid": kid})
+
+
 def test_unknown_key_ids_refetch_the_key_set_at_most_once_per_interval(monkeypatch: Any) -> None:
     old = rsa.generate_private_key(public_exponent=65537, key_size=2048).public_key()
     new = rsa.generate_private_key(public_exponent=65537, key_size=2048).public_key()
     served = [jwks(("old", old))]
     fetches: list[int] = []
-    keys = auth.KeySet("https://identity.example.test/certs", lifespan=300)
 
     def fetch() -> dict[str, Any]:
         fetches.append(1)
-        assert keys.jwk_set_cache is not None
-        keys.jwk_set_cache.put(served[-1])
         return served[-1]
 
-    monkeypatch.setattr(keys, "fetch_data", fetch)
+    keys = auth.KeySet("https://identity.example.test/certs", lifespan=300, fetch=fetch)
     clock = [1000.0]
     monkeypatch.setattr(auth.time, "monotonic", lambda: clock[0])
-    assert keys.get_signing_key("old").key_id == "old" and len(fetches) == 1
+    assert keys.signing_key(token_for("old")).key_id == "old" and len(fetches) == 1
     for _ in range(5):  # made-up key ids: one refetch, then the cached set answers
-        with pytest.raises(jwt.PyJWKClientError):
-            keys.get_signing_key("made-up")
+        with pytest.raises(jwt.PyJWTError):
+            keys.signing_key(token_for("made-up"))
     assert len(fetches) == 2
     served.append(jwks(("old", old), ("new", new)))  # the provider rotates a key in
-    with pytest.raises(jwt.PyJWKClientError):
-        keys.get_signing_key("new")
+    with pytest.raises(jwt.PyJWTError):
+        keys.signing_key(token_for("new"))
     clock[0] += auth.REFETCH_INTERVAL
-    assert keys.get_signing_key("new").key_id == "new" and len(fetches) == 3
+    assert keys.signing_key(token_for("new")).key_id == "new" and len(fetches) == 3
+    clock[0] += 300  # the cached set expires: known key ids refetch it too
+    assert keys.signing_key(token_for("old")).key_id == "old" and len(fetches) == 4
+
+
+def test_a_key_set_that_cannot_be_fetched_refuses_the_token() -> None:
+    def fetch() -> Any:
+        raise httpx.ConnectError("down")
+
+    for broken in [fetch, lambda: ["not", "a", "set"], lambda: {"keys": []}]:
+        with pytest.raises(jwt.PyJWTError):
+            auth.KeySet("https://identity.example.test/certs", fetch=broken).signing_key(token_for("k"))
+
+
+def test_an_outage_keeps_the_keys_held_and_is_not_retried_on_every_request(monkeypatch: Any) -> None:
+    key = rsa.generate_private_key(public_exponent=65537, key_size=2048).public_key()
+    up = [True]
+    fetches: list[int] = []
+
+    def fetch() -> dict[str, Any]:
+        fetches.append(1)
+        if not up[0]:
+            raise httpx.ConnectError("down")
+        return jwks(("k", key))
+
+    keys = auth.KeySet("https://identity.example.test/certs", lifespan=300, fetch=fetch)
+    clock = [1000.0]
+    monkeypatch.setattr(auth.time, "monotonic", lambda: clock[0])
+    assert keys.signing_key(token_for("k")).key_id == "k"
+    up[0] = False
+    clock[0] += 300  # the set is due a refetch, which fails: the held key still verifies
+    for _ in range(5):
+        assert keys.signing_key(token_for("k")).key_id == "k"
+    assert len(fetches) == 2
+    clock[0] += auth.REFETCH_INTERVAL
+    up[0] = True
+    assert keys.signing_key(token_for("k")).key_id == "k" and len(fetches) == 3
 
 
 def test_a_little_clock_skew_is_allowed(monkeypatch: Any) -> None:
@@ -96,7 +135,7 @@ def test_a_little_clock_skew_is_allowed(monkeypatch: Any) -> None:
     monkeypatch.setattr(
         auth,
         "keyset",
-        lambda: SimpleNamespace(get_signing_key_from_jwt=lambda _: SimpleNamespace(key=key.public_key())),
+        lambda: SimpleNamespace(signing_key=lambda _: SimpleNamespace(key=key.public_key())),
     )
     monkeypatch.setenv("OIDC_ISSUER", "https://identity.example.test")
     monkeypatch.setenv("OIDC_AUDIENCE", "learning")
@@ -136,17 +175,8 @@ def test_roles_are_read_defensively(claims: dict[str, Any], roles: set[str]) -> 
 
 def test_tokens_not_signed_with_the_realms_rsa_key_are_refused(monkeypatch: Any) -> None:
     key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
-    keys = auth.KeySet(
-        "https://identity.example.test/certs", lifespan=300
-    )  # the real key set, served locally
-
-    def fetch() -> dict[str, Any]:
-        served = jwks(("realm", key.public_key()))
-        assert keys.jwk_set_cache is not None
-        keys.jwk_set_cache.put(served)
-        return served
-
-    monkeypatch.setattr(keys, "fetch_data", fetch)
+    # The real key set, served locally.
+    keys = auth.KeySet("https://identity.example.test/certs", fetch=lambda: jwks(("realm", key.public_key())))
     monkeypatch.setattr(auth, "keyset", lambda: keys)
     monkeypatch.setenv("OIDC_ISSUER", "https://identity.example.test")
     monkeypatch.setenv("OIDC_AUDIENCE", "learning")

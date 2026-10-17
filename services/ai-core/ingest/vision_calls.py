@@ -101,39 +101,39 @@ async def ask(
     model: str,
     slots: asyncio.Semaphore | None = None,
 ) -> dict:
-    """One JSON-mode vision call, retried here alone (not also by openai_client.call): a 429 up to RATE_RETRIES
-    attempts, other retryable errors up to openai_client.MAX_ATTEMPTS, after OpenAI's Retry-After when it sends
-    one (a wait longer than MAX_WAIT fails the call). The wait happens outside the slot, so other pages' calls go
-    on meanwhile. `image` is the PNG, or an async function making it (called once a slot is first free, so only
-    the pages being sent, or waiting to be sent again, are held in memory). An answer that isn't a JSON object
+    """One JSON-mode vision call, retried by openai_client.call with this module's longer policy (_retry_in): a 429
+    up to RATE_RETRIES attempts, other retryable errors up to openai_client.MAX_ATTEMPTS, after OpenAI's Retry-After
+    when it sends one (a wait longer than MAX_WAIT fails the call). Each attempt takes a slot and the wait happens
+    outside it, so other pages' calls go on meanwhile. `image` is the PNG, or an async function making it (called
+    once a slot is first free, so only the pages being sent, or waiting to be sent again, are held in memory). An answer that isn't a JSON object
     raises, so it is never cached."""
     client = openai_client.get_client()
     extra = openai_client.deterministic_options(model)
     slots = slots or _semaphore()
     png = image if isinstance(image, bytes) else None
     started = time.monotonic()
-    for attempt in range(1, RATE_RETRIES + 1):
+
+    async def attempt() -> Any:
+        nonlocal png
         async with slots:
             if png is None:
                 assert not isinstance(image, bytes)
                 png = await image()
-            try:
-                resp = await client.chat.completions.create(
-                    model=model,
-                    messages=_messages(prompt, png),
-                    response_format={"type": "json_object"},
-                    timeout=TIMEOUT,
-                    **extra,
-                )
-                break
-            except Exception as e:
-                error, delay = e, _retry_in(e, attempt)
-                if delay is None:
-                    costs.retried(attempt - 1)
-                    raise
-        log.warning("vision call failed (attempt %d), retrying in %.2fs: %s", attempt, delay, error)
-        await openai_client._sleep(delay)  # the shared client's sleep, which tests record
-    costs.answered(model, resp.usage, time.monotonic() - started, attempt - 1)
+            return await client.chat.completions.create(
+                model=model,
+                messages=_messages(prompt, png),
+                response_format={"type": "json_object"},
+                timeout=TIMEOUT,
+                **extra,
+            )
+
+    attempts = openai_client.Attempts()
+    try:
+        resp = await openai_client.call(attempt, delay=_retry_in, attempts=attempts)
+    except Exception:
+        costs.retried(attempts.count - 1)
+        raise
+    costs.answered(model, resp.usage, time.monotonic() - started, attempts.count - 1)
     out = json.loads(resp.choices[0].message.content or "")
     if not isinstance(out, dict):
         raise ValueError(f"the model answered {type(out).__name__}, not a JSON object")
@@ -153,9 +153,9 @@ def _messages(prompt: str, png: bytes) -> Any:
     ]
 
 
-def _retry_in(error: Exception, attempt: int) -> float | None:
+def _retry_in(error: openai.OpenAIError, attempt: int) -> float | None:
     """Seconds to wait before attempt `attempt + 1`, or None to give up."""
-    if not isinstance(error, openai.OpenAIError) or not openai_client.retryable(error):
+    if not openai_client.retryable(error):
         return None
     limited = isinstance(error, openai.RateLimitError)
     if attempt >= (RATE_RETRIES if limited else openai_client.MAX_ATTEMPTS):
