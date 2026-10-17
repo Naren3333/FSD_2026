@@ -104,18 +104,14 @@
               @switch (question.type) {
                 @case ('numerical') {
                   <input
+                    appFieldControl
                     [id]="'answer-' + question.id"
                     [formControlName]="question.id"
                     inputmode="decimal"
-                    [attr.aria-describedby]="'answer-' + question.id + '-help'"
                   />
                 }
                 @case ('multiple_choice') {
-                  <select
-                    [id]="'answer-' + question.id"
-                    [formControlName]="question.id"
-                    [attr.aria-describedby]="'answer-' + question.id + '-help'"
-                  >
+                  <select appFieldControl [id]="'answer-' + question.id" [formControlName]="question.id">
                     <option value="">Choose an answer</option>
                     @for (option of question.options ?? []; track option) {
                       <option [value]="option">{{ option }}</option>
@@ -124,20 +120,20 @@
                 }
                 @case ('short_answer') {
                   <input
+                    appFieldControl
                     [id]="'answer-' + question.id"
                     [formControlName]="question.id"
                     maxlength="500"
-                    [attr.aria-describedby]="'answer-' + question.id + '-help'"
                   />
                 }
                 @case ('free_response') {
                   <textarea
+                    appFieldControl
                     [id]="'answer-' + question.id"
                     [formControlName]="question.id"
                     rows="8"
                     class="answer-box"
                     [attr.maxlength]="question.max_length ?? 5000"
-                    [attr.aria-describedby]="'answer-' + question.id + '-help'"
                   ></textarea>
                 }
               }
@@ -193,12 +189,7 @@
           label="Assessment title"
           [invalid]="form.controls.title.touched && form.controls.title.invalid"
         >
-          <input
-            id="assessment-title"
-            formControlName="title"
-            maxlength="160"
-            aria-describedby="assessment-title-help"
-          />
+          <input appFieldControl id="assessment-title" formControlName="title" maxlength="160" />
         </app-field>
 
         @for (question of questions.controls; track question; let i = $index) {
@@ -210,16 +201,16 @@
               [invalid]="question.controls.prompt.touched && question.controls.prompt.invalid"
             >
               <textarea
+                appFieldControl
                 [id]="'question-' + i + '-prompt'"
                 formControlName="prompt"
                 rows="3"
                 maxlength="2000"
-                [attr.aria-describedby]="'question-' + i + '-prompt-help'"
               ></textarea>
             </app-field>
             <div class="field-row">
               <app-field [controlId]="'question-' + i + '-type'" label="Question type">
-                <select [id]="'question-' + i + '-type'" formControlName="type">
+                <select appFieldControl [id]="'question-' + i + '-type'" formControlName="type">
                   <option value="numerical">Numerical</option>
                   <option value="multiple_choice">Multiple choice</option>
                   <option value="short_answer">Short answer</option>
@@ -233,10 +224,10 @@
                   hint="The rubric's top levels added up."
                 >
                   <input
+                    appFieldControl
                     [id]="'question-' + i + '-points'"
                     [value]="rubricPoints(question)"
                     readonly
-                    [attr.aria-describedby]="'question-' + i + '-points-help'"
                   />
                 </app-field>
               } @else {
@@ -248,12 +239,12 @@
                   [invalid]="question.controls.points.touched && question.controls.points.invalid"
                 >
                   <input
+                    appFieldControl
                     [id]="'question-' + i + '-points'"
                     type="number"
                     min="1"
                     max="100"
                     formControlName="points"
-                    [attr.aria-describedby]="'question-' + i + '-points-help'"
                   />
                 </app-field>
               }
@@ -263,11 +254,7 @@
               label="Curriculum skill"
               [invalid]="question.controls.skill_id.touched && question.controls.skill_id.invalid"
             >
-              <select
-                [id]="'question-' + i + '-skill'"
-                formControlName="skill_id"
-                [attr.aria-describedby]="'question-' + i + '-skill-help'"
-              >
+              <select appFieldControl [id]="'question-' + i + '-skill'" formControlName="skill_id">
                 <option value="">Choose a skill</option>
                 @for (skill of skills(); track skill.id) {
                   <option [value]="skill.id">{{ skill.name }}</option>
@@ -284,10 +271,10 @@
                   [invalid]="question.controls.options.touched && question.controls.options.invalid"
                 >
                   <textarea
+                    appFieldControl
                     [id]="'question-' + i + '-options'"
                     formControlName="options"
                     rows="4"
-                    [attr.aria-describedby]="'question-' + i + '-options-help'"
                   ></textarea>
                 </app-field>
                 <app-field
@@ -296,11 +283,7 @@
                   hint="Use the exact option text."
                   [invalid]="question.controls.answer.touched && question.controls.answer.invalid"
                 >
-                  <input
-                    [id]="'question-' + i + '-key'"
-                    formControlName="answer"
-                    [attr.aria-describedby]="'question-' + i + '-key-help'"
-                  />
+                  <input appFieldControl [id]="'question-' + i + '-key'" formControlName="answer" />
                 </app-field>
               }
               @case ('numerical') {
@@ -311,10 +294,10 @@
                     [invalid]="question.controls.answer.touched && question.controls.answer.invalid"
                   >
                     <input
+                      appFieldControl
                       [id]="'question-' + i + '-key'"
                       formControlName="answer"
                       inputmode="decimal"
-                      [attr.aria-describedby]="'question-' + i + '-key-help'"
                     />
                   </app-field>
                   <app-field
@@ -323,10 +306,10 @@
                     hint="Use 0 for an exact match."
                   >
                     <input
+                      appFieldControl
                       [id]="'question-' + i + '-tolerance'"
                       formControlName="tolerance"
                       inputmode="decimal"
-                      [attr.aria-describedby]="'question-' + i + '-tolerance-help'"
                     />
                   </app-field>
                 </div>
@@ -340,10 +323,10 @@
                   [invalid]="question.controls.accepted.touched && question.controls.accepted.invalid"
                 >
                   <textarea
+                    appFieldControl
                     [id]="'question-' + i + '-accepted'"
                     formControlName="accepted"
                     rows="3"
-                    [attr.aria-describedby]="'question-' + i + '-accepted-help'"
                   ></textarea>
                 </app-field>
                 <label class="check">
@@ -360,12 +343,12 @@
                   [invalid]="question.controls.max_length.touched && question.controls.max_length.invalid"
                 >
                   <input
+                    appFieldControl
                     [id]="'question-' + i + '-length'"
                     type="number"
                     min="1"
                     max="20000"
                     formControlName="max_length"
-                    [attr.aria-describedby]="'question-' + i + '-length-help'"
                   />
                 </app-field>
                 <div class="rubric" formArrayName="criteria">
@@ -378,10 +361,10 @@
                         [invalid]="criterion.controls.title.touched && criterion.controls.title.invalid"
                       >
                         <input
+                          appFieldControl
                           [id]="'question-' + i + '-criterion-' + c + '-title'"
                           formControlName="title"
                           maxlength="200"
-                          [attr.aria-describedby]="'question-' + i + '-criterion-' + c + '-title-help'"
                         />
                       </app-field>
                       <app-field
@@ -392,10 +375,10 @@
                         [invalid]="criterion.controls.levels.touched && criterion.controls.levels.invalid"
                       >
                         <textarea
+                          appFieldControl
                           [id]="'question-' + i + '-criterion-' + c + '-levels'"
                           formControlName="levels"
                           rows="4"
-                          [attr.aria-describedby]="'question-' + i + '-criterion-' + c + '-levels-help'"
                         ></textarea>
                       </app-field>
                       @if (question.controls.criteria.length > 1) {
@@ -417,11 +400,11 @@
                   hint="For you and AI suggestions only; students never see it."
                 >
                   <textarea
+                    appFieldControl
                     [id]="'question-' + i + '-model'"
                     formControlName="model_answer"
                     rows="4"
                     maxlength="5000"
-                    [attr.aria-describedby]="'question-' + i + '-model-help'"
                   ></textarea>
                 </app-field>
               }
@@ -445,30 +428,20 @@
               label="Opens (optional)"
               hint="Hidden from students until then."
             >
-              <input
-                id="assessment-opens"
-                type="datetime-local"
-                formControlName="opens_at"
-                aria-describedby="assessment-opens-help"
-              />
+              <input appFieldControl id="assessment-opens" type="datetime-local" formControlName="opens_at" />
             </app-field>
             <app-field controlId="assessment-due" label="Due (optional)" hint="Must be after it opens.">
-              <input
-                id="assessment-due"
-                type="datetime-local"
-                formControlName="due_at"
-                aria-describedby="assessment-due-help"
-              />
+              <input appFieldControl id="assessment-due" type="datetime-local" formControlName="due_at" />
             </app-field>
           </div>
           <app-field controlId="assessment-late" label="After the due date">
-            <select id="assessment-late" formControlName="late_policy">
+            <select appFieldControl id="assessment-late" formControlName="late_policy">
               <option value="accept_flagged">Accept late work and mark it late</option>
               <option value="reject">Stop taking submissions</option>
             </select>
           </app-field>
           <app-field controlId="assessment-release" label="When students see grades">
-            <select id="assessment-release" formControlName="release_policy">
+            <select appFieldControl id="assessment-release" formControlName="release_policy">
               <option value="on_finalize">As soon as I finalize each grade</option>
               <option value="manual">When I release the results</option>
             </select>

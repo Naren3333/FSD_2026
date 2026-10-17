@@ -12,27 +12,14 @@ class SourceReference(Contract):
     source_sha256: str = Field(pattern=r"^[a-f0-9]{64}$")
 
 
-class Billed(Contract):
-    """Whose daily AI allowance would pay for the generation (ADR 0003), taken from the user's verified token."""
-
-    user_id: str = Field(min_length=1, max_length=200)
-    org_id: str = Field(min_length=1, max_length=200)
-    role: Literal["student", "teacher"]
-
-
 class RequestContract(Contract):
-    """ADR 0004's question types, each question worth 1 to 100 points (a free response's points are its rubric's
-    top levels), and the user the model calls would be billed to. Not authorized: always 501."""
-
     document_ids: list[UUID] = Field(min_length=1, max_length=20)
     skill_ids: list[UUID] = Field(min_length=1, max_length=20)
     classroom_id: UUID
-    question_type: Literal["multiple_choice", "numerical", "short_answer", "free_response"]
-    points: int = Field(ge=1, le=100)
+    question_type: Literal["multiple_choice", "numerical"]
     difficulty: Literal["introductory", "intermediate", "advanced"]
     count: int = Field(ge=1, le=20)
     performance_context_id: UUID | None = None
-    billed_to: Billed
 
 
 class GeneratedQuestion(Contract):

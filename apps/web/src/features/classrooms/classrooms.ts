@@ -7,7 +7,7 @@ import { Session } from '../../core/session';
 import { UnsavedChanges } from '../../core/unsaved-changes';
 import { ActionState } from '../../shared/action-state';
 import { ConfirmDialogComponent } from '../../shared/confirm-dialog';
-import { FieldComponent } from '../../shared/field';
+import { FieldComponent, FieldControlDirective } from '../../shared/field';
 import { studentName } from '../../shared/names';
 import { PagerComponent } from '../../shared/pager';
 import { Section } from '../../shared/section';
@@ -21,6 +21,7 @@ import { requiredText } from '../../shared/validators';
   imports: [
     ReactiveFormsModule,
     FieldComponent,
+    FieldControlDirective,
     StatusComponent,
     SectionStateComponent,
     PagerComponent,

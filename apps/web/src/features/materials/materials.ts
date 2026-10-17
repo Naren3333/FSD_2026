@@ -6,7 +6,7 @@ import { ClassroomContext, onClassroomChange } from '../../core/classroom-contex
 import { Session } from '../../core/session';
 import { UnsavedChanges } from '../../core/unsaved-changes';
 import { ActionState } from '../../shared/action-state';
-import { FieldComponent } from '../../shared/field';
+import { FieldComponent, FieldControlDirective } from '../../shared/field';
 import { isPdf } from '../../shared/files';
 import { Section } from '../../shared/section';
 import { SectionStateComponent } from '../../shared/section-state';
@@ -61,7 +61,13 @@ export function describe(doc: DocumentRecord): { label: string; detail: string }
 @Component({
   selector: 'app-materials',
   standalone: true,
-  imports: [ReactiveFormsModule, FieldComponent, StatusComponent, SectionStateComponent],
+  imports: [
+    ReactiveFormsModule,
+    FieldComponent,
+    FieldControlDirective,
+    StatusComponent,
+    SectionStateComponent,
+  ],
   templateUrl: './materials.html',
 })
 export class MaterialsComponent implements OnDestroy {

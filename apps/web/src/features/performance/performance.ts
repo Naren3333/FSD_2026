@@ -9,7 +9,7 @@ import { ClassroomContext, onClassroomChange } from '../../core/classroom-contex
 import { CurriculumNames } from '../../core/curriculum-names';
 import { Session } from '../../core/session';
 import { ActionState } from '../../shared/action-state';
-import { FieldComponent } from '../../shared/field';
+import { FieldComponent, FieldControlDirective } from '../../shared/field';
 import { studentName } from '../../shared/names';
 import { Section } from '../../shared/section';
 import { SectionStateComponent } from '../../shared/section-state';
@@ -21,6 +21,7 @@ import { StatusComponent } from '../../shared/status';
   imports: [
     ReactiveFormsModule,
     FieldComponent,
+    FieldControlDirective,
     StatusComponent,
     SectionStateComponent,
     PercentPipe,

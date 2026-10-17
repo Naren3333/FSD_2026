@@ -12,8 +12,6 @@ PAYLOAD = {
     "question_type": "numerical",
     "difficulty": "introductory",
     "count": 2,
-    "points": 5,
-    "billed_to": {"user_id": "teacher", "org_id": "org", "role": "teacher"},
 }
 
 
@@ -27,10 +25,6 @@ def test_placeholder_contract():
         assert result.json()["error"]["capability"] == "question_generation"
         assert client.post(PATH, json={}).status_code == 422
         assert client.post(PATH, json={**PAYLOAD, "unknown": True}).status_code == 422
-        assert client.post(PATH, json={**PAYLOAD, "question_type": "free_response"}).status_code == 501
-        assert client.post(PATH, json={**PAYLOAD, "points": 101}).status_code == 422
-        unbilled = {k: v for k, v in PAYLOAD.items() if k != "billed_to"}
-        assert client.post(PATH, json=unbilled).status_code == 422
 
 
 @pytest.mark.parametrize("role", ["student", "teacher"])

@@ -1,25 +1,26 @@
-import { AfterViewChecked, Component, ElementRef, Input, inject } from '@angular/core';
+import { Component, Directive, Input, inject } from '@angular/core';
 
-/** A labelled form control with its hint, or its error once invalid. The control (the element whose id is
- * `controlId`) is marked aria-invalid while the error shows, and described by the hint or error. */
+/** A labelled form control with its hint, or its error once invalid. Mark the control (the element whose id is
+ * `controlId`) with `appFieldControl`. */
 @Component({ selector: 'app-field', standalone: true, templateUrl: './field.html' })
-export class FieldComponent implements AfterViewChecked {
+export class FieldComponent {
   @Input({ required: true }) controlId = '';
   @Input({ required: true }) label = '';
   @Input() hint = '';
   @Input() error = 'This field is required.';
   @Input() invalid = false;
-  private readonly host: HTMLElement = inject(ElementRef).nativeElement;
+}
 
-  /** The projected control can appear or change after this component's own inputs do, so it is checked each time. */
-  ngAfterViewChecked(): void {
-    const control = this.host.querySelector(`[id="${this.controlId}"]`);
-    if (!control) return;
-    if (this.invalid) control.setAttribute('aria-invalid', 'true');
-    else control.removeAttribute('aria-invalid');
-    const help = `${this.controlId}-help`;
-    const described = (control.getAttribute('aria-describedby') ?? '').split(/\s+/).filter(Boolean);
-    if ((this.invalid || this.hint) && !described.includes(help))
-      control.setAttribute('aria-describedby', [...described, help].join(' '));
-  }
+/** The control inside an app-field: aria-invalid while the field shows its error, and described by its hint or
+ * error. */
+@Directive({
+  selector: '[appFieldControl]',
+  standalone: true,
+  host: {
+    '[attr.aria-invalid]': 'field.invalid || null',
+    '[attr.aria-describedby]': "field.invalid || field.hint ? field.controlId + '-help' : null",
+  },
+})
+export class FieldControlDirective {
+  readonly field = inject(FieldComponent);
 }

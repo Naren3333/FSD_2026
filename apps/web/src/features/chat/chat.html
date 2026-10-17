@@ -205,11 +205,11 @@
         [invalid]="tried() && form.controls.question.invalid"
       >
         <textarea
+          appFieldControl
           id="chat-question"
           formControlName="question"
           rows="3"
           [attr.maxlength]="max"
-          aria-describedby="chat-question-help"
           (keydown)="shortcut($event)"
         ></textarea>
       </app-field>

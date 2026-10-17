@@ -8,7 +8,7 @@ import { ClassroomContext, onClassroomChange } from '../../core/classroom-contex
 import { UnsavedChanges } from '../../core/unsaved-changes';
 import { ActionState } from '../../shared/action-state';
 import { messageOf } from '../../shared/errors';
-import { FieldComponent } from '../../shared/field';
+import { FieldComponent, FieldControlDirective } from '../../shared/field';
 import { dateTime, resetTime } from '../../shared/format';
 import { Section } from '../../shared/section';
 import { SectionStateComponent } from '../../shared/section-state';
@@ -26,7 +26,14 @@ const OUTCOME_NOTES: Record<string, string> = {
 @Component({
   selector: 'app-chat',
   standalone: true,
-  imports: [ReactiveFormsModule, FieldComponent, StatusComponent, SectionStateComponent, NgTemplateOutlet],
+  imports: [
+    ReactiveFormsModule,
+    FieldComponent,
+    FieldControlDirective,
+    StatusComponent,
+    SectionStateComponent,
+    NgTemplateOutlet,
+  ],
   templateUrl: './chat.html',
 })
 export class ChatComponent {

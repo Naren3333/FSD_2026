@@ -62,19 +62,14 @@
           label="Document title"
           [invalid]="form.controls.title.touched && form.controls.title.invalid"
         >
-          <input
-            id="document-title"
-            formControlName="title"
-            maxlength="160"
-            aria-describedby="document-title-help"
-          />
+          <input appFieldControl id="document-title" formControlName="title" maxlength="160" />
         </app-field>
         <app-field
           controlId="document-type"
           label="Document type"
           hint="Students never see rubrics or marking schemes, and the assistant does not use them in their answers."
         >
-          <select id="document-type" formControlName="doc_type" aria-describedby="document-type-help">
+          <select appFieldControl id="document-type" formControlName="doc_type">
             @for (type of types; track type.value) {
               <option [value]="type.value">{{ type.label }}</option>
             }
@@ -86,12 +81,12 @@
           hint="PDF up to 50 MiB, or UTF-8 .txt up to 5 MiB."
         >
           <input
+            appFieldControl
             #fileInput
             id="document-file"
             type="file"
             accept=".txt,.pdf"
             (change)="selectFile($event)"
-            aria-describedby="document-file-help"
           />
         </app-field>
         @if (file()) {

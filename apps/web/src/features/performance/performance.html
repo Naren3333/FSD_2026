@@ -15,11 +15,7 @@
         error="Choose a student."
         [invalid]="form.controls.student.touched && form.controls.student.invalid"
       >
-        <select
-          id="performance-student"
-          formControlName="student"
-          aria-describedby="performance-student-help"
-        >
+        <select appFieldControl id="performance-student" formControlName="student">
           <option value="">Choose a student</option>
           @for (student of roster.value() ?? []; track student.id) {
             <option [value]="student.id">{{ studentName(student) || student.id }}</option>

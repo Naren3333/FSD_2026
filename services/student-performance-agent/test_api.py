@@ -9,17 +9,10 @@ PAYLOAD = {
     "student_id": "student",
     "classroom_id": "00000000-0000-4000-8000-000000000003",
     "performance_summary": [
-        {
-            "skill_id": "00000000-0000-4000-8000-000000000002",
-            "attempted": 2,
-            "correct": 1,
-            "marks_awarded": 7,
-            "marks_possible": 10,
-        }
+        {"skill_id": "00000000-0000-4000-8000-000000000002", "attempted": 2, "correct": 1}
     ],
     "evidence_ids": ["00000000-0000-4000-8000-000000000001"],
     "skill_ids": ["00000000-0000-4000-8000-000000000002"],
-    "billed_to": {"user_id": "teacher", "org_id": "org", "role": "teacher"},
 }
 
 
@@ -33,10 +26,6 @@ def test_placeholder_contract():
         assert result.json()["error"]["capability"] == "performance_interpretation"
         assert client.post(PATH, json={}).status_code == 422
         assert client.post(PATH, json={**PAYLOAD, "unknown": True}).status_code == 422
-        unbilled = {k: v for k, v in PAYLOAD.items() if k != "billed_to"}
-        assert client.post(PATH, json=unbilled).status_code == 422
-        summary = [{**PAYLOAD["performance_summary"][0], "marks_awarded": 11}]  # type: ignore[index]
-        assert client.post(PATH, json={**PAYLOAD, "performance_summary": summary}).status_code == 422
 
 
 @pytest.mark.parametrize("role", ["student", "teacher"])

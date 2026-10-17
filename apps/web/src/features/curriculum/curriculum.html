@@ -31,7 +31,7 @@
       <h3>Add curriculum</h3>
       <form id="node-form" novalidate [formGroup]="form" (ngSubmit)="create()">
         <app-field controlId="node-kind" label="Level">
-          <select id="node-kind" formControlName="kind">
+          <select appFieldControl id="node-kind" formControlName="kind">
             @for (kind of kinds; track kind) {
               <option [value]="kind">{{ kind }}</option>
             }
@@ -43,14 +43,14 @@
           [invalid]="form.controls.name.touched && form.controls.name.invalid"
           error="Enter a name of 1–160 characters."
         >
-          <input id="node-name" formControlName="name" maxlength="160" aria-describedby="node-name-help" />
+          <input appFieldControl id="node-name" formControlName="name" maxlength="160" />
         </app-field>
         <app-field
           controlId="node-parent"
           label="Parent"
           hint="Optional. Choose the preceding curriculum level."
         >
-          <select id="node-parent" formControlName="parent_id">
+          <select appFieldControl id="node-parent" formControlName="parent_id">
             <option value="">Standalone</option>
             @for (node of nodes.value() ?? []; track node.id) {
               <option [value]="node.id">{{ node.kind }} · {{ node.name }}</option>

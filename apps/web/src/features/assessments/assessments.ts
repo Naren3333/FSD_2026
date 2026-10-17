@@ -11,7 +11,7 @@ import { Session } from '../../core/session';
 import { UnsavedChanges } from '../../core/unsaved-changes';
 import { ActionState } from '../../shared/action-state';
 import { ConfirmDialogComponent } from '../../shared/confirm-dialog';
-import { FieldComponent } from '../../shared/field';
+import { FieldComponent, FieldControlDirective } from '../../shared/field';
 import { dateTime, time } from '../../shared/format';
 import { Section } from '../../shared/section';
 import { SectionStateComponent } from '../../shared/section-state';
@@ -41,6 +41,7 @@ const SAVE_DELAY = 1500;
   imports: [
     ReactiveFormsModule,
     FieldComponent,
+    FieldControlDirective,
     StatusComponent,
     SectionStateComponent,
     ConfirmDialogComponent,

@@ -100,39 +100,6 @@
   },
   "components": {
     "schemas": {
-      "Billed": {
-        "properties": {
-          "user_id": {
-            "type": "string",
-            "maxLength": 200,
-            "minLength": 1,
-            "title": "User Id"
-          },
-          "org_id": {
-            "type": "string",
-            "maxLength": 200,
-            "minLength": 1,
-            "title": "Org Id"
-          },
-          "role": {
-            "type": "string",
-            "enum": [
-              "student",
-              "teacher"
-            ],
-            "title": "Role"
-          }
-        },
-        "additionalProperties": false,
-        "type": "object",
-        "required": [
-          "user_id",
-          "org_id",
-          "role"
-        ],
-        "title": "Billed",
-        "description": "Whose daily AI allowance would pay for the generation (ADR 0003), taken from the user's verified token."
-      },
       "ErrorBody": {
         "properties": {
           "code": {
@@ -269,17 +236,9 @@
             "type": "string",
             "enum": [
               "multiple_choice",
-              "numerical",
-              "short_answer",
-              "free_response"
+              "numerical"
             ],
             "title": "Question Type"
-          },
-          "points": {
-            "type": "integer",
-            "maximum": 100.0,
-            "minimum": 1.0,
-            "title": "Points"
           },
           "difficulty": {
             "type": "string",
@@ -307,9 +266,6 @@
               }
             ],
             "title": "Performance Context Id"
-          },
-          "billed_to": {
-            "$ref": "#/components/schemas/Billed"
           }
         },
         "additionalProperties": false,
@@ -319,13 +275,10 @@
           "skill_ids",
           "classroom_id",
           "question_type",
-          "points",
           "difficulty",
-          "count",
-          "billed_to"
+          "count"
         ],
-        "title": "RequestContract",
-        "description": "ADR 0004's question types, each question worth 1 to 100 points (a free response's points are its rubric's\ntop levels), and the user the model calls would be billed to. Not authorized: always 501."
+        "title": "RequestContract"
       },
       "ResponseContract": {
         "properties": {

@@ -36,7 +36,7 @@
           [invalid]="form.controls.name.touched && form.controls.name.invalid"
           error="Enter a name of 1–120 characters."
         >
-          <input id="class-name" formControlName="name" maxlength="120" aria-describedby="class-name-help" />
+          <input appFieldControl id="class-name" formControlName="name" maxlength="120" />
         </app-field>
         <button [disabled]="state.busy()">Create classroom</button>
         <button type="reset" class="secondary clear-form" [disabled]="state.busy()">Clear form</button>
@@ -112,10 +112,10 @@
     <p class="caption">Everyone in your school who has signed in with a name</p>
     <app-field controlId="student-search" label="Search students" hint="By name or username">
       <input
+        appFieldControl
         id="student-search"
         type="search"
         autocomplete="off"
-        aria-describedby="student-search-help"
         [value]="search()"
         (input)="searchFor($any($event.target).value)"
       />

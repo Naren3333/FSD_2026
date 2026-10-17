@@ -6,7 +6,7 @@ import { CurriculumNames } from '../../core/curriculum-names';
 import { Session } from '../../core/session';
 import { UnsavedChanges } from '../../core/unsaved-changes';
 import { ActionState } from '../../shared/action-state';
-import { FieldComponent } from '../../shared/field';
+import { FieldComponent, FieldControlDirective } from '../../shared/field';
 import { Section } from '../../shared/section';
 import { SectionStateComponent } from '../../shared/section-state';
 import { StatusComponent } from '../../shared/status';
@@ -27,7 +27,13 @@ export const NODE_KINDS = Object.keys(LEVELS) as NodeKind[];
 @Component({
   selector: 'app-curriculum',
   standalone: true,
-  imports: [ReactiveFormsModule, FieldComponent, StatusComponent, SectionStateComponent],
+  imports: [
+    ReactiveFormsModule,
+    FieldComponent,
+    FieldControlDirective,
+    StatusComponent,
+    SectionStateComponent,
+  ],
   templateUrl: './curriculum.html',
 })
 export class CurriculumComponent implements OnInit {

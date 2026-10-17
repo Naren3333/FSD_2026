@@ -7,7 +7,7 @@ import { CurriculumNames } from '../../core/curriculum-names';
 import { UnsavedChanges } from '../../core/unsaved-changes';
 import { ActionState } from '../../shared/action-state';
 import { ConfirmDialogComponent } from '../../shared/confirm-dialog';
-import { FieldComponent } from '../../shared/field';
+import { FieldComponent, FieldControlDirective } from '../../shared/field';
 import { dateTime } from '../../shared/format';
 import { MarksPipe } from '../../shared/marks';
 import { assessmentsOf, promptOf, studentNames } from '../../shared/names';
@@ -43,6 +43,7 @@ const SUGGESTION_POLL_MAX = 60000;
   imports: [
     ReactiveFormsModule,
     FieldComponent,
+    FieldControlDirective,
     StatusComponent,
     SectionStateComponent,
     ConfirmDialogComponent,

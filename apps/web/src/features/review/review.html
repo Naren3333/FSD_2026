@@ -15,12 +15,7 @@
 <section class="panel">
   <div class="filter-row">
     <app-field controlId="review-assessment" label="Assessment" hint="Choose one to see all of its grades.">
-      <select
-        id="review-assessment"
-        [formControl]="filter"
-        (change)="choose()"
-        aria-describedby="review-assessment-help"
-      >
+      <select appFieldControl id="review-assessment" [formControl]="filter" (change)="choose()">
         <option value="">Newest grades in the classroom</option>
         @for (item of published.value() ?? []; track item.id) {
           <option [value]="item.id">{{ item.title }}</option>
@@ -209,12 +204,12 @@
                     "
                   >
                     <input
+                      appFieldControl
                       [id]="'mark-' + evidence.question_id"
                       type="number"
                       min="0"
                       [max]="evidence.possible"
                       formControlName="awarded"
-                      [attr.aria-describedby]="'mark-' + evidence.question_id + '-help'"
                     />
                   </app-field>
                 }
@@ -229,11 +224,11 @@
                   "
                 >
                   <textarea
+                    appFieldControl
                     [id]="'feedback-' + evidence.question_id"
                     formControlName="feedback"
                     rows="3"
                     maxlength="2000"
-                    [attr.aria-describedby]="'feedback-' + evidence.question_id + '-help'"
                   ></textarea>
                 </app-field>
               </section>
@@ -287,11 +282,11 @@
       [invalid]="form.controls.reason.touched && form.controls.reason.invalid"
     >
       <textarea
+        appFieldControl
         id="review-reason"
         formControlName="reason"
         rows="4"
         maxlength="1000"
-        aria-describedby="review-reason-help"
       ></textarea>
     </app-field>
   </form>

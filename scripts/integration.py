@@ -752,12 +752,19 @@ def databases() -> None:
                 isolation = psql("SELECT 1", database=database, user=user, check=False)
                 refused = isolation.returncode != 0 and "permission denied" in isolation.stderr.lower()
                 assert refused, (user, database)
-    # Every numbered migration in the repository has been applied, and nothing else.
+    # Exactly these migrations have been applied. The list is written out, not read from the migrations folders, so
+    # a migration file deleted by mistake fails here; add each new migration's number to it.
     versions = "SELECT string_agg(version::text, ',' ORDER BY version) FROM schema_migrations"
-    folders = {"chatbot": "question-chatbot-agent", "aicore": "ai-core"}
-    for service in SERVICES:
-        files = (ROOT / "services" / folders.get(service, service) / "migrations").glob("*.sql")
-        expected = ",".join(str(n) for n in sorted(int(f.name.split("_", 1)[0]) for f in files))
+    for service, expected in [
+        ("content", "1,2,3"),
+        ("identity", "1,2,3,4,5,6"),
+        ("assessment", "1,2"),
+        ("grading", "1,2,3"),
+        ("analytics", "1,2,3"),
+        ("curriculum", "1"),
+        ("chatbot", "1,2"),
+        ("aicore", "1,2"),
+    ]:
         migrations = sql_value(service, versions)
         assert migrations == expected, (service, migrations, expected)
     vector = sql_value("content", "SELECT count(*) FROM pg_extension WHERE extname='vector'")
@@ -777,18 +784,14 @@ PLACEHOLDER_PROBE = """
 import json, sys, urllib.error, urllib.request
 token, room = sys.stdin.read().split()
 ids = ["00000000-0000-4000-8000-000000000001"]
-billed_to = {"user_id": "integration-test", "org_id": "local-school", "role": "teacher"}
 requests = {
     "question-generation-agent:8080/v1/question_generation": {
-        "document_ids": ids, "skill_ids": ids, "classroom_id": room, "question_type": "numerical",
-        "points": 1, "difficulty": "introductory", "count": 1, "billed_to": billed_to,
+        "document_ids": ids, "skill_ids": ids, "classroom_id": room,
+        "question_type": "numerical", "difficulty": "introductory", "count": 1,
     },
     "student-performance-agent:8080/v1/performance_interpretation": {
         "student_id": "student", "classroom_id": room, "evidence_ids": ids, "skill_ids": ids,
-        "performance_summary": [
-            {"skill_id": ids[0], "attempted": 1, "correct": 1, "marks_awarded": 1, "marks_possible": 1}
-        ],
-        "billed_to": billed_to,
+        "performance_summary": [{"skill_id": ids[0], "attempted": 1, "correct": 1}],
     },
 }
 for path, body in requests.items():
