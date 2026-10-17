@@ -42,9 +42,10 @@ class Billing:
         if spend.over_limit(usage):
             raise spend.limit_reached(usage)
 
-    def charge(self, billed: spend.Billed, correlation: str, *charges: spend.Charge) -> None:
-        """Record what a call cost. The write runs as its own task so a caller hanging up (a closed stream)
-        cannot cancel it; a failed write is logged, since the money is already spent."""
+    async def charge(self, billed: spend.Billed, correlation: str, *charges: spend.Charge) -> None:
+        """Record what a call cost before its response ends, so the caller's next call is checked against it.
+        The write runs as its own task so a caller hanging up (a closed stream, a cancelled request) cannot
+        cancel it; a failed write is logged, since the money is already spent."""
         if not charges:
             return
 
@@ -58,6 +59,7 @@ class Billing:
         task = asyncio.ensure_future(write())
         self._writes.add(task)
         task.add_done_callback(self._writes.discard)
+        await asyncio.shield(task)
 
     async def drain(self) -> None:
         """Wait, briefly, for charges still being written."""
@@ -140,9 +142,9 @@ class StreamBill:
         self.text: list[str] = []
         self.done = False
 
-    def close(self, usage: openai_client.Usage | None = None) -> None:
+    async def close(self, usage: openai_client.Usage | None = None) -> None:
         if self.done:
             return
         self.done = True
         charge = reply_charge("stream", self.model, self.prompt, "".join(self.text), usage)
-        self.billing.charge(self.billed, self.correlation, charge)
+        await self.billing.charge(self.billed, self.correlation, charge)

@@ -96,7 +96,7 @@ class Claims:
 
     @property
     def person_role(self) -> str | None:
-        """The person's role: teacher (which wins for an account with both) or student; None for a service
+        """The person's role, teacher or student (an account never holds both; see caller); None for a service
         account."""
         if self.has(TEACHER):
             return TEACHER
@@ -106,8 +106,12 @@ class Claims:
 
 
 def caller(claims: dict[str, Any] = Depends(actor)) -> Claims:
-    """FastAPI dependency: the verified caller."""
-    return Claims.from_token(claims)
+    """FastAPI dependency: the verified caller. An account is a teacher or a student, never both: a token holding
+    both roles is refused with 403."""
+    verified = Claims.from_token(claims)
+    if verified.has(TEACHER) and verified.has(STUDENT):
+        raise failure(403, "ROLE_CONFLICT", "An account must be either a teacher or a student, not both.")
+    return verified
 
 
 def requires(*roles: str) -> Callable[..., Claims]:

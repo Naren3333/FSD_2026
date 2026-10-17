@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"errors"
 	"learning/platform"
+	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 	"time"
@@ -148,5 +150,50 @@ func TestTooManyQuotesAreRefused(t *testing.T) {
 	}
 	if s, err := checkSuggestion(q, r, essayAnswer, reply(t, []map[string]any{criterion("c1", 2, quotes...), criterion("c2", 0)}, ""), "m"); err == nil {
 		t.Fatalf("kept %+v", s)
+	}
+}
+
+// fakeAI is ai-core and the token endpoint: it keeps the last inference body and answers it with answer.
+type fakeAI struct {
+	*httptest.Server
+	body map[string]any
+}
+
+func newFakeAI(t *testing.T, answer string) *fakeAI {
+	f := &fakeAI{}
+	f.Server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.URL.Path == "/token":
+			_, _ = w.Write([]byte(`{"access_token":"t","expires_in":300}`))
+		case r.URL.Path == "/v1/inference" && r.Header.Get("Authorization") == "Bearer t":
+			if err := json.NewDecoder(r.Body).Decode(&f.body); err != nil {
+				w.WriteHeader(http.StatusBadRequest)
+				return
+			}
+			_, _ = w.Write([]byte(answer))
+		default:
+			w.WriteHeader(http.StatusUnauthorized)
+		}
+	}))
+	t.Cleanup(f.Close)
+	return f
+}
+
+func (f *fakeAI) client() aiSuggester {
+	return aiSuggester{platform.AICore{Base: f.URL, Tokens: &platform.ServiceToken{URL: f.URL + "/token", ID: "grading-marker", Secret: "s", Client: f.Client()}, Client: f.Client()}}
+}
+
+func TestTheMarkingCallNamesWhoPays(t *testing.T) {
+	who := platform.Billed{UserID: "teacher-1", OrgID: "org", Role: "teacher"}
+	f := newFakeAI(t, `{"output":"{}","model_version":"m-2"}`)
+	output, model, err := f.client().generate(t.Context(), []message{{"user", "hi"}}, markingSchema(), who)
+	billed, _ := f.body["billed_to"].(map[string]any)
+	if err != nil || output != "{}" || model != "m-2" || f.body["operation"] != "generate" || billed["user_id"] != "teacher-1" || billed["org_id"] != "org" || billed["role"] != "teacher" {
+		t.Fatalf("%q %q %v %v", output, model, err, f.body)
+	}
+	f = newFakeAI(t, `{"output":null,"model_version":"m-2"}`)
+	var e *platform.AIError
+	if _, _, err = f.client().generate(t.Context(), nil, markingSchema(), who); !errors.As(err, &e) || e.Code != "EMPTY_OUTPUT" {
+		t.Fatalf("a null output: %v", err)
 	}
 }

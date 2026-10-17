@@ -27,6 +27,11 @@ type outboxRow struct {
 // Outbox publishes the events services Emit into their outbox table.
 type Outbox struct{ DB *pgxpool.Pool }
 
+// messageWriter is the part of *kafka.Writer the outbox uses.
+type messageWriter interface {
+	WriteMessages(ctx context.Context, msgs ...kafka.Message) error
+}
+
 // Run publishes committed events until ctx ends. Every second it drains due rows in batches of OutboxBatch until
 // none are left, so a burst of submissions is delivered in seconds instead of one event per second.
 func (o Outbox) Run(ctx context.Context) {
@@ -61,7 +66,7 @@ func (o Outbox) Run(ctx context.Context) {
 // publishBatch sends up to OutboxBatch due rows and records, per row, whether Kafka took it. It returns how many
 // rows were published; a failed delivery returns 0 so the rest waits for the next tick instead of hammering the
 // broker.
-func (o Outbox) publishBatch(ctx context.Context, writer *kafka.Writer) (int, error) {
+func (o Outbox) publishBatch(ctx context.Context, writer messageWriter) (int, error) {
 	batchCtx, cancel := context.WithTimeout(ctx, 20*time.Second)
 	defer cancel()
 	tx, err := o.DB.Begin(batchCtx)
@@ -101,13 +106,14 @@ func (o Outbox) publishBatch(ctx context.Context, writer *kafka.Writer) (int, er
 	return len(batch), nil
 }
 
-// dueRows locks up to OutboxBatch unpublished rows whose next attempt is due, oldest first. A row waits while an
-// older event with the same topic and key is backing off after a failed delivery, so one resource's events are not
-// published out of order.
+// dueRows locks up to OutboxBatch unpublished rows whose next attempt is due, oldest first. Only the oldest
+// unpublished event of each topic and key is due: a later one waits until it is published (or abandoned), so one
+// resource's events are never published out of order, whether the older one is backing off, failed in this same
+// batch, or is locked by another relay.
 func dueRows(ctx context.Context, tx pgx.Tx) ([]outboxRow, error) {
 	rows, err := tx.Query(ctx, `SELECT id,topic,partition_key,body FROM outbox o WHERE published_at IS NULL AND attempts<$1 AND next_attempt<=now()
-		AND NOT EXISTS(SELECT 1 FROM outbox p WHERE p.topic=o.topic AND p.partition_key=o.partition_key AND p.published_at IS NULL AND p.attempts<$1 AND p.next_attempt>now() AND p.created_at<o.created_at)
-		ORDER BY created_at FOR UPDATE SKIP LOCKED LIMIT $2`, OutboxMaxAttempts, OutboxBatch)
+		AND NOT EXISTS(SELECT 1 FROM outbox p WHERE p.topic=o.topic AND p.partition_key=o.partition_key AND p.published_at IS NULL AND p.attempts<$1 AND (p.created_at,p.id)<(o.created_at,o.id))
+		ORDER BY created_at,id FOR UPDATE SKIP LOCKED LIMIT $2`, OutboxMaxAttempts, OutboxBatch)
 	if err != nil {
 		return nil, err
 	}

@@ -1,7 +1,10 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"learning/platform"
 	"testing"
 )
@@ -71,5 +74,31 @@ func TestOnlyANamedTeacherPaysForSuggestions(t *testing.T) {
 	v, _ := decodeSubmitted(submittedEvent(t, topicSubmittedV2, map[string]any{"teacher_id": ""}))
 	if v.marking() {
 		t.Fatal("queued AI marking with nobody to bill")
+	}
+}
+
+func TestMalformedQuestionsAreInvalidEvents(t *testing.T) {
+	numerical := func(id string, points int, kind string) map[string]any {
+		return map[string]any{"id": id, "prompt": "?", "type": kind, "options": nil, "answer": "1", "tolerance": "0", "points": points, "skill_id": skillID}
+	}
+	many := make([]map[string]any, 51)
+	answers := map[string]string{}
+	for i := range many {
+		id := fmt.Sprintf("2e3f4051-6b7c-4d8e-9f0a-%012x", i)
+		many[i], answers[id] = numerical(id, 1, "numerical"), "1"
+	}
+	cases := map[string]map[string]any{
+		"repeated question": {"questions": []map[string]any{numerical(questionID, 1, "numerical"), numerical(questionID, 1, "numerical")}, "answers": map[string]string{questionID: "1", skillID: "1"}},
+		"zero points":       {"questions": []map[string]any{numerical(questionID, 0, "numerical")}, "answers": map[string]string{questionID: "1"}},
+		"too many":          {"questions": many, "answers": answers},
+		"unknown type":      {"questions": []map[string]any{numerical(questionID, 1, "essay")}, "answers": map[string]string{questionID: "1"}},
+		"answer elsewhere":  {"questions": []map[string]any{numerical(questionID, 1, "numerical")}, "answers": map[string]string{skillID: "1"}},
+	}
+	for name, change := range cases {
+		var invalid platform.InvalidEvent
+		// tx is nil: a malformed event must be refused before it touches the database.
+		if err := consume(context.Background(), nil, submittedEvent(t, topicSubmittedV2, change)); !errors.As(err, &invalid) {
+			t.Errorf("%s: %v", name, err)
+		}
 	}
 }

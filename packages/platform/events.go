@@ -12,9 +12,11 @@ import (
 )
 
 // EventMigration creates the outbox and inbox tables; services that publish or consume events pass it to New. The
-// partial index serves the outbox's search for unpublished rows by topic and key (dueRows).
+// partial index serves the outbox's search for unpublished rows by topic and key (dueRows). created_at is the
+// clock time of the Emit, not the transaction's start, so two events emitted in one transaction keep their order.
 const EventMigration = `
-CREATE TABLE IF NOT EXISTS outbox (id uuid PRIMARY KEY, topic text NOT NULL, partition_key text NOT NULL, body jsonb NOT NULL, created_at timestamptz NOT NULL DEFAULT now(), published_at timestamptz, attempts integer NOT NULL DEFAULT 0, next_attempt timestamptz NOT NULL DEFAULT now());
+CREATE TABLE IF NOT EXISTS outbox (id uuid PRIMARY KEY, topic text NOT NULL, partition_key text NOT NULL, body jsonb NOT NULL, created_at timestamptz NOT NULL DEFAULT clock_timestamp(), published_at timestamptz, attempts integer NOT NULL DEFAULT 0, next_attempt timestamptz NOT NULL DEFAULT now());
+ALTER TABLE outbox ALTER COLUMN created_at SET DEFAULT clock_timestamp();
 CREATE INDEX IF NOT EXISTS outbox_unpublished ON outbox (topic, partition_key, created_at) WHERE published_at IS NULL;
 CREATE TABLE IF NOT EXISTS inbox (event_id uuid PRIMARY KEY, processed_at timestamptz NOT NULL DEFAULT now());`
 

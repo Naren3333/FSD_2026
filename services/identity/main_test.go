@@ -20,7 +20,7 @@ func TestClassroomName(t *testing.T) {
 var claims = platformtest.Claims
 
 func TestDecideRelation(t *testing.T) {
-	enrolled := map[string]bool{"student-1": true, "dual": true}
+	enrolled := map[string]bool{"student-1": true, "student-2": true, "teacher-2": true}
 	lookup := func(id string) (bool, error) { return enrolled[id], nil }
 	cases := []struct {
 		name    string
@@ -35,12 +35,12 @@ func TestDecideRelation(t *testing.T) {
 		{"another teacher", claims("teacher-2", "teacher"), "org", "", ""},
 		{"enrolled student", claims("student-1", "student"), "org", "", platform.RelationStudent},
 		{"enrolled student for themselves", claims("student-1", "student"), "org", "student-1", platform.RelationStudent},
-		{"student asking about someone else", claims("student-1", "student"), "org", "dual", ""},
+		{"student asking about someone else", claims("student-1", "student"), "org", "student-2", ""},
 		{"student not enrolled", claims("stranger", "student"), "org", "", ""},
 		{"other organization", claims("teacher-1", "teacher"), "elsewhere", "", ""},
-		// A teacher enrolled as a student elsewhere is only a student there: no answer keys, rubrics or finalizing.
-		{"dual-role account enrolled in another teacher's class", claims("dual", "teacher", "student"), "org", "", platform.RelationStudent},
-		{"dual-role account that owns the class", claims("teacher-1", "teacher", "student"), "org", "", platform.RelationTeacher},
+		// Teacher powers come from owning the classroom, student access from enrollment and the student role.
+		{"teacher listed as enrolled", claims("teacher-2", "teacher"), "org", "", ""},
+		{"student named as the owner", claims("teacher-1", "student"), "org", "", ""},
 	}
 	for _, tc := range cases {
 		got, err := decide(tc.caller, tc.org, "teacher-1", tc.student, lookup)

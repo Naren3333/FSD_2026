@@ -101,7 +101,7 @@ func TestFinalizeMapsEachOutcome(t *testing.T) {
 		{"no reason", platform.RelationTeacher, evaluationID, `{"reason":" "}`, nil, []string{"teacher"}, http.StatusUnprocessableEntity},
 		{"unknown evaluation", platform.RelationTeacher, missing, `{"reason":"Checked"}`, nil, []string{"teacher"}, http.StatusNotFound},
 		{"a student", platform.RelationStudent, evaluationID, `{"reason":"Checked"}`, nil, []string{"student"}, http.StatusForbidden},
-		{"teacher enrolled here", platform.RelationStudent, evaluationID, `{"reason":"Checked"}`, nil, []string{"teacher", "student"}, http.StatusForbidden},
+		{"teacher token, student relation", platform.RelationStudent, evaluationID, `{"reason":"Checked"}`, nil, []string{"teacher"}, http.StatusForbidden},
 		{"already final", platform.RelationTeacher, evaluationID, `{"reason":"Checked"}`, errAlreadyFinalized, []string{"teacher"}, http.StatusConflict},
 		{"score too high", platform.RelationTeacher, evaluationID, `{"reason":"Checked"}`, errScoreOutOfBounds, []string{"teacher"}, http.StatusUnprocessableEntity},
 		{"unknown question", platform.RelationTeacher, evaluationID, `{"reason":"Checked"}`, errUnknownQuestion, []string{"teacher"}, http.StatusUnprocessableEntity},
@@ -251,5 +251,15 @@ func TestOnlyTheClassroomTeacherReleasesResults(t *testing.T) {
 	}
 	if w := platformtest.Serve(s.routes, http.MethodPost, "/v1/evaluations/release", body, "student-1", "student"); w.Code != http.StatusForbidden {
 		t.Fatalf("a student released results: %d", w.Code)
+	}
+}
+
+func TestAFinalizeReasonIsAtMost1000Characters(t *testing.T) {
+	store := &memoryStore{}
+	if w := finalize(t, store, platform.RelationTeacher, evaluationID, `{"reason":"`+strings.Repeat("a", 1001)+`"}`, "teacher"); w.Code != http.StatusUnprocessableEntity || len(store.finalized) != 0 {
+		t.Fatalf("%d %v", w.Code, store.finalized)
+	}
+	if w := finalize(t, store, platform.RelationTeacher, evaluationID, `{"reason":"`+strings.Repeat("a", 1000)+`"}`, "teacher"); w.Code != http.StatusOK {
+		t.Fatalf("%d", w.Code)
 	}
 }

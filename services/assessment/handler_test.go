@@ -8,6 +8,7 @@ import (
 	"learning/platform/platformtest"
 	"net/http"
 	"net/http/httptest"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -22,6 +23,7 @@ type memoryStore struct {
 	assessments map[string]Assessment
 	submitted   map[string]Submission // by assessment/student
 	saved       map[string]map[string]string
+	events      []map[string]any // what each stored submission would publish, from what the handler passed
 }
 
 func (m *memoryStore) findAssessment(_ context.Context, _, id string) (Assessment, error) {
@@ -96,6 +98,7 @@ func (m *memoryStore) insertSubmission(_ context.Context, v Assessment, sub Subm
 		return false, nil
 	}
 	m.submitted[key] = sub
+	m.events = append(m.events, submittedEvent(v, sub))
 	delete(m.saved, key)
 	return true, nil
 }
@@ -165,18 +168,6 @@ func created(t *testing.T, relation string) (server, Assessment) {
 	return s, v
 }
 
-func TestStudentsSeeNoAnswerKey(t *testing.T) {
-	s, v := created(t, platform.RelationStudent)
-	w := call(t, s, http.MethodGet, "/v1/assessments/"+v.ID, "", "student")
-	if w.Code != http.StatusOK || strings.Contains(w.Body.String(), `"answer"`) {
-		t.Fatalf("student view: %d %s", w.Code, w.Body.String())
-	}
-	s.access = platformtest.Access(platform.RelationTeacher)
-	if w = call(t, s, http.MethodGet, "/v1/assessments/"+v.ID, "", "teacher"); !strings.Contains(w.Body.String(), `"answer":"1"`) {
-		t.Fatalf("teacher view lacks the key: %s", w.Body.String())
-	}
-}
-
 func TestEachStudentSubmitsOnce(t *testing.T) {
 	s, v := created(t, platform.RelationStudent)
 	path := "/v1/assessments/" + v.ID + "/submissions"
@@ -187,10 +178,7 @@ func TestEachStudentSubmitsOnce(t *testing.T) {
 	if w := call(t, s, http.MethodPost, path, body, "student"); w.Code != http.StatusConflict {
 		t.Fatalf("second submission: %d", w.Code)
 	}
-	if w := call(t, s, http.MethodPost, path, `{"answers":{}}`, "student"); w.Code != http.StatusUnprocessableEntity && w.Code != http.StatusConflict {
-		t.Fatalf("missing answers: %d", w.Code)
-	}
-	if w := call(t, s, http.MethodPost, path, body, "teacher", "student"); w.Code != http.StatusForbidden {
+	if w := call(t, s, http.MethodPost, path, body, "teacher"); w.Code != http.StatusForbidden {
 		t.Fatalf("a teacher submitted: %d", w.Code)
 	}
 }
@@ -379,11 +367,31 @@ func TestSavedWorkUntilSubmission(t *testing.T) {
 	}
 }
 
+func TestMissingAnswersAreRefused(t *testing.T) {
+	s, v := created(t, platform.RelationStudent)
+	store := s.store.(*memoryStore)
+	w := call(t, s, http.MethodPost, "/v1/assessments/"+v.ID+"/submissions", `{"answers":{}}`, "student")
+	if w.Code != http.StatusUnprocessableEntity || len(store.submitted) != 0 || len(store.events) != 0 {
+		t.Fatalf("%d %s", w.Code, w.Body.String())
+	}
+}
+
 func TestSubmissionsCarryTheGradingSettings(t *testing.T) {
-	v := Assessment{ID: "a", Classroom: room, ReleasePolicy: releaseManual, AIMarking: true, CreatedBy: "teacher-1"}
-	at := time.Date(2026, 10, 16, 8, 0, 0, 0, time.UTC)
-	event := submittedEvent(v, Submission{ID: "s", Org: "org", Student: "student-1", Late: true, SubmittedAt: at})
-	if event["release_policy"] != releaseManual || event["ai_marking"] != true || event["teacher_id"] != "teacher-1" || event["late"] != true || event["submitted_at"] != "2026-10-16T08:00:00Z" {
+	due := time.Now().Add(time.Hour)
+	s, v := scheduled(t, `"due_at":`+stamp(due)+`,"release_policy":"manual",`)
+	store := s.store.(*memoryStore)
+	at := due.Add(time.Minute).UTC()
+	s.clock = func() time.Time { return at }
+	body := `{"answers":{"` + v.Questions[0].ID + `":"1"}}`
+	if w := platformtest.ServeRequest(s.routes, platformtest.Request(platformtest.Claims("student-1", "student"), http.MethodPost, "/v1/assessments/"+v.ID+"/submissions", body)); w.Code != http.StatusCreated {
+		t.Fatalf("%d %s", w.Code, w.Body.String())
+	}
+	if len(store.events) != 1 {
+		t.Fatalf("%d events", len(store.events))
+	}
+	event := store.events[0]
+	if event["release_policy"] != releaseManual || event["ai_marking"] != false || event["teacher_id"] != "user" || event["late"] != true ||
+		event["submitted_at"] != at.Format(time.RFC3339Nano) || event["student_id"] != "student-1" || event["org_id"] != "org" || event["assessment_id"] != v.ID {
 		t.Fatalf("%v", event)
 	}
 }
@@ -418,5 +426,198 @@ func TestASubmissionTooLargeToPublishIsRefused(t *testing.T) {
 	w = call(t, s, http.MethodPost, "/v1/assessments/"+v.ID+"/submissions", string(data), "student")
 	if w.Code != http.StatusUnprocessableEntity || !strings.Contains(w.Body.String(), "SUBMISSION_TOO_LARGE") || len(store.submitted) != 0 {
 		t.Fatalf("%d %s", w.Code, w.Body.String())
+	}
+}
+
+// allTypes has one question of each type, a manual release and AI marking.
+const allTypes = `{"classroom_id":"` + room + `","title":"Mixed","release_policy":"manual","ai_marking":true,"questions":[
+	{"prompt":"Pick the sum","type":"multiple_choice","options":["half","whole"],"answer":"whole","tolerance":"","skill_id":"` + skill + `"},
+	{"prompt":"1/2 + 1/2?","type":"numerical","options":[],"answer":"1.00","tolerance":"0.01","points":2,"skill_id":"` + skill + `"},
+	{"prompt":"Capital of France?","type":"short_answer","accepted_answers":["Paris"],"case_sensitive":true,"skill_id":"` + skill + `"},
+	{"prompt":"Explain.","type":"free_response","max_length":300,"rubric":{"criteria":[{"title":"Clarity","levels":[{"points":0,"descriptor":"Unclear"},{"points":2,"descriptor":"Clear"}]}],"model_answer":"Halves add to a whole."},"skill_id":"` + skill + `"}]}`
+
+// post creates an assessment as the classroom's teacher.
+func post(t *testing.T, s server, body string) Assessment {
+	t.Helper()
+	w := call(t, s, http.MethodPost, "/v1/assessments", body, "teacher")
+	var v Assessment
+	if w.Code != http.StatusCreated || json.Unmarshal(w.Body.Bytes(), &v) != nil {
+		t.Fatalf("%d %s", w.Code, w.Body.String())
+	}
+	return v
+}
+
+// mixedAnswers answers every question of allTypes.
+func mixedAnswers(v Assessment) string {
+	answers := map[string]string{}
+	for _, q := range v.Questions {
+		answers[q.ID] = map[string]string{typeMultipleChoice: "half", typeNumerical: "1", typeShortAnswer: "Lyon", typeFreeResponse: "Because."}[q.Type]
+	}
+	data, _ := json.Marshal(map[string]any{"answers": answers})
+	return string(data)
+}
+
+func snapshot(t *testing.T, m *memoryStore) string {
+	t.Helper()
+	data, err := json.Marshal([]any{m.assessments, m.submitted, m.saved, m.events})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return string(data)
+}
+
+func TestStudentsSeeNoAnswerKey(t *testing.T) {
+	s, _ := newServer(platform.RelationTeacher, skillValid)
+	v := post(t, s, allTypes)
+	s.access = platformtest.Access(platform.RelationStudent)
+	w := call(t, s, http.MethodGet, "/v1/assessments/"+v.ID, "", "student")
+	var view map[string]any
+	if w.Code != http.StatusOK || json.Unmarshal(w.Body.Bytes(), &view) != nil {
+		t.Fatalf("%d %s", w.Code, w.Body.String())
+	}
+	viewKeys := []string{"id", "classroom_id", "title", "questions", "opens_at", "due_at", "late_policy"}
+	for key := range view {
+		if !slices.Contains(viewKeys, key) {
+			t.Errorf("student view has %q", key)
+		}
+	}
+	questions, _ := view["questions"].([]any)
+	if len(questions) != 4 {
+		t.Fatalf("%s", w.Body.String())
+	}
+	for _, q := range questions {
+		for key := range q.(map[string]any) {
+			if !slices.Contains([]string{"id", "prompt", "type", "options", "max_length", "points", "skill_id"}, key) {
+				t.Errorf("student question has %q", key)
+			}
+		}
+	}
+	for _, secret := range []string{"Paris", "Halves add", "Clarity", "Unclear", "0.01", "1.00"} {
+		if strings.Contains(w.Body.String(), secret) {
+			t.Errorf("leaked %q: %s", secret, w.Body.String())
+		}
+	}
+	s.access = platformtest.Access(platform.RelationTeacher)
+	if w = call(t, s, http.MethodGet, "/v1/assessments/"+v.ID, "", "teacher"); !strings.Contains(w.Body.String(), `"accepted_answers":["Paris"]`) || !strings.Contains(w.Body.String(), "Halves add") {
+		t.Fatalf("teacher view lacks the keys: %s", w.Body.String())
+	}
+}
+
+func TestStrangersChangeNothing(t *testing.T) {
+	s, store := newServer(platform.RelationTeacher, skillValid)
+	published := post(t, s, quiz)
+	draft := post(t, s, draftQuiz)
+	answer := `{"answers":{"` + published.Questions[0].ID + `":"1"}}`
+	cases := []struct {
+		relation, role, method, path, body string
+	}{
+		{"", "teacher", http.MethodGet, "/v1/assessments/" + draft.ID, ""},
+		{"", "student", http.MethodGet, "/v1/assessments/" + published.ID, ""},
+		{"", "student", http.MethodGet, "/v1/assessments?classroom_id=" + room, ""},
+		{"", "teacher", http.MethodGet, "/v1/assessments/progress?classroom_id=" + room, ""},
+		{"", "teacher", http.MethodPut, "/v1/assessments/" + draft.ID, strings.Replace(draftQuiz, `"Draft"`, `"Taken"`, 1)},
+		{"", "teacher", http.MethodPost, "/v1/assessments/" + draft.ID + "/publish", ""},
+		{"", "teacher", http.MethodDelete, "/v1/assessments/" + draft.ID, ""},
+		{"", "student", http.MethodPost, "/v1/assessments/" + published.ID + "/submissions", answer},
+		{"", "student", http.MethodGet, "/v1/assessments/" + published.ID + "/saved-answers", ""},
+		{"", "student", http.MethodPut, "/v1/assessments/" + published.ID + "/saved-answers", answer},
+		{platform.RelationStudent, "student", http.MethodPut, "/v1/assessments/" + draft.ID, strings.Replace(draftQuiz, `"Draft"`, `"Taken"`, 1)},
+		{platform.RelationStudent, "student", http.MethodPost, "/v1/assessments/" + draft.ID + "/publish", ""},
+		{platform.RelationStudent, "student", http.MethodDelete, "/v1/assessments/" + draft.ID, ""},
+	}
+	before := snapshot(t, store)
+	for _, tc := range cases {
+		s.access = platformtest.Access(tc.relation)
+		if w := call(t, s, tc.method, tc.path, tc.body, tc.role); w.Code != http.StatusForbidden {
+			t.Errorf("%q %s %s %s: %d %s", tc.relation, tc.role, tc.method, tc.path, w.Code, w.Body.String())
+		}
+		if after := snapshot(t, store); after != before {
+			t.Fatalf("%q %s %s %s changed the store", tc.relation, tc.role, tc.method, tc.path)
+		}
+	}
+}
+
+func TestDeletingNeedsAKnownDraftAndItsTeacher(t *testing.T) {
+	s, store := newServer(platform.RelationTeacher, skillValid)
+	draft := post(t, s, draftQuiz)
+	if w := call(t, s, http.MethodDelete, "/v1/assessments/"+room, "", "teacher"); w.Code != http.StatusNotFound {
+		t.Fatalf("unknown id: %d", w.Code)
+	}
+	s.access = platformtest.Access("") // another classroom's teacher
+	if w := call(t, s, http.MethodDelete, "/v1/assessments/"+draft.ID, "", "teacher"); w.Code != http.StatusForbidden || len(store.assessments) != 1 {
+		t.Fatalf("another teacher: %d", w.Code)
+	}
+}
+
+func TestPublishingAfterTheDueDateIsRefused(t *testing.T) {
+	s, store := newServer(platform.RelationTeacher, skillValid)
+	due := time.Now().Add(time.Hour)
+	v := post(t, s, strings.Replace(draftQuiz, `"status":"draft",`, `"status":"draft","due_at":`+stamp(due)+`,`, 1))
+	s.clock = func() time.Time { return due.Add(time.Minute) }
+	if w := call(t, s, http.MethodPost, "/v1/assessments/"+v.ID+"/publish", "", "teacher"); w.Code != http.StatusUnprocessableEntity {
+		t.Fatalf("%d %s", w.Code, w.Body.String())
+	}
+	if got := store.assessments[v.ID]; got.Status != statusDraft || got.PublishedAt != nil {
+		t.Fatalf("%+v", got)
+	}
+}
+
+func TestAnUpdateCanPublish(t *testing.T) {
+	s, store := newServer(platform.RelationTeacher, skillValid)
+	v := post(t, s, draftQuiz)
+	path := "/v1/assessments/" + v.ID
+	w := call(t, s, http.MethodPut, path, strings.Replace(draftQuiz, `"status":"draft"`, `"status":"published"`, 1), "teacher")
+	var got Assessment
+	if w.Code != http.StatusOK || json.Unmarshal(w.Body.Bytes(), &got) != nil || got.Status != statusPublished || got.PublishedAt == nil || store.assessments[v.ID].PublishedAt == nil {
+		t.Fatalf("%d %s", w.Code, w.Body.String())
+	}
+	s.access = platformtest.Access(platform.RelationStudent)
+	if w = call(t, s, http.MethodGet, path, "", "student"); w.Code != http.StatusOK {
+		t.Fatalf("a student could not open it: %d", w.Code)
+	}
+}
+
+func TestSavingIsClosedWithTheAssessment(t *testing.T) {
+	due := time.Now().Add(time.Hour)
+	s, v := scheduled(t, `"due_at":`+stamp(due)+`,"late_policy":"reject",`)
+	store := s.store.(*memoryStore)
+	s.clock = func() time.Time { return due.Add(time.Minute) }
+	w := call(t, s, http.MethodPut, "/v1/assessments/"+v.ID+"/saved-answers", `{"answers":{"`+v.Questions[0].ID+`":"1"}}`, "student")
+	if w.Code != http.StatusConflict || !strings.Contains(w.Body.String(), "CLOSED") || len(store.saved) != 0 {
+		t.Fatalf("%d %s", w.Code, w.Body.String())
+	}
+}
+
+func TestADraftTakesNoSubmission(t *testing.T) {
+	s, store := newServer(platform.RelationTeacher, skillValid)
+	v := post(t, s, draftQuiz)
+	s.access = platformtest.Access(platform.RelationStudent)
+	w := call(t, s, http.MethodPost, "/v1/assessments/"+v.ID+"/submissions", `{"answers":{"`+v.Questions[0].ID+`":"1"}}`, "student")
+	if w.Code != http.StatusNotFound || len(store.submitted) != 0 {
+		t.Fatalf("%d %s", w.Code, w.Body.String())
+	}
+}
+
+func TestTheCreatorPaysEvenAfterAnotherTeacherEdits(t *testing.T) {
+	s, store := newServer(platform.RelationTeacher, skillValid)
+	v := post(t, s, draftQuiz)
+	if store.assessments[v.ID].CreatedBy != "user" {
+		t.Fatalf("created by %q", store.assessments[v.ID].CreatedBy)
+	}
+	r := platformtest.Request(platformtest.Claims("co-teacher", "teacher"), http.MethodPut, "/v1/assessments/"+v.ID, draftQuiz)
+	if w := platformtest.ServeRequest(s.routes, r); w.Code != http.StatusOK || store.assessments[v.ID].CreatedBy != "user" {
+		t.Fatalf("%d, created by %q", w.Code, store.assessments[v.ID].CreatedBy)
+	}
+}
+
+func TestAnUpdateChecksItsSkills(t *testing.T) {
+	for skills, want := range map[skillStatus]int{skillInvalid: http.StatusUnprocessableEntity, skillUnavailable: http.StatusServiceUnavailable} {
+		s, store := newServer(platform.RelationTeacher, skillValid)
+		v := post(t, s, draftQuiz)
+		s.skills = fixedSkills(skills)
+		w := call(t, s, http.MethodPut, "/v1/assessments/"+v.ID, strings.Replace(draftQuiz, `"Draft"`, `"Edited"`, 1), "teacher")
+		if w.Code != want || store.assessments[v.ID].Title != "Draft" {
+			t.Errorf("%d: %d %s", skills, w.Code, w.Body.String())
+		}
 	}
 }

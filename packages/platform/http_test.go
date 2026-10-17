@@ -49,7 +49,7 @@ func identityStub(t *testing.T, status int, body string) *Identity {
 
 func asTeacher(r *http.Request) *http.Request {
 	var c Claims
-	c.Subject, c.Org, c.Realm.Roles = "dual", "org", []string{"teacher", "student"}
+	c.Subject, c.Org, c.Realm.Roles = "teacher-1", "org", []string{"teacher"}
 	return r.WithContext(WithClaims(r.Context(), c))
 }
 
@@ -63,7 +63,7 @@ func TestTeacherOfNeedsTheTeacherRelation(t *testing.T) {
 		code   int
 	}{
 		{200, `{"allowed":true,"relation":"teacher"}`, true, 200},
-		// A teacher-role account enrolled as a student: Identity says student, so no teacher powers.
+		// Identity decides: a teacher-role token it answers "student" for gets no teacher powers.
 		{200, `{"allowed":true,"relation":"student"}`, false, 403},
 		{200, `{"allowed":true}`, false, 503},
 		{403, `{}`, false, 403},

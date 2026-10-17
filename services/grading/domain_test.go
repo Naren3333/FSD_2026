@@ -2,6 +2,7 @@ package main
 
 import (
 	"errors"
+	"strings"
 	"testing"
 )
 
@@ -112,5 +113,32 @@ func TestStudentsSeeMarksAndFeedbackOnly(t *testing.T) {
 	own := v.own()
 	if own.Evidence[0] != (OwnEvidence{Question: "q", Awarded: 1, Possible: 2, Feedback: "Nearly."}) {
 		t.Fatalf("%+v", own.Evidence[0])
+	}
+}
+
+func TestMarkingEdges(t *testing.T) {
+	long := strings.Repeat("é", maxFeedback+1)
+	cases := map[string]struct {
+		questions []Question
+		marks     map[string]Mark
+		want      error
+	}{
+		"feedback too long":       {nil, map[string]Mark{"q2": {Feedback: &long}}, errFeedbackTooLong},
+		"criteria without rubric": {nil, map[string]Mark{"q2": {Criteria: map[string]int{"c1": 1}}}, errInvalidCriteria},
+		"override and rubric":     {[]Question{rubricQuestion()}, overridesAsMarks(map[string]int{"q2": 5}, map[string]Mark{"q2": {Criteria: map[string]int{"c1": 2, "c2": 3}}}), errInvalidCriteria},
+	}
+	for name, tc := range cases {
+		evidence, _ := markable()
+		if err := applyMarks(evidence, tc.questions, tc.marks); !errors.Is(err, tc.want) {
+			t.Errorf("%s: %v", name, err)
+		}
+		if evidence[1].Feedback != "" || !evidence[1].NeedsMarking {
+			t.Errorf("%s: a refused mark changed the evidence: %+v", name, evidence[1])
+		}
+	}
+	// An evaluation stored before Grading kept its questions still takes points.
+	evidence, _ := markable()
+	if err := applyMarks(evidence, nil, map[string]Mark{"q2": {Awarded: points(4), Feedback: text(strings.Repeat("é", maxFeedback))}}); err != nil || evidence[1].Awarded != 4 || evidence[1].MarkedBy != markedTeacher {
+		t.Fatalf("legacy evaluation: %+v %v", evidence[1], err)
 	}
 }

@@ -9,7 +9,7 @@ import (
 )
 
 // Authenticator verifies bearer tokens: RS256 signature against the realm's keys, issuer, audience and expiry,
-// and the presence of the subject and organization claims.
+// and the presence of the subject and organization claims. An account is a teacher or a student, never both.
 type Authenticator struct {
 	verifier *oidc.IDTokenVerifier
 }
@@ -23,7 +23,7 @@ func NewAuthenticator(client *http.Client) *Authenticator {
 }
 
 // Wrap passes requests with a valid bearer token to next, with the verified claims in the context (see Actor),
-// and answers everything else 401.
+// and answers everything else 401. A token holding both the teacher and the student role is refused with 403.
 func (a *Authenticator) Wrap(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		auth := r.Header.Get("Authorization")
@@ -41,6 +41,16 @@ func (a *Authenticator) Wrap(next http.Handler) http.Handler {
 			Unauthenticated(w, "Required identity claims are missing.")
 			return
 		}
+		if c.Has("teacher") && c.Has("student") {
+			RoleConflict(w)
+			return
+		}
 		next.ServeHTTP(w, r.WithContext(WithClaims(r.Context(), c)))
 	})
+}
+
+// RoleConflict answers 403 ROLE_CONFLICT: an account holds both the teacher and the student role, which no service
+// accepts.
+func RoleConflict(w http.ResponseWriter) {
+	Error(w, http.StatusForbidden, "ROLE_CONFLICT", "An account must be either a teacher or a student, not both.")
 }

@@ -12,7 +12,7 @@ import (
 
 // store is Identity's data: users, classrooms and enrollments.
 type store interface {
-	registerUser(ctx context.Context, org, subject, role string, student bool, username, name string) error
+	registerUser(ctx context.Context, org, subject, role, username, name string) error
 	findClassroomOwner(ctx context.Context, classroom string) (org, teacher string, err error)
 	isEnrolled(ctx context.Context, classroom, student string) (bool, error)
 	insertClassroom(ctx context.Context, id, name, org, teacher string) error
@@ -29,22 +29,34 @@ type store interface {
 // pgStore is the store in the service's own Postgres database.
 type pgStore struct{ db *pgxpool.Pool }
 
-// registerUser upserts the organization and the user's role, whether they may be enrolled as a student, and their
-// names, in one transaction.
-func (p pgStore) registerUser(ctx context.Context, org, subject, role string, student bool, username, name string) error {
+// errRoleChanged is registerUser's answer when the account was registered with the other role. An account is a
+// teacher or a student for good: its role never changes.
+var errRoleChanged = errors.New("the account was registered with another role")
+
+// registerUser upserts the organization and the user's names in one transaction, recording the role on first
+// registration. It returns errRoleChanged when the account is already registered with another role in this
+// organization; an account presenting another organization changes nothing.
+func (p pgStore) registerUser(ctx context.Context, org, subject, role, username, name string) error {
 	tx, err := p.db.Begin(ctx)
 	if err != nil {
 		return err
 	}
 	defer tx.Rollback(ctx)
-	_, err = tx.Exec(ctx, "INSERT INTO organizations(id) VALUES($1) ON CONFLICT DO NOTHING", org)
-	if err == nil {
-		_, err = tx.Exec(ctx, "INSERT INTO users(id,org_id,role,student,username,display_name) VALUES($1,$2,$3,$4,NULLIF($5,''),NULLIF($6,'')) ON CONFLICT(id) DO UPDATE SET role=EXCLUDED.role,student=EXCLUDED.student,username=EXCLUDED.username,display_name=EXCLUDED.display_name WHERE users.org_id=EXCLUDED.org_id", subject, org, role, student, username, name)
+	if _, err = tx.Exec(ctx, "INSERT INTO organizations(id) VALUES($1) ON CONFLICT DO NOTHING", org); err != nil {
+		return err
 	}
-	if err == nil {
-		err = tx.Commit(ctx)
+	var stored string
+	err = tx.QueryRow(ctx, "INSERT INTO users(id,org_id,role,username,display_name) VALUES($1,$2,$3,NULLIF($4,''),NULLIF($5,'')) ON CONFLICT(id) DO UPDATE SET username=EXCLUDED.username,display_name=EXCLUDED.display_name WHERE users.org_id=EXCLUDED.org_id RETURNING role", subject, org, role, username, name).Scan(&stored)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return tx.Commit(ctx) // registered in another organization: the account is left as it is
 	}
-	return err
+	if err != nil {
+		return err
+	}
+	if stored != role {
+		return errRoleChanged
+	}
+	return tx.Commit(ctx)
 }
 
 // findClassroomOwner returns the classroom's organization and teacher.
@@ -86,7 +98,7 @@ func (p pgStore) listClassrooms(ctx context.Context, org, subject string, isTeac
 
 func (p pgStore) studentExists(ctx context.Context, student, org string) (bool, error) {
 	var exists bool
-	err := p.db.QueryRow(ctx, "SELECT EXISTS(SELECT 1 FROM users WHERE id=$1 AND org_id=$2 AND student)", student, org).Scan(&exists)
+	err := p.db.QueryRow(ctx, "SELECT EXISTS(SELECT 1 FROM users WHERE id=$1 AND org_id=$2 AND role='student')", student, org).Scan(&exists)
 	return exists, err
 }
 
@@ -109,10 +121,10 @@ func (p pgStore) insertEnrollment(ctx context.Context, classroom, student string
 	return tx.Commit(ctx)
 }
 
-// studentsNamed returns the ids of the organization's students (dual-role accounts included) with this username,
-// ignoring case. More than one means the username is ambiguous.
+// studentsNamed returns the ids of the organization's students with this username, ignoring case. More than one
+// means the username is ambiguous.
 func (p pgStore) studentsNamed(ctx context.Context, org, username string) ([]string, error) {
-	rows, err := p.db.Query(ctx, "SELECT id FROM users WHERE org_id=$1 AND lower(username)=lower($2) AND student LIMIT 2", org, username)
+	rows, err := p.db.Query(ctx, "SELECT id FROM users WHERE org_id=$1 AND lower(username)=lower($2) AND role='student' LIMIT 2", org, username)
 	if err != nil {
 		return nil, err
 	}
@@ -138,7 +150,7 @@ func (p pgStore) listStudents(ctx context.Context, classroom string) ([]Student,
 // name, with how many match in all. search narrows them to names or usernames containing it, ignoring case.
 // Accounts with no name yet are left out: a teacher could not tell them apart.
 func (p pgStore) listOrgStudents(ctx context.Context, org, search string, offset, limit int) ([]Student, int, error) {
-	const match = `FROM users WHERE org_id=$1 AND student AND username IS NOT NULL AND ($2='' OR strpos(lower(COALESCE(display_name,'')||' '||username),lower($2))>0)`
+	const match = `FROM users WHERE org_id=$1 AND role='student' AND username IS NOT NULL AND ($2='' OR strpos(lower(COALESCE(display_name,'')||' '||username),lower($2))>0)`
 	var total int
 	if err := p.db.QueryRow(ctx, "SELECT count(*) "+match, org, search).Scan(&total); err != nil {
 		return nil, 0, err

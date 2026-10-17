@@ -3,7 +3,11 @@ import type { StreamEvent } from '../api/models';
 /** Splits a server-sent event stream into events; text may arrive in any pieces. */
 export class SseParser {
   private buffer = '';
+  /** The last piece ended in CR, so an LF starting the next one is the rest of that CRLF, not a blank line. */
+  private afterCr = false;
   push(text: string): StreamEvent[] {
+    if (this.afterCr && text.startsWith('\n')) text = text.slice(1);
+    if (text) this.afterCr = text.endsWith('\r');
     this.buffer += text.replace(/\r\n?/g, '\n');
     const events: StreamEvent[] = [];
     let end: number;

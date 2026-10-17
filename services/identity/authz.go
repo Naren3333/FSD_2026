@@ -9,7 +9,7 @@ import (
 // relation decides how the caller may access a classroom, optionally on behalf of a specific student: as its
 // teacher, as an enrolled student, or not at all (""). Teachers must own the classroom; students may only act for
 // themselves, and the target student must be enrolled. The answer comes from ownership and enrollment, never from
-// the token's role alone, so an account holding both roles is a student in a classroom it is enrolled in.
+// the token's role alone. An account holds one role: tokens with both are refused before this runs.
 func (s server) relation(ctx context.Context, c platform.Claims, classroom, student string) (string, error) {
 	if !platform.ID(classroom) {
 		return "", nil

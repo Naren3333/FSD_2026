@@ -4,7 +4,7 @@ import { BrowserTestingModule, platformBrowserTesting } from '@angular/platform-
 import { CanActivateFn, CanMatchFn, Route, UrlTree, provideRouter } from '@angular/router';
 import { beforeAll, describe, expect, it } from 'vitest';
 import { IdentityApi } from './api/clients';
-import { routes } from './app.routes';
+import { SECTIONS, routes } from './app.routes';
 import { Auth } from './core/auth';
 
 beforeAll(() => TestBed.initTestEnvironment(BrowserTestingModule, platformBrowserTesting()));
@@ -33,6 +33,8 @@ async function guard(
     ],
   });
   const route = routes.find((r) => r.path === path) as Route;
+  // A section open to both roles has no guard: the router opens it.
+  if (!route.canActivate?.length && !route.canMatch?.length) return true;
   const result = await TestBed.runInInjectionContext(() =>
     route.canActivate
       ? (route.canActivate[0] as CanActivateFn)({} as never, {} as never)
@@ -62,5 +64,37 @@ describe('role landing pages', () => {
     expect(await guard('classrooms', 'teacher', true)).toBe(false);
     expect(await guard('home', 'student', true)).toBe(false);
     expect(await guard('', 'student', true)).toBe(false);
+  });
+});
+
+describe('sections for one role', () => {
+  const teacherOnly = SECTIONS.filter((s) => s.teacherOnly).map((s) => s.path);
+  const studentOnly = SECTIONS.filter((s) => s.studentOnly).map((s) => s.path);
+  const shared = SECTIONS.filter((s) => !s.teacherOnly && !s.studentOnly).map((s) => s.path);
+
+  it('lists the sections each role may not open', () => {
+    expect(teacherOnly).toEqual(['dashboard', 'classrooms', 'curriculum', 'review']);
+    expect(studentOnly).toEqual(['home', 'results']);
+  });
+
+  it.each(teacherOnly)(
+    'sends a student from the teacher-only %s to Home, and opens it for a teacher',
+    async (path) => {
+      expect(await guard(path, 'student')).toBe('/home');
+      expect(await guard(path, 'teacher')).toBe(true);
+    },
+  );
+
+  it.each(studentOnly)(
+    'sends a teacher from the student-only %s to the dashboard, and opens it for a student',
+    async (path) => {
+      expect(await guard(path, 'teacher')).toBe('/dashboard');
+      expect(await guard(path, 'student')).toBe(true);
+    },
+  );
+
+  it.each(shared)('opens the shared %s for both roles', async (path) => {
+    expect(await guard(path, 'teacher')).toBe(true);
+    expect(await guard(path, 'student')).toBe(true);
   });
 });

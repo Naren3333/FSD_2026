@@ -17,7 +17,6 @@ const room = "6f1c5d2e-8a4b-4c3d-9e2f-1a2b3c4d5e6f"
 // memoryStore is an in-memory store: one organization's users, classrooms and enrollments.
 type memoryStore struct {
 	roles      map[string]string   // user -> role
-	students   map[string]bool     // users who may be enrolled: students and dual-role accounts
 	usernames  map[string]string   // user -> username
 	owners     map[string]string   // classroom -> teacher
 	enrolled   map[string][]string // classroom -> students
@@ -26,17 +25,18 @@ type memoryStore struct {
 
 func newMemoryStore() *memoryStore {
 	return &memoryStore{
-		roles:     map[string]string{"teacher-1": "teacher", "student-1": "student", "student-2": "student", "student-3": "student", "dual-1": "teacher"},
-		students:  map[string]bool{"student-1": true, "student-2": true, "student-3": true, "dual-1": true},
-		usernames: map[string]string{"student-1": "ada", "student-2": "grace", "student-3": "Grace", "dual-1": "lin"},
+		roles:     map[string]string{"teacher-1": "teacher", "teacher-2": "teacher", "student-1": "student", "student-2": "student", "student-3": "student"},
+		usernames: map[string]string{"teacher-2": "lin", "student-1": "ada", "student-2": "grace", "student-3": "Grace"},
 		owners:    map[string]string{room: "teacher-1"},
 		enrolled:  map[string][]string{room: {"student-1"}},
 	}
 }
 
-func (m *memoryStore) registerUser(_ context.Context, _, subject, role string, student bool, username, name string) error {
+func (m *memoryStore) registerUser(_ context.Context, _, subject, role, username, name string) error {
+	if stored, ok := m.roles[subject]; ok && stored != role {
+		return errRoleChanged
+	}
 	m.roles[subject] = role
-	m.students[subject] = student
 	m.registered = append(m.registered, subject+":"+role+":"+username+":"+name)
 	return nil
 }
@@ -74,7 +74,7 @@ func (m *memoryStore) listClassrooms(context.Context, string, string, bool) ([]C
 }
 
 func (m *memoryStore) studentExists(_ context.Context, student, _ string) (bool, error) {
-	return m.students[student], nil
+	return m.roles[student] == "student", nil
 }
 
 func (m *memoryStore) insertEnrollment(_ context.Context, classroom, student string) error {
@@ -88,7 +88,7 @@ func (m *memoryStore) insertEnrollment(_ context.Context, classroom, student str
 func (m *memoryStore) studentsNamed(_ context.Context, _, username string) ([]string, error) {
 	ids := []string{}
 	for id, name := range m.usernames {
-		if strings.EqualFold(name, username) && m.students[id] {
+		if strings.EqualFold(name, username) && m.roles[id] == "student" {
 			ids = append(ids, id)
 		}
 	}
@@ -123,8 +123,8 @@ func (m *memoryStore) deleteClassroom(_ context.Context, classroom, _ string) er
 
 func (m *memoryStore) listOrgStudents(_ context.Context, _, search string, offset, limit int) ([]Student, int, error) {
 	matching := []Student{}
-	for id, student := range m.students {
-		if student && m.usernames[id] != "" && strings.Contains(strings.ToLower(m.usernames[id]), strings.ToLower(search)) {
+	for id, role := range m.roles {
+		if role == "student" && m.usernames[id] != "" && strings.Contains(strings.ToLower(m.usernames[id]), strings.ToLower(search)) {
 			matching = append(matching, Student{ID: id, Username: m.usernames[id]})
 		}
 	}
@@ -139,16 +139,36 @@ func call(t *testing.T, store store, method, path, body, subject string, roles .
 	return platformtest.Serve(server{store: store}.routes, method, path, body, subject, roles...)
 }
 
-func TestRegisterRecordsTheTeacherRoleFirst(t *testing.T) {
+func TestRegisterRecordsOneRole(t *testing.T) {
 	store := newMemoryStore()
-	if w := call(t, store, http.MethodPost, "/v1/me", "", "dual", "student", "teacher"); w.Code != http.StatusOK {
+	if w := call(t, store, http.MethodPost, "/v1/me", "", "new-teacher", "teacher"); w.Code != http.StatusOK {
 		t.Fatalf("status %d", w.Code)
 	}
 	if w := call(t, store, http.MethodPost, "/v1/me", "", "service"); w.Code != http.StatusForbidden {
 		t.Fatalf("a caller without a person role registered: %d", w.Code)
 	}
-	if len(store.registered) != 1 || store.registered[0] != "dual:teacher::" || !store.students["dual"] {
+	w := call(t, store, http.MethodPost, "/v1/me", "", "dual", "student", "teacher")
+	if w.Code != http.StatusForbidden || !strings.Contains(w.Body.String(), "ROLE_CONFLICT") {
+		t.Fatalf("an account with both roles registered: %d %s", w.Code, w.Body.String())
+	}
+	if len(store.registered) != 1 || store.registered[0] != "new-teacher:teacher::" {
 		t.Fatalf("registered %v", store.registered)
+	}
+}
+
+func TestARegisteredRoleNeverChanges(t *testing.T) {
+	store := newMemoryStore()
+	for _, tc := range []struct{ subject, role string }{{"student-1", "teacher"}, {"teacher-1", "student"}} {
+		w := call(t, store, http.MethodPost, "/v1/me", "", tc.subject, tc.role)
+		if w.Code != http.StatusConflict || !strings.Contains(w.Body.String(), "ROLE_CONFLICT") {
+			t.Fatalf("%s signed in as %s: %d %s", tc.subject, tc.role, w.Code, w.Body.String())
+		}
+	}
+	if store.roles["student-1"] != "student" || store.roles["teacher-1"] != "teacher" || len(store.registered) != 0 {
+		t.Fatalf("roles changed: %v %v", store.roles, store.registered)
+	}
+	if w := call(t, store, http.MethodPost, "/v1/me", "", "student-1", "student"); w.Code != http.StatusOK {
+		t.Fatalf("a student signing in again: %d", w.Code)
 	}
 }
 
@@ -202,18 +222,16 @@ func TestCreateTellsAMissingProfileFromAFailure(t *testing.T) {
 	}
 }
 
-func TestDualRoleAccountsCanBeEnrolledButNotInTheirOwnClassroom(t *testing.T) {
+func TestTeachersCannotBeEnrolled(t *testing.T) {
 	store := newMemoryStore()
 	path := "/v1/classrooms/" + room + "/enrollments"
-	if w := call(t, store, http.MethodPost, path, `{"username":"lin"}`, "teacher-1", "teacher"); w.Code != http.StatusOK {
-		t.Fatalf("dual-role account by username: %d %s", w.Code, w.Body.String())
+	for _, body := range []string{`{"username":"lin"}`, `{"student_id":"teacher-2"}`, `{"student_id":"teacher-1"}`} {
+		if w := call(t, store, http.MethodPost, path, body, "teacher-1", "teacher"); w.Code != http.StatusUnprocessableEntity {
+			t.Fatalf("enrolled a teacher with %s: %d %s", body, w.Code, w.Body.String())
+		}
 	}
-	if w := call(t, store, http.MethodPost, path, `{"student_id":"dual-1"}`, "teacher-1", "teacher"); w.Code != http.StatusOK {
-		t.Fatalf("dual-role account by id: %d %s", w.Code, w.Body.String())
-	}
-	store.owners[room] = "dual-1"
-	if w := call(t, store, http.MethodPost, path, `{"student_id":"dual-1"}`, "dual-1", "teacher", "student"); w.Code != http.StatusUnprocessableEntity {
-		t.Fatalf("a teacher enrolled in their own classroom: %d", w.Code)
+	if len(store.enrolled[room]) != 1 {
+		t.Fatalf("enrollments changed: %v", store.enrolled[room])
 	}
 }
 
@@ -327,10 +345,10 @@ func TestOnlyTeachersListTheSchoolsStudents(t *testing.T) {
 		query, want string
 		status      int
 	}{
-		{"", `"total":4`, http.StatusOK},
+		{"", `"total":3`, http.StatusOK}, // the teacher named lin is not listed
 		{"?search=GRACE", `"total":2`, http.StatusOK},
-		{"?offset=3&limit=1", `"students":[{"id":"student-3"`, http.StatusOK},
-		{"?offset=5", `"students":[],"total":4`, http.StatusOK},
+		{"?offset=2&limit=1", `"students":[{"id":"student-3"`, http.StatusOK},
+		{"?offset=5", `"students":[],"total":3`, http.StatusOK},
 		{"?limit=0", "", http.StatusUnprocessableEntity},
 		{"?limit=51", "", http.StatusUnprocessableEntity},
 		{"?offset=-1", "", http.StatusUnprocessableEntity},

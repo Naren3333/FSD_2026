@@ -151,7 +151,7 @@ async def execute(request: RequestContract, http: Request, _caller: Claims = Dep
     try:
         if request.operation == "embed":
             vectors, tokens = await openai_client.embed([request.input or ""])
-            billing.charge(billed, correlation, priced("embed", settings.embedding_model, tokens))
+            await billing.charge(billed, correlation, priced("embed", settings.embedding_model, tokens))
             return ResponseContract(
                 vectors=vectors, model_version=settings.embedding_model, usage_tokens=tokens
             )
@@ -167,8 +167,10 @@ async def execute(request: RequestContract, http: Request, _caller: Claims = Dep
             bill = StreamBill(billing, billed, correlation, settings.chat_model, message_text(messages))
 
             async def finish() -> None:
-                bill.close()
-                await stream.aclose()
+                try:
+                    await bill.close()
+                finally:
+                    await stream.aclose()
 
             return ClosingStream(events(first, stream, bill), finish)
         reply = await openai_client.generate(
@@ -177,7 +179,7 @@ async def execute(request: RequestContract, http: Request, _caller: Claims = Dep
     except openai_client.StructuredOutputError as error:
         # OpenAI bills a refused or cut-off reply like any other: charge it, then refuse it.
         prompt = message_text(messages)
-        billing.charge(
+        await billing.charge(
             billed,
             correlation,
             reply_charge("generate", settings.chat_model, prompt, error.text, error.usage),
@@ -186,7 +188,7 @@ async def execute(request: RequestContract, http: Request, _caller: Claims = Dep
     except PROVIDER_ERRORS as error:
         provider_error(error)
     charge = reply_charge("generate", settings.chat_model, message_text(messages), reply.text, reply.usage)
-    billing.charge(billed, correlation, charge)
+    await billing.charge(billed, correlation, charge)
     return ResponseContract(
         output=reply.text,
         model_version=settings.chat_model,
@@ -223,7 +225,7 @@ async def events(
         while item is not None:
             if isinstance(item, openai_client.Usage):
                 if bill:
-                    bill.close(item)
+                    await bill.close(item)
                 yield sse_event("done", {"model_version": model, "usage_tokens": total(item)})
                 return
             if bill:
@@ -236,9 +238,11 @@ async def events(
             "error", {"code": "AI_PROVIDER_FAILED", "message": "The AI provider stopped responding."}
         )
     finally:
-        if bill:
-            bill.close()
-        await stream.aclose()
+        try:
+            if bill:
+                await bill.close()
+        finally:
+            await stream.aclose()
 
 
 @app.post("/v1/rerank", response_model=RerankResponse, responses=ERRORS)
@@ -259,7 +263,7 @@ async def rerank_documents(
         charge = priced("rerank", model, guess, estimated=True)
     else:
         charge = priced("rerank", model, tokens)
-    billing.charge(request.billed_to, correlation_of(http), charge)
+    await billing.charge(request.billed_to, correlation_of(http), charge)
     return RerankResponse(scores=scores, model_version=model, usage_tokens=tokens)
 
 
@@ -320,7 +324,7 @@ async def ingest_pdf(
                 ) from None
             finally:
                 costs.write(record, None)
-                billing.charge(billed, correlation_of(request), *ingest_charges(record))
+                await billing.charge(billed, correlation_of(request), *ingest_charges(record))
     return indexed_response(result)
 
 

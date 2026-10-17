@@ -28,16 +28,26 @@ func (s server) routes(mux *http.ServeMux) {
 
 func (s server) register(w http.ResponseWriter, r *http.Request) {
 	c := platform.Actor(r)
-	role := "student"
-	if c.Has("teacher") {
+	var role string
+	switch {
+	case c.Has("teacher") && c.Has("student"):
+		platform.RoleConflict(w)
+		return
+	case c.Has("teacher"):
 		role = "teacher"
-	} else if !c.Has("student") {
+	case c.Has("student"):
+		role = "student"
+	default:
 		platform.Forbidden(w, "An application role is required.")
 		return
 	}
 	username, name := strings.TrimSpace(c.Username), displayName(c.Name, c.Username)
-	// An account holding both roles is recorded as a teacher who may also be enrolled in other classrooms.
-	if err := s.store.registerUser(r.Context(), c.Org, c.Subject, role, c.Has("student"), username, name); err != nil {
+	err := s.store.registerUser(r.Context(), c.Org, c.Subject, role, username, name)
+	if errors.Is(err, errRoleChanged) {
+		platform.Error(w, http.StatusConflict, "ROLE_CONFLICT", "This account is registered with another role; a teacher stays a teacher and a student stays a student.")
+		return
+	}
+	if err != nil {
 		platform.Fail(w, err)
 		return
 	}
@@ -143,9 +153,6 @@ func (s server) enroll(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		platform.Fail(w, err)
 		return
-	}
-	if problem == "" && student == platform.Actor(r).Subject {
-		problem = "A teacher cannot enroll in their own classroom."
 	}
 	if problem != "" {
 		platform.Error(w, http.StatusUnprocessableEntity, "INVALID_STUDENT", problem)

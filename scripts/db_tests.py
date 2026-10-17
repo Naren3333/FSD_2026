@@ -1,11 +1,14 @@
 """Run the database-backed tests that check.py skips, against the local Compose PostgreSQL.
 
-- Content's Go tests (indexing worker, duplicate and stale jobs, hybrid search) with pgvector, in a Go container.
-- The chatbot's PostgresStore tests, in the chatbot's own image.
+- The Go modules' store tests (platform outbox, inbox and migrations; Identity, Curriculum, Assessment, Grading and
+  Content against real SQL, Content with pgvector), in a Go container.
+- The Python services' PostgreSQL tests (ai-core's usage ledger, Analytics, the chatbot's PostgresStore), in each
+  service's own image.
 
-Each suite gets its own scratch database, created once and owned by the service's role (`content_test`,
-`chatbot_test`), so no service's real data is touched. The tests run in containers on the Compose network because
-PostgreSQL is not published to the host. ai-core is faked inside the tests.
+Each suite gets its own scratch database, created once and owned by a service's role (`identity_test`,
+`grading_test`, ...), so no service's real data is touched; every test then works in a throwaway schema of it. The
+tests run in containers on the Compose network because PostgreSQL is not published to the host. ai-core is faked
+inside the tests.
 """
 
 import os
@@ -18,52 +21,63 @@ GO_IMAGE = "golang:1.25.7-alpine"
 NETWORK = "learning-foundation_default"
 PYTEST = "pytest==8.4.1"  # the version in requirements-dev.lock
 
+# Go module directory, its tests' environment variable, the role owning its scratch database, extensions.
+GO_SUITES = [
+    ("packages/platform", "PLATFORM_TEST_DATABASE_URL", "identity", ()),
+    ("services/identity", "IDENTITY_TEST_DATABASE_URL", "identity", ()),
+    ("services/curriculum", "CURRICULUM_TEST_DATABASE_URL", "curriculum", ()),
+    ("services/assessment", "ASSESSMENT_TEST_DATABASE_URL", "assessment", ()),
+    ("services/grading", "GRADING_TEST_DATABASE_URL", "grading", ()),
+    ("services/content", "CONTENT_TEST_DATABASE_URL", "content", ("vector",)),
+]
 
-def scratch_database(service: str, *extensions: str) -> str:
-    """Creates `<service>_test` owned by the service's role if missing; returns its URL on the Compose network."""
-    name = f"{service}_test"
-    if psql_value(f"SELECT count(*) FROM pg_database WHERE datname='{name}'") == "0":
-        psql_value(f"CREATE DATABASE {name} OWNER {service}")
+
+def scratch_database(name: str, owner: str, *extensions: str) -> str:
+    """Creates `<name>_test` owned by the owner's role if missing; returns its URL on the Compose network."""
+    database = f"{name}_test"
+    if psql_value(f"SELECT count(*) FROM pg_database WHERE datname='{database}'") == "0":
+        psql_value(f"CREATE DATABASE {database} OWNER {owner}")
     for extension in extensions:
-        psql_value(f"CREATE EXTENSION IF NOT EXISTS {extension}", database=name)
-    password = env()[password_key(service)]
-    return f"postgresql://{service}:{password}@postgres:5432/{name}?sslmode=disable"
+        psql_value(f"CREATE EXTENSION IF NOT EXISTS {extension}", database=database)
+    password = env()[password_key(owner)]
+    return f"postgresql://{owner}:{password}@postgres:5432/{database}?sslmode=disable"
 
 
-def content() -> None:
-    url = scratch_database("content", "vector")
+def go_suite(module: str, variable: str, owner: str, extensions: tuple[str, ...]) -> None:
+    url = scratch_database(module.rsplit("/", 1)[-1], owner, *extensions)
     command = [
         "docker", "run", "--rm",
         "--network", NETWORK,
-        "-e", "CONTENT_TEST_DATABASE_URL",
+        "-e", variable,
         "-e", "GOFLAGS=-buildvcs=false",
         "-e", "GOCACHE=/go/cache",
         "-v", f"{ROOT}:/src:ro",
         "-v", "learning-go-cache:/go",
-        "-w", "/src/services/content",
+        "-w", f"/src/{module}",
         GO_IMAGE, "go", "test", "-count=1", "-v", "./...",
     ]  # fmt: skip
-    output = run(command, {"CONTENT_TEST_DATABASE_URL": url})
-    if "--- SKIP" in output:
-        raise SystemExit("Content's database tests were skipped")
-    print("PASS: Content indexing and search against PostgreSQL with pgvector")
+    output = run(command, {variable: url})
+    if f"{variable} is not set" in output:
+        raise SystemExit(f"{module}'s database tests were skipped")
+    print(f"PASS: {module} against PostgreSQL")
 
 
-def chatbot() -> None:
-    url = scratch_database("chatbot")
-    service = ROOT / "services" / "question-chatbot-agent"
-    test = f"pip install --quiet --disable-pip-version-check {PYTEST} && python -m pytest -q -rs -p no:cacheprovider tests/test_store.py"
+def python_suite(service: str, variable: str, owner: str, tests: str) -> None:
+    """Runs the service's database tests in its own image, which has its dependencies but not pytest."""
+    url = scratch_database(owner, owner)
+    directory = ROOT / "services" / service
+    test = f"pip install --quiet --disable-pip-version-check {PYTEST} && python -m pytest -q -rs -p no:cacheprovider {tests}"
     command = [
         "docker", "compose", "run", "--rm", "--no-deps", "--user", "root",
-        "-e", "CHATBOT_TEST_DATABASE_URL",
-        "-v", f"{service}:/app:ro",
+        "-e", variable,
+        "-v", f"{directory}:/app:ro",
         "--entrypoint", "sh",
-        "question-chatbot-agent", "-c", test,
+        service, "-c", test,
     ]  # fmt: skip
-    output = run(command, {"CHATBOT_TEST_DATABASE_URL": url})
-    if "skipped" in output:
-        raise SystemExit("The chatbot's store tests were skipped")
-    print("PASS: the chatbot's PostgresStore against PostgreSQL")
+    output = run(command, {variable: url})
+    if f"{variable} is not set" in output:
+        raise SystemExit(f"{service}'s database tests were skipped")
+    print(f"PASS: {service} against PostgreSQL")
 
 
 def run(command: list[str], extra: dict[str, str]) -> str:
@@ -88,6 +102,16 @@ def run(command: list[str], extra: dict[str, str]) -> str:
     return "".join(lines)
 
 
+# Python service (its Compose name), its tests' environment variable, the role owning its scratch database, the
+# test files that use the database.
+PYTHON_SUITES = [
+    ("question-chatbot-agent", "CHATBOT_TEST_DATABASE_URL", "chatbot", "tests/test_store.py"),
+    ("ai-core", "AICORE_TEST_DATABASE_URL", "aicore", "tests/test_ledger.py"),
+    ("analytics", "ANALYTICS_TEST_DATABASE_URL", "analytics", "test_store.py"),
+]
+
 if __name__ == "__main__":
-    content()
-    chatbot()
+    for suite in GO_SUITES:
+        go_suite(*suite)
+    for python in PYTHON_SUITES:
+        python_suite(*python)

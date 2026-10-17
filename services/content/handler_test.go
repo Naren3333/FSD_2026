@@ -59,7 +59,7 @@ func TestStudentsCannotSeeRubrics(t *testing.T) {
 		{"student, teaching material", platform.RelationStudent, teachingID, []string{"student"}, http.StatusOK},
 		{"student, rubric", platform.RelationStudent, rubricID, []string{"student"}, http.StatusNotFound},
 		// The token's teacher role is not enough: enrolled here, the account sees what students see.
-		{"teacher enrolled as a student, rubric", platform.RelationStudent, rubricID, []string{"teacher", "student"}, http.StatusNotFound},
+		{"teacher token, student relation, rubric", platform.RelationStudent, rubricID, []string{"teacher"}, http.StatusNotFound},
 		{"no access", "", teachingID, []string{"student"}, http.StatusForbidden},
 		{"unknown document", platform.RelationTeacher, classID, []string{"teacher"}, http.StatusNotFound},
 	}
@@ -241,7 +241,7 @@ func TestReindexNeedsTheClassroomsTeacherAndAPDF(t *testing.T) {
 		{"malformed id", platform.RelationTeacher, "not-a-uuid", []string{"teacher"}, http.StatusNotFound},
 		{"unknown document", platform.RelationTeacher, classID, []string{"teacher"}, http.StatusNotFound},
 		{"a student", platform.RelationStudent, teachingID, []string{"student"}, http.StatusForbidden},
-		{"teacher enrolled here", platform.RelationStudent, teachingID, []string{"teacher", "student"}, http.StatusForbidden},
+		{"teacher token, student relation", platform.RelationStudent, teachingID, []string{"teacher"}, http.StatusForbidden},
 		{"not a PDF", platform.RelationTeacher, teachingID, []string{"teacher"}, http.StatusConflict},
 	}
 	for _, tc := range cases {

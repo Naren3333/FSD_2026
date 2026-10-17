@@ -156,10 +156,11 @@ def test_ids_longer_than_200_characters_are_valid():
 
 
 class Recorder:
-    """A pool whose one connection records each statement and finds nothing."""
+    """A pool whose one connection records each statement and finds nothing, except a tombstone when `purged`."""
 
-    def __init__(self) -> None:
+    def __init__(self, purged: bool = False) -> None:
         self.statements: list[str] = []
+        self.purged = purged
 
     def connection(self) -> "Recorder":
         return self
@@ -178,8 +179,10 @@ class Recorder:
         return self
 
     def fetchone(self) -> dict[str, object] | None:
-        # The inbox insert succeeds; nothing else is found.
-        return {"event_id": 1} if len(self.statements) == 1 else None
+        # The inbox insert succeeds; nothing else is found but the tombstone, when there is one.
+        if len(self.statements) == 1 or (self.purged and "purged_classrooms" in self.statements[-1]):
+            return {"event_id": 1}
+        return None
 
     def fetchall(self) -> list[object]:
         return []
@@ -219,3 +222,36 @@ def test_consumer_group_can_be_overridden(monkeypatch):
     monkeypatch.setenv("KAFKA_GROUP", "analytics-rebuild-1")
     consumer.run(None, None, None)  # type: ignore[arg-type]
     assert groups == ["analytics-v1", "analytics-rebuild-1"]
+
+
+def test_the_weakness_threshold_is_below_sixty_percent_over_five_questions():
+    at_threshold = summarize([row("s", n < 3) for n in range(5)])[0]
+    assert (at_threshold["observed_accuracy"], at_threshold["evidence_status"]) == (0.6, "observed")
+    assert at_threshold["weakness_indicator"] is False
+    below = summarize([row("s", n < 2) for n in range(5)])[0]
+    assert below["weakness_indicator"] is True
+    too_few = summarize([row("s", False) for _ in range(4)])[0]
+    assert too_few["evidence_status"] == "insufficient_evidence" and too_few["weakness_indicator"] is False
+
+
+def test_skills_are_sorted_and_v1_and_v2_rows_add_up():
+    a, b, c = sorted(str(uuid4()) for _ in range(3))
+    rows = [row(c, True), row(a, False, 0, 4), row(b, True), row(a, True), row(a, True, 5, 5)]
+    metrics = summarize(rows)
+    assert [m["skill_id"] for m in metrics] == [a, b, c]
+    assert (metrics[0]["attempted"], metrics[0]["correct"]) == (3, 2)
+    assert (metrics[0]["marks_awarded"], metrics[0]["marks_possible"]) == (6, 10)
+    assert all(SkillMetric.model_validate(m) for m in metrics)
+
+
+def test_a_grade_for_a_purged_classroom_stores_nothing():
+    from consumer import process
+    from domain import Event
+
+    recorder = Recorder(purged=True)
+    process(recorder, Event.model_validate(finalized("grading.finalized.v2", 1)))  # type: ignore[arg-type]
+    assert "inbox" in recorder.statements[0]
+    assert not any("evaluations" in s or "evidence" in s for s in recorder.statements)
+    stored = Recorder()
+    process(stored, Event.model_validate(finalized("grading.finalized.v2", 1)))  # type: ignore[arg-type]
+    assert any("INSERT INTO evaluations" in s for s in stored.statements)

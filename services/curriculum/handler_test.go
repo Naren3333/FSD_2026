@@ -187,3 +187,20 @@ func TestAMissingNodeIsNotFound(t *testing.T) {
 		t.Fatalf("status %d", w.Code)
 	}
 }
+
+func TestStudentsCannotChangeTheCurriculum(t *testing.T) {
+	store := newMemoryStore()
+	cases := [][3]string{
+		{http.MethodPatch, "/v1/nodes/" + topicID, `{"name":"Halves"}`},
+		{http.MethodDelete, "/v1/nodes/" + skillA, ""},
+		{http.MethodPost, "/v1/skills/" + skillA + "/prerequisites", `{"prerequisite_id":"` + skillB + `"}`},
+	}
+	for _, tc := range cases {
+		if w := call(t, store, tc[0], tc[1], tc[2], "student"); w.Code != http.StatusForbidden {
+			t.Errorf("%s %s by a student: %d", tc[0], tc[1], w.Code)
+		}
+	}
+	if _, ok := store.nodes[skillA]; !ok || len(store.edges) != 0 || store.nodes[topicID].Name != "Fractions" {
+		t.Fatalf("the curriculum changed: %v %v", store.nodes, store.edges)
+	}
+}

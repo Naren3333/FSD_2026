@@ -147,13 +147,18 @@ def test_over_the_limit_nothing_is_called(
     assert openai_fake.requests == [] and ledger.charges == []
 
 
-def test_a_teacher_has_the_larger_allowance(
-    api: TestClient, openai_fake: FakeOpenAI, ledger: MemoryLedger
+@pytest.mark.parametrize(
+    ("role", "spent", "status"),
+    [("student", 4.99, 200), ("student", 5.0, 429), ("teacher", 9.99, 200), ("teacher", 10.0, 429)],
+)
+def test_each_role_is_refused_exactly_at_its_allowance(
+    api: TestClient, openai_fake: FakeOpenAI, ledger: MemoryLedger, role: str, spent: float, status: int
 ) -> None:
-    ledger.already["teacher-1"] = 5.0
+    ledger.already["user-1"] = spent
     openai_fake.reply(json=embedding_response([[0.5]], prompt_tokens=3))
-    teacher = {**EMBED, "billed_to": {"user_id": "teacher-1", "org_id": "test-org", "role": "teacher"}}
-    assert api.post("/v1/inference", json=teacher).status_code == 200
+    body = {**EMBED, "billed_to": {"user_id": "user-1", "org_id": "test-org", "role": role}}
+    assert api.post("/v1/inference", json=body).status_code == status
+    assert len(openai_fake.requests) == (status == 200)
 
 
 def test_no_ledger_no_call(api: TestClient, openai_fake: FakeOpenAI, ledger: MemoryLedger) -> None:
@@ -173,7 +178,9 @@ def test_usage(api: TestClient, ledger: MemoryLedger) -> None:
     ledger.already["student-1"] = 1.25
     resp = api.get("/v1/usage", params={"user_id": "student-1", "org_id": "test-org", "role": "student"})
     assert resp.status_code == 200
-    assert resp.json()["spent_usd"] == 1.25 and resp.json()["limit_usd"] == 5.0
+    assert resp.json() == {"spent_usd": 1.25, "limit_usd": 5.0, "resets_at": "2026-10-14T00:00:00Z"}
+    teacher = api.get("/v1/usage", params={"user_id": "teacher-1", "org_id": "test-org", "role": "teacher"})
+    assert teacher.json()["spent_usd"] == 0.0 and teacher.json()["limit_usd"] == 10.0
 
 
 def test_ingest_charges_per_model() -> None:
@@ -267,7 +274,7 @@ def test_a_stream_the_caller_leaves_before_it_starts_is_charged_and_closed(
         bill = billing.StreamBill(bills, billed, "corr", "gpt-test", "Say hello")
 
         async def finish() -> None:
-            bill.close()
+            await bill.close()
             await stream.aclose()
 
         response = main.ClosingStream(main.events(first, stream, bill), finish)
@@ -327,3 +334,119 @@ def test_embedding_batches_answered_before_a_failure_are_charged(
     settle(ledger, 1)
     charge = ledger.charges[0][1]
     assert (charge.operation, charge.model, charge.tokens_in) == ("ingest", "text-embedding-3-small", 8)
+
+
+class SlowLedger(MemoryLedger):
+    """Writes take a while, as over a network to Postgres."""
+
+    def __init__(self, delay: float = 0.2) -> None:
+        super().__init__()
+        self.delay = delay
+
+    async def record(self, billed: spend.Billed, charge: spend.Charge, correlation_id: str) -> None:
+        await asyncio.sleep(self.delay)
+        await super().record(billed, charge, correlation_id)
+
+
+def a_dollar_an_embedding(monkeypatch: pytest.MonkeyPatch, test_settings: settings.Settings) -> None:
+    """1000 prompt tokens of the embedding model cost $1."""
+    priced = configured(model_prices={test_settings.embedding_model: (1000.0, 1000.0, 0.0)})
+    monkeypatch.setattr("spend.get_settings", lambda: priced)
+
+
+def test_the_next_call_sees_the_last_ones_charge(
+    openai_fake: FakeOpenAI,
+    test_settings: settings.Settings,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The charge is written before the response ends, so a caller's next call is checked against it."""
+    from conftest import SERVICE_CLAIMS
+    from learning_transport.testing import as_caller
+
+    from main import app
+
+    app.state.ledger = slow = SlowLedger()
+    a_dollar_an_embedding(monkeypatch, test_settings)
+    slow.already["student-1"] = 4.5
+    openai_fake.reply(json=embedding_response([[0.5]], prompt_tokens=1000), times=2)
+    with as_caller(app, SERVICE_CLAIMS), TestClient(app) as api:
+        assert api.post("/v1/inference", json=EMBED).status_code == 200
+        resp = api.post("/v1/inference", json=EMBED)
+    assert (resp.status_code, resp.json()["error"]["code"]) == (429, "AI_SPEND_LIMIT")
+    assert len(openai_fake.requests) == 1 and len(slow.charges) == 1
+
+
+def test_overshoot_is_bounded_by_the_calls_in_flight(
+    openai_fake: FakeOpenAI,
+    test_settings: settings.Settings,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Calls already past the check when the allowance runs out still finish and are charged; once they are
+    recorded, nothing more runs. The overshoot is at most what the in-flight calls cost (ADR 0003)."""
+    from conftest import SERVICE_CLAIMS
+    from learning_transport.testing import as_caller
+
+    from main import app
+
+    app.state.ledger = slow = SlowLedger()
+    a_dollar_an_embedding(monkeypatch, test_settings)
+    slow.already["student-1"] = 4.5
+    in_flight = 3
+    openai_fake.reply(json=embedding_response([[0.5]], prompt_tokens=1000), times=in_flight + 1)
+
+    async def burst() -> list[int]:
+        import httpx
+
+        transport = httpx.ASGITransport(app=app)
+        async with httpx.AsyncClient(transport=transport, base_url="http://ai-core") as client:
+            responses = await asyncio.gather(
+                *(client.post("/v1/inference", json=EMBED) for _ in range(in_flight))
+            )
+            after = await client.post("/v1/inference", json=EMBED)
+        return [r.status_code for r in responses] + [after.status_code]
+
+    monkeypatch.setattr(app.state, "billing", billing.Billing(slow), raising=False)
+    with as_caller(app, SERVICE_CLAIMS):
+        statuses = asyncio.run(burst())
+    assert statuses == [200] * in_flight + [429]
+    spent = 4.5 + sum(c.cost_usd for _, c in slow.charges)
+    assert spent == pytest.approx(4.5 + in_flight * 1.0) and len(openai_fake.requests) == in_flight
+
+
+def test_a_failed_ledger_write_is_logged(caplog: pytest.LogCaptureFixture) -> None:
+    """The money is already spent: the call still succeeds, and the lost charge is in the log for reconciling."""
+
+    class Unwritable(MemoryLedger):
+        async def record(self, billed: spend.Billed, charge: spend.Charge, correlation_id: str) -> None:
+            raise ConnectionError("ledger down")
+
+    charge = spend.Charge("embed", "text-embedding-3-small", 10, 0, 0.25)
+    with caplog.at_level("ERROR", logger="ai-core.billing"):
+        asyncio.run(billing.Billing(Unwritable()).charge(spend.Billed.model_validate(BILLED), "corr", charge))
+    [record] = [r for r in caplog.records if r.name == "ai-core.billing"]
+    assert record.getMessage() == "ledger_write_failed"
+    assert (record.__dict__["operation"], record.__dict__["cost_usd"]) == ("embed", 0.25)
+
+
+def test_an_unpriced_reranker_is_charged_the_highest_rates(
+    api: TestClient,
+    reranker_fake: FakeReranker,
+    ledger: MemoryLedger,
+    test_settings: settings.Settings,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    assert test_settings.reranker_model not in spend.prices()
+    reranker_fake.handler = lambda r: httpx2.Response(
+        200,
+        json={
+            "data": [{"index": 0, "relevance_score": 0.9}, {"index": 1, "relevance_score": 0.1}],
+            "usage": {"total_tokens": 40},
+        },
+    )
+    with caplog.at_level("WARNING", logger="ai-core.spend"):
+        assert api.post("/v1/rerank", json=RERANK).status_code == 200
+    [(_, charge)] = ledger.charges
+    highest = max(p[0] for p in spend.prices().values())
+    assert charge.model == test_settings.reranker_model and charge.cost_usd > 0
+    assert charge.cost_usd == pytest.approx(40 * highest / 1_000_000)
+    assert "unpriced_model" in [r.getMessage() for r in caplog.records]

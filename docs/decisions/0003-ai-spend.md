@@ -20,7 +20,7 @@ Every chat turn, search and PDF index costs OpenAI and Voyage money. The only li
   - Content bills the teacher who uploaded a document for indexing it.
 - **The cap.**
   - Before a paid call, ai-core sums the user's spend since local midnight. If it has reached the limit, ai-core answers `429 AI_SPEND_LIMIT` with `spent_usd`, `limit_usd` and `resets_at`, and makes no provider call.
-  - The limit is $5 for a student and $10 for a teacher. A token holding both roles gets the teacher limit.
+  - The limit is $5 for a student and $10 for a teacher. An account holds exactly one of the two roles; a token with both is refused.
   - The day starts at midnight in `SPEND_TIMEZONE` (default `Asia/Singapore`).
   - The limits are set by `SPEND_LIMIT_STUDENT_USD` and `SPEND_LIMIT_TEACHER_USD`.
 - **Prices.**

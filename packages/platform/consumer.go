@@ -80,7 +80,7 @@ func (c Consumer) consumeSession(ctx context.Context, topic string, handler Hand
 }
 
 // settle handles one message, or dead-letters it when it is invalid, and reports whether it may be committed.
-func (c Consumer) settle(ctx context.Context, topic string, msg kafka.Message, handler Handler, dlq *kafka.Writer) bool {
+func (c Consumer) settle(ctx context.Context, topic string, msg kafka.Message, handler Handler, dlq messageWriter) bool {
 	event, valid := decodeEvent(msg.Value, topic)
 	if valid {
 		completed, invalid := c.handle(ctx, event, handler)

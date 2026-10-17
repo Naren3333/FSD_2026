@@ -9,7 +9,7 @@ from typing import Any
 from uuid import UUID
 
 import httpx
-from fastapi import Depends, Query, Request
+from fastapi import Depends, HTTPException, Query, Request
 from learning_transport import (
     OIDC_SETTINGS,
     STUDENT,
@@ -87,8 +87,7 @@ async def owned_thread(store: Store, claims: Claims, thread_id: UUID) -> dict[st
 async def require_access(request: Request, classroom_id: str) -> str:
     """The caller's relation to the classroom (teacher or student), or 403 unless Identity says the caller may use
     the classroom now. Enrollment can end, so this is asked on every read and turn, not only when a thread is
-    created. The relation, not the token's role, decides the prompt and the allowance: an account holding both
-    roles is a student in a classroom it is enrolled in."""
+    created. The relation, not the token's role, decides the prompt and the allowance."""
     services: Services = request.app.state.services
     return await require_relation(services.identity, request, classroom_id)
 
@@ -129,7 +128,25 @@ async def list_threads(
     rows = await store_of(request).list_threads(
         claims.org, claims.subject, None if classroom_id is None else str(classroom_id)
     )
+    if classroom_id is None:
+        # Enrollment can end, so even the unfiltered list shows only threads (and their titles) in classrooms
+        # Identity says the caller may still use.
+        rooms = sorted({str(r["classroom_id"]) for r in rows})
+        allowed = await asyncio.gather(*(may_use(request, room) for room in rooms))
+        kept = {room for room, ok in zip(rooms, allowed, strict=True) if ok}
+        rows = [r for r in rows if str(r["classroom_id"]) in kept]
     return {"threads": rows}
+
+
+async def may_use(request: Request, classroom_id: str) -> bool:
+    """Whether the caller may use the classroom now; Identity being unavailable is still a 503."""
+    try:
+        await require_access(request, classroom_id)
+    except HTTPException as error:
+        if error.status_code == 403:
+            return False
+        raise
+    return True
 
 
 @app.get("/v1/threads/{thread_id}/messages", response_model=MessageList, responses=ERRORS)

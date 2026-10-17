@@ -1,9 +1,14 @@
+import base64
+import hashlib
+import hmac
+import json
 import time
 from types import SimpleNamespace
 from typing import Any
 
 import jwt
 import pytest
+from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric import rsa
 from fastapi import HTTPException
 from starlette.requests import Request
@@ -127,3 +132,56 @@ def test_a_little_clock_skew_is_allowed(monkeypatch: Any) -> None:
 )
 def test_roles_are_read_defensively(claims: dict[str, Any], roles: set[str]) -> None:
     assert auth.Claims.from_token({"sub": "s", "org_id": "o", **claims}).roles == roles
+
+
+def test_tokens_not_signed_with_the_realms_rsa_key_are_refused(monkeypatch: Any) -> None:
+    key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+    keys = auth.KeySet(
+        "https://identity.example.test/certs", lifespan=300
+    )  # the real key set, served locally
+
+    def fetch() -> dict[str, Any]:
+        served = jwks(("realm", key.public_key()))
+        assert keys.jwk_set_cache is not None
+        keys.jwk_set_cache.put(served)
+        return served
+
+    monkeypatch.setattr(keys, "fetch_data", fetch)
+    monkeypatch.setattr(auth, "keyset", lambda: keys)
+    monkeypatch.setenv("OIDC_ISSUER", "https://identity.example.test")
+    monkeypatch.setenv("OIDC_AUDIENCE", "learning")
+    now = int(time.time())
+    claims = {
+        "sub": "s",
+        "org_id": "o",
+        "iss": "https://identity.example.test",
+        "aud": "learning",
+        "iat": now,
+        "exp": now + 3600,
+    }
+    public_pem = key.public_key().public_bytes(
+        serialization.Encoding.PEM, serialization.PublicFormat.SubjectPublicKeyInfo
+    )
+
+    def segment(value: dict[str, Any]) -> bytes:
+        return base64.urlsafe_b64encode(json.dumps(value).encode()).rstrip(b"=")
+
+    def token(alg: str, signing_key: bytes) -> str:
+        """A token with header `alg`, signed with HMAC-SHA256 under signing_key when one is given."""
+        body = segment({"alg": alg, "kid": "realm", "typ": "JWT"}) + b"." + segment(claims)
+        mac = hmac.new(signing_key, body, hashlib.sha256).digest() if signing_key else b""
+        return (body + b"." + base64.urlsafe_b64encode(mac).rstrip(b"=")).decode()
+
+    def status(bearer: str) -> int:
+        try:
+            transport.actor(
+                Request({"type": "http", "headers": [(b"authorization", f"Bearer {bearer}".encode())]})
+            )
+        except HTTPException as error:
+            return error.status_code
+        return 200
+
+    assert status(jwt.encode(claims, key, algorithm="RS256", headers={"kid": "realm"})) == 200
+    assert status(token("none", b"")) == 401
+    assert status(token("HS256", public_pem)) == 401
+    assert status(jwt.encode(claims, key, algorithm="RS256", headers={"kid": "other"})) == 401

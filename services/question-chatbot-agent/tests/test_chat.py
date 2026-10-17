@@ -3,18 +3,20 @@ what is saved. Ported from fsd_test's assistant tests."""
 
 import asyncio
 import json
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Callable
 from typing import Any
 from uuid import uuid4
 
 import anyio
 import httpx
 import pytest
-from conftest import OTHER_ROOM, ROOM, Fakes, MemoryStore, as_user, chat_stream, rewrite
+from conftest import OTHER_ROOM, ROOM, SETTINGS, Fakes, MemoryStore, as_user, chat_stream, rewrite
 from fastapi.testclient import TestClient
 from learning_transport import sse_event
 
+import main
 import prompts
+from clients import Services
 
 C1, C2, C3 = str(uuid4()), str(uuid4()), str(uuid4())
 DOC = str(uuid4())
@@ -268,6 +270,30 @@ def test_a_removed_student_loses_their_threads(api: TestClient, fakes: Fakes, st
     assert api.get("/v1/threads", params={"classroom_id": ROOM}, headers=as_user("s1")).status_code == 403
 
 
+def test_a_removed_student_no_longer_lists_those_threads(api: TestClient, fakes: Fakes) -> None:
+    """The unfiltered list is checked too: a thread title is a question asked about that classroom's materials."""
+    fakes.access.add(("Bearer s1", OTHER_ROOM))
+    kept = thread(api, "s1", classroom=OTHER_ROOM)
+    thread(api, "s1", classroom=ROOM)
+    assert len(api.get("/v1/threads", headers=as_user("s1")).json()["threads"]) == 2
+    fakes.access.discard(("Bearer s1", ROOM))
+    resp = api.get("/v1/threads", headers=as_user("s1"))
+    assert resp.status_code == 200 and [t["id"] for t in resp.json()["threads"]] == [kept]
+
+
+def answering(handler: Callable[[httpx.Request], httpx.Response]) -> None:
+    """The other services answer through `handler` from now on."""
+    http = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+    main.app.state.services = Services(SETTINGS, http)
+
+
+def test_the_thread_list_needs_identity(api: TestClient, fakes: Fakes) -> None:
+    thread(api, "s1")
+    answering(lambda r: httpx.Response(503) if r.url.path.endswith("/access") else fakes.handle(r))
+    resp = api.get("/v1/threads", headers=as_user("s1"))
+    assert (resp.status_code, resp.json()["error"]["code"]) == (503, "DEPENDENCY_UNAVAILABLE")
+
+
 def test_only_students_and_teachers(api: TestClient) -> None:
     assert api.post("/v1/threads", json={"classroom_id": ROOM}, headers=as_user("x1")).status_code == 403
     assert api.get("/v1/threads", headers=as_user("x1")).status_code == 403
@@ -345,21 +371,34 @@ def test_usage(api: TestClient, fakes: Fakes) -> None:
     assert request.url.params["user_id"] == "s1" and request.url.params["role"] == "student"
 
 
-def test_the_classroom_relation_not_the_token_role_decides(
-    api: TestClient, fakes: Fakes, store: MemoryStore
+@pytest.mark.parametrize("failure", [httpx.Response(503), httpx.Response(500), httpx.ConnectError("down")])
+def test_usage_is_503_when_ai_core_cannot_answer(
+    api: TestClient, fakes: Fakes, failure: httpx.Response | Exception
 ) -> None:
-    """t2's token holds the teacher role, but t2 is enrolled in this classroom as a student: the thread, the prompt
-    and the allowance are a student's."""
-    fakes.access.add(("Bearer t2", ROOM))
+    def broken(request: httpx.Request) -> httpx.Response:
+        if request.url.path != "/v1/usage":
+            return fakes.handle(request)
+        if isinstance(failure, Exception):
+            raise failure
+        return failure
+
+    answering(broken)
+    resp = api.get("/v1/usage", headers=as_user("s1"))
+    assert (resp.status_code, resp.json()["error"]["code"]) == (503, "DEPENDENCY_UNAVAILABLE")
+
+
+@pytest.mark.parametrize(("user", "role"), [("s1", "student"), ("t1", "teacher")])
+def test_the_usage_meter_and_a_turn_use_the_same_allowance(
+    api: TestClient, fakes: Fakes, user: str, role: str
+) -> None:
+    """An account holds one role, so the meter shows the allowance its chat turns are billed to."""
     fakes.results = RESULTS
     fakes.replies += [rewrite("q"), chat_stream(["One [S1]."])]
-    tid = thread(api, "t2")
-    assert store.threads[tid]["role"] == "student"
-    post(api, tid, "q", user="t2")
-    billed = [call["billed_to"]["role"] for call in fakes.calls("/v1/inference")]
-    assert billed == ["student", "student"]
-    assert prompts.prompt_version("student") != prompts.prompt_version("teacher")
-    assert saved(store, tid)["prompt_version"] == prompts.prompt_version("student")
+    post(api, thread(api, user), "q", user=user)
+    assert [call["billed_to"]["role"] for call in fakes.calls("/v1/inference")] == [role, role]
+    assert api.get("/v1/usage", headers=as_user(user)).status_code == 200
+    [request] = [r for p, _, r in fakes.requests if p == "/v1/usage"]
+    assert request.url.params["role"] == role
 
 
 def test_no_thread_in_a_purged_classroom(api: TestClient, store: MemoryStore) -> None:
@@ -418,3 +457,25 @@ def test_a_disconnect_during_the_final_save_keeps_the_answer(fakes: Fakes) -> No
 
     [row] = anyio.run(scenario)
     assert (row["content"], row["outcome"]) == ("Done.", "answered")
+
+
+def test_results_that_do_not_fit_are_dropped_and_cannot_be_cited(
+    api: TestClient, fakes: Fakes, store: MemoryStore
+) -> None:
+    """Eight long passages: only the first five fit in one prompt message. A tag for a trimmed source ([S8]) is
+    dropped from the answer and is not among the citations or the retrieved chunks."""
+    from chat import MAX_DOCUMENTS_CHARS, PASSAGE_OVERHEAD
+
+    size = MAX_DOCUMENTS_CHARS // 5 - PASSAGE_OVERHEAD - 20  # with "passage n ": five fit, six do not
+    ids = [str(uuid4()) for _ in range(8)]
+    fakes.results = [result(c, f"passage {n} " + "x" * size, n) for n, c in enumerate(ids, 1)]
+    fakes.replies += [rewrite("q"), chat_stream(["Kept [S1]. Trimmed [S8]. Both [S5, S6]."])]
+    tid = thread(api)
+    events = post(api, tid, "q")
+
+    assert tokens(events) == f"Kept [doc:{ids[0]}]. Trimmed . Both [doc:{ids[4]}]."
+    assert [c["chunk_id"] for c in events[-2][1]["citations"]] == [ids[0], ids[4]]
+    answer = saved(store, tid)
+    assert answer["retrieved_chunk_ids"] == ids[:5]
+    prompt = fakes.calls("/v1/inference")[1]["messages"][2]["content"]
+    assert 'id="S5"' in prompt and 'id="S6"' not in prompt and len(prompt) <= MAX_DOCUMENTS_CHARS + 1000

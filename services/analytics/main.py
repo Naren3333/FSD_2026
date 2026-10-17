@@ -13,6 +13,7 @@ from fastapi import Depends, Query, Request
 from fastapi.concurrency import run_in_threadpool
 from learning_transport import (
     OIDC_SETTINGS,
+    RELATION_STUDENT,
     RELATION_TEACHER,
     STUDENT,
     TEACHER,
@@ -137,13 +138,16 @@ async def performance(
     request: Request,
     claims: Claims = Depends(requires(TEACHER, STUDENT)),
 ) -> PerformanceResponse:
-    if claims.person_role != TEACHER and student_id != claims.subject:
+    teacher = claims.person_role == TEACHER
+    if not teacher and student_id != claims.subject:
         raise failure(403, "FORBIDDEN", "Students can only view their own performance.")
+    # The relation must match the role: a teacher's token reads other students only as the classroom's teacher.
     await require_relation(
         request.app.state.identity,
         request,
         str(classroom_id),
         student_id=student_id,
+        allowed=(RELATION_TEACHER,) if teacher else (RELATION_STUDENT,),
         denied=("ACCESS_DENIED", "Classroom or student access could not be verified."),
     )
     rows = await run_in_threadpool(

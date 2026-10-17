@@ -265,7 +265,7 @@ func TestCallerAllowance(t *testing.T) {
 	if caller(c).Role != "student" {
 		t.Fatal("student billed as teacher")
 	}
-	c.Realm.Roles = []string{"teacher", "student"}
+	c.Realm.Roles = []string{"teacher"}
 	if caller(c).Role != "teacher" {
 		t.Fatal("teacher billed as student")
 	}
