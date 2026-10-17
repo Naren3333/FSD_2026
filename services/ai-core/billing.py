@@ -24,12 +24,45 @@ def ledger_unavailable() -> HTTPException:
     return failure(503, "USAGE_LEDGER_UNAVAILABLE", "AI usage cannot be checked right now.")
 
 
+def busy() -> HTTPException:
+    """429 when the user already has as many paid calls running as AI_USER_CONCURRENCY allows. Unlike
+    AI_SPEND_LIMIT it clears as soon as one of them ends."""
+    return failure(429, "AI_BUSY", "Too many AI requests are running for you at once. Try again in a moment.")
+
+
+class Slot:
+    """One of a user's running paid calls. release() frees it; calling it again does nothing."""
+
+    def __init__(self, running: dict[tuple[str, str], int], key: tuple[str, str]) -> None:
+        self._running, self._key, self._held = running, key, True
+        running[key] = running.get(key, 0) + 1
+
+    def release(self) -> None:
+        if not self._held:
+            return
+        self._held = False
+        left = self._running[self._key] - 1
+        if left:
+            self._running[self._key] = left
+        else:
+            del self._running[self._key]
+
+
 class Billing:
-    """The usage ledger, and the charges still being written to it."""
+    """The usage ledger, the charges still being written to it, and each user's running paid calls."""
 
     def __init__(self, ledger: spend.Ledger) -> None:
         self.ledger = ledger
         self._writes: set[asyncio.Future[None]] = set()
+        self._running: dict[tuple[str, str], int] = {}
+
+    def claim(self, billed: spend.Billed) -> Slot:
+        """A slot for one paid call, taken before its allowance check so a user's calls in flight never exceed
+        AI_USER_CONCURRENCY: the most they can overshoot the allowance by. Counted per ai-core process."""
+        key = (billed.org_id, billed.user_id)
+        if self._running.get(key, 0) >= get_settings().user_concurrency:
+            raise busy()
+        return Slot(self._running, key)
 
     async def check(self, billed: spend.Billed) -> None:
         """Refuse before any paid work once the user's daily allowance is used up. Without a working ledger

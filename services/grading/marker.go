@@ -33,6 +33,9 @@ const (
 	// markingWait is how long a job waits, without using an attempt, for AI to be set up on this server or for an
 	// allowance whose reset time ai-core did not say.
 	markingWait = 10 * time.Minute
+	// markingBusyWait is how long a job waits, without using an attempt, while the teacher already has as many AI
+	// calls running as ai-core allows (AI_BUSY).
+	markingBusyWait = 30 * time.Second
 )
 
 // rejectedOutputs are ai-core's answers about the model's reply itself (refused, cut off or empty). The same
@@ -378,16 +381,19 @@ func (m marker) task(ctx context.Context, j job) (markingTask, error) {
 }
 
 // afterFailure decides what follows a failed ai-core call on a job's attempt-th attempt: whether to try again, when,
-// and how many attempts the job has then used. The teacher's allowance being used up waits until it resets, and AI
-// not being set up waits markingWait, both without using an attempt (ADR 0004: the suggestion stays pending). A
-// rejected model reply fails at once (rejectedOutputs). Any other transient
-// failure is retried with backoff up to markingAttempts.
+// and how many attempts the job has then used. The teacher's allowance being used up waits until it resets, AI not
+// being set up waits markingWait, and the teacher having too many AI calls running waits markingBusyWait, all
+// without using an attempt (ADR 0004: the suggestion stays pending). A rejected model reply fails at once
+// (rejectedOutputs). Any other transient failure is retried with backoff up to markingAttempts.
 func afterFailure(err error, attempt int, now time.Time) (time.Time, int, bool) {
 	if limit, waiting := platform.AISpendLimit(err); waiting {
 		if !limit.ResetsAt.After(now) {
 			return now.Add(markingWait), attempt - 1, true
 		}
 		return limit.ResetsAt, attempt - 1, true
+	}
+	if platform.AIBusy(err) {
+		return now.Add(markingBusyWait), attempt - 1, true
 	}
 	switch code := errorCode(err); {
 	case code == "AI_PROVIDER_NOT_CONFIGURED":

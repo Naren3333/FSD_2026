@@ -30,7 +30,13 @@ export interface Node {
 export type DocType = 'teaching_material' | 'rubric' | 'marking_scheme';
 export type DocumentStatus = 'extracted' | 'extraction_unsupported' | 'indexing' | 'indexed' | 'failed';
 /** Why indexing a PDF failed. */
-export type FailureReason = 'NO_TEXT_LAYER' | 'ENCRYPTED' | 'CORRUPT' | 'AI_UNAVAILABLE' | 'INTERNAL';
+export type FailureReason =
+  | 'NO_TEXT_LAYER'
+  | 'ENCRYPTED'
+  | 'CORRUPT'
+  | 'TOO_LARGE'
+  | 'AI_UNAVAILABLE'
+  | 'INTERNAL';
 export interface DocumentRecord {
   id: string;
   classroom_id: string;

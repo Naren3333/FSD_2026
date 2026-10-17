@@ -11,10 +11,14 @@
     Refresh materials
   </button>
 </div>
-<p>
-  Upload original teaching documents. PDFs are indexed so the assistant can answer from them with sources;
-  text files are kept as extracted text only.
-</p>
+@if (session.isTeacher()) {
+  <p>
+    Upload original teaching documents. PDFs are indexed so the assistant can answer from them with sources;
+    text files are kept as extracted text only.
+  </p>
+} @else {
+  <p>Teaching materials shared in this classroom. Open one to read the original document.</p>
+}
 <div class="split">
   <section class="panel">
     <h3>Classroom library</h3>
@@ -24,14 +28,20 @@
       @for (doc of documents.value() ?? []; track doc.id) {
         <article class="record">
           <strong>{{ doc.title }}</strong>
-          <span class="doc-tags">
-            <span class="badge" [class.badge-danger]="doc.status === 'failed'">{{ status(doc).label }}</span>
-            @if (session.isTeacher()) {
+          @if (session.isTeacher()) {
+            <span class="doc-tags">
+              <span class="badge" [class.badge-danger]="doc.status === 'failed'">{{
+                status(doc).label
+              }}</span>
               <span class="badge badge-plain">{{ typeLabel(doc.doc_type) }}</span>
-            }
-          </span>
-          <small>{{ status(doc).detail }}</small>
-          <small>Revision {{ doc.revision }} · {{ doc.mime_type }}</small>
+            </span>
+            <small>{{ status(doc).detail }}</small>
+            <small>Revision {{ doc.revision }} · {{ doc.mime_type }}</small>
+          }
+          <button class="secondary" (click)="view(doc)">
+            {{ isPdf(doc) ? 'View PDF' : 'View document' }}
+            <span class="visually-hidden">{{ doc.title }}</span>
+          </button>
           @if (session.isTeacher() && (doc.status === 'failed' || doc.status === 'extraction_unsupported')) {
             <button class="secondary" (click)="reindex(doc)" [disabled]="state.busy()">
               {{ doc.status === 'failed' ? 'Retry indexing' : 'Index document' }}
@@ -42,9 +52,11 @@
       } @empty {
         <p class="empty">
           {{
-            classroomId()
-              ? 'No documents in this classroom. Upload a teaching resource to begin.'
-              : 'Select a classroom to view its materials.'
+            !classroomId()
+              ? 'Select a classroom to view its materials.'
+              : session.isTeacher()
+                ? 'No documents in this classroom. Upload a teaching resource to begin.'
+                : 'No materials have been shared in this classroom yet.'
           }}
         </p>
       }

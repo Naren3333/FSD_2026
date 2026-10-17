@@ -164,6 +164,22 @@ Kong's rate limit (120 requests a minute) was counted per Kong consumer, and eve
 - **Tests (2026-10-17):** database-backed tests now cover every Go store, the platform outbox, inbox and migrations, ai-core's ledger and Analytics' consumer SQL; `db_tests.py` runs them all. The outbox makes only the oldest unpublished event of a topic and key due, so a failed or locked event holds back that key's later ones (no out-of-order publishing). ai-core records each charge before the response ends, so a user's next call is checked against it. The chatbot's unfiltered thread list re-checks classroom access. Analytics requires the relation to match the token's role. The web SSE parser handles a CRLF split across reads.
 - **Checks:** `check.py` and CI lint `infra/` with the scripts and run `scripts/tests` (setup, Compose and Kong consistency without Docker). CI also runs `export_contracts.py --check`, the web unit tests in a job of their own, and `db_tests.py` after the integration test, and lists skipped tests. Make has `wait_ready`, `db_tests` and `upgrade_local` targets. `integration.py` and Playwright passed against the full Docker stack, in the review environment and in CI.
 
+## AI call and ingest limits (2026-10-17)
+
+- **Running calls per user:** ai-core lets one user run at most `AI_USER_CONCURRENCY` (default 4) inference and rerank calls at once, counted per process, and answers `429 AI_BUSY` past that. A call holds its slot until its charge is recorded (a stream until it ends), so the spend overshoot is at most four calls. Grading's marker waits 30 seconds on `AI_BUSY` without using an attempt; Content's search passes it on as 429; the chatbot ends the turn with it. Ingests are not counted (they have their own two slots).
+- **PDF size:** ai-core fails a PDF over `INGEST_MAX_PAGES` (500) pages before any model call, and one over `INGEST_MAX_CHUNKS` (5000) chunks before its embeddings, with the new reason `TOO_LARGE`. Content migration `004_too_large.sql` widens its `failure_reason` check (additive).
+
+## Review fixes (2026-10-17)
+
+- **Busy rerank:** a rerank refused with `AI_BUSY` is passed on like the spend limit, so a search answers `429 AI_BUSY` and the chatbot reports it, instead of falling back and failing the turn as `RERANK_UNAVAILABLE`.
+- **Text limits count characters:** Assessment's title, prompt, option, criterion and level limits and Grading's review reason count characters, not bytes, as the web app, the contracts and Identity do.
+- **Chat answers always saved:** the chatbot's `SSEResponse` runs the turn's `finish` however the response ends, so a client gone before the stream starts still leaves an `interrupted` answer after the user's message.
+- **Reproducible images:** every Python Dockerfile installs with `requirements-dev.lock` as a constraints file, so images run the versions CI tested.
+- **Assessment remembers purged classrooms:** migration `003_purged_classrooms.sql` (additive); the purge records the classroom under an advisory lock, and creating an assessment in a purged classroom answers 404.
+- **Smaller fixes:** the assessment list counts questions and points in SQL; Grading's readiness covers all three consumers; a service token renews halfway through a lifetime of a minute or less; stale comments in Identity and the platform fixed; `review-fixes-protected.patch` and `premium-audit.json` removed.
+- **Purge time limit:** `platform.Consumer` takes an optional `Timeout` per attempt (default 10 seconds); Content's classroom-deletion consumer uses 5 minutes, so deleting a large classroom's documents, vectors and objects can finish instead of rolling back on every retry and blocking that consumer.
+- **Still open from the review:** an ingest's allowance is checked only before it starts (its page and chunk caps bound what one upload can cost).
+
 ## Incomplete requirements and risks
 
 The full requested definition of done is **not claimed**. The coherent core workflow is implemented, but these requirements remain incomplete or narrower than the full brief:

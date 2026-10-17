@@ -17,10 +17,11 @@ var migrations embed.FS
 func main() {
 	platform.Serve("grading", migrations, platform.EventMigration, func(a *platform.App) ([]func(context.Context), error) {
 		server{store: pgStore{a.DB}, access: a.Identity()}.routes(a.Mux)
-		var consumerRunning atomic.Bool
+		// Ready only while all three consumers run: a stalled one would otherwise go unnoticed.
+		var v1Running, v2Running, classroomsRunning atomic.Bool
 		a.Checks = append(a.Checks, func(ctx context.Context) error {
-			if !consumerRunning.Load() {
-				return errors.New("consumer is stopped")
+			if !v1Running.Load() || !v2Running.Load() || !classroomsRunning.Load() {
+				return errors.New("a consumer is stopped")
 			}
 			return platform.KafkaReady(ctx)
 		})
@@ -31,13 +32,15 @@ func main() {
 		marking := marker{a.DB, aiSuggester{platform.NewAICore()}}
 		return []func(context.Context){
 			platform.Outbox{DB: a.DB}.Run,
-			func(ctx context.Context) { submissionsV1.Consume(ctx, topicSubmittedV1, consume, nil) },
+			func(ctx context.Context) { submissionsV1.Consume(ctx, topicSubmittedV1, consume, &v1Running) },
 			func(ctx context.Context) {
-				submissions.Consume(ctx, topicSubmittedV2, consume, &consumerRunning)
+				submissions.Consume(ctx, topicSubmittedV2, consume, &v2Running)
 			},
 			marking.Run,
 			marking.Run,
-			func(ctx context.Context) { classrooms.Consume(ctx, platform.TopicClassroomDeleted, purge, nil) },
+			func(ctx context.Context) {
+				classrooms.Consume(ctx, platform.TopicClassroomDeleted, purge, &classroomsRunning)
+			},
 		}, nil
 	})
 }

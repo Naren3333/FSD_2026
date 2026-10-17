@@ -19,6 +19,7 @@ from conftest import (
     configured,
     embedding_response,
 )
+from fastapi import HTTPException
 from fastapi.testclient import TestClient
 from starlette.requests import ClientDisconnect
 from starlette.types import Message
@@ -411,6 +412,85 @@ def test_overshoot_is_bounded_by_the_calls_in_flight(
     assert statuses == [200] * in_flight + [429]
     spent = 4.5 + sum(c.cost_usd for _, c in slow.charges)
     assert spent == pytest.approx(4.5 + in_flight * 1.0) and len(openai_fake.requests) == in_flight
+
+
+def test_a_users_running_calls_are_capped(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr("billing.get_settings", lambda: configured(user_concurrency=2))
+    bills = billing.Billing(MemoryLedger())
+    student = spend.Billed.model_validate(BILLED)
+    other = spend.Billed.model_validate({**BILLED, "user_id": "student-2"})
+    first, _ = bills.claim(student), bills.claim(student)
+    with pytest.raises(HTTPException) as busy:
+        bills.claim(student)
+    assert busy.value.status_code == 429 and busy.value.detail["code"] == "AI_BUSY"  # type: ignore[index]
+    bills.claim(other).release()  # another user is not held up
+    first.release()
+    first.release()  # releasing twice frees one slot, not two
+    bills.claim(student)
+    with pytest.raises(HTTPException):
+        bills.claim(student)
+
+
+def test_calls_beyond_the_cap_are_busy_until_one_ends(
+    openai_fake: FakeOpenAI, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A call holds its slot until its charge is written, so a burst runs at most AI_USER_CONCURRENCY calls."""
+    from conftest import SERVICE_CLAIMS
+    from learning_transport.testing import as_caller
+
+    from main import app
+
+    monkeypatch.setattr("billing.get_settings", lambda: configured(user_concurrency=2))
+    slow = SlowLedger()
+    monkeypatch.setattr(app.state, "billing", billing.Billing(slow), raising=False)
+    openai_fake.reply(json=embedding_response([[0.5]], prompt_tokens=10), times=3)
+
+    async def burst() -> tuple[list[tuple[int, str]], int]:
+        import httpx
+
+        transport = httpx.ASGITransport(app=app)
+        async with httpx.AsyncClient(transport=transport, base_url="http://ai-core") as client:
+            responses = await asyncio.gather(*(client.post("/v1/inference", json=EMBED) for _ in range(4)))
+            after = await client.post("/v1/inference", json=EMBED)
+        codes = [(r.status_code, r.json().get("error", {}).get("code", "")) for r in responses]
+        return codes, after.status_code
+
+    with as_caller(app, SERVICE_CLAIMS):
+        codes, after = asyncio.run(burst())
+    assert sorted(codes) == [(200, ""), (200, ""), (429, "AI_BUSY"), (429, "AI_BUSY")]
+    assert after == 200 and len(openai_fake.requests) == 3
+
+
+@pytest.mark.parametrize("kind", ["embed", "stream", "rerank"])
+def test_every_call_frees_its_slot_however_it_ends(
+    api: TestClient, openai_fake: FakeOpenAI, reranker_fake: FakeReranker, ledger: MemoryLedger, kind: str
+) -> None:
+    from main import app
+
+    running = app.state.billing._running
+
+    def call(succeeds: bool) -> int:
+        if kind == "rerank":
+            scores = {"data": [{"index": 0, "relevance_score": 0.9}, {"index": 1, "relevance_score": 0.1}]}
+            reranker_fake.handler = (
+                lambda r: httpx2.Response(200, json=scores) if succeeds else httpx2.Response(500)
+            )
+            return api.post("/v1/rerank", json=RERANK).status_code
+        if not succeeds:
+            openai_fake.reply(500, json={"error": {"message": "down"}}, times=10)
+        elif kind == "stream":
+            openai_fake.replies.append(chat_stream(["Hi"]))
+        else:
+            openai_fake.reply(json=embedding_response([[0.5]], prompt_tokens=3))
+        body = {**GENERATE, "stream": True} if kind == "stream" else EMBED
+        return api.post("/v1/inference", json=body).status_code
+
+    assert call(True) == 200 and running == {}
+    ledger.already["student-1"] = 5.0  # refused by the allowance check, before the provider
+    assert call(True) == 429 and running == {}
+    ledger.already.clear()
+    openai_fake.replies.clear()
+    assert call(False) == 502 and running == {}
 
 
 def test_a_failed_ledger_write_is_logged(caplog: pytest.LogCaptureFixture) -> None:

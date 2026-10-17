@@ -4,7 +4,8 @@ own `aicore` database. The cap is per user per day: SPEND_LIMIT_STUDENT_USD (def
 SPEND_LIMIT_TEACHER_USD (default 10), and the day starts at midnight in SPEND_TIMEZONE (default Asia/Singapore).
 
 The check happens before a call and the cost is recorded after it, so calls already running when a user reaches
-the cap still finish: the overshoot is at most the calls in flight."""
+the cap still finish: the overshoot is at most the calls in flight. A user may have at most AI_USER_CONCURRENCY
+(default 4) inference and rerank calls running at once (429 AI_BUSY past it), which bounds that overshoot."""
 
 import logging
 from dataclasses import dataclass

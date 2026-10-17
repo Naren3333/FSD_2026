@@ -87,6 +87,7 @@ export function applySuggestion(marks: QuestionMarks, suggestion: Suggestion): v
 export function suggestionReason(suggestion: Suggestion): string {
   const reasons: Record<string, string> = {
     AI_SPEND_LIMIT: 'Waiting for your daily AI allowance to reset.',
+    AI_BUSY: 'Waiting for your other AI requests to finish.',
     AI_PROVIDER_NOT_CONFIGURED:
       'AI is not set up on this server yet. It will be tried again every 10 minutes.',
     AI_PROVIDER_FAILED: 'The AI provider failed; it will be tried again.',

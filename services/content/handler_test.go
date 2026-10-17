@@ -105,6 +105,14 @@ func TestASpendLimitAlwaysExplainsItself(t *testing.T) {
 	}
 }
 
+func TestTooManyAICallsIsItsOwn429(t *testing.T) {
+	w := httptest.NewRecorder()
+	searchFailed(w, &aiError{Status: http.StatusTooManyRequests, Code: "AI_BUSY"})
+	if w.Code != http.StatusTooManyRequests || !strings.Contains(w.Body.String(), `"code":"AI_BUSY"`) {
+		t.Fatalf("%d %s", w.Code, w.Body.String())
+	}
+}
+
 // uploadStore records the inserted document, or fails after or before attempting the commit.
 type uploadStore struct {
 	store
@@ -248,6 +256,28 @@ func TestReindexNeedsTheClassroomsTeacherAndAPDF(t *testing.T) {
 		s := server{store: documentStore{}, access: platformtest.Access(tc.relation)}
 		if w := platformtest.Serve(s.routes, http.MethodPost, "/v1/documents/"+tc.id+"/reindex", "", "user", tc.roles...); w.Code != tc.status {
 			t.Errorf("%s: %d %s", tc.name, w.Code, w.Body.String())
+		}
+	}
+}
+
+// refusingModels embeds fine and answers every rerank with err.
+type refusingModels struct{ err error }
+
+func (refusingModels) embed(context.Context, string, billed) ([]float32, string, error) {
+	return unit(), "text-embedding-3-small", nil
+}
+
+func (m refusingModels) rerank(context.Context, string, []passage, billed) ([]float64, error) {
+	return nil, m.err
+}
+
+func TestARerankRefusedForTooManyCallsIsAnErrorNotAFallback(t *testing.T) {
+	hits := []hit{{Title: "a"}, {Title: "b"}}
+	for code, wantErr := range map[string]bool{"AI_BUSY": true, "AI_SPEND_LIMIT": true, "PROVIDER_UNAVAILABLE": false} {
+		s := server{ai: refusingModels{&aiError{Status: http.StatusTooManyRequests, Code: code}}}
+		fallback, err := s.rerankHits(t.Context(), "q", hits, testBilled)
+		if (err != nil) != wantErr || fallback == wantErr {
+			t.Fatalf("%s: fallback=%v err=%v", code, fallback, err)
 		}
 	}
 }

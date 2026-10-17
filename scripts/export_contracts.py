@@ -254,7 +254,9 @@ document = obj(
         "chunk_count": {"type": "integer", "minimum": 0},
         "embedding_model": TEXT,
         "indexed_at": {"type": "string", "format": "date-time"},
-        "failure_reason": {"enum": ["NO_TEXT_LAYER", "ENCRYPTED", "CORRUPT", "AI_UNAVAILABLE", "INTERNAL"]},
+        "failure_reason": {
+            "enum": ["NO_TEXT_LAYER", "ENCRYPTED", "CORRUPT", "TOO_LARGE", "AI_UNAVAILABLE", "INTERNAL"]
+        },
     },
     ["id", "classroom_id", "title", "mime_type", "status", "revision", "sha256", "doc_type"],
 )
@@ -621,17 +623,19 @@ for name, routes in operations.items():
             }
         }
         paths["/v1/search"]["post"]["responses"]["429"] = {
-            "description": "The caller's daily AI allowance is used up (ADR 0003)",
+            "description": "The caller's daily AI allowance is used up until resets_at (ADR 0003), or they have too "
+            "many AI calls running at once (AI_BUSY)",
             "content": {
                 "application/json": {
                     "schema": obj(
                         {
                             "error": obj(
                                 {
-                                    "code": {"const": "AI_SPEND_LIMIT"},
+                                    "code": {"enum": ["AI_SPEND_LIMIT", "AI_BUSY"]},
                                     "message": TEXT,
                                     "resets_at": {"type": "string", "format": "date-time"},
-                                }
+                                },
+                                ["code", "message"],
                             )
                         }
                     )

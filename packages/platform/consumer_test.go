@@ -132,3 +132,23 @@ func TestSettleRunsTheHandlerOncePerEvent(t *testing.T) {
 		t.Fatalf("handler ran %d times for one event", runs)
 	}
 }
+
+func TestAnAttemptGetsTheConsumersTimeout(t *testing.T) {
+	db := eventDB(t)
+	for want, c := range map[time.Duration]Consumer{defaultEventTimeout: {DB: db}, 5 * time.Minute: {DB: db, Timeout: 5 * time.Minute}} {
+		msg := envelope(t, nil)
+		event, _ := decodeEvent(msg.Value, consumerTopic)
+		var left time.Duration
+		measure := func(ctx context.Context, _ pgx.Tx, _ Event) error {
+			deadline, _ := ctx.Deadline()
+			left = time.Until(deadline)
+			return nil
+		}
+		if err := c.handleOnce(context.Background(), event, measure); err != nil {
+			t.Fatal(err)
+		}
+		if left <= want-5*time.Second || left > want {
+			t.Fatalf("an attempt had %v left, want about %v", left, want)
+		}
+	}
+}

@@ -8,13 +8,19 @@ import (
 )
 
 // purge removes a deleted classroom's assessments with their submissions and saved work, with any of its submission events not yet
-// published. Deleting what is already gone changes nothing, so a repeated event is harmless.
+// published, and remembers the classroom so an assessment created meanwhile is refused. Deleting what is already gone
+// changes nothing, so a repeated event is harmless.
 func purge(ctx context.Context, tx pgx.Tx, event platform.Event) error {
 	v, err := platform.DecodeClassroomDeleted(event)
 	if err != nil {
 		return err
 	}
+	// Waits for assessments being created in the classroom, and makes later ones see it purged.
+	if _, err = tx.Exec(ctx, "SELECT pg_advisory_xact_lock($1::int, hashtext($2::uuid::text))", classroomLock, v.Classroom); err != nil {
+		return err
+	}
 	statements := []string{
+		"INSERT INTO purged_classrooms(classroom_id,org_id) VALUES($1,$2) ON CONFLICT DO NOTHING",
 		"DELETE FROM saved_answers WHERE assessment_id IN (SELECT id FROM assessments WHERE classroom_id=$1 AND org_id=$2)",
 		"DELETE FROM submissions WHERE assessment_id IN (SELECT id FROM assessments WHERE classroom_id=$1 AND org_id=$2)",
 		"DELETE FROM assessments WHERE classroom_id=$1 AND org_id=$2",

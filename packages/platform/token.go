@@ -77,7 +77,10 @@ func (t *ServiceToken) fetch(ctx context.Context) (string, time.Time, error) {
 	if res.StatusCode != http.StatusOK || json.NewDecoder(io.LimitReader(res.Body, 1<<20)).Decode(&body) != nil || body.AccessToken == "" {
 		return "", time.Time{}, fmt.Errorf("token endpoint answered %d", res.StatusCode)
 	}
-	return body.AccessToken, time.Now().Add(time.Duration(body.ExpiresIn)*time.Second - 30*time.Second), nil
+	// Renewed 30 seconds early, or halfway through a token that lives a minute or less, so a short-lived token is still
+	// reused rather than fetched again on every call.
+	lifetime := time.Duration(body.ExpiresIn) * time.Second
+	return body.AccessToken, time.Now().Add(lifetime - min(30*time.Second, lifetime/2)), nil
 }
 
 // Reset drops the cached token, so the next Get fetches a new one (after the token was refused, say).

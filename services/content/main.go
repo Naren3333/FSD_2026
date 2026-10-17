@@ -24,7 +24,9 @@ func main() {
 		server{store: pgStore{a.DB}, access: a.Identity(), files: files, ai: ai, vectors: newVectorCache()}.routes(a.Mux)
 		// Two indexing workers: ai-core ingests two PDFs at once.
 		x := indexer{a.DB, files, ai, 2 * time.Second}
-		classrooms := platform.Consumer{DB: a.DB, Group: "content-classrooms-v1"}
+		// A purge deletes every document of the classroom with its chunks and vectors, and their objects in the
+		// bucket: far more than the default 10 seconds for a large classroom.
+		classrooms := platform.Consumer{DB: a.DB, Group: "content-classrooms-v1", Timeout: purgeTimeout}
 		purge := purger{files}.purge
 		return []func(context.Context){
 			platform.Outbox{DB: a.DB}.Run, x.run, x.run,

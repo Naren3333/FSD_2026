@@ -126,6 +126,7 @@ func TestWhatFollowsAFailedCall(t *testing.T) {
 		{"spend limit waits for the reset", &platform.AIError{Status: 429, Code: "AI_SPEND_LIMIT", ResetsAt: resets}, 3, resets, 2, true},
 		{"spend limit without a reset", &platform.AIError{Status: 429, Code: "AI_SPEND_LIMIT"}, 3, now.Add(markingWait), 2, true},
 		{"spend limit reset already past", &platform.AIError{Status: 429, Code: "AI_SPEND_LIMIT", ResetsAt: now.Add(-time.Minute)}, 1, now.Add(markingWait), 0, true},
+		{"too many calls running waits briefly", &platform.AIError{Status: 429, Code: "AI_BUSY"}, markingAttempts, now.Add(markingBusyWait), markingAttempts - 1, true},
 		{"AI not set up stays pending", &platform.AIError{Status: 503, Code: "AI_PROVIDER_NOT_CONFIGURED"}, markingAttempts, now.Add(markingWait), markingAttempts - 1, true},
 		{"provider failure backs off", &platform.AIError{Status: 502, Code: "AI_PROVIDER_FAILED"}, 2, now.Add(time.Minute), 2, true},
 		{"unreachable backs off", errors.New("connection refused"), 1, now.Add(30 * time.Second), 1, true},

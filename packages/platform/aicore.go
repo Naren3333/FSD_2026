@@ -59,6 +59,13 @@ func AISpendLimit(err error) (*AIError, bool) {
 	return nil, false
 }
 
+// AIBusy reports whether err is ai-core refusing because the billed user already has as many AI calls running as
+// it allows. Unlike AI_SPEND_LIMIT it clears as soon as one of them ends.
+func AIBusy(err error) bool {
+	var e *AIError
+	return errors.As(err, &e) && e.Status == http.StatusTooManyRequests && e.Code == "AI_BUSY"
+}
+
 // AITransient reports whether a later retry may succeed: ai-core or its provider being down, slow, rate limited or
 // not configured yet, or our token being refused. Anything else (a 4xx about the request) will fail again.
 func AITransient(err error) bool {

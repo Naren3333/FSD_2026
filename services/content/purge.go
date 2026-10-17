@@ -3,9 +3,14 @@ package main
 import (
 	"context"
 	"learning/platform"
+	"time"
 
 	"github.com/jackc/pgx/v5"
 )
+
+// purgeTimeout bounds one attempt at purging a classroom. It must cover deleting a large classroom's rows and every
+// one of its objects; a purge cut short rolls back and starts again, so one that never fits would block the consumer.
+const purgeTimeout = 5 * time.Minute
 
 // folders is what purging needs from object storage.
 type folders interface {

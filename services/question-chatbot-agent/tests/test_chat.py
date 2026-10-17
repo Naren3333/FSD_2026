@@ -220,6 +220,35 @@ def test_disconnect_saves_an_interrupted_answer(api: TestClient, fakes: Fakes, s
     assert (answer["content"], answer["outcome"]) == (f"Partial [doc:{C1}] ", "interrupted")
 
 
+def test_a_client_gone_before_the_stream_starts_still_gets_an_answer_saved() -> None:
+    """Starlette never starts the events generator when sending the response start fails, so the response's
+    finish saves the turn instead: the user's message never stands alone."""
+    from starlette.requests import ClientDisconnect
+
+    from chat import SSEResponse, Turn, TurnRequest
+
+    async def scenario() -> list[dict[str, Any]]:
+        store, pending = MemoryStore(), set[asyncio.Task[Any]]()
+        asked = TurnRequest(thread={"id": "t", "role": "student", "classroom_id": ROOM}, authorization="Bearer s1",
+                            correlation="c", content="q", history=[], billed_to={})  # fmt: skip
+        turn = Turn(None, store, SETTINGS, pending, asked)  # type: ignore[arg-type]
+        response = SSEResponse(turn.events(), turn.finish)
+
+        async def receive() -> dict[str, Any]:
+            return {"type": "http.disconnect"}
+
+        async def send(message: dict[str, Any]) -> None:
+            raise OSError("the client is gone")
+
+        with pytest.raises(ClientDisconnect):
+            await response({"type": "http", "asgi": {"spec_version": "2.4"}}, receive, send)  # type: ignore[arg-type]
+        await asyncio.wait(set(pending), timeout=5)
+        return store.all("t")
+
+    [row] = anyio.run(scenario)
+    assert (row["content"], row["outcome"]) == ("", "interrupted")
+
+
 async def post_then_disconnect(app: Any, tid: str) -> None:
     """Drive the ASGI app directly: the client disconnects once the first token has been sent."""
     first_token = asyncio.Event()
@@ -362,6 +391,27 @@ def test_a_used_up_allowance_during_search(api: TestClient, fakes: Fakes) -> Non
     fakes.search_error = LIMIT
     events = post(api, thread(api), "q")
     assert events[-1][0] == "error" and events[-1][1]["code"] == "AI_SPEND_LIMIT"
+
+
+BUSY = {"error": {"code": "AI_BUSY", "message": "x"}}
+
+
+def test_too_many_running_calls_end_the_turn_before_searching(
+    api: TestClient, fakes: Fakes, store: MemoryStore
+) -> None:
+    fakes.replies.append(httpx.Response(429, json=BUSY))
+    tid = thread(api)
+    [(event, data)] = post(api, tid, "q")
+    assert event == "error" and data["code"] == "AI_BUSY" and "resets_at" not in data
+    assert fakes.calls("/v1/search") == [] and saved(store, tid)["outcome"] == "error"
+
+
+def test_too_many_running_calls_during_search(api: TestClient, fakes: Fakes) -> None:
+    fakes.replies.append(rewrite("q"))
+    fakes.search_status = 429
+    fakes.search_error = BUSY
+    events = post(api, thread(api), "q")
+    assert events[-1][0] == "error" and events[-1][1]["code"] == "AI_BUSY"
 
 
 def test_usage(api: TestClient, fakes: Fakes) -> None:

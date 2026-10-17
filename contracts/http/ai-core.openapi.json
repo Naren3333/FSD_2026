@@ -799,7 +799,8 @@
                 "enum": [
                   "NO_TEXT_LAYER",
                   "ENCRYPTED",
-                  "CORRUPT"
+                  "CORRUPT",
+                  "TOO_LARGE"
                 ]
               },
               {
@@ -875,7 +876,7 @@
           "outcome"
         ],
         "title": "IngestResponse",
-        "description": "`failed` is the document's own problem (ENCRYPTED, CORRUPT, NO_TEXT_LAYER) and retrying will not help.\nProvider outages are errors instead, for the caller to retry."
+        "description": "`failed` is the document's own problem (ENCRYPTED, CORRUPT, NO_TEXT_LAYER, TOO_LARGE) and retrying will not\nhelp. Provider outages are errors instead, for the caller to retry."
       },
       "Message": {
         "properties": {

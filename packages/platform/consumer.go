@@ -17,6 +17,19 @@ import (
 type Consumer struct {
 	DB    *pgxpool.Pool
 	Group string // the Kafka consumer group, one per service
+	// Timeout bounds one attempt at an event, its transaction included; zero means defaultEventTimeout. A handler
+	// whose work grows with the data, such as a classroom purge, sets a longer one so a large event can finish.
+	Timeout time.Duration
+}
+
+// defaultEventTimeout is how long one attempt at an event may take unless the Consumer sets its own Timeout.
+const defaultEventTimeout = 10 * time.Second
+
+func (c Consumer) eventTimeout() time.Duration {
+	if c.Timeout > 0 {
+		return c.Timeout
+	}
+	return defaultEventTimeout
 }
 
 // Consume processes a topic for as long as ctx lives. A session stops without committing when an event keeps
@@ -126,7 +139,7 @@ func (c Consumer) handle(ctx context.Context, event Event, handler Handler) (com
 
 // handleOnce records the event in the inbox and runs the handler in the same transaction; a duplicate is a no-op.
 func (c Consumer) handleOnce(ctx context.Context, event Event, handler Handler) error {
-	workCtx, cancel := context.WithTimeout(context.WithValue(ctx, correlationKey, event.Correlation), 10*time.Second)
+	workCtx, cancel := context.WithTimeout(context.WithValue(ctx, correlationKey, event.Correlation), c.eventTimeout())
 	defer cancel()
 	tx, err := c.DB.Begin(workCtx)
 	if err != nil {

@@ -6,6 +6,7 @@ import { ClassroomContext, onClassroomChange } from '../../core/classroom-contex
 import { Session } from '../../core/session';
 import { UnsavedChanges } from '../../core/unsaved-changes';
 import { ActionState } from '../../shared/action-state';
+import { messageOf } from '../../shared/errors';
 import { FieldComponent, FieldControlDirective } from '../../shared/field';
 import { isPdf } from '../../shared/files';
 import { Section } from '../../shared/section';
@@ -19,6 +20,7 @@ const FAILURES: Record<FailureReason, string> = {
   NO_TEXT_LAYER: 'the PDF has no readable text layer',
   ENCRYPTED: 'the PDF is password protected',
   CORRUPT: 'the PDF could not be read',
+  TOO_LARGE: 'the PDF is too long to index',
   AI_UNAVAILABLE: 'the AI service was unavailable after several attempts',
   INTERNAL: 'an internal error occurred',
 };
@@ -101,10 +103,15 @@ export class MaterialsComponent implements OnDestroy {
     if (!id) return;
     void this.documents.load(() => this.content.documents(id)).then(() => this.schedule());
   }
-  /** While a PDF is indexing, re-reads the list quietly; a failed read stops until the next manual refresh. */
+  /**
+   * While a PDF is indexing, re-reads the list quietly for a teacher; a failed read stops until the next manual
+   * refresh. Students don't see indexing status, so their list isn't polled.
+   */
   private schedule(): void {
     clearTimeout(this.timer);
-    this.polling.set(!!this.documents.value()?.some((d) => d.status === 'indexing'));
+    this.polling.set(
+      this.session.isTeacher() && !!this.documents.value()?.some((d) => d.status === 'indexing'),
+    );
     if (!this.polling()) return;
     const id = this.classroomId();
     this.timer = setTimeout(() => {
@@ -121,6 +128,25 @@ export class MaterialsComponent implements OnDestroy {
   }
   status(doc: DocumentRecord) {
     return describe(doc);
+  }
+  isPdf(doc: DocumentRecord): boolean {
+    return doc.mime_type === 'application/pdf';
+  }
+  /** The original file in a new tab; the tab opens on the click so it isn't blocked as a pop-up. */
+  view(doc: DocumentRecord): void {
+    this.state.error.set('');
+    const tab = window.open('', '_blank');
+    this.content
+      .original(doc.id)
+      .then((url) => {
+        if (tab) tab.location.href = url;
+        else this.state.error.set('Allow pop-ups for this site to open the document.');
+        setTimeout(() => URL.revokeObjectURL(url), 60000);
+      })
+      .catch((error: unknown) => {
+        tab?.close();
+        this.state.error.set(`The document could not be opened. ${messageOf(error, '')}`.trim());
+      });
   }
   typeLabel(type: DocType): string {
     return DOC_TYPES.find((t) => t.value === type)?.label || type;

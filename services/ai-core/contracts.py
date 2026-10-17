@@ -98,11 +98,11 @@ class IngestFigure(Contract):
 
 
 class IngestResponse(Contract):
-    """`failed` is the document's own problem (ENCRYPTED, CORRUPT, NO_TEXT_LAYER) and retrying will not help.
-    Provider outages are errors instead, for the caller to retry."""
+    """`failed` is the document's own problem (ENCRYPTED, CORRUPT, NO_TEXT_LAYER, TOO_LARGE) and retrying will not
+    help. Provider outages are errors instead, for the caller to retry."""
 
     outcome: Literal["indexed", "failed"]
-    failure_reason: Literal["NO_TEXT_LAYER", "ENCRYPTED", "CORRUPT"] | None = None
+    failure_reason: Literal["NO_TEXT_LAYER", "ENCRYPTED", "CORRUPT", "TOO_LARGE"] | None = None
     failure_detail: str | None = None
     page_count: int | None = Field(default=None, ge=0)
     ocr_page_count: int | None = Field(default=None, ge=0)

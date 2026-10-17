@@ -93,6 +93,30 @@ async function setup(ask: (onEvent: (e: StreamEvent) => void) => Promise<void>) 
   return { page, usage, send };
 }
 
+describe('sending a question', () => {
+  it('clears the question box as soon as it is sent, before the answer starts', async () => {
+    let finish = () => undefined as void;
+    const { page } = await setup(
+      (onEvent) =>
+        new Promise<void>((resolve) => {
+          finish = () => {
+            onEvent({ event: 'done', data: { outcome: 'answered' } });
+            resolve();
+          };
+        }),
+    );
+    page.form.controls.question.setValue('What is a fraction?');
+    page.send();
+    expect(page.form.controls.question.value).toBe('');
+    expect(page.form.dirty).toBe(false);
+    await vi.waitFor(() => expect(page.streaming()).toBe(true));
+    expect(page.messages.value()?.[0].content).toBe('What is a fraction?');
+    finish();
+    await vi.waitFor(() => expect(page.state.busy()).toBe(false));
+    expect(page.form.controls.question.value).toBe('');
+  });
+});
+
 describe('a chat answer that fails', () => {
   it('says when a used-up daily AI allowance resets, and refreshes the meter', async () => {
     const resets = '2026-10-18T00:00:00+08:00';

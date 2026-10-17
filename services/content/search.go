@@ -143,9 +143,13 @@ func (req *searchRequest) normalize() (topK int, rerank bool, problem string) {
 	return topK, rerank, ""
 }
 
-// searchFailed answers a failed search: the user's AI allowance is used up, ai-core is unavailable, or an
-// internal error.
+// searchFailed answers a failed search: the user's AI allowance is used up, they have too many AI calls running,
+// ai-core is unavailable, or an internal error.
 func searchFailed(w http.ResponseWriter, err error) {
+	if platform.AIBusy(err) {
+		platform.Error(w, http.StatusTooManyRequests, "AI_BUSY", "Too many AI requests are running for you at once. Try again in a moment.")
+		return
+	}
 	if limit, ok := spendLimit(err); ok {
 		message := limit.Message
 		if message == "" {
@@ -300,7 +304,7 @@ func distinct(hits []hit) []hit {
 }
 
 // rerankHits reorders hits by ai-core's rerank scores and reports whether it fell back: on failure the RRF order
-// stays. A user over their daily AI allowance is an error, not a fallback.
+// stays. A user over their daily AI allowance, or with too many AI calls running, is an error, not a fallback.
 func (s server) rerankHits(ctx context.Context, query string, hits []hit, who billed) (bool, error) {
 	ctx, cancel := context.WithTimeout(ctx, rerankTimeout)
 	defer cancel()
@@ -309,7 +313,7 @@ func (s server) rerankHits(ctx context.Context, query string, hits []hit, who bi
 		passages[i] = passage{h.Title, h.SectionPath, h.Content}
 	}
 	scores, err := s.ai.rerank(ctx, query, passages, who)
-	if _, ok := spendLimit(err); ok {
+	if _, ok := spendLimit(err); ok || platform.AIBusy(err) {
 		return false, err
 	}
 	if err != nil {

@@ -38,3 +38,21 @@ func TestServiceTokenFetchesOnceAndWaitersHonourTheirContext(t *testing.T) {
 		t.Fatalf("%q %v after %d fetches", token, err, fetches.Load())
 	}
 }
+
+func TestAShortLivedTokenIsStillReused(t *testing.T) {
+	var fetches atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		fetches.Add(1)
+		_, _ = w.Write([]byte(`{"access_token":"t1","expires_in":20}`))
+	}))
+	t.Cleanup(server.Close)
+	tokens := &ServiceToken{URL: server.URL, Client: server.Client()}
+	for range 3 {
+		if _, err := tokens.Get(context.Background()); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if fetches.Load() != 1 {
+		t.Fatalf("a 20-second token was fetched %d times", fetches.Load())
+	}
+}

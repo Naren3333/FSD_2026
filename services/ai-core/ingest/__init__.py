@@ -12,6 +12,9 @@ a reindex never renames an image the live chunks still point at.
 
 Scans: a page without a text layer is transcribed by the vision pass (OCR); its text chunks are source "vision".
 NO_TEXT_LAYER is left for scans with OCR off, or whose transcripts come back empty.
+
+Size: a PDF over INGEST_MAX_PAGES pages fails TOO_LARGE before any model call, and one over INGEST_MAX_CHUNKS chunks
+before its embeddings, so one upload cannot spend a teacher's whole allowance.
 """
 
 import logging
@@ -75,7 +78,9 @@ async def ingest(path: Path, title: str, vision_cfg: VisionConfig | None) -> Ing
     record = costs.current()
     if record:
         record.title = title
-    await pdf.in_thread(_check, path)  # a bad PDF fails with its own reason, before any vision call
+    settings = get_settings()
+    # a bad or oversized PDF fails with its own reason, before any vision call
+    await pdf.in_thread(_check, path, settings.ingest_max_pages)
     with costs.stage("vision"):
         seen = await _see(path, vision_cfg)
     with costs.stage("parse"):
@@ -84,6 +89,10 @@ async def ingest(path: Path, title: str, vision_cfg: VisionConfig | None) -> Ing
         record.pages, record.chunks = len(document.pages), len(chunks)
     if not chunks:
         raise IngestError("NO_TEXT_LAYER", "No text to index")
+    if len(chunks) > settings.ingest_max_chunks:
+        raise IngestError(
+            "TOO_LARGE", f"{len(chunks)} chunks, more than the {settings.ingest_max_chunks} allowed"
+        )
     texts = [embed_text(title, c) for c in chunks]
     tally = openai_client.Tally()
     with costs.stage("embed"):
@@ -110,7 +119,7 @@ async def ingest(path: Path, title: str, vision_cfg: VisionConfig | None) -> Ing
         embed_texts=texts,
         vectors=vectors,
         figures=figures,
-        embedding_model=get_settings().embedding_model,
+        embedding_model=settings.embedding_model,
     )
 
 
@@ -131,9 +140,10 @@ async def _see(path: Path, cfg: VisionConfig | None) -> list[vision.PageVision |
     return await rescue.rescue_tables(path, seen, model=cfg.table_model, cache_dir=cfg.cache_dir)
 
 
-def _check(path: Path) -> None:
-    with open_checked(path):
-        pass
+def _check(path: Path, max_pages: int) -> None:
+    with open_checked(path) as doc:
+        if doc.page_count > max_pages:
+            raise IngestError("TOO_LARGE", f"{doc.page_count} pages, more than the {max_pages} allowed")
 
 
 def _parse_and_chunk(path: Path, seen: list[vision.PageVision | None] | None) -> tuple[Document, list[Chunk]]:

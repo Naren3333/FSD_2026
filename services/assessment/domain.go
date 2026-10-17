@@ -173,7 +173,7 @@ func (v *Assessment) normalize() {
 }
 
 func (v Assessment) Validate() error {
-	if !platform.ID(v.Classroom) || strings.TrimSpace(v.Title) == "" || len(v.Title) > maxTitle || len(v.Questions) < 1 || len(v.Questions) > maxQuestions {
+	if !platform.ID(v.Classroom) || strings.TrimSpace(v.Title) == "" || utf8.RuneCountInString(v.Title) > maxTitle || len(v.Questions) < 1 || len(v.Questions) > maxQuestions {
 		return errors.New("provide a classroom, title, and 1–50 questions")
 	}
 	if err := v.validateSettings(); err != nil {
@@ -214,7 +214,7 @@ func (v Assessment) publishable(now time.Time) error {
 }
 
 func (q Question) validate() error {
-	if strings.TrimSpace(q.Prompt) == "" || len(q.Prompt) > maxPrompt || !platform.ID(q.Skill) {
+	if strings.TrimSpace(q.Prompt) == "" || utf8.RuneCountInString(q.Prompt) > maxPrompt || !platform.ID(q.Skill) {
 		return errors.New("each question needs a prompt and curriculum skill")
 	}
 	kind, ok := questionKinds[q.Type]

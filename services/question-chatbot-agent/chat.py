@@ -11,14 +11,14 @@ import asyncio
 import json
 import logging
 import time
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Callable
 from contextlib import aclosing
 from dataclasses import dataclass
 from typing import Any
 
 from fastapi.responses import StreamingResponse
 from learning_transport import UpstreamError, sse_event
-from starlette.types import Send
+from starlette.types import Receive, Scope, Send
 
 import prompts
 from citations import CitationRewriter
@@ -48,14 +48,22 @@ PASSAGE_OVERHEAD = 200  # characters each passage adds to the prompt besides its
 
 class SSEResponse(StreamingResponse):
     """Closes the body generator as soon as streaming stops, disconnects included, so its cleanup runs then rather
-    than whenever the generator is garbage-collected."""
+    than whenever the generator is garbage-collected. `finish` runs however the response ends: a client gone before
+    the body starts means the generator never runs, so its own cleanup can't."""
 
-    def __init__(self, content: AsyncIterator[str]) -> None:
+    def __init__(self, content: AsyncIterator[str], finish: Callable[[], None]) -> None:
         super().__init__(
             content,
             media_type="text/event-stream",
             headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
         )
+        self.finish = finish
+
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        try:
+            await super().__call__(scope, receive, send)
+        finally:
+            self.finish()
 
     async def stream_response(self, send: Send) -> None:
         async with aclosing(self.body_iterator):  # type: ignore[type-var]
@@ -66,6 +74,8 @@ def error_of(e: UpstreamError) -> tuple[str, str]:
     """The `error` event for a failed upstream call: a code the browser can act on and a safe message."""
     if e.code == "AI_SPEND_LIMIT":
         return "AI_SPEND_LIMIT", "You've used today's AI allowance."
+    if e.code == "AI_BUSY":
+        return "AI_BUSY", "You have too many AI requests running at once. Try again in a moment."
     if e.service == "content":
         if e.status in (401, 403):
             return "FORBIDDEN", "You no longer have access to this classroom's materials."
@@ -119,8 +129,17 @@ class Turn:
         self.small_talk = False
         self.searched = False
         self.top_score: float | None = None
+        self.begun = False  # whether events() has started; finish() saves the turn when it never did
+
+    def finish(self) -> None:
+        """Saves the turn as `interrupted` if its events never started: the client left before the stream began."""
+        if not self.begun:
+            self.begun = True
+            log.info("thread %s: client gone before the answer started", self.thread["id"])
+            self._save_detached("interrupted")
 
     async def events(self) -> AsyncIterator[str]:
+        self.begun = True
         error: tuple[str, str] | None = None
         resets_at: str | None = None
         try:
@@ -230,7 +249,7 @@ class Turn:
                 bool(out["is_small_talk"]),
             )
         except UpstreamError as e:
-            if error_of(e)[0] in ("AI_UNAVAILABLE", "AI_SPEND_LIMIT"):
+            if error_of(e)[0] in ("AI_UNAVAILABLE", "AI_SPEND_LIMIT", "AI_BUSY"):
                 raise
             log.warning(
                 "thread %s: query rewrite failed, searching the raw message: %s", self.thread["id"], e

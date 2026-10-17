@@ -140,6 +140,7 @@
                           "NO_TEXT_LAYER",
                           "ENCRYPTED",
                           "CORRUPT",
+                          "TOO_LARGE",
                           "AI_UNAVAILABLE",
                           "INTERNAL"
                         ]
@@ -544,6 +545,7 @@
                         "NO_TEXT_LAYER",
                         "ENCRYPTED",
                         "CORRUPT",
+                        "TOO_LARGE",
                         "AI_UNAVAILABLE",
                         "INTERNAL"
                       ]
@@ -1011,6 +1013,7 @@
                         "NO_TEXT_LAYER",
                         "ENCRYPTED",
                         "CORRUPT",
+                        "TOO_LARGE",
                         "AI_UNAVAILABLE",
                         "INTERNAL"
                       ]
@@ -1391,6 +1394,7 @@
                         "NO_TEXT_LAYER",
                         "ENCRYPTED",
                         "CORRUPT",
+                        "TOO_LARGE",
                         "AI_UNAVAILABLE",
                         "INTERNAL"
                       ]
@@ -2087,7 +2091,7 @@
             }
           },
           "429": {
-            "description": "The caller's daily AI allowance is used up (ADR 0003)",
+            "description": "The caller's daily AI allowance is used up until resets_at (ADR 0003), or they have too many AI calls running at once (AI_BUSY)",
             "content": {
               "application/json": {
                 "schema": {
@@ -2097,7 +2101,10 @@
                       "type": "object",
                       "properties": {
                         "code": {
-                          "const": "AI_SPEND_LIMIT"
+                          "enum": [
+                            "AI_SPEND_LIMIT",
+                            "AI_BUSY"
+                          ]
                         },
                         "message": {
                           "type": "string",
@@ -2110,8 +2117,7 @@
                       },
                       "required": [
                         "code",
-                        "message",
-                        "resets_at"
+                        "message"
                       ],
                       "additionalProperties": false
                     }

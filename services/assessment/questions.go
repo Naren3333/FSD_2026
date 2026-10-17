@@ -72,7 +72,7 @@ func (multipleChoice) validate(q Question) error {
 	}
 	seen := map[string]bool{}
 	for _, o := range q.Options {
-		if strings.TrimSpace(o) == "" || len(o) > maxAnswer || seen[o] {
+		if strings.TrimSpace(o) == "" || utf8.RuneCountInString(o) > maxAnswer || seen[o] {
 			return errors.New("options must be unique nonempty values")
 		}
 		seen[o] = true
@@ -173,7 +173,7 @@ func (freeResponse) validate(q Question) error {
 }
 
 func (c Criterion) validate() error {
-	if strings.TrimSpace(c.Title) == "" || len(c.Title) > maxCriterion {
+	if strings.TrimSpace(c.Title) == "" || utf8.RuneCountInString(c.Title) > maxCriterion {
 		return errors.New("each rubric criterion needs a title")
 	}
 	if len(c.Levels) < minLevels || len(c.Levels) > maxLevels {
@@ -181,7 +181,7 @@ func (c Criterion) validate() error {
 	}
 	seen := map[int]bool{}
 	for _, l := range c.Levels {
-		if l.Points < 0 || l.Points > maxPoints || seen[l.Points] || strings.TrimSpace(l.Descriptor) == "" || len(l.Descriptor) > maxDescriptor {
+		if l.Points < 0 || l.Points > maxPoints || seen[l.Points] || strings.TrimSpace(l.Descriptor) == "" || utf8.RuneCountInString(l.Descriptor) > maxDescriptor {
 			return errors.New("each level needs a description and its own points from 0 to 100")
 		}
 		seen[l.Points] = true

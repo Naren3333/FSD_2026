@@ -28,7 +28,7 @@ from starlette.types import Receive, Scope, Send
 import openai_client
 import rerank
 import spend
-from billing import Billing, StreamBill, ingest_charges, ledger_unavailable, priced, reply_charge
+from billing import Billing, Slot, StreamBill, ingest_charges, ledger_unavailable, priced, reply_charge
 from contracts import (
     IngestChunk,
     IngestFigure,
@@ -145,6 +145,18 @@ async def usage_today(
 
 @app.post("/v1/inference", response_model=ResponseContract, responses=ERRORS)
 async def execute(request: RequestContract, http: Request, _caller: Claims = Depends(SERVICE)) -> Any:
+    slot = billing_of(http).claim(request.billed_to)
+    try:
+        result = await infer(request, http, slot)
+    except BaseException:
+        slot.release()
+        raise
+    if not isinstance(result, ClosingStream):
+        slot.release()  # a stream frees its slot when it ends
+    return result
+
+
+async def infer(request: RequestContract, http: Request, slot: Slot) -> Any:
     settings = get_settings()
     billed, billing, correlation = request.billed_to, billing_of(http), correlation_of(http)
     await billing.check(billed)
@@ -170,7 +182,10 @@ async def execute(request: RequestContract, http: Request, _caller: Claims = Dep
                 try:
                     await bill.close()
                 finally:
-                    await stream.aclose()
+                    try:
+                        await stream.aclose()
+                    finally:
+                        slot.release()
 
             return ClosingStream(events(first, stream, bill), finish)
         reply = await openai_client.generate(
@@ -250,6 +265,14 @@ async def rerank_documents(
     request: RerankRequest, http: Request, _caller: Claims = Depends(SERVICE)
 ) -> RerankResponse:
     billing = billing_of(http)
+    slot = billing.claim(request.billed_to)
+    try:
+        return await rerank_billed(request, http, billing)
+    finally:
+        slot.release()  # after the charge, so the user's next call is checked against it
+
+
+async def rerank_billed(request: RerankRequest, http: Request, billing: Billing) -> RerankResponse:
     await billing.check(request.billed_to)
     documents = [passage_text(p.title, p.section_path, p.content) for p in request.passages]
     try:

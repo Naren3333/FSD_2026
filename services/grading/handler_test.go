@@ -259,7 +259,7 @@ func TestAFinalizeReasonIsAtMost1000Characters(t *testing.T) {
 	if w := finalize(t, store, platform.RelationTeacher, evaluationID, `{"reason":"`+strings.Repeat("a", 1001)+`"}`, "teacher"); w.Code != http.StatusUnprocessableEntity || len(store.finalized) != 0 {
 		t.Fatalf("%d %v", w.Code, store.finalized)
 	}
-	if w := finalize(t, store, platform.RelationTeacher, evaluationID, `{"reason":"`+strings.Repeat("a", 1000)+`"}`, "teacher"); w.Code != http.StatusOK {
-		t.Fatalf("%d", w.Code)
+	if w := finalize(t, store, platform.RelationTeacher, evaluationID, `{"reason":"`+strings.Repeat("語", 1000)+`"}`, "teacher"); w.Code != http.StatusOK {
+		t.Fatalf("1000 characters (3000 bytes) refused: %d", w.Code)
 	}
 }

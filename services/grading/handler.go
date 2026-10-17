@@ -5,6 +5,7 @@ import (
 	"learning/platform"
 	"net/http"
 	"strings"
+	"unicode/utf8"
 )
 
 // server answers Grading's HTTP routes from its store, with classroom access from Identity.
@@ -127,7 +128,7 @@ func (s server) finalize(w http.ResponseWriter, r *http.Request) {
 	if !platform.Decode(w, r, &input) {
 		return
 	}
-	if strings.TrimSpace(input.Reason) == "" || len(input.Reason) > 1000 {
+	if strings.TrimSpace(input.Reason) == "" || utf8.RuneCountInString(input.Reason) > 1000 {
 		platform.Invalid(w, "A review reason of 1–1000 characters is required.")
 		return
 	}

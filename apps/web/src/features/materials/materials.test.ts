@@ -3,7 +3,7 @@ import { signal } from '@angular/core';
 import { TestBed } from '@angular/core/testing';
 import { BrowserTestingModule, platformBrowserTesting } from '@angular/platform-browser/testing';
 import { readFileSync } from 'node:fs';
-import { beforeAll, describe, expect, it } from 'vitest';
+import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 import { ContentApi } from '../../api/clients';
 import type { DocumentRecord } from '../../api/models';
 import { ClassroomContext } from '../../core/classroom-context';
@@ -35,6 +35,7 @@ function render(
   documents: Promise<DocumentRecord[]>,
   role: 'teacher' | 'student' = 'teacher',
   classroomId = 'c1',
+  original: (id: string) => Promise<string> = () => Promise.resolve('blob:pdf'),
 ) {
   TestBed.resetTestingModule();
   TestBed.configureTestingModule({
@@ -43,7 +44,7 @@ function render(
         provide: Session,
         useValue: { isTeacher: signal(role === 'teacher'), isStudent: signal(role === 'student') },
       },
-      { provide: ContentApi, useValue: { documents: () => documents } },
+      { provide: ContentApi, useValue: { documents: () => documents, original } },
       { provide: ClassroomContext, useValue: { classroomId: signal(classroomId) } },
     ],
   });
@@ -109,8 +110,58 @@ describe('materials states', () => {
 
     const student = render(Promise.resolve([doc({}), failed]), 'student');
     await student.settle();
-    expect(student.library()).toContain('Indexing failed');
+    expect(student.library()).toContain('Scanned worksheet');
     expect(student.library()).not.toContain('Retry indexing');
     expect(student.root.textContent).not.toContain('Upload a document');
+  });
+
+  it('hides indexing details from students', async () => {
+    const page = render(Promise.resolve([doc({}), doc({ id: 'd2', status: 'indexing' })]), 'student');
+    await page.settle();
+    const text = page.root.textContent ?? '';
+    for (const hidden of ['Indexed', 'Indexing', 'passage', 'pages', 'Revision', 'application/pdf'])
+      expect(text).not.toContain(hidden);
+    expect(page.library()).toContain('Fractions notes');
+    expect(page.fixture.componentInstance.polling()).toBe(false);
+    page.fixture.destroy();
+  });
+
+  it('tells a student when nothing has been shared', async () => {
+    const page = render(Promise.resolve([]), 'student');
+    await page.settle();
+    expect(page.library()).toContain('No materials have been shared in this classroom yet.');
+  });
+});
+
+describe('viewing a material', () => {
+  afterEach(() => vi.restoreAllMocks());
+
+  for (const role of ['teacher', 'student'] as const)
+    it(`opens the original PDF in a new tab for a ${role}`, async () => {
+      const tab = { location: { href: '' }, close: vi.fn() };
+      vi.spyOn(window, 'open').mockReturnValue(tab as unknown as Window);
+      const original = vi.fn(() => Promise.resolve('blob:fractions'));
+      const page = render(Promise.resolve([doc({})]), role, 'c1', original);
+      await page.settle();
+      const button = [...page.root.querySelectorAll('button')].find((b) =>
+        b.textContent?.includes('View PDF'),
+      );
+      button?.click();
+      await page.settle();
+      expect(original).toHaveBeenCalledWith('d1');
+      expect(tab.location.href).toBe('blob:fractions');
+    });
+
+  it('closes the tab and explains when the PDF cannot be opened', async () => {
+    const tab = { location: { href: '' }, close: vi.fn() };
+    vi.spyOn(window, 'open').mockReturnValue(tab as unknown as Window);
+    const page = render(Promise.resolve([doc({})]), 'student', 'c1', () =>
+      Promise.reject(new Error('Document not found.')),
+    );
+    await page.settle();
+    page.fixture.componentInstance.view(doc({}));
+    await page.settle();
+    expect(tab.close).toHaveBeenCalled();
+    expect(page.root.textContent).toContain('The document could not be opened. Document not found.');
   });
 });

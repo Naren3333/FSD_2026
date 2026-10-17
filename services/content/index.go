@@ -27,7 +27,7 @@ const (
 )
 
 var figureName = regexp.MustCompile(`^[a-f0-9]{16}\.png$`)
-var documentFailures = map[string]bool{"NO_TEXT_LAYER": true, "ENCRYPTED": true, "CORRUPT": true}
+var documentFailures = map[string]bool{"NO_TEXT_LAYER": true, "ENCRYPTED": true, "CORRUPT": true, "TOO_LARGE": true}
 
 // objects is the part of object storage the indexer uses.
 type objects interface {

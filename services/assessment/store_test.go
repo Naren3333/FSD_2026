@@ -219,3 +219,42 @@ func TestAFailedEventLeavesNoSubmission(t *testing.T) {
 		t.Fatal("a submission without its event was kept")
 	}
 }
+
+func TestAPurgedClassroomRefusesNewAssessments(t *testing.T) {
+	p, ctx := testStore(t), context.Background()
+	before := stored(t, p, "org", statusDraft, nil)
+	data, _ := json.Marshal(platform.ClassroomDeleted{Classroom: room, Org: "org"})
+	tx, err := p.db.Begin(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = purge(ctx, tx, platform.Event{Resource: room, Data: data}); err != nil {
+		t.Fatal(err)
+	}
+	if err = tx.Commit(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if n := count(t, p, "SELECT count(*) FROM assessments WHERE id=$1", before.ID); n != 0 {
+		t.Fatal("the purge left an assessment")
+	}
+	late := fixture()
+	late.ID, late.Questions[0].ID, late.Classroom, late.Status, late.CreatedBy = uuid.NewString(), uuid.NewString(), room, statusDraft, "teacher-1"
+	if err = p.insertAssessment(ctx, "org", late); !errors.Is(err, errClassroomPurged) {
+		t.Fatalf("an assessment was created in a purged classroom: %v", err)
+	}
+	if n := count(t, p, "SELECT count(*) FROM assessments WHERE classroom_id=$1", room); n != 0 {
+		t.Fatal("the refused assessment was stored")
+	}
+}
+
+func TestTheListCountsQuestionsAndPointsLikeDecoding(t *testing.T) {
+	p, ctx := testStore(t), context.Background()
+	id := uuid.NewString()
+	if _, err := p.db.Exec(ctx, `INSERT INTO assessments(id,classroom_id,org_id,title,questions) VALUES($1,$2,'org','Old','[{"id":"q1","type":"numerical"},{"id":"q2","type":"free_response","points":7},{"id":"q3","type":"numerical","points":0}]')`, id, room); err != nil {
+		t.Fatal(err)
+	}
+	list, err := p.listAssessments(ctx, "org", room, "student-1", true, time.Now())
+	if err != nil || len(list) != 1 || list[0].Questions != 3 || list[0].Points != 9 {
+		t.Fatalf("%+v %v", list, err)
+	}
+}

@@ -105,8 +105,9 @@ func (s server) list(w http.ResponseWriter, r *http.Request) {
 	platform.JSON(w, http.StatusOK, result)
 }
 
-// remove deletes a classroom for its teacher. Students lose access and it leaves every list; its enrollments,
-// submissions and grades are kept, and every service refuses access to it from then on.
+// remove deletes a classroom for its teacher. Students lose access and it leaves every list; its enrollments go with
+// it, and identity.classroom.deleted.v1 has every other service purge the classroom's data (assessments,
+// submissions, grades, documents, chats, evidence) and refuse access to it from then on.
 func (s server) remove(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
 	if !s.owner(w, r, id, "delete it") {

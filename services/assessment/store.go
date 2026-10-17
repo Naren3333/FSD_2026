@@ -17,6 +17,14 @@ var errNotDraft = errors.New("assessment is not a draft")
 // errAlreadySubmitted is what saveAnswers returns once the student has submitted: their work is final.
 var errAlreadySubmitted = errors.New("already submitted")
 
+// errClassroomPurged is insertAssessment's answer for a classroom that has been deleted and purged.
+var errClassroomPurged = errors.New("the classroom was deleted")
+
+// classroomLock, with the classroom, serializes a classroom's purge against new assessments in it: an insert holds
+// it shared, the purge exclusively, so an insert either commits before the purge (which then deletes it) or sees the
+// classroom in purged_classrooms.
+const classroomLock = 271828
+
 // store is a classroom's assessments and its students' submissions and saved work.
 type store interface {
 	findAssessment(ctx context.Context, org, id string) (Assessment, error)
@@ -72,9 +80,26 @@ func (p pgStore) insertAssessment(ctx context.Context, org string, v Assessment)
 	if err != nil {
 		return err
 	}
-	_, err = p.db.Exec(ctx, "INSERT INTO assessments(id,classroom_id,org_id,title,questions,status,opens_at,due_at,late_policy,release_policy,ai_marking,published_at,created_by) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)",
-		v.ID, v.Classroom, org, v.Title, data, v.Status, v.OpensAt, v.DueAt, v.LatePolicy, v.ReleasePolicy, v.AIMarking, v.PublishedAt, v.CreatedBy)
-	return err
+	tx, err := p.db.Begin(ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback(ctx)
+	if _, err = tx.Exec(ctx, "SELECT pg_advisory_xact_lock_shared($1::int, hashtext($2::uuid::text))", classroomLock, v.Classroom); err != nil {
+		return err
+	}
+	var purged bool
+	if err = tx.QueryRow(ctx, "SELECT EXISTS(SELECT 1 FROM purged_classrooms WHERE classroom_id=$1)", v.Classroom).Scan(&purged); err != nil {
+		return err
+	}
+	if purged {
+		return errClassroomPurged
+	}
+	if _, err = tx.Exec(ctx, "INSERT INTO assessments(id,classroom_id,org_id,title,questions,status,opens_at,due_at,late_policy,release_policy,ai_marking,published_at,created_by) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)",
+		v.ID, v.Classroom, org, v.Title, data, v.Status, v.OpensAt, v.DueAt, v.LatePolicy, v.ReleasePolicy, v.AIMarking, v.PublishedAt, v.CreatedBy); err != nil {
+		return err
+	}
+	return tx.Commit(ctx)
 }
 
 // draftChange runs one statement that applies to a draft only, and tells a published assessment (errNotDraft)
@@ -122,10 +147,13 @@ func (p pgStore) listProgress(ctx context.Context, org, classroomID string) ([]P
 }
 
 // listAssessments is the classroom's 100 newest assessments, each with whether student has submitted it. Without
-// all, only those published and open.
+// all, only those published and open. The question count and points are summed in SQL, so the questions (answer
+// keys and rubrics included) are never read for a list; a question stored without points is worth one, as in
+// decodeQuestions.
 func (p pgStore) listAssessments(ctx context.Context, org, classroomID, student string, all bool, now time.Time) ([]Summary, error) {
 	rows, err := p.db.Query(ctx, `SELECT a.id,a.title,EXISTS(SELECT 1 FROM submissions s WHERE s.assessment_id=a.id AND s.student_id=$3),
-		a.status,a.opens_at,a.due_at,a.late_policy,a.questions
+		a.status,a.opens_at,a.due_at,a.late_policy,jsonb_array_length(a.questions),
+		(SELECT coalesce(sum(coalesce(nullif((q->>'points')::int,0),1)),0) FROM jsonb_array_elements(a.questions) q)
 		FROM assessments a WHERE a.classroom_id=$1 AND a.org_id=$2 AND ($4 OR (a.status='published' AND (a.opens_at IS NULL OR a.opens_at<=$5)))
 		ORDER BY a.created_at DESC LIMIT 100`, classroomID, org, student, all, now)
 	if err != nil {
@@ -133,15 +161,7 @@ func (p pgStore) listAssessments(ctx context.Context, org, classroomID, student 
 	}
 	return pgx.CollectRows(rows, func(row pgx.CollectableRow) (Summary, error) {
 		var v Summary
-		var data []byte
-		if err := row.Scan(&v.ID, &v.Title, &v.Submitted, &v.Status, &v.OpensAt, &v.DueAt, &v.LatePolicy, &data); err != nil {
-			return v, err
-		}
-		questions, err := decodeQuestions(data)
-		v.Questions = len(questions)
-		for _, q := range questions {
-			v.Points += q.Points
-		}
+		err := row.Scan(&v.ID, &v.Title, &v.Submitted, &v.Status, &v.OpensAt, &v.DueAt, &v.LatePolicy, &v.Questions, &v.Points)
 		return v, err
 	})
 }

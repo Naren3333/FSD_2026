@@ -105,6 +105,9 @@ describe('marking form', () => {
     expect(suggestionReason({ status: 'pending', awarded: 0, reason: 'AI_SPEND_LIMIT' })).toContain(
       'allowance',
     );
+    expect(suggestionReason({ status: 'pending', awarded: 0, reason: 'AI_BUSY' })).toContain(
+      'other AI requests',
+    );
     expect(suggestionReason({ status: 'failed', awarded: 0, reason: 'invalid quote' })).toContain('yourself');
     expect(
       suggestionReason({ status: 'pending', awarded: 0, reason: 'AI_PROVIDER_NOT_CONFIGURED' }),

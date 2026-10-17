@@ -8,6 +8,10 @@ from pathlib import Path
 
 # The daily AI allowance defaults (ADR 0003), in USD per user per day, and the zone whose midnight starts the day.
 SPEND_LIMIT_STUDENT_USD, SPEND_LIMIT_TEACHER_USD, SPEND_TIMEZONE = 5.0, 10.0, "Asia/Singapore"
+USER_CONCURRENCY = 4
+# The largest PDF ingest takes, in pages and in chunks: past either it fails TOO_LARGE. Pages are checked before any
+# model call; chunks before the embeddings.
+INGEST_MAX_PAGES, INGEST_MAX_CHUNKS = 500, 5000
 
 
 def _flag(name: str, default: bool) -> bool:
@@ -42,6 +46,11 @@ class Settings:
     spend_limit_student_usd: float = SPEND_LIMIT_STUDENT_USD
     spend_limit_teacher_usd: float = SPEND_LIMIT_TEACHER_USD
     spend_timezone: str = SPEND_TIMEZONE
+    # Paid calls one user may have running at once (inference and rerank). The allowance is checked before a call
+    # and charged after it, so this bounds how far calls already running can take a user past it.
+    user_concurrency: int = USER_CONCURRENCY
+    ingest_max_pages: int = INGEST_MAX_PAGES
+    ingest_max_chunks: int = INGEST_MAX_CHUNKS
     # USD per million tokens (input, cached input, output) that override or add to spend.DEFAULT_PRICES.
     model_prices: dict[str, tuple[float, float, float]] = field(default_factory=dict)
 
@@ -74,5 +83,8 @@ def get_settings() -> Settings:
         spend_limit_student_usd=float(env("SPEND_LIMIT_STUDENT_USD") or SPEND_LIMIT_STUDENT_USD),
         spend_limit_teacher_usd=float(env("SPEND_LIMIT_TEACHER_USD") or SPEND_LIMIT_TEACHER_USD),
         spend_timezone=env("SPEND_TIMEZONE") or SPEND_TIMEZONE,
+        user_concurrency=int(env("AI_USER_CONCURRENCY") or USER_CONCURRENCY),
+        ingest_max_pages=int(env("INGEST_MAX_PAGES") or INGEST_MAX_PAGES),
+        ingest_max_chunks=int(env("INGEST_MAX_CHUNKS") or INGEST_MAX_CHUNKS),
         model_prices=_prices(env("MODEL_PRICES") or ""),
     )

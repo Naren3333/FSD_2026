@@ -88,6 +88,11 @@ func (s server) create(w http.ResponseWriter, r *http.Request) {
 	v.ID = uuid.NewString()
 	v.CreatedBy = platform.Actor(r).Subject
 	if err := s.store.insertAssessment(r.Context(), platform.Actor(r).Org, v); err != nil {
+		if errors.Is(err, errClassroomPurged) {
+			// Identity deleted the classroom after the access check.
+			platform.NotFound(w, "Classroom not found.")
+			return
+		}
 		platform.Fail(w, err)
 		return
 	}

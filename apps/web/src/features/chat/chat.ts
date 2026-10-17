@@ -110,10 +110,19 @@ export class ChatComponent {
     if (!this.state.validate(this.form, 'chat-form')) return;
     const question = this.form.controls.question.value.trim(),
       classroom = this.classroomId();
+    // The question moves into the conversation at once; it comes back only if it was never asked.
+    this.form.reset();
+    this.tried.set(false);
+    const restore = () => {
+      if (!this.form.controls.question.value) this.form.controls.question.setValue(question);
+    };
     void this.state.run(async () => {
       let thread = this.active();
       if (!thread) {
-        thread = await this.chat.createThread(classroom);
+        thread = await this.chat.createThread(classroom).catch((error: unknown) => {
+          restore();
+          throw error;
+        });
         this.active.set(thread);
         this.threads.set([thread, ...(this.threads.value() ?? [])]);
       }
@@ -151,11 +160,7 @@ export class ChatComponent {
         );
       try {
         await this.chat.ask(thread.id, question, this.controller.signal, (event: StreamEvent) => {
-          if (!started) {
-            started = true;
-            this.form.reset();
-            this.tried.set(false);
-          }
+          started = true;
           const current = this.messages.value()?.find((m) => m.id === answer.id);
           if (event.event === 'token')
             update({ content: (current?.content || '') + String(event.data['text'] ?? '') });
@@ -176,6 +181,7 @@ export class ChatComponent {
             (this.messages.value() ?? []).filter((m) => m.id !== answer.id && m.id !== askedId),
           );
           this.announcement.set('');
+          restore();
           throw error;
         }
         if (!this.controller?.signal.aborted) failure = messageOf(error, 'The answer stopped. Retry later.');

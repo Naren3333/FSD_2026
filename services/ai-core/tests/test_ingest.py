@@ -106,6 +106,29 @@ def test_unreadable_pdfs_fail_before_the_vision_pass(
     assert (doc["outcome"], doc["failure_reason"]) == ("failed", reason)
 
 
+def test_a_pdf_over_the_page_cap_fails_before_any_model_call(
+    api: TestClient, embeddings: FakeOpenAI, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    async def see_pages(*args: object, **kwargs: object) -> None:
+        raise AssertionError("the vision pass ran on an oversized PDF")
+
+    monkeypatch.setattr("ingest.get_settings", lambda: configured(ingest_max_pages=2))
+    with_vision(monkeypatch, VisionConfig("vision-model", tmp_path / "vision", 500))
+    monkeypatch.setattr(vision, "see_pages", see_pages)
+    doc = ingested(api, make_pdf(pages=3))
+    assert (doc["outcome"], doc["failure_reason"]) == ("failed", "TOO_LARGE")
+    assert "3 pages" in doc["failure_detail"] and embeddings.requests == []
+
+
+def test_a_pdf_over_the_chunk_cap_fails_before_its_embeddings(
+    api: TestClient, embeddings: FakeOpenAI, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr("ingest.get_settings", lambda: configured(ingest_max_chunks=1))
+    doc = ingested(api, textbook())  # at least two chunks
+    assert (doc["outcome"], doc["failure_reason"]) == ("failed", "TOO_LARGE")
+    assert embeddings.requests == []
+
+
 def test_provider_errors_are_errors_not_failed_documents(api: TestClient, openai_fake: FakeOpenAI) -> None:
     """A quota or outage is the caller's to retry: it never marks the document failed or returns partial output."""
     openai_fake.reply(429, json=QUOTA)

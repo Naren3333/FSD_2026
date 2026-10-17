@@ -28,8 +28,8 @@ func Access(a ClassroomAccess, w http.ResponseWriter, r *http.Request, classroom
 	return ok
 }
 
-// TeacherOf allows only the classroom's own teacher. The token's teacher role is not enough: an account with both
-// roles that is enrolled in someone else's classroom is a student there.
+// TeacherOf allows only the classroom's own teacher. The token's teacher role is not enough: a teacher may only
+// manage the classrooms Identity says they teach.
 func TeacherOf(a ClassroomAccess, w http.ResponseWriter, r *http.Request, classroom string) bool {
 	if !Teacher(w, r) {
 		return false

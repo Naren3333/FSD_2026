@@ -184,7 +184,7 @@ async def post_message(
     )
     state = request.app.state
     turn = Turn(state.services, store, state.settings, state.pending, asked)
-    return SSEResponse(turn.events())
+    return SSEResponse(turn.events(), turn.finish)
 
 
 @app.get("/v1/usage", response_model=Usage, responses=ERRORS)

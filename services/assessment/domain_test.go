@@ -189,3 +189,21 @@ func TestAFreeResponsesPointsErrorNamesItsRubric(t *testing.T) {
 		t.Fatalf("no rubric: %v", err)
 	}
 }
+
+func TestTextLimitsCountCharactersNotBytes(t *testing.T) {
+	v := fixture()
+	v.Title = strings.Repeat("語", maxTitle)
+	v.Questions[0].Prompt = strings.Repeat("語", maxPrompt)
+	q := essay()
+	q.Rubric.Criteria[0].Title = strings.Repeat("語", maxCriterion)
+	q.Rubric.Criteria[0].Levels[0].Descriptor = strings.Repeat("語", maxDescriptor)
+	v.Questions = append(v.Questions, q, Question{ID: "q3", Prompt: "?", Type: typeMultipleChoice, Options: []string{strings.Repeat("語", maxAnswer), "b"}, Answer: "b", Skill: skillID})
+	v.normalize()
+	if err := v.Validate(); err != nil {
+		t.Fatalf("text at the limit in characters refused: %v", err)
+	}
+	v.Title += "語"
+	if v.Validate() == nil {
+		t.Fatal("a title past the limit accepted")
+	}
+}
