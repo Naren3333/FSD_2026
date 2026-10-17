@@ -135,3 +135,87 @@ def test_both_finalized_versions_are_read_and_v1_keeps_one_point():
     assert Event.model_validate(finalized("grading.finalized.v1", 1)).data.evidence[0].possible == 1
     with pytest.raises(ValidationError):
         Event.model_validate(finalized("grading.finalized.v1", 4))
+
+
+def test_finalized_events_on_the_wrong_topic_are_dead_lettered():
+    from consumer import handler
+
+    handle = handler(None)  # type: ignore[arg-type]  # never reached: the message is rejected first
+    v2 = json.dumps(finalized("grading.finalized.v2", 4)).encode()
+    assert handle("grading.finalized.v1", v2) is False
+    v1 = json.dumps(finalized("grading.finalized.v1", 1)).encode()
+    assert handle("grading.finalized.v2", v1) is False
+
+
+def test_ids_longer_than_200_characters_are_valid():
+    from domain import Event
+
+    event = finalized("grading.finalized.v2", 1)
+    event["data"]["org_id"] = event["data"]["student_id"] = "x" * 300  # type: ignore[index]
+    assert Event.model_validate(event).data.student_id == "x" * 300
+
+
+class Recorder:
+    """A pool whose one connection records each statement and finds nothing."""
+
+    def __init__(self) -> None:
+        self.statements: list[str] = []
+
+    def connection(self) -> "Recorder":
+        return self
+
+    def transaction(self) -> "Recorder":
+        return self
+
+    def __enter__(self) -> "Recorder":
+        return self
+
+    def __exit__(self, *_: object) -> None:
+        return None
+
+    def execute(self, sql: str, params: object = None) -> "Recorder":
+        self.statements.append(sql)
+        return self
+
+    def fetchone(self) -> dict[str, object] | None:
+        # The inbox insert succeeds; nothing else is found.
+        return {"event_id": 1} if len(self.statements) == 1 else None
+
+    def fetchall(self) -> list[object]:
+        return []
+
+
+def test_storing_and_purging_lock_the_classroom_before_its_tombstone():
+    from consumer import CLASSROOM_LOCK, process, purge
+    from domain import ClassroomDeletedEvent, Event
+
+    stored = Recorder()
+    process(stored, Event.model_validate(finalized("grading.finalized.v2", 1)))  # type: ignore[arg-type]
+    assert stored.statements.index(CLASSROOM_LOCK) < next(
+        i for i, s in enumerate(stored.statements) if "purged_classrooms" in s
+    )
+    room = str(uuid4())
+    deletion = {
+        "event_id": str(uuid4()),
+        "event_type": "identity.classroom.deleted.v1",
+        "schema_version": 1,
+        "timestamp": "2026-10-14T00:00:00Z",
+        "correlation_id": str(uuid4()),
+        "resource_id": room,
+        "data": {"classroom_id": room, "org_id": "o"},
+    }
+    purged = Recorder()
+    purge(purged, ClassroomDeletedEvent.model_validate(deletion))  # type: ignore[arg-type]
+    assert purged.statements[0] == CLASSROOM_LOCK
+
+
+def test_consumer_group_can_be_overridden(monkeypatch):
+    import consumer
+
+    groups: list[str] = []
+    monkeypatch.setattr(consumer, "consume", lambda group, *_: groups.append(group))
+    monkeypatch.delenv("KAFKA_GROUP", raising=False)
+    consumer.run(None, None, None)  # type: ignore[arg-type]
+    monkeypatch.setenv("KAFKA_GROUP", "analytics-rebuild-1")
+    consumer.run(None, None, None)  # type: ignore[arg-type]
+    assert groups == ["analytics-v1", "analytics-rebuild-1"]

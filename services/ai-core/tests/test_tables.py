@@ -2,12 +2,14 @@
 No DB, no OpenAI: the vision pass's results are given directly."""
 
 from pathlib import Path
+from typing import Any
 
 import pymupdf
-from conftest import make_table_pdf
+from conftest import FakeOpenAI, make_table_pdf
 
 from ingest import embed_text
 from ingest.chunker import CONTINUED, MAX_TOKENS, TRANSCRIBED, chunk_paras, encoding
+from ingest.geometry import Box
 from ingest.headings import Para, outline
 from ingest.parse import Block, _join_continued, read_pages
 from ingest.strings import clean_cell, unligature
@@ -29,7 +31,7 @@ def page_of(tmp_path: Path, data: bytes) -> pymupdf.Page:
     return pymupdf.open(path)[0]
 
 
-def seen(box, rows: int, cols: int, style: str = "bordered", **kw) -> SeenTable:
+def seen(box: Box, rows: int, cols: int, style: str = "bordered", **kw: Any) -> SeenTable:
     return SeenTable(box, rows, cols, style, **kw)
 
 
@@ -142,13 +144,14 @@ def test_a_table_sits_under_its_heading_and_borrows_a_caption() -> None:
     paras = outline(pages, [[table]])
     assert [p.table is not None for p in paras] == [False, False, True, False]
     assert paras[2].path == ("Marking",) and paras[2].level is None
+    assert paras[2].table is not None
     assert paras[2].table.caption == "The rubric below shows what each band requires."
 
 
 # ---- chunker
 
 
-def rubric_para(rows: list[list[str]] | None = None, **kw) -> Para:
+def rubric_para(rows: list[list[str]] | None = None, **kw: Any) -> Para:
     table = Table(
         (0, 0, 1, 1), tuple(HEADER), tuple(tuple(r) for r in rows or RUBRIC), "Table 1: Essay rubric", **kw
     )
@@ -164,7 +167,9 @@ def test_a_table_is_a_chunk_of_its_own() -> None:
         "Table 1: Essay rubric\n\n| Criterion | Band 4 | Band 2 |\n|---|---|---|\n"
     )
     assert table.section_path == "Marking" and table.page_start == 2
-    assert "Criterion: Evidence; Band 4: Cites three sources; Band 2: Cites one source" in table.embed_body
+    assert "Criterion: Evidence; Band 4: Cites three sources; Band 2: Cites one source" in (
+        table.embed_body or ""
+    )
     assert embed_text("Essays", table) == f"Essays\nMarking\n\n{table.embed_body}"
 
 
@@ -216,11 +221,13 @@ def test_a_layout_with_an_invented_or_missing_word_is_rejected(tmp_path: Path) -
 
     words, box = box_words(tmp_path, SPARSE_HEADER, SPARSE)
     invented = tuple(tuple(r) for r in [*SPARSE[:2], ["(B)", "4", "", "27.0"]])
-    assert "not in the box" in verify_layout(
-        tuple(SPARSE_HEADER), invented, words, seen(box, 4, 4, "borderless")
+    assert "not in the box" in (
+        verify_layout(tuple(SPARSE_HEADER), invented, words, seen(box, 4, 4, "borderless")) or ""
     )
     dropped = tuple(tuple(r) for r in SPARSE[:2])  # the (B) row left out
-    assert "leaves out" in verify_layout(tuple(SPARSE_HEADER), dropped, words, seen(box, 4, 4, "borderless"))
+    assert "leaves out" in (
+        verify_layout(tuple(SPARSE_HEADER), dropped, words, seen(box, 4, 4, "borderless")) or ""
+    )
 
 
 def test_a_value_moved_to_the_wrong_column_is_rejected(tmp_path: Path) -> None:
@@ -228,12 +235,14 @@ def test_a_value_moved_to_the_wrong_column_is_rejected(tmp_path: Path) -> None:
 
     words, box = box_words(tmp_path, SPARSE_HEADER, SPARSE)
     shifted = tuple(tuple(r) for r in [SPARSE[0], ["(A)", "16", "", "24.9"], SPARSE[2]])  # 16 is dk, not h
-    assert "another column" in verify_layout(
-        tuple(SPARSE_HEADER), shifted, words, seen(box, 4, 4, "borderless")
+    assert "another column" in (
+        verify_layout(tuple(SPARSE_HEADER), shifted, words, seen(box, 4, 4, "borderless")) or ""
     )
 
 
-def test_a_rejected_table_is_laid_out_once_and_read_as_pdf_text(tmp_path: Path, openai_fake) -> None:
+def test_a_rejected_table_is_laid_out_once_and_read_as_pdf_text(
+    tmp_path: Path, openai_fake: FakeOpenAI
+) -> None:
     import asyncio
     import json
 
@@ -251,6 +260,7 @@ def test_a_rejected_table_is_laid_out_once_and_read_as_pdf_text(tmp_path: Path, 
     [page] = asyncio.run(
         rescue.rescue_tables(path, [PageVision([bad])], model="figure-model", cache_dir=cache)
     )
+    assert page is not None
     [table] = page_tables(page_of(tmp_path, data), page.tables).tables
     assert (
         table.source == "pdf"

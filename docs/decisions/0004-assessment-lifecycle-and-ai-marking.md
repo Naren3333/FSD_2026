@@ -29,7 +29,7 @@ Assessments published at once, held one-mark multiple-choice and numerical quest
 - `assessment.submitted.v2` carries the points, the new question types, `late`, `submitted_at`, `release_policy`, `ai_marking` and the paying `teacher_id`. Grading still reads v1 events, with one point per question and today's defaults.
 - A question the teacher must mark has `needs_marking`. The teacher marks it with `POST /v1/evaluations/{id}/marks`: a level for every rubric criterion, or points for other questions, with optional feedback. Finalizing is refused with `422 NEEDS_MARKING` while any question still needs marking. Finalize also takes the same `marks`, and the older `overrides` still work.
 - With `manual` release, students see nothing until `POST /v1/evaluations/release`. A student's own results never include rubric scores or AI suggestions.
-- `grading.finalized.v2` carries `awarded` and `possible` for part marks. Analytics reads v1 and v2 and adds `marks_awarded` and `marks_possible` to each skill. "Correct" now means full marks.
+- `grading.finalized.v2` carries `awarded` and `possible` for part marks. It is written when the grade is released (at finalization with `on_finalize`, at the release with `manual`), so Analytics never shows a student a grade before release (corrected 2026-10-17; it was first written at finalization). Analytics reads v1 and v2 and adds `marks_awarded` and `marks_possible` to each skill. "Correct" now means full marks.
 
 **AI marking is a suggestion inside Grading, not a service and not an agent.**
 

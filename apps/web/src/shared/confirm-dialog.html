@@ -1,4 +1,4 @@
-<dialog #dialog [attr.aria-labelledby]="dialogId + '-title'" (close)="onClose()">
+<dialog #dialog [attr.aria-labelledby]="dialogId + '-title'" (cancel)="onCancel($event)" (close)="onClose()">
   <h2 [id]="dialogId + '-title'">{{ heading }}</h2>
   <ng-content />
   <div class="actions">

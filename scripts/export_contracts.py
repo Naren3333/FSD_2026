@@ -97,8 +97,13 @@ input_rubric = obj(
     },
     ["criteria"],
 )
+# A question's id is optional and ignored: Assessment gives every question of a new or edited draft a new id.
 question_input = obj(
-    {**{k: v for k, v in question_fields.items() if k != "id"}, "rubric": input_rubric},
+    {
+        **question_fields,
+        "id": {**UUID, "description": "Ignored; every saved question gets a new id."},
+        "rubric": input_rubric,
+    },
     ["prompt", "type", "skill_id"],
 )
 public_question = obj(
@@ -132,6 +137,11 @@ assessment_input = obj(
         "title": {"type": "string", "minLength": 1, "maxLength": 160},
         "questions": array(question_input, 1, 50),
         **settings,
+        "status": {
+            **STATUS,
+            "description": "Omitted: published on create; on update the draft stays a draft (only an explicit "
+            "`published` publishes it).",
+        },
     },
     ["classroom_id", "title", "questions"],
 )
@@ -227,12 +237,13 @@ chunk = obj(
     }
 )
 DOC_TYPE = {"enum": ["teaching_material", "rubric", "marking_scheme"]}
+TITLE = {"type": "string", "minLength": 1, "maxLength": 160}
 FIGURE = {"type": "string", "pattern": "^[a-f0-9]{16}\\.png$"}
 document = obj(
     {
         "id": UUID,
         "classroom_id": UUID,
-        "title": TEXT,
+        "title": TITLE,
         "mime_type": {"enum": ["text/plain", "application/pdf"]},
         "status": {"enum": ["extracted", "extraction_unsupported", "indexing", "indexed", "failed"]},
         "revision": {"type": "integer", "minimum": 1},
@@ -288,11 +299,12 @@ search_request = obj(
 )
 search_response = obj({"results": array(search_hit, maximum=30), "rerank_fallback": {"type": "boolean"}})
 classroom = obj({"id": UUID, "name": TEXT, "teacher_id": TEXT})
+NODE_NAME = {"type": "string", "minLength": 1, "maxLength": 160}
 node = obj(
     {
         "id": UUID,
         "kind": {"enum": ["subject", "course", "unit", "topic", "skill", "objective"]},
-        "name": TEXT,
+        "name": NODE_NAME,
         "parent_id": {"type": ["string", "null"], "format": "uuid"},
     }
 )
@@ -333,6 +345,26 @@ enrollment["oneOf"] = [{"required": ["student_id"]}, {"required": ["username"]}]
 error = obj({"error": obj({"code": TEXT, "message": TEXT})})
 
 
+ERRORS = {
+    401: "Unauthenticated",
+    403: "Forbidden",
+    404: "Not found",
+    409: "State conflict",
+    413: "Too large",
+    422: "Validation error",
+    500: "Internal error",
+    503: "Dependency unavailable",
+}
+
+
+def errors(statuses):
+    """The error responses of a Go service's route: the standard envelope for each status."""
+    return {
+        str(s): {"description": ERRORS[s], "content": {"application/json": {"schema": error}}}
+        for s in statuses
+    }
+
+
 def operation(method, path, body, response, code=200, query=()):
     parameters = [{"name": "id", "in": "path", "required": True, "schema": UUID}] if "{id}" in path else []
     parameters += (
@@ -343,7 +375,7 @@ def operation(method, path, body, response, code=200, query=()):
             "name": q,
             "in": "query",
             "required": q not in ("student_id", "assessment_id"),
-            "schema": TEXT if q in ("student_id", "title") else UUID,
+            "schema": {"student_id": TEXT, "title": TITLE}.get(q, UUID),
         }
         for q in query
     ]
@@ -355,17 +387,11 @@ def operation(method, path, body, response, code=200, query=()):
                 "description": "Success",
                 **({"content": {"application/json": {"schema": response}}} if response else {}),
             },
-            **{
-                str(s): {"description": label, "content": {"application/json": {"schema": error}}}
-                for s, label in [
-                    (401, "Unauthenticated"),
-                    (403, "Forbidden"),
-                    (404, "Not found"),
-                    (409, "State conflict"),
-                    (422, "Validation error"),
-                    (503, "Dependency unavailable"),
-                ]
-            },
+            **errors(
+                [401, 403, 404, 409]
+                + ([413] if body is not None else [])  # platform.Decode's 2 MiB limit
+                + [422, 500, 503]
+            ),
         },
     }
     if body is not None:
@@ -396,7 +422,7 @@ operations = {
         operation(
             "POST",
             "/v1/me",
-            obj({}),
+            None,
             obj(
                 {
                     "id": TEXT,
@@ -448,7 +474,7 @@ operations = {
             node,
             201,
         ),
-        operation("PATCH", "/v1/nodes/{id}", obj({"name": TEXT}), obj({"id": UUID, "name": TEXT})),
+        operation("PATCH", "/v1/nodes/{id}", obj({"name": NODE_NAME}), obj({"id": UUID, "name": NODE_NAME})),
         operation("DELETE", "/v1/nodes/{id}", None, None, 204),
         operation(
             "POST",
@@ -590,7 +616,7 @@ for name, routes in operations.items():
                         "description": "A figure crop a search result points at",
                         "content": {"image/png": {"schema": {"type": "string", "format": "binary"}}},
                     },
-                    "404": {"description": "Not found", "content": {"application/json": {"schema": error}}},
+                    **errors([401, 403, 404, 500, 503]),
                 },
             }
         }
@@ -617,11 +643,13 @@ for name, routes in operations.items():
                 "parameters": [{"name": "id", "in": "path", "required": True, "schema": UUID}],
                 "responses": {
                     "200": {
-                        "description": "Authorized original file",
+                        "description": "Authorized original file, as uploaded",
                         "content": {
-                            "application/octet-stream": {"schema": {"type": "string", "format": "binary"}}
+                            kind: {"schema": {"type": "string", "format": "binary"}}
+                            for kind in ["application/pdf", "text/plain"]
                         },
-                    }
+                    },
+                    **errors([401, 403, 404, 500, 503]),
                 },
             }
         }
@@ -720,6 +748,12 @@ payloads = {
         }
     ),
 }
+# When an event is published, for topics whose timing matters to consumers.
+descriptions = {
+    "grading.finalized.v2": "Published when a finalized grade becomes visible to its student: at finalization "
+    "with release_policy on_finalize, otherwise when the teacher releases the assessment's results. Consumers "
+    "show its marks to the student, and must deduplicate by evaluation_id.",
+}
 for topic, payload in payloads.items():
     schema = obj(
         {
@@ -734,7 +768,12 @@ for topic, payload in payloads.items():
     )
     save(
         f"contracts/events/{topic}.schema.json",
-        {"$schema": "https://json-schema.org/draft/2020-12/schema", "$id": f"urn:learning:{topic}", **schema},
+        {
+            "$schema": "https://json-schema.org/draft/2020-12/schema",
+            "$id": f"urn:learning:{topic}",
+            **({"description": descriptions[topic]} if topic in descriptions else {}),
+            **schema,
+        },
     )
 
 env = dict(os.environ, PYTHONPATH=str(ROOT / "packages/python-platform"))

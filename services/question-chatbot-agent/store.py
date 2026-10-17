@@ -12,16 +12,23 @@ MIGRATIONS = Path(__file__).parent / "migrations"
 TITLE_CHARS = 80
 THREAD_COLUMNS = "id, classroom_id, role, title, created_at, last_message_at"
 MESSAGE_COLUMNS = "id, role, content, outcome, citations, created_at"
+# A transaction-scoped lock on one classroom: creating a thread and purging the classroom take it, so a thread is
+# never created in a classroom whose purge is committing.
+CLASSROOM_LOCK = "SELECT pg_advisory_xact_lock(hashtextextended(%s::text, 0))"
 
 
 class Store(Protocol):
-    async def create_thread(self, org: str, user: str, role: str, classroom_id: str) -> dict[str, Any]: ...
+    async def create_thread(self, org: str, user: str, role: str, classroom_id: str) -> dict[str, Any] | None:
+        """The new thread, or None when the classroom was deleted and purged."""
+        ...
 
     async def list_threads(self, org: str, user: str, classroom_id: str | None) -> list[dict[str, Any]]: ...
 
     async def thread(self, org: str, user: str, thread_id: str) -> dict[str, Any] | None: ...
 
-    async def messages(self, thread_id: str) -> list[dict[str, Any]]: ...
+    async def messages(self, thread_id: str, limit: int) -> list[dict[str, Any]]:
+        """The thread's latest `limit` messages, oldest first."""
+        ...
 
     async def start_turn(self, thread_id: str, content: str, history_turns: int) -> list[dict[str, str]]:
         """The last `history_turns` messages (oldest first), then saves the user's message and, for the first,
@@ -34,14 +41,17 @@ class Store(Protocol):
 class PostgresStore(AsyncPooled):
     MIGRATIONS = MIGRATIONS
 
-    async def create_thread(self, org: str, user: str, role: str, classroom_id: str) -> dict[str, Any]:
-        async with self.pool.connection() as conn:
+    async def create_thread(self, org: str, user: str, role: str, classroom_id: str) -> dict[str, Any] | None:
+        async with self.pool.connection() as conn, conn.transaction():
+            await conn.execute(CLASSROOM_LOCK, (classroom_id,))
             cur = await conn.execute(
-                f"INSERT INTO threads (org_id, user_id, role, classroom_id) VALUES (%s,%s,%s,%s)"
+                f"INSERT INTO threads (org_id, user_id, role, classroom_id) SELECT %s,%s,%s,%s"
+                f" WHERE NOT EXISTS (SELECT 1 FROM purged_classrooms WHERE classroom_id=%s)"
                 f" RETURNING {THREAD_COLUMNS}",
-                (org, user, role, classroom_id),
+                (org, user, role, classroom_id, classroom_id),
             )
-            return dict(await cur.fetchone() or {})
+            row = await cur.fetchone()
+            return dict(row) if row else None
 
     async def list_threads(self, org: str, user: str, classroom_id: str | None) -> list[dict[str, Any]]:
         async with self.pool.connection() as conn:
@@ -61,13 +71,13 @@ class PostgresStore(AsyncPooled):
             row = await cur.fetchone()
             return dict(row) if row else None
 
-    async def messages(self, thread_id: str) -> list[dict[str, Any]]:
+    async def messages(self, thread_id: str, limit: int) -> list[dict[str, Any]]:
         async with self.pool.connection() as conn:
             cur = await conn.execute(
-                f"SELECT {MESSAGE_COLUMNS} FROM messages WHERE thread_id=%s ORDER BY created_at, id",
-                (thread_id,),
+                f"SELECT {MESSAGE_COLUMNS} FROM messages WHERE thread_id=%s ORDER BY created_at DESC, id DESC LIMIT %s",
+                (thread_id, limit),
             )
-            return [dict(r) for r in await cur.fetchall()]
+            return [dict(r) for r in await cur.fetchall()][::-1]
 
     async def start_turn(self, thread_id: str, content: str, history_turns: int) -> list[dict[str, str]]:
         async with self.pool.connection() as conn, conn.transaction():

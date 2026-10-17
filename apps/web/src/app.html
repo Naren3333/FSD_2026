@@ -36,7 +36,10 @@
       @if (session.profile(); as profile) {
         <div class="account">
           <span>{{ session.isTeacher() ? 'Teacher' : 'Student' }} · {{ profile.org_id }}</span>
-          <button class="secondary" (click)="logout()">Sign out</button>
+          @if (session.expired()) {
+            <button (click)="login()" [disabled]="state.busy()">Sign in again</button>
+          }
+          <button class="secondary" (click)="logout()" [disabled]="state.busy()">Sign out</button>
         </div>
       } @else if (!session.signedIn) {
         <button (click)="login()" [disabled]="state.busy()">Sign in</button>
@@ -81,7 +84,15 @@
         <app-usage />
       </div>
       <p class="draft-note">
-        {{ hasUnsaved() ? 'Finish or clear your current form before changing classrooms.' : '' }}
+        {{
+          session.expired()
+            ? hasUnsaved()
+              ? 'Your session expired. Signing in again reloads the workspace; your browser asks before unsaved work on this page is lost.'
+              : 'Your session expired. Sign in again to continue.'
+            : hasUnsaved()
+              ? 'Finish or clear your current form before changing classrooms.'
+              : ''
+        }}
       </p>
       <app-status [state]="state" />
       <router-outlet />

@@ -29,7 +29,7 @@
   @if (session.isTeacher()) {
     <section class="panel">
       <h3>Add curriculum</h3>
-      <form novalidate [formGroup]="form" (ngSubmit)="create()">
+      <form id="node-form" novalidate [formGroup]="form" (ngSubmit)="create()">
         <app-field controlId="node-kind" label="Level">
           <select id="node-kind" formControlName="kind">
             @for (kind of kinds; track kind) {
@@ -43,13 +43,7 @@
           [invalid]="form.controls.name.touched && form.controls.name.invalid"
           error="Enter a name of 1–160 characters."
         >
-          <input
-            id="node-name"
-            formControlName="name"
-            maxlength="160"
-            aria-describedby="node-name-help"
-            [attr.aria-invalid]="form.controls.name.touched && form.controls.name.invalid"
-          />
+          <input id="node-name" formControlName="name" maxlength="160" aria-describedby="node-name-help" />
         </app-field>
         <app-field
           controlId="node-parent"

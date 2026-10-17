@@ -1,6 +1,9 @@
 package main
 
-import "strings"
+import (
+	"strings"
+	"unicode/utf8"
+)
 
 type Classroom struct {
 	ID      string `json:"id"`
@@ -24,7 +27,11 @@ func displayName(name, username string) string {
 	return strings.TrimSpace(username)
 }
 
-// maxName is the longest classroom name, in bytes.
+// maxName is the longest classroom name, in characters.
 const maxName = 120
 
-func validName(name string) bool { return strings.TrimSpace(name) != "" && len(name) <= maxName }
+// validName reports whether the name, trimmed as it is stored, has 1–maxName characters.
+func validName(name string) bool {
+	name = strings.TrimSpace(name)
+	return name != "" && utf8.RuneCountInString(name) <= maxName
+}

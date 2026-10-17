@@ -10,13 +10,15 @@ from learning_transport.kafka import Envelope, consume, parse
 from psycopg_pool import ConnectionPool
 from pydantic import Field, model_validator
 
+from store import CLASSROOM_LOCK
+
 TOPIC = "identity.classroom.deleted.v1"
 GROUP = "question-chatbot-agent-v1"
 
 
 class ClassroomDeleted(Contract):
     classroom_id: UUID
-    org_id: str = Field(min_length=1, max_length=200)
+    org_id: str = Field(min_length=1)
 
 
 class ClassroomDeletedEvent(Envelope):
@@ -31,15 +33,21 @@ class ClassroomDeletedEvent(Envelope):
 
 
 def purge(pool: ConnectionPool[Any], value: bytes | None) -> bool:
-    """Delete the classroom's threads (their messages go with them). False when the message is not a valid
+    """Delete the classroom's threads (their messages go with them) and remember the classroom, so no thread is
+    created in it afterwards (store.create_thread takes the same lock). False when the message is not a valid
     deletion. Deleting what is already gone changes nothing, so a repeated event is harmless."""
     event = parse(ClassroomDeletedEvent, value)
     if event is None:
         return False
-    with pool.connection() as conn:
+    data = event.data
+    with pool.connection() as conn, conn.transaction():
+        conn.execute(CLASSROOM_LOCK, (data.classroom_id,))
         conn.execute(
-            "DELETE FROM threads WHERE classroom_id=%s AND org_id=%s",
-            (event.data.classroom_id, event.data.org_id),
+            "INSERT INTO purged_classrooms(classroom_id,org_id) VALUES(%s,%s) ON CONFLICT DO NOTHING",
+            (data.classroom_id, data.org_id),
+        )
+        conn.execute(
+            "DELETE FROM threads WHERE classroom_id=%s AND org_id=%s", (data.classroom_id, data.org_id)
         )
     return True
 

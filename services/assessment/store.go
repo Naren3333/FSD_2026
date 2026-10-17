@@ -159,6 +159,9 @@ func (p pgStore) insertSubmission(ctx context.Context, v Assessment, sub Submiss
 		return false, err
 	}
 	defer tx.Rollback(ctx)
+	if err = lockStudentWork(ctx, tx, v.ID, sub.Student); err != nil {
+		return false, err
+	}
 	result, err := tx.Exec(ctx, "INSERT INTO submissions(id,assessment_id,student_id,answers,late,created_at) VALUES($1,$2,$3,$4,$5,$6) ON CONFLICT(assessment_id,student_id) DO NOTHING", sub.ID, v.ID, sub.Student, answers, sub.Late, sub.SubmittedAt)
 	if err != nil {
 		return false, err
@@ -195,18 +198,36 @@ func (p pgStore) findSaved(ctx context.Context, assessment, student string) (Sav
 	return saved, err
 }
 
+// lockStudentWork serializes one student's saving and submitting of one assessment until tx ends, so saved work
+// cannot be written after the submission that deletes it.
+func lockStudentWork(ctx context.Context, tx pgx.Tx, assessment, student string) error {
+	_, err := tx.Exec(ctx, "SELECT pg_advisory_xact_lock(hashtextextended($1::text||'/'||$2::text,0))", assessment, student)
+	return err
+}
+
 // saveAnswers replaces the student's saved work, unless they have already submitted (errAlreadySubmitted).
 func (p pgStore) saveAnswers(ctx context.Context, assessment, student string, answers map[string]string) (time.Time, error) {
 	data, err := json.Marshal(answers)
 	if err != nil {
 		return time.Time{}, err
 	}
+	tx, err := p.db.Begin(ctx)
+	if err != nil {
+		return time.Time{}, err
+	}
+	defer tx.Rollback(ctx)
+	if err = lockStudentWork(ctx, tx, assessment, student); err != nil {
+		return time.Time{}, err
+	}
 	var at time.Time
-	err = p.db.QueryRow(ctx, `INSERT INTO saved_answers(assessment_id,student_id,answers) SELECT $1,$2,$3
+	err = tx.QueryRow(ctx, `INSERT INTO saved_answers(assessment_id,student_id,answers) SELECT $1,$2,$3
 		WHERE NOT EXISTS(SELECT 1 FROM submissions WHERE assessment_id=$1 AND student_id=$2)
 		ON CONFLICT(assessment_id,student_id) DO UPDATE SET answers=excluded.answers,saved_at=now() RETURNING saved_at`, assessment, student, data).Scan(&at)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return at, errAlreadySubmitted
+	}
+	if err == nil {
+		err = tx.Commit(ctx)
 	}
 	return at, err
 }

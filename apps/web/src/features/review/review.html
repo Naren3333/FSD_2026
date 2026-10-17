@@ -33,7 +33,9 @@
           {{ count }} finalized {{ count === 1 ? 'grade is' : 'grades are' }} hidden from students until you
           release them.
         </p>
-        <button (click)="askRelease()" [disabled]="state.busy()">Release results</button>
+        <button (click)="askRelease()" [disabled]="state.busy() || releaseState.busy()">
+          Release results
+        </button>
       </div>
     }
   </div>
@@ -98,6 +100,7 @@
           }
         } @else if (selected(); as current) {
           <form
+            id="marking-form"
             class="marking"
             novalidate
             [formGroup]="marks"
@@ -159,21 +162,33 @@
                 @if (question(grade, evidence)?.rubric; as rubric) {
                   <div formGroupName="criteria">
                     @for (criterion of rubric.criteria; track criterion.id) {
-                      <fieldset class="levels">
+                      @let group = 'level-' + evidence.question_id + '-' + criterion.id;
+                      @let missing =
+                        !!marks.get([evidence.question_id, 'criteria', criterion.id!])?.touched &&
+                        !!marks.get([evidence.question_id, 'criteria', criterion.id!])?.invalid;
+                      <fieldset
+                        class="levels"
+                        role="radiogroup"
+                        [attr.aria-invalid]="missing || null"
+                        [attr.aria-describedby]="missing ? group + '-error' : null"
+                      >
                         <legend>{{ criterion.title }}</legend>
                         @for (level of criterion.levels; track level.points) {
                           <label class="check">
-                            <input type="radio" [formControlName]="criterion.id!" [value]="level.points" />
+                            <!-- One name per criterion makes a real radio group: one Tab stop, arrow keys between levels. -->
+                            <input
+                              type="radio"
+                              [attr.name]="group"
+                              [formControlName]="criterion.id!"
+                              [value]="level.points"
+                            />
                             <span
                               ><strong>{{ level.points }}</strong> · {{ level.descriptor }}</span
                             >
                           </label>
                         }
-                        @if (
-                          marks.get([evidence.question_id, 'criteria', criterion.id!])?.touched &&
-                          marks.get([evidence.question_id, 'criteria', criterion.id!])?.invalid
-                        ) {
-                          <small class="error">Choose a level.</small>
+                        @if (missing) {
+                          <small class="error" [id]="group + '-error'">Choose a level.</small>
                         }
                       </fieldset>
                     }
@@ -265,7 +280,7 @@
     Finalization records this student's scores in their performance record. A finalized grade cannot be
     changed.
   </p>
-  <form novalidate [formGroup]="form" (ngSubmit)="finalize()">
+  <form id="finalize-form" novalidate [formGroup]="form" (ngSubmit)="finalize()">
     <app-field
       controlId="review-reason"
       label="Review notes"

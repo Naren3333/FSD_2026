@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"cmp"
 	"context"
 	"encoding/json"
 	"errors"
@@ -29,7 +30,15 @@ const (
 	markingCall     = 90 * time.Second
 	markingIdle     = 3 * time.Second
 	markingTokens   = 1500
+	// markingWait is how long a job waits, without using an attempt, for AI to be set up on this server or for an
+	// allowance whose reset time ai-core did not say.
+	markingWait = 10 * time.Minute
 )
+
+// rejectedOutputs are ai-core's answers about the model's reply itself (refused, cut off or empty). The same
+// prompt would most likely get the same reply, and each try costs a model call, so they are stored as failed at once
+// (ADR 0004: a reply that breaks a rule is a failed suggestion).
+var rejectedOutputs = []string{"AI_OUTPUT_REJECTED", "EMPTY_OUTPUT"}
 
 // Suggestion flags the model may raise; anything else it says is dropped.
 var knownFlags = []string{"blank", "off_topic", "possible_instructions_in_answer", "language_mismatch"}
@@ -154,6 +163,9 @@ func markingSchema() map[string]any {
 
 var errUngrounded = errors.New("UNGROUNDED")
 
+// maxQuotes is the most evidence quotes a criterion may have; a reply with more is refused.
+const maxQuotes = 100
+
 // checkSuggestion reads the model's reply and keeps it only if it fits the rubric: one level of each criterion and
 // nothing else, with evidence quoted from the answer for anything above a criterion's lowest level. The total is
 // Grading's sum, never the model's. Feedback that repeats the model answer is dropped; a short answer gets none.
@@ -180,7 +192,7 @@ func checkSuggestion(q Question, r Rubric, answer, output, model string) (Sugges
 	}
 	for _, c := range r.Criteria {
 		got, ok := byID[c.ID]
-		if !ok || !slices.ContainsFunc(c.Levels, func(l Level) bool { return l.Points == got.Points }) {
+		if !ok || !fits(got, c) {
 			return Suggestion{}, errors.New("INVALID_OUTPUT")
 		}
 		if !grounded(got, c, answer) {
@@ -203,6 +215,11 @@ func checkSuggestion(q Question, r Rubric, answer, output, model string) (Sugges
 		}
 	}
 	return s, nil
+}
+
+// fits reports whether got is one of the criterion's levels, with no more than maxQuotes quotes.
+func fits(got SuggestedCriterion, c Criterion) bool {
+	return len(got.Quotes) <= maxQuotes && slices.ContainsFunc(c.Levels, func(l Level) bool { return l.Points == got.Points })
 }
 
 // grounded reports whether every quote is in the answer (ignoring how whitespace runs), and a level above the
@@ -247,11 +264,13 @@ type marker struct {
 	ai suggester
 }
 
-// job is a leased marking job.
+// job is a leased marking job. attempts counts this one: leasing uses an attempt, so a job whose worker crashes or
+// errors before it settles still runs out of attempts.
 type job struct {
 	evaluation, question string
 	attempts             int
 	lease                time.Time
+	lastError            string
 }
 
 // Run marks until ctx ends, waiting a little whenever there is nothing to do or the database is unreachable.
@@ -276,34 +295,35 @@ func (m marker) Run(ctx context.Context) {
 
 func (m marker) lease(ctx context.Context) (job, bool, error) {
 	var j job
-	err := m.db.QueryRow(ctx, `UPDATE marking_jobs SET leased_until=now()+$1::interval
+	err := m.db.QueryRow(ctx, `UPDATE marking_jobs SET leased_until=now()+$1::interval,attempts=attempts+1
 		WHERE (evaluation_id,question_id)=(SELECT evaluation_id,question_id FROM marking_jobs WHERE run_after<=now() AND (leased_until IS NULL OR leased_until<now()) ORDER BY run_after LIMIT 1 FOR UPDATE SKIP LOCKED)
-		RETURNING evaluation_id,question_id,attempts,leased_until`, markingLease.String()).Scan(&j.evaluation, &j.question, &j.attempts, &j.lease)
+		RETURNING evaluation_id,question_id,attempts,leased_until,coalesce(last_error,'')`, markingLease.String()).Scan(&j.evaluation, &j.question, &j.attempts, &j.lease, &j.lastError)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return j, false, nil
 	}
 	return j, err == nil, err
 }
 
-// work makes one suggestion. A suggestion the model got wrong is stored as failed; ai-core being unavailable is
-// retried with backoff up to markingAttempts; the teacher's allowance being used up waits until it resets without
-// using an attempt.
+// work makes one suggestion. A suggestion the model got wrong is stored as failed; what happens after a failed
+// ai-core call is afterFailure's choice. A job that has used every attempt without settling (its worker crashed or
+// failed) is stored as failed.
 func (m marker) work(ctx context.Context, j job) error {
-	var status, teacher, org, answer string
-	var questions []Question
-	var data []byte
-	err := m.db.QueryRow(ctx, "SELECT status,coalesce(teacher_id,''),org_id,coalesce(answers->>$2::text,''),coalesce(questions,'[]'::jsonb) FROM evaluations WHERE id=$1", j.evaluation, j.question).Scan(&status, &teacher, &org, &answer, &data)
-	if err == nil {
-		err = json.Unmarshal(data, &questions)
+	if j.attempts > markingAttempts {
+		return m.finish(ctx, j, &Suggestion{Status: suggestionFailed, Reason: cmp.Or(j.lastError, "MARKING_INTERRUPTED")})
 	}
+	t, err := m.task(ctx, j)
 	if err != nil {
 		return err
 	}
-	i := slices.IndexFunc(questions, func(q Question) bool { return q.ID == j.question })
-	if status != statusDraft || teacher == "" || i < 0 {
+	i := slices.IndexFunc(t.questions, func(q Question) bool { return q.ID == j.question })
+	if t.status != statusDraft || t.teacher == "" || i < 0 {
 		return m.finish(ctx, j, nil) // finalized meanwhile, or nothing to mark: nothing to suggest
 	}
-	q := questions[i]
+	if t.marked {
+		// The teacher has marked it already: a suggestion would only cost their allowance.
+		return m.finish(ctx, j, &Suggestion{Status: suggestionFailed, Reason: "MARKED_BY_TEACHER"})
+	}
+	q, answer := t.questions[i], t.answer
 	r, ok := markingRubric(q)
 	if !ok {
 		return m.finish(ctx, j, &Suggestion{Status: suggestionFailed, Reason: "NOT_MARKABLE"})
@@ -317,13 +337,13 @@ func (m marker) work(ctx context.Context, j job) error {
 	}
 	call, cancel := context.WithTimeout(ctx, markingCall)
 	defer cancel()
-	output, model, err := m.ai.generate(call, messages, markingSchema(), platform.Billed{UserID: teacher, OrgID: org, Role: "teacher"})
-	if limit, waiting := platform.AISpendLimit(err); waiting {
-		return m.retry(ctx, j, limit.ResetsAt, j.attempts, "AI_SPEND_LIMIT")
-	}
+	output, model, err := m.ai.generate(call, messages, markingSchema(), platform.Billed{UserID: t.teacher, OrgID: t.org, Role: "teacher"})
 	if err != nil {
-		if platform.AITransient(err) && j.attempts+1 < markingAttempts && ctx.Err() == nil {
-			return m.retry(ctx, j, time.Now().Add(30*time.Second<<j.attempts), j.attempts+1, errorCode(err))
+		if ctx.Err() != nil {
+			return err // shutting down: the lease runs out and the job is tried again
+		}
+		if at, attempts, again := afterFailure(err, j.attempts, time.Now()); again {
+			return m.retry(ctx, j, at, attempts, errorCode(err))
 		}
 		return m.finish(ctx, j, &Suggestion{Status: suggestionFailed, Reason: errorCode(err)})
 	}
@@ -332,6 +352,53 @@ func (m marker) work(ctx context.Context, j job) error {
 		s = Suggestion{Status: suggestionFailed, Reason: err.Error(), Model: model}
 	}
 	return m.finish(ctx, j, &s)
+}
+
+// markingTask is what a job needs from its evaluation: the student's answer to the job's question, and whether the
+// teacher has marked that question already.
+type markingTask struct {
+	status, teacher, org, answer string
+	questions                    []Question
+	marked                       bool
+}
+
+func (m marker) task(ctx context.Context, j job) (markingTask, error) {
+	var t markingTask
+	var evidence []Evidence
+	var questions, marks []byte
+	err := m.db.QueryRow(ctx, "SELECT status,coalesce(teacher_id,''),org_id,coalesce(answers->>$2::text,''),coalesce(questions,'[]'::jsonb),evidence FROM evaluations WHERE id=$1", j.evaluation, j.question).Scan(&t.status, &t.teacher, &t.org, &t.answer, &questions, &marks)
+	if err == nil {
+		err = json.Unmarshal(questions, &t.questions)
+	}
+	if err == nil {
+		err = json.Unmarshal(marks, &evidence)
+	}
+	t.marked = slices.ContainsFunc(evidence, func(e Evidence) bool { return e.Question == j.question && e.MarkedBy == markedTeacher })
+	return t, err
+}
+
+// afterFailure decides what follows a failed ai-core call on a job's attempt-th attempt: whether to try again, when,
+// and how many attempts the job has then used. The teacher's allowance being used up waits until it resets, and AI
+// not being set up waits markingWait, both without using an attempt (ADR 0004: the suggestion stays pending). A
+// rejected model reply fails at once (rejectedOutputs). Any other transient
+// failure is retried with backoff up to markingAttempts.
+func afterFailure(err error, attempt int, now time.Time) (time.Time, int, bool) {
+	if limit, waiting := platform.AISpendLimit(err); waiting {
+		if !limit.ResetsAt.After(now) {
+			return now.Add(markingWait), attempt - 1, true
+		}
+		return limit.ResetsAt, attempt - 1, true
+	}
+	switch code := errorCode(err); {
+	case code == "AI_PROVIDER_NOT_CONFIGURED":
+		return now.Add(markingWait), attempt - 1, true
+	case slices.Contains(rejectedOutputs, code):
+		return time.Time{}, attempt, false
+	}
+	if platform.AITransient(err) && attempt < markingAttempts {
+		return now.Add(30 * time.Second << max(attempt-1, 0)), attempt, true
+	}
+	return time.Time{}, attempt, false
 }
 
 func errorCode(err error) string {

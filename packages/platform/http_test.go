@@ -20,6 +20,15 @@ func TestStrictJSON(t *testing.T) {
 		}
 	}
 }
+func TestOversizedJSONIsTooLarge(t *testing.T) {
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodPost, "/", strings.NewReader(`{"name":"`+strings.Repeat("a", 3<<20)+`"}`))
+	var value struct{ Name string }
+	if Decode(w, r, &value) || w.Code != http.StatusRequestEntityTooLarge {
+		t.Fatalf("status %d", w.Code)
+	}
+}
+
 func TestRoles(t *testing.T) {
 	var c Claims
 	c.Realm.Roles = []string{"student"}
@@ -58,6 +67,7 @@ func TestTeacherOfNeedsTheTeacherRelation(t *testing.T) {
 		{200, `{"allowed":true,"relation":"student"}`, false, 403},
 		{200, `{"allowed":true}`, false, 503},
 		{403, `{}`, false, 403},
+		{401, `{}`, false, 401},
 		{500, `{}`, false, 503},
 	}
 	for _, tc := range cases {
@@ -90,6 +100,24 @@ func TestSlowRoutesGetTheirOwnDeadline(t *testing.T) {
 	}
 	if left["/health/upload"] < 4*time.Minute || left["/health/other"] > requestTimeout {
 		t.Fatalf("deadlines %v", left)
+	}
+}
+
+func TestHandlersCanExtendTheirOwnWriteDeadline(t *testing.T) {
+	a := &App{Mux: http.NewServeMux(), auth: &Authenticator{}, slow: map[string]time.Duration{}}
+	var err error
+	a.Mux.HandleFunc("GET /health/download", func(w http.ResponseWriter, _ *http.Request) {
+		err = http.NewResponseController(w).SetWriteDeadline(time.Now().Add(time.Minute))
+	})
+	server := httptest.NewServer(a.Handler())
+	defer server.Close()
+	res, getErr := server.Client().Get(server.URL + "/health/download")
+	if getErr != nil {
+		t.Fatal(getErr)
+	}
+	res.Body.Close()
+	if err != nil {
+		t.Fatalf("SetWriteDeadline: %v", err)
 	}
 }
 

@@ -21,12 +21,18 @@ export class ActionState {
       this.busy.set(false);
     }
   }
-  validate(form: FormGroup): boolean {
+  /** Shows the form's errors and, when it is invalid, focuses its first invalid control: the one inside the element
+   * with id `formId`, never another form on the page. */
+  validate(form: FormGroup, formId: string): boolean {
     form.markAllAsTouched();
     if (form.invalid) {
       this.error.set('Check the highlighted fields before continuing.');
       setTimeout(() =>
-        Array.from(document.querySelectorAll<HTMLElement>('form :is(input, select, textarea).ng-invalid'))
+        Array.from(
+          document
+            .getElementById(formId)
+            ?.querySelectorAll<HTMLElement>(':is(input, select, textarea).ng-invalid') ?? [],
+        )
           .find((el) => !el.closest('[hidden]'))
           ?.focus(),
       );

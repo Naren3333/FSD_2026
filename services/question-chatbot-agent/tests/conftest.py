@@ -35,8 +35,11 @@ class MemoryStore:
     def __init__(self) -> None:
         self.threads: dict[str, dict[str, Any]] = {}
         self.rows: list[dict[str, Any]] = []
+        self.purged: set[str] = set()
 
-    async def create_thread(self, org: str, user: str, role: str, classroom_id: str) -> dict[str, Any]:
+    async def create_thread(self, org: str, user: str, role: str, classroom_id: str) -> dict[str, Any] | None:
+        if classroom_id in self.purged:
+            return None
         now = datetime.now(UTC)
         thread = {"id": str(uuid4()), "org": org, "user": user, "role": role, "classroom_id": classroom_id,
                   "title": None, "created_at": now, "last_message_at": now}  # fmt: skip
@@ -57,9 +60,9 @@ class MemoryStore:
     def all(self, thread_id: str) -> list[dict[str, Any]]:
         return [r for r in self.rows if r["thread_id"] == thread_id]
 
-    async def messages(self, thread_id: str) -> list[dict[str, Any]]:
+    async def messages(self, thread_id: str, limit: int) -> list[dict[str, Any]]:
         keys = ("id", "role", "content", "outcome", "citations", "created_at")
-        return [{k: r.get(k) for k in keys} for r in self.all(thread_id)]
+        return [{k: r.get(k) for k in keys} for r in self.all(thread_id)][-limit:]
 
     async def start_turn(self, thread_id: str, content: str, history_turns: int) -> list[dict[str, str]]:
         history = [{"role": r["role"], "content": r["content"]} for r in self.all(thread_id)][-history_turns:]

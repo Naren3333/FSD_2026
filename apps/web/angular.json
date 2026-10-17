@@ -13,7 +13,12 @@
             "index": "src/index.html",
             "tsConfig": "tsconfig.json",
             "styles": ["src/styles.css"],
-            "outputPath": "dist/web"
+            "outputPath": "dist/web",
+            "optimization": {
+              "scripts": true,
+              "styles": { "minify": true, "inlineCritical": false },
+              "fonts": true
+            }
           }
         },
         "serve": { "builder": "@angular/build:dev-server", "options": { "buildTarget": "web:build" } }

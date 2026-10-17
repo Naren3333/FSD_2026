@@ -11,6 +11,7 @@ from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 from typing import Literal, Protocol
+from zoneinfo import ZoneInfo
 
 from learning_transport import Contract, failure
 from learning_transport.db import AsyncPooled
@@ -105,19 +106,24 @@ class PostgresLedger(AsyncPooled):
     MIGRATIONS = MIGRATIONS
 
     async def today(self, billed: Billed) -> Usage:
-        # The day boundary is computed by PostgreSQL, which carries the time zone database.
+        # The day boundaries are computed by PostgreSQL, which carries the time zone database, on local dates in
+        # SPEND_TIMEZONE (adding a day to a timestamptz would follow the session's zone across a DST change).
         async with self.pool.connection() as conn:
             cur = await conn.execute(
-                """WITH day AS (SELECT date_trunc('day', now() AT TIME ZONE %(tz)s) AT TIME ZONE %(tz)s AS start)
-                SELECT coalesce(sum(u.cost_usd), 0)::float8 AS spent, (day.start + interval '1 day') AS resets_at
+                """WITH local AS (SELECT date_trunc('day', now() AT TIME ZONE %(tz)s) AS midnight),
+                day AS (SELECT midnight AT TIME ZONE %(tz)s AS start,
+                  (midnight + interval '1 day') AT TIME ZONE %(tz)s AS resets_at FROM local)
+                SELECT coalesce(sum(u.cost_usd), 0)::float8 AS spent, day.resets_at
                 FROM day LEFT JOIN usage u ON u.org_id=%(org)s AND u.user_id=%(user)s AND u.created_at>=day.start
-                GROUP BY day.start""",
+                GROUP BY day.start, day.resets_at""",
                 {"tz": timezone(), "org": billed.org_id, "user": billed.user_id},
             )
             row = await cur.fetchone()
         assert row is not None
         return Usage(
-            spent_usd=round(row["spent"], 6), limit_usd=limit(billed.role), resets_at=row["resets_at"]
+            spent_usd=round(row["spent"], 6),
+            limit_usd=limit(billed.role),
+            resets_at=row["resets_at"].astimezone(ZoneInfo(timezone())),
         )
 
     async def record(self, billed: Billed, charge: Charge, correlation_id: str) -> None:

@@ -128,7 +128,13 @@ def psql(
     command = ["docker", "compose", "exec", "-T", "postgres", "psql", "-U", user, "-d", database]
     command += ["-v", "ON_ERROR_STOP=1", "-At", "-F", "\t", "-c", sql]
     return subprocess.run(
-        command, cwd=ROOT, text=True, capture_output=True, check=check, timeout=PSQL_TIMEOUT
+        command,
+        cwd=ROOT,
+        text=True,
+        encoding="utf-8",
+        capture_output=True,
+        check=check,
+        timeout=PSQL_TIMEOUT,
     )
 
 
@@ -137,10 +143,12 @@ def psql_value(sql: str, *, database: str = "postgres", user: str = "postgres") 
     return psql(sql, database=database, user=user).stdout.strip()
 
 
-def psql_rows(sql: str, *, database: str = "postgres", user: str = "postgres") -> list[list[str]]:
-    """The rows a statement returns, each a list of column texts."""
-    out = psql(sql, database=database, user=user).stdout
-    return [line.split("\t") for line in out.splitlines() if line]
+def psql_json(sql: str, *, database: str = "postgres", user: str = "postgres") -> list[dict[str, Any]]:
+    """The rows a SELECT returns, each a dict by column name. PostgreSQL encodes them as one JSON array, so text
+    holding tabs, line breaks or anything else comes back intact."""
+    out = psql_value(f"SELECT coalesce(json_agg(r), '[]') FROM ({sql}) r", database=database, user=user)
+    rows: list[dict[str, Any]] = json.loads(out)
+    return rows
 
 
 def sse_events(lines: Iterable[str]) -> Iterator[tuple[str, dict[str, Any]]]:

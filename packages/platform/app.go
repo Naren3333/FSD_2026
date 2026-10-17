@@ -152,6 +152,9 @@ func (w *responseRecorder) WriteHeader(status int) {
 	w.ResponseWriter.WriteHeader(status)
 }
 
+// Unwrap lets http.NewResponseController reach the connection, so a handler can extend its own write deadline.
+func (w *responseRecorder) Unwrap() http.ResponseWriter { return w.ResponseWriter }
+
 func (w *responseRecorder) Write(data []byte) (int, error) {
 	if w.status == 0 {
 		w.WriteHeader(http.StatusOK)

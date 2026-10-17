@@ -46,10 +46,10 @@
     </li>
     <li>
       <a class="stat" routerLink="/assessments">
-        <span class="stat-label">Assessments</span>
+        <span class="stat-label">Published assessments</span>
         @if (assessments.value(); as list) {
           <strong class="stat-value">{{ list.length }}</strong>
-          <span class="caption">Create and open them under Assessments</span>
+          <span class="caption">Published · drafts are under Assessments</span>
         } @else {
           <strong class="stat-value">{{ assessments.loading() ? '…' : '–' }}</strong>
           <span class="caption">{{ assessments.loading() ? 'Loading…' : 'Unavailable' }}</span>
@@ -60,7 +60,7 @@
 
   <section class="panel dashboard-panel" aria-labelledby="submissions-title">
     <h3 id="submissions-title">Submissions</h3>
-    <p class="caption">Up to 100 newest assessments</p>
+    <p class="caption">Published assessments, from the 100 newest</p>
     <app-section-state [section]="assessments" loading="Loading assessments…" />
     @if (assessments.ready()) {
       @for (item of assessments.value(); track item.id) {
@@ -70,7 +70,8 @@
         </article>
       } @empty {
         <p class="empty">
-          No assessments yet. Create one under <a routerLink="/assessments">Assessments</a>.
+          No published assessments yet. Create or publish one under
+          <a routerLink="/assessments">Assessments</a>.
         </p>
       }
     }

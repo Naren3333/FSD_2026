@@ -17,6 +17,7 @@ from learning_transport import (
     STUDENT,
     TEACHER,
     Claims,
+    ErrorResponse,
     IdentityClient,
     UpstreamError,
     application,
@@ -33,6 +34,7 @@ from domain import ClassPerformanceResponse, PerformanceResponse, by_student, su
 
 MIGRATIONS = Path(__file__).parent / "migrations"
 CONSUMER_STOP_GRACE = 35  # seconds shutdown waits for the consumer thread
+ERRORS: dict[int | str, dict[str, Any]] = {code: {"model": ErrorResponse} for code in (401, 403, 422, 503)}
 
 
 @asynccontextmanager
@@ -42,7 +44,7 @@ async def lifespan(app: Any) -> AsyncIterator[None]:
     stop, connected = threading.Event(), threading.Event()
     thread = threading.Thread(target=run, args=(pool, stop, connected), daemon=True)
     async with httpx.AsyncClient() as http:
-        app.state.pool, app.state.connected = pool, connected
+        app.state.pool = pool
         app.state.identity = IdentityClient(os.environ["IDENTITY_URL"], http)
         thread.start()
         yield
@@ -54,6 +56,9 @@ async def lifespan(app: Any) -> AsyncIterator[None]:
 app = application("analytics", lifespan=lifespan)
 
 
+# Ready when the database answers, as the chatbot is. The event consumer restarts itself with a backoff and logs each
+# stop (consumer_stopped_uncommitted, consumer_restarting); a broker outage delays new evidence but doesn't stop the
+# reads, so it doesn't take the service out of rotation.
 @app.get("/health/ready")
 def ready(request: Request) -> dict[str, str]:
     try:
@@ -61,8 +66,6 @@ def ready(request: Request) -> dict[str, str]:
             conn.execute("SELECT 1")
     except Exception:
         raise failure(503, "DEPENDENCY_UNAVAILABLE", "Database unavailable.") from None
-    if not request.app.state.connected.is_set():
-        raise failure(503, "DEPENDENCY_UNAVAILABLE", "Event consumer is not ready.")
     return {"status": "ready"}
 
 
@@ -88,7 +91,7 @@ def class_evidence(pool: ConnectionPool[Any], org: str, classroom_id: UUID, stud
         ).fetchall()
 
 
-@app.get("/v1/performance")
+@app.get("/v1/performance", responses=ERRORS)
 async def class_performance(
     classroom_id: UUID,
     request: Request,
@@ -127,7 +130,7 @@ async def class_performance(
     )
 
 
-@app.get("/v1/performance/{student_id}")
+@app.get("/v1/performance/{student_id}", responses=ERRORS)
 async def performance(
     student_id: str,
     classroom_id: UUID,

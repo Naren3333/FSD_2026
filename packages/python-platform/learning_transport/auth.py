@@ -2,6 +2,8 @@
 headers or request bodies."""
 
 import os
+import threading
+import time
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from functools import lru_cache
@@ -13,11 +15,37 @@ from fastapi import Depends, Request
 from learning_transport.errors import failure
 
 TEACHER, STUDENT, AI_CLIENT = "teacher", "student", "ai-client"
+LEEWAY = 30  # seconds of clock skew allowed between the identity provider and this service (exp, iat, nbf)
+REFETCH_INTERVAL = 30.0  # seconds between key set refetches for a key id the cached set lacks
+
+
+class KeySet(jwt.PyJWKClient):
+    """PyJWKClient refetching the key set for an unknown key id at most once per REFETCH_INTERVAL. The stock
+    client refetches on every such token, so tokens with made-up key ids would each wait up to its timeout on the
+    identity provider (and hammer it); a key the provider really rotated in is still picked up within the
+    interval."""
+
+    def __init__(self, uri: str, **kwargs: Any) -> None:
+        super().__init__(uri, **kwargs)
+        self._refetch_lock = threading.Lock()
+        self._refetched = -REFETCH_INTERVAL
+
+    def get_signing_key(self, kid: str) -> jwt.PyJWK:
+        key = self.match_kid(self.get_signing_keys(), kid)
+        if key is None:
+            with self._refetch_lock:  # one refetch at a time; the others then see its result
+                refresh = time.monotonic() - self._refetched >= REFETCH_INTERVAL
+                if refresh:
+                    self._refetched = time.monotonic()
+                key = self.match_kid(self.get_signing_keys(refresh=refresh), kid)
+        if key is None:
+            raise jwt.PyJWKClientError(f'Unable to find a signing key that matches: "{kid}"')
+        return key
 
 
 @lru_cache
 def keyset() -> jwt.PyJWKClient:
-    return jwt.PyJWKClient(os.environ["OIDC_JWKS_URL"], timeout=5, lifespan=300)
+    return KeySet(os.environ["OIDC_JWKS_URL"], timeout=5, lifespan=300)
 
 
 def actor(request: Request) -> dict[str, Any]:
@@ -36,6 +64,7 @@ def actor(request: Request) -> dict[str, Any]:
             audience=os.environ["OIDC_AUDIENCE"],
             issuer=os.environ["OIDC_ISSUER"],
             options={"require": ["exp", "iat", "sub", "org_id"]},
+            leeway=LEEWAY,
         )
     except (jwt.PyJWTError, jwt.PyJWKClientError):
         raise failure(401, "UNAUTHENTICATED", "The session is invalid or expired.") from None
@@ -54,8 +83,13 @@ class Claims:
 
     @classmethod
     def from_token(cls, claims: Mapping[str, Any]) -> "Claims":
-        roles = claims.get("realm_access", {}).get("roles", [])
-        return cls(str(claims.get("sub", "")), str(claims.get("org_id", "")), frozenset(roles))
+        """Roles from `realm_access.roles`: a list of names, or one name; anything else holds no role."""
+        access = claims.get("realm_access")
+        roles = access.get("roles") if isinstance(access, Mapping) else None
+        if isinstance(roles, str):
+            roles = [roles]
+        names = frozenset(r for r in roles if isinstance(r, str)) if isinstance(roles, list) else frozenset()
+        return cls(str(claims.get("sub", "")), str(claims.get("org_id", "")), names)
 
     def has(self, role: str) -> bool:
         return role in self.roles

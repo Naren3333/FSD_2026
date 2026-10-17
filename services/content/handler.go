@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
@@ -13,6 +14,8 @@ import (
 	"net/http"
 	"os"
 	"strings"
+	"time"
+	"unicode/utf8"
 
 	"github.com/google/uuid"
 )
@@ -95,6 +98,12 @@ func (s server) upload(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	commitAttempted, err := s.store.insertDocument(r.Context(), d)
+	if errors.Is(err, errClassroomPurged) {
+		// Identity deleted the classroom while the file was uploading.
+		s.files.removeOrphan(id, d.Key)
+		platform.NotFound(w, "Classroom not found.")
+		return
+	}
 	if err != nil {
 		// An uncertain commit may have stored the row, so the original stays; otherwise it is an orphan.
 		if !commitAttempted {
@@ -151,7 +160,7 @@ func extractFile(file *os.File, kind string) ([]Chunk, string, error) {
 // problem is set when either is invalid.
 func uploadFields(r *http.Request) (title, docType, problem string) {
 	title = strings.TrimSpace(r.URL.Query().Get("title"))
-	if title == "" || len(title) > maxTitle {
+	if title == "" || utf8.RuneCountInString(title) > maxTitle {
 		return "", "", fmt.Sprintf("Title must contain 1–%d characters.", maxTitle)
 	}
 	docType = r.URL.Query().Get("doc_type")
@@ -292,8 +301,15 @@ func (s server) reindex(w http.ResponseWriter, r *http.Request) {
 	platform.JSON(w, http.StatusAccepted, v)
 }
 
+// send streams a stored object to the caller. A 50 MiB original on a slow link takes longer than the request
+// deadline and the server's write timeout, so the stream gets its own: downloadDeadline for both reading the object
+// and writing the response. A client that goes away still ends it, by failing the write.
 func (s server) send(w http.ResponseWriter, r *http.Request, key, kind, disposition string) {
-	object, size, err := s.files.open(r.Context(), key)
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(r.Context()), downloadDeadline)
+	defer cancel()
+	// Not every ResponseWriter supports deadlines (test recorders don't); the server's write timeout then applies.
+	_ = http.NewResponseController(w).SetWriteDeadline(time.Now().Add(downloadDeadline))
+	object, size, err := s.files.open(ctx, key)
 	if err != nil {
 		platform.Error(w, http.StatusServiceUnavailable, "STORAGE_UNAVAILABLE", "Original file is unavailable.")
 		return

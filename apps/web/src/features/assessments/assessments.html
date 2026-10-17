@@ -88,13 +88,13 @@
             }}
           </p>
         }
-        <form novalidate [formGroup]="answers" (ngSubmit)="submit()">
+        <form id="answer-form" novalidate [formGroup]="answers" (ngSubmit)="submit()">
           @for (question of assessment.questions; track question.id) {
             <app-field
               [controlId]="'answer-' + question.id"
               [label]="question.prompt"
               [hint]="answerHint(question)"
-              [invalid]="!!answers.get(question.id!)?.touched && !!answers.get(question.id!)?.invalid"
+              [invalid]="!!answers.get(question.id)?.touched && !!answers.get(question.id)?.invalid"
               [error]="
                 question.type === 'free_response'
                   ? 'Write an answer of at most ' + (question.max_length ?? 5000) + ' characters.'
@@ -105,7 +105,7 @@
                 @case ('numerical') {
                   <input
                     [id]="'answer-' + question.id"
-                    [formControlName]="question.id!"
+                    [formControlName]="question.id"
                     inputmode="decimal"
                     [attr.aria-describedby]="'answer-' + question.id + '-help'"
                   />
@@ -113,11 +113,11 @@
                 @case ('multiple_choice') {
                   <select
                     [id]="'answer-' + question.id"
-                    [formControlName]="question.id!"
+                    [formControlName]="question.id"
                     [attr.aria-describedby]="'answer-' + question.id + '-help'"
                   >
                     <option value="">Choose an answer</option>
-                    @for (option of question.options; track option) {
+                    @for (option of question.options ?? []; track option) {
                       <option [value]="option">{{ option }}</option>
                     }
                   </select>
@@ -125,7 +125,7 @@
                 @case ('short_answer') {
                   <input
                     [id]="'answer-' + question.id"
-                    [formControlName]="question.id!"
+                    [formControlName]="question.id"
                     maxlength="500"
                     [attr.aria-describedby]="'answer-' + question.id + '-help'"
                   />
@@ -133,7 +133,7 @@
                 @case ('free_response') {
                   <textarea
                     [id]="'answer-' + question.id"
-                    [formControlName]="question.id!"
+                    [formControlName]="question.id"
                     rows="8"
                     class="answer-box"
                     [attr.maxlength]="question.max_length ?? 5000"
@@ -156,7 +156,7 @@
                 Submission is final. Check your answers before submitting.
               }
             </p>
-            <button [disabled]="state.busy() || submitted() || due() === 'closed'">
+            <button [disabled]="state.busy() || clearState.busy() || submitted() || due() === 'closed'">
               {{ submitted() ? 'Submitted' : 'Submit answers' }}
             </button>
           } @else {
@@ -165,7 +165,15 @@
             </p>
           }
           @if (!submitted() && due() !== 'closed') {
-            <button type="reset" class="secondary clear-form" [disabled]="state.busy()">Clear form</button>
+            <!-- Not a reset button: a student's Clear form also clears their saved work, so it asks first. -->
+            <button
+              type="button"
+              class="secondary clear-form"
+              (click)="confirmClear()"
+              [disabled]="state.busy() || clearState.busy()"
+            >
+              Clear form
+            </button>
           }
         </form>
       </div>
@@ -179,7 +187,7 @@
       <p class="caption">
         Up to {{ maxQuestions }} questions. Save a draft at any time; publishing makes it final.
       </p>
-      <form novalidate [formGroup]="form" (ngSubmit)="save(false)">
+      <form id="assessment-editor" novalidate [formGroup]="form" (ngSubmit)="save(false)">
         <app-field
           controlId="assessment-title"
           label="Assessment title"
@@ -518,4 +526,17 @@
       cannot be undone.
     </p>
   }
+</app-confirm-dialog>
+<app-confirm-dialog
+  #clearDialog
+  dialogId="clear-answers"
+  heading="Clear your answers?"
+  confirmLabel="Clear answers"
+  [state]="clearState"
+  (confirm)="clearAnswers()"
+>
+  <p>
+    Every answer on this assessment will be emptied, including the answers saved so far. This cannot be
+    undone.
+  </p>
 </app-confirm-dialog>

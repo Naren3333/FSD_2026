@@ -14,7 +14,7 @@ import { Section } from '../../shared/section';
 import { SectionStateComponent } from '../../shared/section-state';
 import { StatusComponent } from '../../shared/status';
 import { requiredText } from '../../shared/validators';
-import { Inline, markdown, pages } from './markdown';
+import { Block, Inline, markdown, pages } from './markdown';
 
 export const MAX_QUESTION = 1000;
 const OUTCOME_NOTES: Record<string, string> = {
@@ -46,6 +46,10 @@ export class ChatComponent {
   readonly figures = signal<Record<string, string>>({});
   readonly figureErrors = signal<Record<string, string>>({});
   streamingId = '';
+  /** Numbers each question's local placeholders, so they never share an id with an earlier question's. */
+  private asked = 0;
+  /** Each message's parsed answer, kept while the message object is unchanged; a streamed token makes a new one. */
+  private readonly parsed = new WeakMap<ChatMessage, Block[]>();
   private controller: AbortController | null = null;
   readonly form = new FormGroup({
     question: new FormControl('', { nonNullable: true, validators: requiredText(MAX_QUESTION) }),
@@ -96,7 +100,7 @@ export class ChatComponent {
   send(): void {
     if (this.streaming() || this.loading()) return;
     this.tried.set(true);
-    if (!this.state.validate(this.form)) return;
+    if (!this.state.validate(this.form, 'chat-form')) return;
     const question = this.form.controls.question.value.trim(),
       classroom = this.classroomId();
     void this.state.run(async () => {
@@ -106,8 +110,10 @@ export class ChatComponent {
         this.active.set(thread);
         this.threads.set([thread, ...(this.threads.value() ?? [])]);
       }
+      const turn = ++this.asked;
+      const askedId = `asked-${turn}`;
       const answer: ChatMessage = {
-        id: 'streaming',
+        id: `streaming-${turn}`,
         role: 'assistant',
         content: '',
         outcome: null,
@@ -117,7 +123,7 @@ export class ChatComponent {
       this.messages.set([
         ...(this.messages.value() ?? []),
         {
-          id: 'asked',
+          id: askedId,
           role: 'user',
           content: question,
           outcome: null,
@@ -160,7 +166,7 @@ export class ChatComponent {
       } catch (error) {
         if (!started) {
           this.messages.set(
-            (this.messages.value() ?? []).filter((m) => m.id !== answer.id && m.id !== 'asked'),
+            (this.messages.value() ?? []).filter((m) => m.id !== answer.id && m.id !== askedId),
           );
           this.announcement.set('');
           throw error;
@@ -207,8 +213,13 @@ export class ChatComponent {
     }
   }
 
-  blocks(message: ChatMessage) {
-    return markdown(message.content, message.citations || []);
+  blocks(message: ChatMessage): Block[] {
+    let blocks = this.parsed.get(message);
+    if (!blocks) {
+      blocks = markdown(message.content, message.citations || []);
+      this.parsed.set(message, blocks);
+    }
+    return blocks;
   }
   asRuns(runs: unknown): Inline[] {
     return runs as Inline[];

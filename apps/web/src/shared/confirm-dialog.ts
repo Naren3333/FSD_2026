@@ -18,18 +18,26 @@ export class ConfirmDialogComponent {
   /** The action's state: it disables the buttons while it runs and is announced inside the dialog. */
   @Input({ required: true }) state!: ActionState;
   @Output() readonly confirm = new EventEmitter<void>();
-  /** However the dialog closed: Cancel, Escape or the page closing it. */
+  /** However the dialog closed: Cancel, Escape (not while the action runs) or the page closing it. */
   @Output() readonly closed = new EventEmitter<void>();
   @ViewChild('dialog', { static: true }) private dialog!: ElementRef<HTMLDialogElement>;
   readonly isOpen = signal(false);
 
+  /** Opens the dialog without the action's earlier message or error. */
   show(): void {
+    this.state.error.set('');
+    this.state.message.set('');
     this.isOpen.set(true);
     this.dialog.nativeElement.showModal();
   }
 
   close(): void {
     this.dialog.nativeElement.close();
+  }
+
+  /** Escape would close the dialog while its action is still running; it waits until the action ends. */
+  onCancel(event: Event): void {
+    if (this.state.busy()) event.preventDefault();
   }
 
   onClose(): void {

@@ -33,7 +33,7 @@ from pathlib import Path
 
 import yaml
 from common import GOLDEN, ROOT, RUNS, USERS, Session, load_state
-from local_stack import check, psql_rows, sse_events
+from local_stack import check, psql_json, sse_events
 
 sys.path.insert(0, str(ROOT / "services" / "question-chatbot-agent"))
 import prompts  # the chatbot's own prompts, to spot one quoted in a reply
@@ -83,27 +83,30 @@ def chunk_map(state: dict) -> dict[str, dict]:
     """chunk id → its document's title, doc_type and class, for the eval classrooms."""
     rooms = {v: k for k, v in state["classrooms"].items()}
     ids = ",".join(f"'{r}'" for r in rooms)
-    rows = psql_rows(
+    rows = psql_json(
         database="content",
         sql=f"SELECT c.id, d.title, d.doc_type, d.classroom_id FROM document_chunks c JOIN documents d ON d.id=c.document_id WHERE d.classroom_id IN ({ids})",
     )
-    return {r[0]: {"title": r[1], "doc_type": r[2], "class": rooms[r[3]]} for r in rows}
+    return {
+        r["id"]: {"title": r["title"], "doc_type": r["doc_type"], "class": rooms[r["classroom_id"]]}
+        for r in rows
+    }
 
 
 def internals(message_id: str) -> dict:
     """What the API doesn't return about a saved answer."""
-    rows = psql_rows(
+    rows = psql_json(
         database="chatbot",
-        sql=f"SELECT coalesce(array_to_string(retrieved_chunk_ids, ','), ''), coalesce(rewritten_query, ''), coalesce(prompt_version, ''), "
-        f"coalesce(usage_tokens::text, ''), coalesce(latency_ms::text, '') FROM messages WHERE id='{message_id}'",
+        sql="SELECT retrieved_chunk_ids, rewritten_query, prompt_version, usage_tokens, latency_ms "
+        f"FROM messages WHERE id='{message_id}'",
     )
-    r = rows[0] if rows else ["", "", "", "", ""]
+    r = rows[0] if rows else {}
     return {
-        "retrieved": [x for x in r[0].split(",") if x],
-        "rewritten_query": r[1] or None,
-        "prompt_version": r[2] or None,
-        "usage_tokens": int(r[3]) if r[3] else None,
-        "latency_ms": int(r[4]) if r[4] else None,
+        "retrieved": r.get("retrieved_chunk_ids") or [],
+        "rewritten_query": r.get("rewritten_query") or None,
+        "prompt_version": r.get("prompt_version") or None,
+        "usage_tokens": r.get("usage_tokens"),
+        "latency_ms": r.get("latency_ms"),
     }
 
 

@@ -74,7 +74,9 @@ def run(command: list[str], extra: dict[str, str]) -> str:
         env={**os.environ, **extra},
         stdout=subprocess.PIPE,
         stderr=subprocess.STDOUT,
-        text=True,
+        # Go and pytest write UTF-8; Windows would otherwise decode it with its locale code page.
+        encoding="utf-8",
+        errors="replace",
     )
     assert process.stdout is not None
     lines = []

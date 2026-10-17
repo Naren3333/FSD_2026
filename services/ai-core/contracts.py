@@ -1,9 +1,12 @@
+import json
 from typing import Any, Literal, Self
 
 from learning_transport import Contract
 from pydantic import Field, model_validator
 
 from spend import Billed
+
+MAX_SCHEMA_CHARS = 20000  # a response_schema, as JSON: the callers' schemas are a few hundred characters
 
 
 class Message(Contract):
@@ -39,6 +42,8 @@ class RequestContract(Contract):
             raise ValueError("generate takes input or messages")
         elif self.stream and self.response_schema is not None:
             raise ValueError("a structured reply cannot be streamed")
+        if self.response_schema is not None and len(json.dumps(self.response_schema)) > MAX_SCHEMA_CHARS:
+            raise ValueError(f"response_schema is over {MAX_SCHEMA_CHARS} characters as JSON")
         return self
 
 

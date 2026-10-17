@@ -7,6 +7,7 @@ from collections.abc import AsyncIterator, Callable, Iterator
 from dataclasses import replace
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import Any
 
 import httpx2
 import pymupdf
@@ -37,7 +38,7 @@ def anyio_backend() -> str:
     return "asyncio"
 
 
-def configured(**overrides: object) -> settings.Settings:
+def configured(**overrides: Any) -> settings.Settings:
     """Settings as from an empty environment, with test keys: never the developer's real ones."""
     return replace(
         settings.Settings(**{**_EMPTY, "openai_api_key": "sk-test", "voyage_api_key": "pa-test"}), **overrides
@@ -126,7 +127,7 @@ def make_pdf(
             )
             y += height + 6
     if password:
-        out = doc.tobytes(encryption=pymupdf.PDF_ENCRYPT_AES_256, user_pw=password, owner_pw=password)
+        out = doc.tobytes(encryption=pymupdf.mupdf.PDF_ENCRYPT_AES_256, user_pw=password, owner_pw=password)
     else:
         out = doc.tobytes()
     doc.close()
@@ -347,7 +348,7 @@ class FakeOpenAI:
         self.timeouts: list[float] = []  # read timeout of each request
         self.sleeps: list[float] = []  # retry backoff delays (never really slept)
 
-    def reply(self, status: int = 200, *, times: int = 1, **kwargs) -> None:
+    def reply(self, status: int = 200, *, times: int = 1, **kwargs: Any) -> None:
         self.replies += [httpx2.Response(status, **kwargs) for _ in range(times)]
 
     def __call__(self, request: httpx2.Request) -> httpx2.Response:
@@ -407,7 +408,7 @@ def chat_stream(
     """A streamed chat completion: one SSE chunk per delta, a final finish_reason chunk, the `choices: []`
     usage chunk and [DONE]. `fail_after=n` breaks the connection after n deltas."""
 
-    def event(choices: list[dict], **extra) -> bytes:
+    def event(choices: list[dict], **extra: Any) -> bytes:
         chunk = {
             "id": "chatcmpl-test",
             "object": "chat.completion.chunk",
@@ -472,7 +473,7 @@ def page_key0(path: Path) -> str:
         return page_key(doc[0])
 
 
-_EMPTY = {
+_EMPTY: dict[str, Any] = {
     "openai_api_key": None,
     "embedding_model": "text-embedding-3-small",
     "chat_model": "gpt-test",

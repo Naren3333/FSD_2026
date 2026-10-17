@@ -1,3 +1,5 @@
+// @vitest-environment jsdom
+import { FormControl, FormGroup, Validators } from '@angular/forms';
 import { describe, it, expect } from 'vitest';
 import { ActionState } from './action-state';
 describe('ActionState', () => {
@@ -24,5 +26,16 @@ describe('ActionState', () => {
     await state.run(async () => {}, 'Saved');
     expect(state.message()).toBe('Saved');
     expect(state.error()).toBe('');
+  });
+  it('focuses the first invalid control of the form it validates, not of another form above it', async () => {
+    document.body.innerHTML = `
+      <form id="preview"><input class="ng-invalid" id="other" /></form>
+      <form id="editor"><input class="ng-valid" /><textarea class="ng-invalid" id="mine"></textarea></form>`;
+    const state = new ActionState();
+    const form = new FormGroup({ title: new FormControl('', Validators.required) });
+    expect(state.validate(form, 'editor')).toBe(false);
+    await new Promise((resolve) => setTimeout(resolve));
+    expect(document.activeElement?.id).toBe('mine');
+    expect(form.controls.title.touched).toBe(true);
   });
 });

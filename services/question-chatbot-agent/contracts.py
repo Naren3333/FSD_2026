@@ -7,6 +7,7 @@ from pydantic import Field, StringConstraints
 
 # Content caps a search query at 1000 characters, and the raw message is the query when the rewrite fails.
 MAX_MESSAGE = 1000
+MAX_MESSAGES = 200  # the most messages one read of a thread returns: its latest, oldest first
 
 
 class NewThread(Contract):
@@ -54,7 +55,9 @@ class Message(Contract):
 
 
 class MessageList(Contract):
-    messages: list[Message]
+    """A thread's latest messages, oldest first."""
+
+    messages: list[Message] = Field(max_length=MAX_MESSAGES)
 
 
 class Usage(Contract):

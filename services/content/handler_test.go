@@ -14,6 +14,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 )
 
 const (
@@ -88,10 +89,19 @@ func TestSearchValidatesBeforeAnyLookup(t *testing.T) {
 		`{"classroom_id":"` + classID + `","query":"leaves","top_k":31}`,
 		`{"classroom_id":"` + classID + `","query":"leaves","doc_types":["lesson"]}`,
 		`{"classroom_id":"` + classID + `","query":"leaves","document_ids":["nope"]}`,
+		`{"classroom_id":"` + classID + `","query":"leaves","doc_types":["rubric","rubric","rubric","rubric"]}`,
 	} {
 		if w := platformtest.Serve(s.routes, http.MethodPost, "/v1/search", body, "user", "teacher"); w.Code != http.StatusUnprocessableEntity {
 			t.Errorf("%s: %d", body, w.Code)
 		}
+	}
+}
+
+func TestASpendLimitAlwaysExplainsItself(t *testing.T) {
+	w := httptest.NewRecorder()
+	searchFailed(w, &aiError{Status: http.StatusTooManyRequests, Code: "AI_SPEND_LIMIT", ResetsAt: time.Date(2026, 10, 18, 0, 0, 0, 0, time.UTC)})
+	if w.Code != http.StatusTooManyRequests || !strings.Contains(w.Body.String(), `"message":"Your daily AI allowance is used up until 2026-10-18T00:00:00Z."`) {
+		t.Fatalf("%d %s", w.Code, w.Body.String())
 	}
 }
 
@@ -162,6 +172,24 @@ func TestUploadRemovesAnOriginalWhoseRowWasNeverCommitted(t *testing.T) {
 	uncertain := &fileStore{}
 	if w := upload(t, uploadStore{inserted: &inserted, err: errors.New("commit lost"), commitAttempted: true}, uncertain, "&title=Notes"); w.Code != http.StatusInternalServerError || len(uncertain.removed) != 0 {
 		t.Fatalf("%d, removed %v", w.Code, uncertain.removed)
+	}
+}
+
+func TestAnUploadIntoAPurgedClassroomIsNotFoundAndLeavesNoOriginal(t *testing.T) {
+	var inserted newDocument
+	files := &fileStore{}
+	if w := upload(t, uploadStore{inserted: &inserted, err: errClassroomPurged}, files, "&title=Notes"); w.Code != http.StatusNotFound || len(files.removed) != 1 {
+		t.Fatalf("%d, removed %v", w.Code, files.removed)
+	}
+}
+
+func TestTitleLimitCountsCharacters(t *testing.T) {
+	var inserted newDocument
+	if w := upload(t, uploadStore{inserted: &inserted}, &fileStore{}, "&title="+strings.Repeat("%C3%A9", maxTitle)); w.Code != http.StatusCreated {
+		t.Fatalf("%d characters: %d %s", maxTitle, w.Code, w.Body.String())
+	}
+	if w := upload(t, uploadStore{inserted: &inserted}, &fileStore{}, "&title="+strings.Repeat("%C3%A9", maxTitle+1)); w.Code != http.StatusUnprocessableEntity {
+		t.Fatalf("%d characters: %d", maxTitle+1, w.Code)
 	}
 }
 

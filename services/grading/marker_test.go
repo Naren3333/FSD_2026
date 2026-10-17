@@ -2,8 +2,11 @@ package main
 
 import (
 	"encoding/json"
+	"errors"
+	"learning/platform"
 	"strings"
 	"testing"
+	"time"
 )
 
 const essayAnswer = "Two threads both read   the counter, then both write it back, so one update is lost."
@@ -104,5 +107,46 @@ func TestTheSchemaIsStrict(t *testing.T) {
 	schema := markingSchema()
 	if schema["additionalProperties"] != false || len(schema["required"].([]string)) != 4 {
 		t.Fatalf("%v", schema)
+	}
+}
+
+func TestWhatFollowsAFailedCall(t *testing.T) {
+	now := time.Date(2026, 10, 17, 9, 0, 0, 0, time.UTC)
+	resets := now.Add(3 * time.Hour)
+	cases := []struct {
+		name     string
+		err      error
+		attempt  int
+		at       time.Time
+		attempts int
+		again    bool
+	}{
+		{"spend limit waits for the reset", &platform.AIError{Status: 429, Code: "AI_SPEND_LIMIT", ResetsAt: resets}, 3, resets, 2, true},
+		{"spend limit without a reset", &platform.AIError{Status: 429, Code: "AI_SPEND_LIMIT"}, 3, now.Add(markingWait), 2, true},
+		{"spend limit reset already past", &platform.AIError{Status: 429, Code: "AI_SPEND_LIMIT", ResetsAt: now.Add(-time.Minute)}, 1, now.Add(markingWait), 0, true},
+		{"AI not set up stays pending", &platform.AIError{Status: 503, Code: "AI_PROVIDER_NOT_CONFIGURED"}, markingAttempts, now.Add(markingWait), markingAttempts - 1, true},
+		{"provider failure backs off", &platform.AIError{Status: 502, Code: "AI_PROVIDER_FAILED"}, 2, now.Add(time.Minute), 2, true},
+		{"unreachable backs off", errors.New("connection refused"), 1, now.Add(30 * time.Second), 1, true},
+		{"provider failure on the last attempt", &platform.AIError{Status: 502, Code: "AI_PROVIDER_FAILED"}, markingAttempts, time.Time{}, markingAttempts, false},
+		{"rejected reply is not paid for twice", &platform.AIError{Status: 502, Code: "AI_OUTPUT_REJECTED"}, 1, time.Time{}, 1, false},
+		{"empty reply is not paid for twice", &platform.AIError{Status: 502, Code: "EMPTY_OUTPUT"}, 1, time.Time{}, 1, false},
+		{"a bad request fails", &platform.AIError{Status: 422, Code: "INVALID_REQUEST"}, 1, time.Time{}, 1, false},
+	}
+	for _, tc := range cases {
+		at, attempts, again := afterFailure(tc.err, tc.attempt, now)
+		if !at.Equal(tc.at) || attempts != tc.attempts || again != tc.again {
+			t.Errorf("%s: %v %d %v", tc.name, at, attempts, again)
+		}
+	}
+}
+
+func TestTooManyQuotesAreRefused(t *testing.T) {
+	q, r := essayRubric()
+	quotes := make([]string, maxQuotes+1)
+	for i := range quotes {
+		quotes[i] = "lost"
+	}
+	if s, err := checkSuggestion(q, r, essayAnswer, reply(t, []map[string]any{criterion("c1", 2, quotes...), criterion("c2", 0)}, ""), "m"); err == nil {
+		t.Fatalf("kept %+v", s)
 	}
 }

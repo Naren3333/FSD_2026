@@ -1,7 +1,10 @@
 """Per-user spend: every paid call is charged to the user it was made for, and a user over today's allowance is
 refused before any provider call (ADR 0003)."""
 
+import asyncio
+import inspect
 import time
+from collections.abc import AsyncGenerator
 
 import httpx2
 import pytest
@@ -17,6 +20,8 @@ from conftest import (
     embedding_response,
 )
 from fastapi.testclient import TestClient
+from starlette.requests import ClientDisconnect
+from starlette.types import Message
 
 import billing
 import openai_client
@@ -191,3 +196,134 @@ def test_ingest_charges_per_model() -> None:
 def test_price_overrides_are_read_from_json() -> None:
     assert settings._prices('{"gpt-x": [1, 0.5, "2"]}') == {"gpt-x": (1.0, 0.5, 2.0)}
     assert settings._prices("  ") == {}
+
+
+SCHEMA = {
+    "type": "object",
+    "properties": {"query": {"type": "string"}},
+    "required": ["query"],
+    "additionalProperties": False,
+}
+
+
+@pytest.mark.parametrize(
+    "reply",
+    [chat_response(None, refusal="I can't help with that"), chat_response('{"que', finish_reason="length")],
+    ids=["refused", "cut-off"],
+)
+def test_a_rejected_structured_reply_is_still_charged(
+    api: TestClient, openai_fake: FakeOpenAI, ledger: MemoryLedger, reply: dict
+) -> None:
+    """OpenAI bills it like any other reply; the error code stays AI_OUTPUT_REJECTED (Grading doesn't retry it)."""
+    openai_fake.reply(json=reply)
+    resp = api.post("/v1/inference", json={**GENERATE, "response_schema": SCHEMA})
+    assert (resp.status_code, resp.json()["error"]["code"]) == (502, "AI_OUTPUT_REJECTED")
+    settle(ledger, 1)
+    charge = ledger.charges[0][1]
+    assert (charge.operation, charge.tokens_in, charge.tokens_out, charge.estimated) == (
+        "generate",
+        120,
+        7,
+        False,
+    )
+
+
+def test_an_oversized_response_schema_is_refused(api: TestClient, openai_fake: FakeOpenAI) -> None:
+    schema = {**SCHEMA, "description": "x" * 20000}
+    resp = api.post("/v1/inference", json={**GENERATE, "response_schema": schema})
+    assert resp.status_code == 422 and openai_fake.requests == []
+
+
+def test_rerank_without_usage_is_charged_an_estimate(
+    api: TestClient, reranker_fake: FakeReranker, ledger: MemoryLedger
+) -> None:
+    reranker_fake.handler = lambda r: httpx2.Response(
+        200,
+        json={
+            "data": [{"index": 0, "relevance_score": 0.9}, {"index": 1, "relevance_score": 0.1}],
+            "usage": None,
+        },
+    )
+    resp = api.post("/v1/rerank", json=RERANK)
+    assert resp.status_code == 200 and resp.json()["usage_tokens"] is None
+    settle(ledger, 1)
+    assert ledger.charges[0][1].estimated and ledger.charges[0][1].tokens_in > 0
+
+
+def test_a_stream_the_caller_leaves_before_it_starts_is_charged_and_closed(
+    openai_fake: FakeOpenAI, ledger: MemoryLedger
+) -> None:
+    """Starlette never starts the events generator when the caller is gone first: ClosingStream still bills the
+    reply and closes the provider's stream."""
+    import main
+
+    openai_fake.replies.append(chat_stream(["Hel", "lo"]))
+    billed = spend.Billed.model_validate(BILLED)
+
+    async def run() -> AsyncGenerator[str | openai_client.Usage, None]:
+        bills = billing.Billing(ledger)
+        stream = openai_client.stream_chat([{"role": "user", "content": "Say hello"}], 20)
+        first = await anext(stream)
+        bill = billing.StreamBill(bills, billed, "corr", "gpt-test", "Say hello")
+
+        async def finish() -> None:
+            bill.close()
+            await stream.aclose()
+
+        response = main.ClosingStream(main.events(first, stream, bill), finish)
+
+        async def receive() -> Message:
+            return {"type": "http.disconnect"}
+
+        async def send(message: Message) -> None:
+            raise OSError("the caller is gone")
+
+        with pytest.raises(ClientDisconnect):
+            await response({"type": "http", "asgi": {"spec_version": "2.4"}}, receive, send)
+        await bills.drain()
+        return stream
+
+    stream = asyncio.run(run())
+    assert inspect.getasyncgenstate(stream) == inspect.AGEN_CLOSED
+    [(_, charge)] = ledger.charges
+    assert charge.operation == "stream" and charge.estimated
+
+
+def test_ingest_rechecks_the_allowance_once_it_has_a_slot(
+    api: TestClient, openai_fake: FakeOpenAI, ledger: MemoryLedger, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Uploads queued behind others passed the first check long ago; the one that finds the allowance used up
+    when its turn comes makes no model call."""
+    from conftest import post, textbook
+
+    checks: list[str] = []
+    today = ledger.today
+
+    async def spent_meanwhile(billed: spend.Billed) -> spend.Usage:
+        checks.append(billed.user_id)
+        if len(checks) > 1:
+            ledger.already[billed.user_id] = 10.0
+        return await today(billed)
+
+    monkeypatch.setattr(ledger, "today", spent_meanwhile)
+    records: list[costs.IngestCost] = []
+    monkeypatch.setattr(costs, "write", lambda record, path: records.append(record))
+    resp = post(api, textbook())
+    assert (resp.status_code, resp.json()["error"]["code"]) == (429, "AI_SPEND_LIMIT")
+    assert checks == ["teacher-1", "teacher-1"] and openai_fake.requests == []
+    assert records[0].outcome == "skipped" and "queued" in records[0].stages
+
+
+def test_embedding_batches_answered_before_a_failure_are_charged(
+    api: TestClient, openai_fake: FakeOpenAI, ledger: MemoryLedger, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from conftest import fake_embeddings, post, textbook
+
+    monkeypatch.setattr(openai_client, "EMBED_BATCH", 1)
+    openai_fake.replies.append(fake_embeddings)  # 8 prompt tokens
+    openai_fake.reply(400, json={"error": {"message": "bad"}})
+    resp = post(api, textbook())
+    assert (resp.status_code, resp.json()["error"]["code"]) == (502, "AI_PROVIDER_FAILED")
+    settle(ledger, 1)
+    charge = ledger.charges[0][1]
+    assert (charge.operation, charge.model, charge.tokens_in) == ("ingest", "text-embedding-3-small", 8)

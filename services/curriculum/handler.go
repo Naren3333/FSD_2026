@@ -1,6 +1,7 @@
 package main
 
 import (
+	"errors"
 	"learning/platform"
 	"net/http"
 	"strings"
@@ -30,8 +31,7 @@ func (s server) list(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s server) get(w http.ResponseWriter, r *http.Request) {
-	if !platform.ID(r.PathValue("id")) {
-		platform.NotFound(w, "Node not found.")
+	if !nodeID(w, r) {
 		return
 	}
 	v, err := s.store.findNode(r.Context(), platform.Actor(r).Org, r.PathValue("id"))
@@ -50,27 +50,34 @@ func (s server) create(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if !valid(v) {
-		platform.Invalid(w, "Provide a supported kind, name and optional parent UUID.")
+		platform.Invalid(w, "Provide a supported kind, a name of 1–160 characters and an optional parent UUID.")
 		return
 	}
 	org := platform.Actor(r).Org
+	// A node may stand alone; a parent, when given, must be the level above it.
+	parentOK := v.Parent == nil
 	if v.Parent != nil {
 		kind, err := s.store.findKind(r.Context(), org, *v.Parent)
-		if err != nil || expectedParent[v.Kind] != kind {
-			platform.Error(w, http.StatusUnprocessableEntity, "INVALID_PARENT", "Parent must be the preceding curriculum level in your organization.")
+		if err != nil && !errors.Is(err, platform.ErrNotFound) {
+			platform.Fail(w, err)
 			return
 		}
+		parentOK = err == nil && expectedParent[v.Kind] == kind
 	}
-	id := uuid.NewString()
-	if err := s.store.insertNode(r.Context(), id, org, v.Kind, strings.TrimSpace(v.Name), v.Parent); err != nil {
+	if !parentOK {
+		platform.Error(w, http.StatusUnprocessableEntity, "INVALID_PARENT", "Parent must be the preceding curriculum level in your organization.")
+		return
+	}
+	id, name := uuid.NewString(), strings.TrimSpace(v.Name)
+	if err := s.store.insertNode(r.Context(), id, org, v.Kind, name, v.Parent); err != nil {
 		platform.Fail(w, err)
 		return
 	}
-	platform.JSON(w, http.StatusCreated, Node{id, v.Kind, v.Name, v.Parent})
+	platform.JSON(w, http.StatusCreated, Node{id, v.Kind, name, v.Parent})
 }
 
 func (s server) rename(w http.ResponseWriter, r *http.Request) {
-	if !platform.Teacher(w, r) {
+	if !platform.Teacher(w, r) || !nodeID(w, r) {
 		return
 	}
 	var v struct {
@@ -79,11 +86,12 @@ func (s server) rename(w http.ResponseWriter, r *http.Request) {
 	if !platform.Decode(w, r, &v) {
 		return
 	}
-	if !platform.ID(r.PathValue("id")) || !validName(v.Name) {
-		platform.Invalid(w, "Provide an identifier and a name of 1–160 characters.")
+	if !validName(v.Name) {
+		platform.Invalid(w, "Provide a name of 1–160 characters.")
 		return
 	}
-	updated, err := s.store.renameNode(r.Context(), platform.Actor(r).Org, r.PathValue("id"), strings.TrimSpace(v.Name))
+	name := strings.TrimSpace(v.Name)
+	updated, err := s.store.renameNode(r.Context(), platform.Actor(r).Org, r.PathValue("id"), name)
 	if err != nil {
 		platform.Fail(w, err)
 		return
@@ -92,31 +100,40 @@ func (s server) rename(w http.ResponseWriter, r *http.Request) {
 		platform.NotFound(w, "Node not found.")
 		return
 	}
-	platform.JSON(w, http.StatusOK, map[string]string{"id": r.PathValue("id"), "name": v.Name})
+	platform.JSON(w, http.StatusOK, map[string]string{"id": r.PathValue("id"), "name": name})
 }
 
 func (s server) archive(w http.ResponseWriter, r *http.Request) {
-	if !platform.Teacher(w, r) {
+	if !platform.Teacher(w, r) || !nodeID(w, r) {
 		return
 	}
-	if !platform.ID(r.PathValue("id")) {
-		platform.NotFound(w, "Node not found.")
-		return
-	}
-	archived, err := s.store.archiveNode(r.Context(), platform.Actor(r).Org, r.PathValue("id"))
+	result, err := s.store.archiveNode(r.Context(), platform.Actor(r).Org, r.PathValue("id"))
 	if err != nil {
 		platform.Fail(w, err)
 		return
 	}
-	if !archived {
-		platform.Error(w, http.StatusConflict, "ARCHIVE_CONFLICT", "Node is absent, already archived, or has active children.")
+	switch result {
+	case archiveMissing:
+		platform.NotFound(w, "Node not found.")
+		return
+	case archiveHasChildren:
+		platform.Error(w, http.StatusConflict, "ARCHIVE_CONFLICT", "Archive the node's children first.")
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
 }
 
+// nodeID reports whether the path's node id is a UUID, answering 404 like a missing node when it is not.
+func nodeID(w http.ResponseWriter, r *http.Request) bool {
+	if !platform.ID(r.PathValue("id")) {
+		platform.NotFound(w, "Node not found.")
+		return false
+	}
+	return true
+}
+
 func (s server) addPrerequisite(w http.ResponseWriter, r *http.Request) {
-	if !platform.Teacher(w, r) {
+	if !platform.Teacher(w, r) || !nodeID(w, r) {
 		return
 	}
 	var input struct {
@@ -126,7 +143,7 @@ func (s server) addPrerequisite(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	id := r.PathValue("id")
-	if !platform.ID(id) || !platform.ID(input.Prerequisite) || id == input.Prerequisite {
+	if !platform.ID(input.Prerequisite) || id == input.Prerequisite {
 		platform.Error(w, http.StatusUnprocessableEntity, "INVALID_PREREQUISITE", "Choose a different skill.")
 		return
 	}

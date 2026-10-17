@@ -2,11 +2,12 @@
 
 Results are cached on disk by (page content, model, prompt version): a reindex is free and gives the same
 answer, and so does an unchanged page in another file (a revised deck). Calls run a few at
-a time per event loop, and back off on the per-model rate limit beyond the shared client's own retries."""
+a time per event loop, and back off on the per-model rate limit longer than the shared client would."""
 
 import asyncio
 import base64
 import json
+import logging
 import os
 import time
 import uuid
@@ -20,10 +21,16 @@ import openai_client
 from ingest import costs
 from ingest.prompts import PROMPT_VERSION
 
+log = logging.getLogger("ai-core.ingest.vision_calls")
+
 CONCURRENCY = 4  # vision calls at once, across all ingests in the process
 
 
-RATE_RETRIES = 8  # a batch of pages hits the per-model TPM limit; the shared client's 2 retries aren't enough
+RATE_RETRIES = 8  # attempts at a rate-limited call: a batch of pages hits the per-model TPM limit
+
+
+# the longest Retry-After waited for: a longer one fails the call, which only costs the page its tables or figures
+MAX_WAIT = 60.0
 
 
 TIMEOUT = 120.0
@@ -56,20 +63,36 @@ def cache_file(cache_dir: Path, model: str, key: str, kind: str = "page") -> Pat
 async def cached(path: Path, make: Callable[[], Awaitable[dict]], kind: str) -> dict:
     """The cached answer, or a new one, saved atomically (a crash mid-write can't leave a broken entry). `kind`
     names the call in the ingest's cost record (ingest.costs); the cache folder is the model's name."""
-    if path.exists():
+    if (answer := await asyncio.to_thread(_read, path)) is not None:
         costs.hit(kind, path.parent.name)
-        return json.loads(path.read_text(encoding="utf-8"))
+        return answer
     with costs.calling(kind):
         try:
             result = await make()
         except Exception:
             costs.failed()
             raise
+    await asyncio.to_thread(_write, path, result)
+    return result
+
+
+def _read(path: Path) -> dict | None:
+    """The cached answer; None when there is none, or it is unreadable (it is then asked for again)."""
+    try:
+        answer = json.loads(path.read_text(encoding="utf-8"))
+    except FileNotFoundError:
+        return None
+    except ValueError:
+        log.warning("unreadable cache entry %s: asking again", path.name)
+        return None
+    return answer if isinstance(answer, dict) else None
+
+
+def _write(path: Path, answer: dict) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     tmp = path.with_suffix(f".{uuid.uuid4().hex}.tmp")
-    tmp.write_text(json.dumps(result), encoding="utf-8")
+    tmp.write_text(json.dumps(answer), encoding="utf-8")
     os.replace(tmp, path)
-    return result
 
 
 async def ask(
@@ -78,50 +101,67 @@ async def ask(
     model: str,
     slots: asyncio.Semaphore | None = None,
 ) -> dict:
-    """One JSON-mode vision call, with backoff on the per-model rate limit. `image` is the PNG, or an async
-    function making it (called once a slot is free, so only the pages being sent are held in memory).
-    An answer that isn't a JSON object raises, so it is never cached."""
+    """One JSON-mode vision call, retried here alone (not also by openai_client.call): a 429 up to RATE_RETRIES
+    attempts, other retryable errors up to openai_client.MAX_ATTEMPTS, after OpenAI's Retry-After when it sends
+    one (a wait longer than MAX_WAIT fails the call). The wait happens outside the slot, so other pages' calls go
+    on meanwhile. `image` is the PNG, or an async function making it (called once a slot is first free, so only
+    the pages being sent, or waiting to be sent again, are held in memory). An answer that isn't a JSON object
+    raises, so it is never cached."""
     client = openai_client.get_client()
     extra = openai_client.deterministic_options(model)
-    async with slots or _semaphore():
-        png = image if isinstance(image, bytes) else await image()
-        url = f"data:image/png;base64,{base64.b64encode(png).decode()}"
-        messages: Any = [
-            {
-                "role": "user",
-                "content": [
-                    {"type": "text", "text": prompt},
-                    {"type": "image_url", "image_url": {"url": url, "detail": "high"}},
-                ],
-            }
-        ]
-        attempts, started = 0, time.monotonic()
-
-        def create() -> Any:
-            nonlocal attempts
-            attempts += 1  # the shared client's retries call this again
-            return client.chat.completions.create(
-                model=model,
-                messages=messages,
-                response_format={"type": "json_object"},
-                timeout=TIMEOUT,
-                **extra,
-            )
-
-        for attempt in range(RATE_RETRIES):
+    slots = slots or _semaphore()
+    png = image if isinstance(image, bytes) else None
+    started = time.monotonic()
+    for attempt in range(1, RATE_RETRIES + 1):
+        async with slots:
+            if png is None:
+                assert not isinstance(image, bytes)
+                png = await image()
             try:
-                resp = await openai_client.call(create)
+                resp = await client.chat.completions.create(
+                    model=model,
+                    messages=_messages(prompt, png),
+                    response_format={"type": "json_object"},
+                    timeout=TIMEOUT,
+                    **extra,
+                )
                 break
-            except openai.RateLimitError as e:
-                if e.code == "insufficient_quota" or attempt == RATE_RETRIES - 1:
-                    costs.retried(attempts - 1)
+            except Exception as e:
+                error, delay = e, _retry_in(e, attempt)
+                if delay is None:
+                    costs.retried(attempt - 1)
                     raise
-                await asyncio.sleep(2 + attempt * 3)
-            except Exception:
-                costs.retried(attempts - 1)
-                raise
-    costs.answered(model, resp.usage, time.monotonic() - started, attempts - 1)
+        log.warning("vision call failed (attempt %d), retrying in %.2fs: %s", attempt, delay, error)
+        await openai_client._sleep(delay)  # the shared client's sleep, which tests record
+    costs.answered(model, resp.usage, time.monotonic() - started, attempt - 1)
     out = json.loads(resp.choices[0].message.content or "")
     if not isinstance(out, dict):
         raise ValueError(f"the model answered {type(out).__name__}, not a JSON object")
     return out
+
+
+def _messages(prompt: str, png: bytes) -> Any:
+    url = f"data:image/png;base64,{base64.b64encode(png).decode()}"
+    return [
+        {
+            "role": "user",
+            "content": [
+                {"type": "text", "text": prompt},
+                {"type": "image_url", "image_url": {"url": url, "detail": "high"}},
+            ],
+        }
+    ]
+
+
+def _retry_in(error: Exception, attempt: int) -> float | None:
+    """Seconds to wait before attempt `attempt + 1`, or None to give up."""
+    if not isinstance(error, openai.OpenAIError) or not openai_client.retryable(error):
+        return None
+    limited = isinstance(error, openai.RateLimitError)
+    if attempt >= (RATE_RETRIES if limited else openai_client.MAX_ATTEMPTS):
+        return None
+    after = openai_client.retry_after(error)
+    if after is not None:
+        return after if after <= MAX_WAIT else None
+    # a batch of pages hits the per-model TPM limit: back off further each time
+    return 2.0 + (attempt - 1) * 3 if limited else openai_client.backoff(attempt)

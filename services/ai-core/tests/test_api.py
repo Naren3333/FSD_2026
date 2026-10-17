@@ -1,6 +1,7 @@
 """POST /v1/inference and /v1/rerank against mock providers, and who may call them."""
 
 import json
+from collections.abc import Callable
 
 import httpx2
 import pytest
@@ -118,7 +119,9 @@ def test_a_stream_that_cannot_start_is_a_plain_error(api: TestClient, openai_fak
     assert error(api.post("/v1/inference", json={**GENERATE, "stream": True})) == (502, "AI_PROVIDER_FAILED")
 
 
-def test_provider_failure_and_missing_key(api: TestClient, openai_fake: FakeOpenAI, monkeypatch) -> None:
+def test_provider_failure_and_missing_key(
+    api: TestClient, openai_fake: FakeOpenAI, monkeypatch: pytest.MonkeyPatch
+) -> None:
     openai_fake.reply(500, json={"error": {"message": "boom"}}, times=3)
     assert error(api.post("/v1/inference", json=EMBED)) == (502, "AI_PROVIDER_FAILED")
 
@@ -187,13 +190,13 @@ def test_rerank(api: TestClient, reranker_fake: FakeReranker) -> None:
     ids=["down", "500", "missing", "out-of-range", "not-json"],
 )
 def test_rerank_failures_are_errors_never_scores(
-    api: TestClient, reranker_fake: FakeReranker, handler
+    api: TestClient, reranker_fake: FakeReranker, handler: Callable[[httpx2.Request], httpx2.Response] | None
 ) -> None:
     reranker_fake.handler = handler
     assert error(api.post("/v1/rerank", json=RERANK)) == (502, "AI_PROVIDER_FAILED")
 
 
-def test_rerank_without_a_key(api: TestClient, monkeypatch) -> None:
+def test_rerank_without_a_key(api: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
     from conftest import configured
 
     import rerank

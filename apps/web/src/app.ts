@@ -23,7 +23,10 @@ export class AppComponent implements OnInit {
   readonly context = inject(ClassroomContext);
   private readonly unsaved = inject(UnsavedChanges);
   private readonly usage = inject(AiUsage);
+  private readonly router = inject(Router);
   readonly state = new ActionState();
+  /** The last load failed, so the route guards may have refused the address. */
+  private failed = false;
   readonly sections = computed(() =>
     SECTIONS.filter(
       (section) =>
@@ -34,8 +37,8 @@ export class AppComponent implements OnInit {
 
   constructor() {
     // A section may have spent AI allowance (indexing, chat) since the meter last loaded.
-    inject(Router)
-      .events.pipe(
+    this.router.events
+      .pipe(
         filter((event) => event instanceof NavigationEnd),
         takeUntilDestroyed(),
       )
@@ -50,10 +53,16 @@ export class AppComponent implements OnInit {
 
   /** Loads the signed-in user's profile and classrooms; also the retry when that fails. */
   load(): void {
-    void this.state.run(async () => {
-      await this.session.ready();
-      if (this.session.profile()) await this.context.refresh();
-    });
+    const retry = this.failed;
+    void this.state
+      .run(async () => {
+        await this.session.ready();
+        if (!this.session.profile()) return;
+        await this.context.refresh();
+        // The route guards refused the address while the profile was missing; open it now that the role is known.
+        if (retry) await this.router.navigateByUrl(location.pathname + location.search);
+      })
+      .then(() => (this.failed = !!this.state.error()));
   }
 
   login(): void {

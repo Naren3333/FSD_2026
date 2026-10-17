@@ -24,7 +24,7 @@ from ingest.geometry import Word, center_in, pad
 from ingest.pages import page_key, visible_words
 from ingest.prompts import UNTRUSTED
 from ingest.strings import clean_cell
-from ingest.vision import MIN_TEXT_WORDS, PageRef, PageVision, SeenTable
+from ingest.vision import MIN_TEXT_WORDS, PageRef, PageVision, SeenTable, items
 from ingest.vision_calls import FIGURE_CONCURRENCY, _semaphore, ask, cached
 
 log = logging.getLogger("ai-core.ingest.rescue")
@@ -98,8 +98,8 @@ async def _laid_out(
     except Exception as e:
         log.warning("table %d on %s not laid out: %s", i + 1, page, e)
         return None
-    header = tuple(clean_cell(c) for c in raw.get("header") or ()) or None
-    rows = tuple(tuple(clean_cell(c) for c in row) for row in raw.get("rows") or [] if isinstance(row, list))
+    header = tuple(clean_cell(c) for c in items(raw.get("header"))) or None
+    rows = tuple(tuple(clean_cell(c) for c in row) for row in items(raw.get("rows")) if isinstance(row, list))
     problem = extraction.verify_layout(header, rows, words, table)
     if problem:
         log.info("table %d on %s stays prose: %s", i + 1, page, problem)

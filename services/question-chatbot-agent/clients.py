@@ -20,9 +20,14 @@ STREAM_TIMEOUT = httpx.Timeout(60, connect=5)
 USAGE_TIMEOUT = 5.0
 
 
-def billed(claims: Claims) -> dict[str, str]:
-    """Whose daily AI allowance pays for a call: the signed-in user, at the teacher allowance with that role."""
-    return {"user_id": claims.subject, "org_id": claims.org, "role": claims.person_role or STUDENT}
+def billed(claims: Claims, relation: str | None = None) -> dict[str, str]:
+    """Whose daily AI allowance pays for a call: the signed-in user, at the allowance of their relation to the
+    turn's classroom (teacher or student), or of their token's role when no classroom is involved."""
+    return {
+        "user_id": claims.subject,
+        "org_id": claims.org,
+        "role": relation or claims.person_role or STUDENT,
+    }
 
 
 @dataclass(frozen=True)

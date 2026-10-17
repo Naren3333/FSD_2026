@@ -68,7 +68,10 @@ export class DashboardComponent {
     this.page.set(page);
     if (!classroomId) return;
     void this.roster.load(() => this.identity.roster(classroomId));
-    void this.assessments.load(() => this.assessmentApi.progress(classroomId));
+    // Students never see drafts, so a draft has no submissions to count.
+    void this.assessments.load(async () =>
+      (await this.assessmentApi.progress(classroomId)).filter((a) => a.status === 'published'),
+    );
     void this.counts.load(() => this.grading.counts(classroomId));
     void this.loadPerformance(classroomId);
   }

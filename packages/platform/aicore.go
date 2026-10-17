@@ -28,6 +28,10 @@ func NewAICore() AICore {
 	}
 }
 
+// maxAIResponse bounds a successful ai-core answer. The largest is an ingest result: a long PDF's chunks with
+// their vectors and base64 figure crops.
+const maxAIResponse = 64 << 20
+
 // Billed is whose daily AI allowance pays for a call (ADR 0003).
 type Billed struct {
 	UserID string `json:"user_id"`
@@ -102,7 +106,7 @@ func (a AICore) Call(ctx context.Context, path, contentType string, body io.Read
 		}
 		return &AIError{res.StatusCode, e.Error.Code, e.Error.Message, e.Error.ResetsAt}
 	}
-	if err = json.NewDecoder(res.Body).Decode(out); err != nil {
+	if err = json.NewDecoder(io.LimitReader(res.Body, maxAIResponse)).Decode(out); err != nil {
 		return &AIError{Status: http.StatusBadGateway, Code: "UNREADABLE_RESPONSE"}
 	}
 	return nil

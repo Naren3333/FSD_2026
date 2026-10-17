@@ -3,7 +3,7 @@
     <p class="eyebrow">Your teaching space</p>
     <h2>Classrooms</h2>
   </div>
-  <button class="secondary" (click)="refresh()">Refresh classrooms</button>
+  <button class="secondary" (click)="refresh()" [disabled]="state.busy()">Refresh classrooms</button>
 </div>
 <p>Keep teaching materials, assessments and evidence together in one classroom.</p>
 <div class="split">
@@ -29,20 +29,14 @@
   @if (session.isTeacher()) {
     <section class="panel">
       <h3>Create a classroom</h3>
-      <form novalidate [formGroup]="form" (ngSubmit)="create()">
+      <form id="classroom-form" novalidate [formGroup]="form" (ngSubmit)="create()">
         <app-field
           controlId="class-name"
           label="Classroom name"
           [invalid]="form.controls.name.touched && form.controls.name.invalid"
           error="Enter a name of 1–120 characters."
         >
-          <input
-            id="class-name"
-            formControlName="name"
-            maxlength="120"
-            [attr.aria-invalid]="form.controls.name.touched && form.controls.name.invalid"
-            aria-describedby="class-name-help"
-          />
+          <input id="class-name" formControlName="name" maxlength="120" aria-describedby="class-name-help" />
         </app-field>
         <button [disabled]="state.busy()">Create classroom</button>
         <button type="reset" class="secondary clear-form" [disabled]="state.busy()">Clear form</button>

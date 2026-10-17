@@ -387,3 +387,36 @@ func TestSubmissionsCarryTheGradingSettings(t *testing.T) {
 		t.Fatalf("%v", event)
 	}
 }
+
+func TestAnUpdateWithoutAStatusKeepsTheDraft(t *testing.T) {
+	s, _ := newServer(platform.RelationTeacher, skillValid)
+	w := call(t, s, http.MethodPost, "/v1/assessments", draftQuiz, "teacher")
+	var v Assessment
+	if json.Unmarshal(w.Body.Bytes(), &v) != nil {
+		t.Fatalf("%d %s", w.Code, w.Body.String())
+	}
+	if w = call(t, s, http.MethodPut, "/v1/assessments/"+v.ID, strings.Replace(draftQuiz, `"status":"draft",`, "", 1), "teacher"); w.Code != http.StatusOK || !strings.Contains(w.Body.String(), `"status":"draft"`) {
+		t.Fatalf("an update without a status: %d %s", w.Code, w.Body.String())
+	}
+}
+
+func TestASubmissionTooLargeToPublishIsRefused(t *testing.T) {
+	s, store := newServer(platform.RelationTeacher, skillValid)
+	essay := `{"prompt":"Explain.","type":"free_response","max_length":20000,"rubric":{"criteria":[{"title":"Clarity","levels":[{"points":0,"descriptor":"Unclear"},{"points":1,"descriptor":"Clear"}]}]},"skill_id":"` + skill + `"}`
+	body := `{"classroom_id":"` + room + `","title":"Essays","questions":[` + strings.TrimSuffix(strings.Repeat(essay+",", 25), ",") + `]}`
+	w := call(t, s, http.MethodPost, "/v1/assessments", body, "teacher")
+	var v Assessment
+	if w.Code != http.StatusCreated || json.Unmarshal(w.Body.Bytes(), &v) != nil {
+		t.Fatalf("%d %s", w.Code, w.Body.String())
+	}
+	answers := map[string]string{}
+	for _, q := range v.Questions {
+		answers[q.ID] = strings.Repeat("é", 20000) // two bytes each: 25 × 40 KB of JSON
+	}
+	data, _ := json.Marshal(map[string]any{"answers": answers})
+	s.access = platformtest.Access(platform.RelationStudent)
+	w = call(t, s, http.MethodPost, "/v1/assessments/"+v.ID+"/submissions", string(data), "student")
+	if w.Code != http.StatusUnprocessableEntity || !strings.Contains(w.Body.String(), "SUBMISSION_TOO_LARGE") || len(store.submitted) != 0 {
+		t.Fatalf("%d %s", w.Code, w.Body.String())
+	}
+}

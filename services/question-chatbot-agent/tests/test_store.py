@@ -57,7 +57,7 @@ async def test_turns_keep_history_title_and_answers(store: PostgresStore) -> Non
     })  # fmt: skip
     history = await store.start_turn(tid, "and then?", 6)
     assert [h["role"] for h in history] == ["user", "assistant"]
-    messages = await store.messages(tid)
+    messages = await store.messages(tid, 200)
     assert [(m["role"], m["outcome"]) for m in messages] == [
         ("user", None),
         ("assistant", "answered"),
@@ -72,4 +72,19 @@ async def test_an_error_answer_without_retrieval_is_saved(store: PostgresStore) 
     tid = str((await store.create_thread("org", str(uuid4()), "student", ROOM))["id"])
     await store.start_turn(tid, "q", 6)
     await store.save_answer(tid, {"content": "", "outcome": "error"})
-    assert [m["outcome"] for m in await store.messages(tid)] == [None, "error"]
+    assert [m["outcome"] for m in await store.messages(tid, 200)] == [None, "error"]
+
+
+async def test_latest_messages_oldest_first(store: PostgresStore) -> None:
+    tid = str((await store.create_thread("org", str(uuid4()), "student", ROOM))["id"])
+    for n in range(3):
+        await store.start_turn(tid, f"q{n}", 6)
+    assert [m["content"] for m in await store.messages(tid, 2)] == ["q1", "q2"]
+
+
+async def test_no_thread_in_a_purged_classroom(store: PostgresStore) -> None:
+    room = str(uuid4())
+    assert await store.create_thread("org", str(uuid4()), "student", room) is not None
+    async with store.pool.connection() as conn:
+        await conn.execute("INSERT INTO purged_classrooms(classroom_id, org_id) VALUES (%s, 'org')", (room,))
+    assert await store.create_thread("org", str(uuid4()), "student", room) is None

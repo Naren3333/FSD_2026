@@ -1,0 +1,121 @@
+diff --git a/.github/workflows/quality.yml b/.github/workflows/quality.yml
+index a159b73..acd41c2 100644
+--- a/.github/workflows/quality.yml
++++ b/.github/workflows/quality.yml
+@@ -18,11 +18,16 @@ jobs:
+           working-directory: ${{ matrix.path }}
+           args: --config ${{ github.workspace }}/.golangci.yml
+       - working-directory: ${{ matrix.path }}
++        shell: bash
+         run: |
+           test -z "$(gofmt -l .)"
+           go vet ./...
+-          go test ./...
++          go test -v ./... | tee "$RUNNER_TEMP/go-test.log"
+           go build -o /dev/null ./...
++          # Database-backed tests skip themselves here; the integration job runs them with scripts/db_tests.py.
++          if grep -B1 -- '--- SKIP' "$RUNNER_TEMP/go-test.log"; then
++            echo "::warning title=Skipped tests::${{ matrix.path }} skipped tests (listed above)"
++          fi
+   python:
+     runs-on: ubuntu-latest
+     strategy:
+@@ -42,7 +47,7 @@ jobs:
+           python -m ruff format --check .
+           python -m ruff check .
+           python -m mypy main.py
+-          python -m pytest -q
++          python -m pytest -q -rs
+   python-platform:
+     runs-on: ubuntu-latest
+     steps:
+@@ -55,7 +60,38 @@ jobs:
+         run: |
+           python -m ruff format --check .
+           python -m ruff check .
+-          python -m pytest -q
++          python -m pytest -q -rs
++  scripts:
++    runs-on: ubuntu-latest
++    steps:
++      - uses: actions/checkout@v4
++      - uses: actions/setup-python@v5
++        with:
++          python-version: '3.13'
++      - run: python -m pip install -r requirements-dev.lock
++      - run: |
++          python -m ruff format --check --config ruff.toml scripts infra
++          python -m ruff check --config ruff.toml scripts infra
++          python -m pytest -q -rs -p no:cacheprovider scripts/tests
++      # The committed contracts must match what the Python apps and export_contracts.py's Go contracts produce.
++      - run: python scripts/export_contracts.py --check
++  web:
++    runs-on: ubuntu-latest
++    steps:
++      - uses: actions/checkout@v4
++      - uses: actions/setup-node@v4
++        with:
++          node-version: '22.17.0'
++          cache: npm
++          cache-dependency-path: apps/web/package-lock.json
++      - working-directory: apps/web
++        run: |
++          npm ci
++          npm run format:check
++          npm run lint
++          npm run typecheck
++          npm test
++          npm run build
+   integration:
+     runs-on: ubuntu-latest
+     timeout-minutes: 30
+@@ -74,14 +110,11 @@ jobs:
+       - run: docker compose up -d --build
+       - run: python scripts/wait_ready.py
+       - run: python scripts/integration.py
++      # Content's and the chatbot's database-backed tests, which skip themselves in the jobs above.
++      - run: python scripts/db_tests.py
+       - working-directory: apps/web
+         run: |
+           npm ci
+-          npm run format:check
+-          npm run lint
+-          npm run typecheck
+-          npm test
+-          npm run build
+           npx playwright install --with-deps chromium
+           npm run test:e2e
+       - if: always()
+diff --git a/Makefile b/Makefile
+index 22e59d4..1e1bd32 100644
+--- a/Makefile
++++ b/Makefile
+@@ -1,18 +1,25 @@
+-.PHONY: setup up down test lint build check integration e2e contracts
++.PHONY: setup upgrade_local up down wait_ready test lint build check integration db_tests e2e contracts
+ PYTHON ?= python
+ setup:
+ 	$(PYTHON) scripts/setup.py
++# Brings a setup made by an older scripts/setup.py up to date; the stack must be up for its database and Keycloak steps.
++upgrade_local:
++	$(PYTHON) scripts/upgrade_local.py
+ up:
+ 	docker compose up -d --build
+ down:
+ 	docker compose down
++wait_ready:
++	$(PYTHON) scripts/wait_ready.py
+ test check lint:
+ 	$(PYTHON) scripts/check.py
+ build:
+ 	docker compose build
+-integration:
++integration: wait_ready
+ 	$(PYTHON) scripts/integration.py
+-e2e:
++db_tests: wait_ready
++	$(PYTHON) scripts/db_tests.py
++e2e: wait_ready
+ 	cd apps/web && npm run test:e2e
+ contracts:
+ 	$(PYTHON) scripts/export_contracts.py

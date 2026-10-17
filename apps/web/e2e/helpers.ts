@@ -6,7 +6,11 @@ export const env: Record<string, string> = Object.fromEntries(
   readFileSync('../../.env', 'utf8')
     .split(/\r?\n/)
     .filter((l: string) => l && !l.startsWith('#'))
-    .map((l: string) => l.split('=')),
+    // Only the first '=' separates the name; a value such as a password may contain more.
+    .map((l: string) => {
+      const at = l.indexOf('=');
+      return at < 0 ? [l, ''] : [l.slice(0, at), l.slice(at + 1)];
+    }),
 );
 
 /** Signs in through Keycloak and waits for the workspace. */

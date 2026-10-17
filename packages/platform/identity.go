@@ -79,9 +79,12 @@ func (i *Identity) Relation(w http.ResponseWriter, r *http.Request, classroom, s
 	}
 	defer res.Body.Close()
 	if res.StatusCode != http.StatusOK {
-		if res.StatusCode >= 500 {
+		switch {
+		case res.StatusCode >= 500:
 			Unavailable(w, "Authorization unavailable.")
-		} else {
+		case res.StatusCode == http.StatusUnauthorized:
+			Unauthenticated(w, "The access token was not accepted.")
+		default:
 			Forbidden(w, "You do not have access to this classroom or student.")
 		}
 		return "", false

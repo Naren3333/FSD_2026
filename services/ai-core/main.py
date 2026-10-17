@@ -4,13 +4,13 @@ import contextlib
 import logging
 import os
 import tempfile
-from collections.abc import AsyncGenerator, AsyncIterator, Coroutine
+from collections.abc import AsyncGenerator, AsyncIterator, Awaitable, Callable, Coroutine
 from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any, NoReturn
 
 import openai
-from fastapi import Depends, Query, Request
+from fastapi import Depends, HTTPException, Query, Request
 from fastapi.responses import StreamingResponse
 from learning_transport import (
     AI_CLIENT,
@@ -23,6 +23,7 @@ from learning_transport import (
     requires,
     sse_event,
 )
+from starlette.types import Receive, Scope, Send
 
 import openai_client
 import rerank
@@ -73,9 +74,10 @@ app = application("ai-core", lifespan=lifespan)
 SERVICE = requires(AI_CLIENT)
 
 
-@app.get("/health/ready")
+@app.get("/health/ready", responses={503: {"model": ErrorResponse}})
 async def ready(request: Request) -> dict[str, str]:
-    # Only whether keys are configured: probing paid APIs on every health check would cost money and latency.
+    # The ledger must answer (no call runs without it); for the providers only whether keys are configured:
+    # probing paid APIs on every health check would cost money and latency.
     try:
         await asyncio.wait_for(billing_of(request).ledger.ping(), 2)
     except Exception:
@@ -163,10 +165,24 @@ async def execute(request: RequestContract, http: Request, _caller: Claims = Dep
             stream = openai_client.stream_chat(messages, request.max_tokens)
             first = await anext(stream)
             bill = StreamBill(billing, billed, correlation, settings.chat_model, message_text(messages))
-            return StreamingResponse(events(first, stream, bill), media_type="text/event-stream")
+
+            async def finish() -> None:
+                bill.close()
+                await stream.aclose()
+
+            return ClosingStream(events(first, stream, bill), finish)
         reply = await openai_client.generate(
             messages, request.max_tokens, request.response_schema, name=request.schema_name or ""
         )
+    except openai_client.StructuredOutputError as error:
+        # OpenAI bills a refused or cut-off reply like any other: charge it, then refuse it.
+        prompt = message_text(messages)
+        billing.charge(
+            billed,
+            correlation,
+            reply_charge("generate", settings.chat_model, prompt, error.text, error.usage),
+        )
+        provider_error(error)
     except PROVIDER_ERRORS as error:
         provider_error(error)
     charge = reply_charge("generate", settings.chat_model, message_text(messages), reply.text, reply.usage)
@@ -177,6 +193,22 @@ async def execute(request: RequestContract, http: Request, _caller: Claims = Dep
         usage_tokens=total(reply.usage),
         finish_reason=reply.finish_reason,
     )
+
+
+class ClosingStream(StreamingResponse):
+    """Server-sent events that run `finish` however the response ends. A caller hanging up before the body starts
+    means the events generator never runs, so its own `finally` can't bill the reply or close the provider
+    stream."""
+
+    def __init__(self, content: AsyncIterator[str], finish: Callable[[], Awaitable[None]]) -> None:
+        super().__init__(content, media_type="text/event-stream")
+        self.finish = finish
+
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        try:
+            await super().__call__(scope, receive, send)
+        finally:
+            await self.finish()
 
 
 async def events(
@@ -258,7 +290,8 @@ async def ingest_pdf(
         openai_client.get_client()  # without a key every model call would fail: refuse before any work
     except openai_client.NotConfiguredError as error:
         provider_error(error)
-    await billing_of(request).check(billed)
+    billing = billing_of(request)
+    await billing.check(billed)
     with tempfile.TemporaryDirectory(prefix="ingest-") as folder:
         path = Path(folder) / "document.pdf"
         await receive(request, path)
@@ -267,7 +300,8 @@ async def ingest_pdf(
             record.outcome = "error"
             try:
                 result = await unless_disconnected(
-                    request, _ingest(request.app.state.ingest_slots, path, title)
+                    request,
+                    _ingest(request.app.state.ingest_slots, path, title, lambda: billing.check(billed)),
                 )
                 record.outcome = "indexed"
             except IngestError as e:
@@ -275,6 +309,9 @@ async def ingest_pdf(
                 return IngestResponse(outcome="failed", failure_reason=e.reason, failure_detail=str(e)[:2000])  # type: ignore[arg-type]
             except PROVIDER_ERRORS as error:
                 provider_error(error)
+            except HTTPException:
+                record.outcome = "skipped"  # refused by the allowance check once it had a slot
+                raise
             except CallerGoneError:
                 record.outcome = "abandoned"
                 log.info("ingest_abandoned")
@@ -283,7 +320,7 @@ async def ingest_pdf(
                 ) from None
             finally:
                 costs.write(record, None)
-                billing_of(request).charge(billed, correlation_of(request), *ingest_charges(record))
+                billing.charge(billed, correlation_of(request), *ingest_charges(record))
     return indexed_response(result)
 
 
@@ -319,10 +356,19 @@ def indexed_response(result: IngestResult) -> IngestResponse:
     )
 
 
-async def _ingest(slots: asyncio.Semaphore, path: Path, title: str) -> IngestResult:
-    async with slots:
+async def _ingest(
+    slots: asyncio.Semaphore, path: Path, title: str, check: Callable[[], Awaitable[None]]
+) -> IngestResult:
+    """The ingest, once one of the slots is free. The allowance is checked again then: the check before the wait
+    may be long out of date, as other uploads by the same user ran (and were charged) in the meantime."""
+    with costs.stage("queued"):
+        await slots.acquire()
+    try:
+        await check()
         with costs.stage("total"):
             return await ingest(path, title, vision_config(get_settings()))
+    finally:
+        slots.release()
 
 
 class CallerGoneError(Exception):
@@ -356,6 +402,6 @@ async def receive(request: Request, path: Path) -> None:
             size += len(part)
             if size > MAX_PDF_BYTES:
                 raise failure(413, "PAYLOAD_TOO_LARGE", "The PDF is larger than 50 MiB.")
-            out.write(part)
+            await asyncio.to_thread(out.write, part)
     if size == 0:
         raise failure(422, "VALIDATION_ERROR", "The PDF is empty.")

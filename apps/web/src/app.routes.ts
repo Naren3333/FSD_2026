@@ -83,12 +83,18 @@ function landing(session: Session): string {
   return session.isStudent() ? '/home' : '/dashboard';
 }
 
+/** Signed in, but the profile (and so the role) did not load: nothing opens until the shell's Try again works. */
+function profileMissing(session: Session): boolean {
+  return session.signedIn && !session.profile();
+}
+
 /** Sections for one role send the other role to its own landing page. Signed out, the shell shows sign-in. */
 function onlyFor(role: 'teacher' | 'student'): CanMatchFn {
   return async () => {
     const session = inject(Session);
     const router = inject(Router);
     await session.ready().catch(() => undefined);
+    if (profileMissing(session)) return false;
     const profile = session.profile();
     return !profile || profile.role === role || router.parseUrl(landing(session));
   };
@@ -99,6 +105,7 @@ const toLanding: CanActivateFn = async () => {
   const session = inject(Session);
   const router = inject(Router);
   await session.ready().catch(() => undefined);
+  if (profileMissing(session)) return false;
   return router.parseUrl(landing(session));
 };
 

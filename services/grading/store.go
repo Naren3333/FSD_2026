@@ -176,8 +176,9 @@ func (p pgStore) saveMarks(ctx context.Context, org, id, actor string, marks map
 	return v, err
 }
 
-// finalizeEvaluation locks the evaluation row, applies the marks, records the audit entry and emits the finalized
-// event in one transaction, releasing the grade to the student at once when its assessment says so. It returns
+// finalizeEvaluation locks the evaluation row, applies the marks and records the audit entry in one transaction,
+// releasing the grade to the student at once when its assessment says so; only then does it emit the finalized
+// event, since Analytics shows its marks to the student (a manual release emits it in release). It returns
 // errAlreadyFinalized, errUnmarked or a marking error for the business failures; any other error is an
 // infrastructure failure.
 func (p pgStore) finalizeEvaluation(ctx context.Context, org, id, actor, reason string, marks map[string]Mark) (Evaluation, error) {
@@ -212,8 +213,8 @@ func (p pgStore) finalizeEvaluation(ctx context.Context, org, id, actor, reason 
 	if err == nil {
 		_, err = tx.Exec(ctx, "INSERT INTO audit(evaluation_id,actor_id,action,reason,before_evidence,after_evidence) VALUES($1,$2,'finalize',$3,$4,$5)", v.ID, actor, reason, before, after)
 	}
-	if err == nil {
-		err = platform.Emit(ctx, tx, topicFinalized, v.ID, map[string]any{"evaluation_id": v.ID, "assessment_id": v.Assessment, "classroom_id": v.Classroom, "org_id": org, "student_id": v.Student, "evidence": final(v.Evidence)})
+	if err == nil && v.ReleasedAt != nil {
+		err = emitFinalized(ctx, tx, org, v)
 	}
 	if err == nil {
 		err = tx.Commit(ctx)
@@ -221,33 +222,41 @@ func (p pgStore) finalizeEvaluation(ctx context.Context, org, id, actor, reason 
 	return v, err
 }
 
-// release shows the assessment's finalized, unreleased grades to their students, with an audit entry each, and
-// returns how many it released. Drafts stay drafts: finalizing one later releases it only if its assessment
-// releases on finalization, or at the next release.
+// emitFinalized publishes grading.finalized.v2 through the outbox when a grade becomes visible to its student:
+// Analytics shows the student their own marks from it, so it must never go out before the release.
+func emitFinalized(ctx context.Context, tx pgx.Tx, org string, v Evaluation) error {
+	return platform.Emit(ctx, tx, topicFinalized, v.ID, map[string]any{"evaluation_id": v.ID, "assessment_id": v.Assessment, "classroom_id": v.Classroom, "org_id": org, "student_id": v.Student, "evidence": final(v.Evidence)})
+}
+
+// release shows the assessment's finalized, unreleased grades to their students, with an audit entry and a
+// grading.finalized.v2 event each, and returns how many it released. Drafts stay drafts: finalizing one later
+// releases it only if its assessment releases on finalization, or at the next release.
 func (p pgStore) release(ctx context.Context, org, assessment, actor string) (int, error) {
 	tx, err := p.db.Begin(ctx)
 	if err != nil {
 		return 0, err
 	}
 	defer tx.Rollback(ctx)
-	rows, err := tx.Query(ctx, "UPDATE evaluations SET released_at=now() WHERE assessment_id=$1 AND org_id=$2 AND status='finalized' AND released_at IS NULL RETURNING id,evidence", assessment, org)
+	rows, err := tx.Query(ctx, "UPDATE evaluations SET released_at=now() WHERE assessment_id=$1 AND org_id=$2 AND status='finalized' AND released_at IS NULL RETURNING "+evaluationColumns, assessment, org)
 	if err != nil {
 		return 0, err
 	}
 	type released struct {
-		id       string
+		v        Evaluation
 		evidence []byte
 	}
 	list, err := pgx.CollectRows(rows, func(row pgx.CollectableRow) (released, error) {
-		var r released
-		err := row.Scan(&r.id, &r.evidence)
-		return r, err
+		v, evidence, err := scanEvaluation(row)
+		return released{v, evidence}, err
 	})
 	if err != nil {
 		return 0, err
 	}
 	for _, r := range list {
-		if _, err = tx.Exec(ctx, "INSERT INTO audit(evaluation_id,actor_id,action,reason,before_evidence,after_evidence) VALUES($1,$2,'release','Results released',$3,$3)", r.id, actor, r.evidence); err != nil {
+		if _, err = tx.Exec(ctx, "INSERT INTO audit(evaluation_id,actor_id,action,reason,before_evidence,after_evidence) VALUES($1,$2,'release','Results released',$3,$3)", r.v.ID, actor, r.evidence); err != nil {
+			return 0, err
+		}
+		if err = emitFinalized(ctx, tx, org, r.v); err != nil {
 			return 0, err
 		}
 	}

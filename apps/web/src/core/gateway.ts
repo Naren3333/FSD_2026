@@ -82,6 +82,7 @@ export class Gateway {
     }).catch(() => {
       throw new Error(unreachable(signal));
     });
+    if (response.status === 401) this.auth.expired.set(true);
     if (!response.ok) throw new Error(await failure(response));
     return response;
   }
@@ -99,5 +100,6 @@ async function failure(response: Response): Promise<string> {
   if (detail.error?.message) return detail.error.message;
   if (response.status === 401) return 'Your session expired. Sign in again.';
   if (response.status === 403) return 'You do not have access to this resource.';
+  if (response.status === 413) return 'This is too large to send. Shorten it and try again.';
   return `The operation failed (${response.status}). Retry later.`;
 }

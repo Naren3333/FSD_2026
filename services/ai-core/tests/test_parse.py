@@ -68,7 +68,7 @@ def test_password_pdf_is_encrypted(tmp_path: Path) -> None:
 
 def test_owner_password_only_is_readable(tmp_path: Path) -> None:
     doc = pymupdf.open(stream=make_pdf(), filetype="pdf")
-    data = doc.tobytes(encryption=pymupdf.PDF_ENCRYPT_AES_256, owner_pw="owner", user_pw="")
+    data = doc.tobytes(encryption=pymupdf.mupdf.PDF_ENCRYPT_AES_256, owner_pw="owner", user_pw="")
     assert prose(write(tmp_path, data))[0][0].text.startswith("Photosynthesis")
 
 
@@ -79,6 +79,28 @@ def test_garbage_after_the_magic_is_corrupt(tmp_path: Path) -> None:
 def test_missing_file_is_not_a_failure_reason(tmp_path: Path) -> None:
     with pytest.raises(FileNotFoundError):
         read_pages(tmp_path / "gone.pdf")
+
+
+@pytest.mark.parametrize(
+    ("error", "corrupt"),
+    [(RuntimeError("MuPDF error: format error"), True), (KeyError("bbox"), False), (RecursionError(), False)],
+)
+def test_only_pymupdf_errors_mean_a_corrupt_file(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, error: Exception, corrupt: bool
+) -> None:
+    """A bug here, or a model answer it trips over, is a 500 the caller retries, not a permanent CORRUPT."""
+    import ingest.parse
+
+    def broken(*args: object) -> list[Table]:
+        raise error
+
+    monkeypatch.setattr(ingest.parse, "_page_tables", broken)
+    path = write(tmp_path, make_pdf())
+    if corrupt:
+        assert failure(path) == "CORRUPT"
+    else:
+        with pytest.raises(type(error)):
+            read_pages(path)
 
 
 PARA = "Leaves are the main site of photosynthesis in most plants and hold many chloroplasts. " * 2

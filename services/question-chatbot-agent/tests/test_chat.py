@@ -343,3 +343,78 @@ def test_usage(api: TestClient, fakes: Fakes) -> None:
     assert resp.status_code == 200 and resp.json()["limit_usd"] == 5.0
     [(_, _, request)] = [r for r in fakes.requests if r[0] == "/v1/usage"]
     assert request.url.params["user_id"] == "s1" and request.url.params["role"] == "student"
+
+
+def test_the_classroom_relation_not_the_token_role_decides(
+    api: TestClient, fakes: Fakes, store: MemoryStore
+) -> None:
+    """t2's token holds the teacher role, but t2 is enrolled in this classroom as a student: the thread, the prompt
+    and the allowance are a student's."""
+    fakes.access.add(("Bearer t2", ROOM))
+    fakes.results = RESULTS
+    fakes.replies += [rewrite("q"), chat_stream(["One [S1]."])]
+    tid = thread(api, "t2")
+    assert store.threads[tid]["role"] == "student"
+    post(api, tid, "q", user="t2")
+    billed = [call["billed_to"]["role"] for call in fakes.calls("/v1/inference")]
+    assert billed == ["student", "student"]
+    assert prompts.prompt_version("student") != prompts.prompt_version("teacher")
+    assert saved(store, tid)["prompt_version"] == prompts.prompt_version("student")
+
+
+def test_no_thread_in_a_purged_classroom(api: TestClient, store: MemoryStore) -> None:
+    store.purged.add(ROOM)
+    resp = api.post("/v1/threads", json={"classroom_id": ROOM}, headers=as_user("s1"))
+    assert resp.status_code == 403 and store.threads == {}
+
+
+def test_messages_are_the_latest_oldest_first(api: TestClient, store: MemoryStore) -> None:
+    tid = thread(api)
+    for n in range(3):
+        anyio.run(store.start_turn, tid, f"q{n}", 6)
+    resp = api.get(f"/v1/threads/{tid}/messages", params={"limit": 2}, headers=as_user())
+    assert [m["content"] for m in resp.json()["messages"]] == ["q1", "q2"]
+    assert api.get(f"/v1/threads/{tid}/messages", params={"limit": 201}, headers=as_user()).status_code == 422
+
+
+def test_a_disconnect_during_the_final_save_keeps_the_answer(fakes: Fakes) -> None:
+    from conftest import SETTINGS
+
+    from chat import Turn, TurnRequest
+
+    class SlowStore(MemoryStore):
+        def __init__(self) -> None:
+            super().__init__()
+            self.saving, self.release = asyncio.Event(), asyncio.Event()
+
+        async def save_answer(self, thread_id: str, answer: dict[str, Any]) -> str:
+            self.saving.set()
+            await self.release.wait()
+            return await super().save_answer(thread_id, answer)
+
+    async def answer() -> AsyncIterator[str]:
+        yield sse_event("token", {"text": "Done."})
+
+    async def scenario() -> list[dict[str, Any]]:
+        store, pending = SlowStore(), set[asyncio.Task[Any]]()
+        asked = TurnRequest(thread={"id": "t", "role": "student", "classroom_id": ROOM}, authorization="Bearer s1",
+                            correlation="c", content="q", history=[], billed_to={})  # fmt: skip
+        turn = Turn(None, store, SETTINGS, pending, asked)  # type: ignore[arg-type]
+        turn.parts.append("Done.")
+        turn._answer = answer  # type: ignore[method-assign]
+
+        async def drain() -> None:
+            async for _ in turn.events():
+                pass
+
+        task = asyncio.create_task(drain())
+        await store.saving.wait()
+        task.cancel()  # the client goes away while the answer is being saved
+        with pytest.raises(asyncio.CancelledError):
+            await task
+        store.release.set()
+        await asyncio.wait(set(pending), timeout=5)
+        return store.all("t")
+
+    [row] = anyio.run(scenario)
+    assert (row["content"], row["outcome"]) == ("Done.", "answered")

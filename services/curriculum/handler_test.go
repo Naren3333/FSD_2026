@@ -2,10 +2,12 @@ package main
 
 import (
 	"context"
+	"errors"
 	"learning/platform"
 	"learning/platform/platformtest"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 )
 
@@ -17,8 +19,9 @@ const (
 
 // memoryStore keeps nodes by id and prerequisite edges; it answers a cycle when the reverse edge exists.
 type memoryStore struct {
-	nodes map[string]Node
-	edges map[[2]string]bool
+	nodes  map[string]Node
+	edges  map[[2]string]bool
+	broken bool // every lookup fails as if the database were down
 }
 
 func newMemoryStore() *memoryStore {
@@ -35,6 +38,9 @@ func newMemoryStore() *memoryStore {
 func (m *memoryStore) listNodes(context.Context, string) ([]Node, error) { return nil, nil }
 
 func (m *memoryStore) findNode(_ context.Context, _, id string) (Node, error) {
+	if m.broken {
+		return Node{}, errors.New("connection refused")
+	}
 	n, ok := m.nodes[id]
 	if !ok {
 		return Node{}, platform.ErrNotFound
@@ -56,7 +62,18 @@ func (m *memoryStore) renameNode(context.Context, string, string, string) (bool,
 	return true, nil
 }
 
-func (m *memoryStore) archiveNode(context.Context, string, string) (bool, error) { return true, nil }
+func (m *memoryStore) archiveNode(_ context.Context, _, id string) (archiveResult, error) {
+	if _, ok := m.nodes[id]; !ok {
+		return archiveMissing, nil
+	}
+	for _, n := range m.nodes {
+		if n.Parent != nil && *n.Parent == id {
+			return archiveHasChildren, nil
+		}
+	}
+	delete(m.nodes, id)
+	return archived, nil
+}
 
 func (m *memoryStore) insertPrerequisite(_ context.Context, _, id, prerequisite string) (prerequisiteResult, error) {
 	if m.edges[[2]string{prerequisite, id}] {
@@ -81,6 +98,9 @@ func TestANodeNeedsTheLevelAboveAsParent(t *testing.T) {
 		{`{"kind":"unit","name":"Number","parent_id":"` + topicID + `"}`, http.StatusUnprocessableEntity},
 		{`{"kind":"skill","name":"Simplify","parent_id":"` + skillA + `"}`, http.StatusUnprocessableEntity},
 		{`{"kind":"chapter","name":"Simplify"}`, http.StatusUnprocessableEntity},
+		{`{"kind":"skill","name":"Simplify"}`, http.StatusCreated}, // a standalone skill
+		{`{"kind":"subject","name":"Maths"}`, http.StatusCreated},
+		{`{"kind":"skill","name":"Simplify","parent_id":"` + skillB[:35] + `9"}`, http.StatusUnprocessableEntity},
 	}
 	for _, tc := range cases {
 		if w := call(t, store, http.MethodPost, "/v1/nodes", tc.body, "teacher"); w.Code != tc.status {
@@ -103,6 +123,59 @@ func TestPrerequisitesRejectSelfReferenceAndCycles(t *testing.T) {
 	}
 	if w := call(t, store, http.MethodPost, path(skillB), `{"prerequisite_id":"`+skillA+`"}`, "teacher"); w.Code != http.StatusConflict {
 		t.Fatalf("cycle accepted: %d", w.Code)
+	}
+}
+
+func TestCreateAndRenameEchoTheTrimmedName(t *testing.T) {
+	store := newMemoryStore()
+	w := call(t, store, http.MethodPost, "/v1/nodes", `{"kind":"subject","name":"  Maths "}`, "teacher")
+	if w.Code != http.StatusCreated || !strings.Contains(w.Body.String(), `"name":"Maths"`) {
+		t.Fatalf("%d %s", w.Code, w.Body.String())
+	}
+	w = call(t, store, http.MethodPatch, "/v1/nodes/"+topicID, `{"name":" Halves "}`, "teacher")
+	if w.Code != http.StatusOK || !strings.Contains(w.Body.String(), `"name":"Halves"`) {
+		t.Fatalf("%d %s", w.Code, w.Body.String())
+	}
+	// The limit counts characters, not bytes.
+	if w = call(t, store, http.MethodPatch, "/v1/nodes/"+topicID, `{"name":"`+strings.Repeat("é", maxName)+`"}`, "teacher"); w.Code != http.StatusOK {
+		t.Fatalf("%d characters: %d", maxName, w.Code)
+	}
+}
+
+func TestAFailedParentLookupIsAnInternalError(t *testing.T) {
+	store := newMemoryStore()
+	store.broken = true
+	if w := call(t, store, http.MethodPost, "/v1/nodes", `{"kind":"skill","name":"Simplify","parent_id":"`+topicID+`"}`, "teacher"); w.Code != http.StatusInternalServerError {
+		t.Fatalf("status %d", w.Code)
+	}
+}
+
+func TestArchive(t *testing.T) {
+	store := newMemoryStore()
+	child := topicID
+	store.nodes[skillA] = Node{skillA, "skill", "Add fractions", &child}
+	cases := []struct {
+		id     string
+		status int
+	}{
+		{"not-a-uuid", http.StatusNotFound},
+		{skillB[:35] + "9", http.StatusNotFound},
+		{topicID, http.StatusConflict},
+		{skillA, http.StatusNoContent},
+		{skillA, http.StatusNotFound}, // already archived
+	}
+	for _, tc := range cases {
+		if w := call(t, store, http.MethodDelete, "/v1/nodes/"+tc.id, "", "teacher"); w.Code != tc.status {
+			t.Errorf("%s: %d %s", tc.id, w.Code, w.Body.String())
+		}
+	}
+}
+
+func TestAMalformedPathIDIsNotFoundBeforeTheBodyIsRead(t *testing.T) {
+	for _, tc := range [][2]string{{http.MethodPatch, "/v1/nodes/x"}, {http.MethodPost, "/v1/skills/x/prerequisites"}} {
+		if w := call(t, newMemoryStore(), tc[0], tc[1], "not json", "teacher"); w.Code != http.StatusNotFound {
+			t.Errorf("%s %s: %d", tc[0], tc[1], w.Code)
+		}
 	}
 }
 

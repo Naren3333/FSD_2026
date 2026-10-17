@@ -31,8 +31,11 @@ interface Grades {
   assessments: Map<string, Assessment>;
 }
 
-/** How often an open grade re-reads AI suggestions that are still being prepared. */
+/** How long an open grade first waits before re-reading AI suggestions still being prepared, and the longest wait.
+ * Grading has no read of one evaluation, so each re-read fetches the assessment's grades (up to 500); the wait
+ * doubles after every re-read that finds a suggestion still pending. */
 const SUGGESTION_POLL = 5000;
+const SUGGESTION_POLL_MAX = 60000;
 
 @Component({
   selector: 'app-review',
@@ -81,11 +84,11 @@ export class ReviewComponent {
   });
   readonly flagText = flagText;
   readonly suggestionReason = suggestionReason;
-  private poll: ReturnType<typeof setInterval> | undefined;
+  private poll: ReturnType<typeof setTimeout> | undefined;
 
   constructor() {
     inject(UnsavedChanges).track(() => this.form.dirty || this.marks.dirty);
-    inject(DestroyRef).onDestroy(() => clearInterval(this.poll));
+    inject(DestroyRef).onDestroy(() => clearTimeout(this.poll));
     onClassroomChange(() => {
       this.filter.setValue('');
       this.assessmentId.set('');
@@ -177,7 +180,7 @@ export class ReviewComponent {
   }
 
   stopMarking(): void {
-    clearInterval(this.poll);
+    clearTimeout(this.poll);
     this.marks = new FormGroup({});
     this.selected.set(null);
   }
@@ -218,33 +221,37 @@ export class ReviewComponent {
     }
   }
 
-  /** While a suggestion is being prepared, re-reads the grade so it appears without a refresh. */
-  private watchSuggestions(): void {
-    clearInterval(this.poll);
-    this.poll = setInterval(() => {
-      const grade = this.selected();
-      if (!grade || !grade.evidence.some((e) => e.suggestion?.status === 'pending')) {
-        clearInterval(this.poll);
-        return;
-      }
-      void this.grading.evaluations(this.classroomId(), grade.assessment_id).then(
+  /** While a suggestion is being prepared, re-reads the grade so it appears without a refresh, less often the longer
+   * it takes. */
+  private watchSuggestions(delay = SUGGESTION_POLL): void {
+    clearTimeout(this.poll);
+    const grade = this.selected();
+    if (!grade?.evidence.some((e) => e.suggestion?.status === 'pending')) return;
+    const classroomId = this.classroomId();
+    this.poll = setTimeout(() => {
+      void this.grading.evaluations(classroomId, grade.assessment_id).then(
         (rows) => {
           const fresh = rows.find((r) => r.id === grade.id);
-          if (!fresh || this.selected()?.id !== grade.id) return;
+          const current = this.selected();
+          if (!fresh || current?.id !== grade.id || this.classroomId() !== classroomId) return;
           // Only the suggestions change here, so the teacher's unsaved marks stay.
           const suggestions = new Map(fresh.evidence.map((e) => [e.question_id, e.suggestion]));
           this.selected.set({
-            ...grade,
-            evidence: grade.evidence.map((e) => ({ ...e, suggestion: suggestions.get(e.question_id) })),
+            ...current,
+            evidence: current.evidence.map((e) => ({ ...e, suggestion: suggestions.get(e.question_id) })),
           });
+          this.watchSuggestions(Math.min(delay * 2, SUGGESTION_POLL_MAX));
         },
-        () => undefined,
+        () => {
+          if (this.selected()?.id === grade.id)
+            this.watchSuggestions(Math.min(delay * 2, SUGGESTION_POLL_MAX));
+        },
       );
-    }, SUGGESTION_POLL);
+    }, delay);
   }
 
   askFinalize(): void {
-    if (!this.selected() || !this.state.validate(this.marks)) return;
+    if (!this.selected() || !this.state.validate(this.marks, 'marking-form')) return;
     this.finalizing.set(true);
     this.form.reset();
     this.dialog?.show();
@@ -258,14 +265,16 @@ export class ReviewComponent {
 
   finalize(): void {
     const grade = this.selected();
-    if (!grade || !this.state.validate(this.form)) return;
+    if (!grade || !this.state.validate(this.form, 'finalize-form')) return;
     const marks = marksOf(this.marks, grade.evidence);
+    const classroomId = this.classroomId();
+    const assessmentId = this.assessmentId();
     void this.state.run(
       async () => {
         await this.grading.finalize(grade.id, this.form.controls.reason.value, marks);
         this.close();
         this.stopMarking();
-        this.grades.set(await this.read(this.classroomId(), this.assessmentId()));
+        await this.grades.reload(() => this.read(classroomId, assessmentId));
       },
       grade.release_policy === 'manual'
         ? 'Grade finalized. Students see it when you release the results.'
@@ -277,7 +286,6 @@ export class ReviewComponent {
 
   askRelease(): void {
     this.releasing.set(true);
-    this.releaseState.error.set('');
     this.releaseDialog?.show();
   }
 
@@ -288,11 +296,12 @@ export class ReviewComponent {
 
   release(): void {
     const assessmentId = this.assessmentId();
+    const classroomId = this.classroomId();
     if (!assessmentId) return;
     void this.releaseState.run(async () => {
       const result = await this.grading.release(assessmentId);
       this.closeRelease();
-      this.grades.set(await this.read(this.classroomId(), assessmentId));
+      await this.grades.reload(() => this.read(classroomId, assessmentId));
       this.state.message.set(
         `${result.released} ${result.released === 1 ? 'result' : 'results'} released to students.`,
       );

@@ -108,8 +108,9 @@ export class MaterialsComponent implements OnDestroy {
         .then((read) => (read ? this.schedule() : this.polling.set(false)));
     }, 5000);
   }
-  private show(docs: DocumentRecord[]): void {
-    this.documents.set(docs);
+  /** Re-reads the list after a change; it lands only while the user is still in that classroom. */
+  private async reread(classroomId: string): Promise<void> {
+    await this.documents.reload(() => this.content.documents(classroomId));
     this.schedule();
   }
   status(doc: DocumentRecord) {
@@ -119,7 +120,8 @@ export class MaterialsComponent implements OnDestroy {
     return DOC_TYPES.find((t) => t.value === type)?.label || type;
   }
   selectFile(event: Event): void {
-    const file = (event.target as HTMLInputElement).files?.[0] || null;
+    const input = event.target as HTMLInputElement;
+    const file = input.files?.[0] || null;
     const pdf = !!file && isPdf(file);
     if (
       file &&
@@ -127,13 +129,15 @@ export class MaterialsComponent implements OnDestroy {
     ) {
       this.state.error.set('Choose a nonempty PDF up to 50 MiB or .txt file up to 5 MiB.');
       this.file.set(null);
+      // The picker would otherwise still name the refused file.
+      input.value = '';
       return;
     }
     this.file.set(file);
     this.form.markAsDirty();
   }
   upload(): void {
-    if (!this.state.validate(this.form)) return;
+    if (!this.state.validate(this.form, 'upload-form')) return;
     const file = this.file();
     if (!file) {
       this.state.error.set('Choose a file to upload.');
@@ -141,13 +145,14 @@ export class MaterialsComponent implements OnDestroy {
     }
     const pdf = isPdf(file);
     const { title, doc_type } = this.form.getRawValue();
+    const classroomId = this.classroomId();
     void this.state.run(
       async () => {
-        await this.content.upload(this.classroomId(), title, doc_type, file);
+        await this.content.upload(classroomId, title, doc_type, file);
         this.form.reset();
         this.file.set(null);
         if (this.fileInput) this.fileInput.nativeElement.value = '';
-        this.show(await this.content.documents(this.classroomId()));
+        await this.reread(classroomId);
       },
       pdf
         ? 'Document uploaded. Indexing has started.'
@@ -155,9 +160,10 @@ export class MaterialsComponent implements OnDestroy {
     );
   }
   reindex(doc: DocumentRecord): void {
+    const classroomId = this.classroomId();
     void this.state.run(async () => {
       await this.content.reindex(doc.id);
-      this.show(await this.content.documents(this.classroomId()));
+      await this.reread(classroomId);
     }, 'Indexing has started.');
   }
 }

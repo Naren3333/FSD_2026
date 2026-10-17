@@ -43,6 +43,7 @@ SENTENCE_END = re.compile(r"(?<=[.!?])\s+(?=[A-Z0-9\"“(])")
 CONTINUED = "(cont.)"
 DESCRIBED = "described by AI"
 MAX_LABEL_TOKENS = 300  # a figure's own words, as embedded
+MIN_ROW_TOKENS = 100  # room for rows in a table chunk, even when the caption and header alone fill MAX_TOKENS
 TRANSCRIBED = "(transcribed from an image)"
 STUB_WORDS = 5  # a text chunk shorter than this is dropped when another chunk covers its page
 LABEL = re.compile(r"\b(fig(?:ure)?s?\.?|tables?|exhibits?)\s*(\d+[a-z]?)\b", re.IGNORECASE)
@@ -178,11 +179,13 @@ def _table_chunks(enc: tiktoken.Encoding, para: Para) -> list[Chunk]:
     caption = " ".join(x for x in (table.caption, TRANSCRIBED if table.source == "vision" else None) if x)
     lines = markdown_lines(table)
     head, row_lines = lines[:2], lines[2:]
-    budget = (
+    # A very wide header leaves no room under MAX_TOKENS: its chunks then run over it rather than lose rows.
+    budget = max(
+        MIN_ROW_TOKENS,
         MAX_TOKENS
         - WINDOW_SLACK
         - _tokens(enc, f"{caption} {CONTINUED}")
-        - sum(_tokens(enc, h) + 1 for h in head)
+        - sum(_tokens(enc, h) + 1 for h in head),
     )
     rows: list[tuple[tuple[str, ...], str]] = []
     for row, line in zip(table.rows, row_lines, strict=False):

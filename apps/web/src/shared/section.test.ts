@@ -62,4 +62,23 @@ describe('Section', () => {
     expect(await section.poll(() => Promise.reject(new Error('offline')))).toBe(false);
     expect([section.value(), section.error()]).toEqual([2, '']);
   });
+
+  it('reloads after a mutation only while nothing newer started, such as a load for another classroom', async () => {
+    const section = new Section<string>();
+    const reread = deferred<string>();
+    const reload = section.reload(() => reread.promise);
+    await section.load(() => Promise.resolve('classroom B'));
+    reread.resolve('classroom A');
+    await reload;
+    expect([section.value(), section.loading()]).toEqual(['classroom B', false]);
+
+    const pending = deferred<string>();
+    const load = section.load(() => pending.promise);
+    await section.reload(() => Promise.resolve('after the mutation'));
+    pending.resolve('older load');
+    await load;
+    expect([section.value(), section.loading()]).toEqual(['after the mutation', false]);
+    await expect(section.reload(() => Promise.reject(new Error('offline')))).rejects.toThrow('offline');
+    expect([section.value(), section.loading(), section.error()]).toEqual(['after the mutation', false, '']);
+  });
 });

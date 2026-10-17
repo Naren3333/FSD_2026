@@ -38,9 +38,9 @@ class VisionConfig:
     max_pages: int
     figure_model: str | None = None  # None: figures aren't described, so not indexed
     ocr_model: str | None = None  # None: pages without a text layer aren't transcribed
-    table_model: str | None = (
-        None  # lays out tables no method could read (ingest.rescue); None: they stay prose
-    )
+    # lays out tables no method could read (ingest.rescue); None (tests only: the service always sets it): they
+    # stay prose
+    table_model: str | None = None
 
 
 def vision_config(settings: Settings) -> VisionConfig | None:
@@ -85,10 +85,13 @@ async def ingest(path: Path, title: str, vision_cfg: VisionConfig | None) -> Ing
     if not chunks:
         raise IngestError("NO_TEXT_LAYER", "No text to index")
     texts = [embed_text(title, c) for c in chunks]
+    tally = openai_client.Tally()
     with costs.stage("embed"):
-        vectors, embed_tokens = await openai_client.embed(texts)
-    if record:
-        record.embed_inputs, record.embed_tokens = len(chunks), embed_tokens
+        try:
+            vectors, _ = await openai_client.embed(texts, tally)
+        finally:
+            if record:  # the batches answered before a failure are paid for too
+                record.embed_inputs, record.embed_tokens = len(chunks), tally.tokens
     crops = {f.image: f.png for page in document.figures for f in page}
     figures = {c.image: crops[c.image] for c in chunks if c.image and c.image in crops}
     chunks = [c if c.image in figures else replace(c, image=None) for c in chunks]

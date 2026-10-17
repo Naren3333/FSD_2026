@@ -43,6 +43,17 @@ func (m *memoryStore) put(ctx context.Context, key string, data []byte, contentT
 	return nil
 }
 
+func (m *memoryStore) removeAll(_ context.Context, prefix string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	for key := range m.objects {
+		if strings.HasPrefix(key, prefix) {
+			delete(m.objects, key)
+		}
+	}
+	return nil
+}
+
 func testDB(t *testing.T) *pgxpool.Pool {
 	url := os.Getenv("CONTENT_TEST_DATABASE_URL")
 	if url == "" {
@@ -252,6 +263,52 @@ func TestADuplicateRunCannotOverwriteOrEmitTwice(t *testing.T) {
 	}
 }
 
+// purgeClassroom applies Identity's deletion of the fixture's classroom, as the consumer does.
+func (f *fixture) purgeClassroom() {
+	ctx := context.Background()
+	data, _ := json.Marshal(platform.ClassroomDeleted{Classroom: f.room, Org: f.org})
+	tx, err := f.db.Begin(ctx)
+	if err != nil {
+		f.t.Fatal(err)
+	}
+	defer tx.Rollback(ctx)
+	if err = (purger{f.store}).purge(ctx, tx, platform.Event{Resource: f.room, Data: data}); err != nil {
+		f.t.Fatal(err)
+	}
+	if err = tx.Commit(ctx); err != nil {
+		f.t.Fatal(err)
+	}
+}
+
+func TestAPurgeDuringIndexingLeavesNoCropsAndRefusesLateUploads(t *testing.T) {
+	f := newFixture(t)
+	id := f.upload("teaching_material")
+	ctx := context.Background()
+	running, err := f.x.claim(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// The classroom is deleted while the run is with ai-core; the run then stores its crops and loses its lease.
+	reply := f.reply(indexedResult())
+	f.ai.ingest = func(w http.ResponseWriter, r *http.Request) {
+		f.purgeClassroom()
+		reply(w, r)
+	}
+	if err = f.x.process(ctx, running); err != nil {
+		t.Fatal(err)
+	}
+	for key := range f.store.objects {
+		if strings.HasPrefix(key, f.org+"/"+id+"/") {
+			t.Errorf("%s survived the purge", key)
+		}
+	}
+	// An upload that was already under way when the purge ran is refused.
+	late := newDocument{Document: Document{ID: uuid.NewString(), Classroom: f.room, Title: "Late", Type: mimeText, Status: statusExtracted, Revision: 1, SHA: strings.Repeat("b", 64), DocType: docTeachingMaterial, Chunks: []Chunk{}}, Org: f.org, Owner: "teacher", Key: "late"}
+	if _, err = f.s.store.insertDocument(ctx, late); !errors.Is(err, errClassroomPurged) {
+		t.Fatalf("upload into a purged classroom: %v", err)
+	}
+}
+
 func TestAnOutageIsRetriedThenFailsTheDocument(t *testing.T) {
 	f := newFixture(t)
 	id := f.upload("teaching_material")
@@ -294,7 +351,8 @@ func TestAnUnreadablePDFFailsWithItsReasonAndReindexRecovers(t *testing.T) {
 	}
 	f.ai.ingest = f.reply(map[string]any{"outcome": "failed", "failure_reason": "ENCRYPTED", "failure_detail": "password"})
 	f.runAll()
-	if got := f.value("SELECT status||' '||failure_reason||' '||failure_detail||' '||(SELECT count(*) FROM document_chunks) FROM documents WHERE id=$1", id); got != "failed ENCRYPTED password 0" {
+	// The failed reindex keeps the earlier chunks searchable.
+	if got := f.value("SELECT status||' '||failure_reason||' '||failure_detail||' '||(SELECT count(*) FROM document_chunks) FROM documents WHERE id=$1", id); got != "failed ENCRYPTED password 2" {
 		t.Fatal(got)
 	}
 	f.ai.ingest = f.reply(indexedResult())

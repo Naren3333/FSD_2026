@@ -138,13 +138,14 @@ class Turn:
         except Exception:
             log.exception("thread %s: chat turn failed", self.thread["id"])
             error = ("INTERNAL_ERROR", "The answer failed.")
-        # Saved before the last events, so a disconnect while they are sent can't lose the row.
+        # Saved before the last events, so a disconnect while they are sent can't lose the row, and shielded, so a
+        # disconnect during the save can't either: the save carries on and the lifespan waits for it.
         if error is None:
-            message_id = await self._save(self.outcome)
+            message_id = await asyncio.shield(self._save_detached(self.outcome))
             yield sse_event("citations", {"citations": self._citations()})
             yield sse_event("done", {"message_id": message_id, "outcome": self.outcome})
         else:
-            await self._save("error")
+            await asyncio.shield(self._save_detached("error"))
             data: dict[str, Any] = {"code": error[0], "message": error[1]}
             if resets_at:
                 data["resets_at"] = resets_at
@@ -281,13 +282,15 @@ class Turn:
         )
         return message_id
 
-    def _save_detached(self, outcome: str) -> None:
+    def _save_detached(self, outcome: str) -> asyncio.Task[str]:
+        """Save in a task of its own, which a cancelled request does not cancel."""
         task = asyncio.get_running_loop().create_task(self._save(outcome))
         self.pending.add(task)  # a strong reference until it finishes; the lifespan waits for these
         task.add_done_callback(self.pending.discard)
         task.add_done_callback(_log_failure)
+        return task
 
 
 def _log_failure(task: asyncio.Task[Any]) -> None:
     if not task.cancelled() and task.exception() is not None:
-        log.error("saving an interrupted answer failed", exc_info=task.exception())
+        log.error("saving an answer failed", exc_info=task.exception())

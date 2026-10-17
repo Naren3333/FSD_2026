@@ -54,9 +54,21 @@ def status(url: str) -> int:
 
 
 def applications_ready() -> bool:
+    """Whether every application answers ready. A probe that hangs, or prints something other than its JSON
+    (analytics still starting, say), counts as not ready yet, to be asked again."""
     command = ["docker", "compose", "exec", "-T", "analytics", "python", "-c", PROBE]
-    result = subprocess.run(command, cwd=ROOT, text=True, capture_output=True, timeout=40, check=False)
-    return result.returncode == 0 and all(value == 200 for value in json.loads(result.stdout).values())
+    try:
+        result = subprocess.run(
+            command, cwd=ROOT, text=True, encoding="utf-8", capture_output=True, timeout=40, check=False
+        )
+        statuses = json.loads(result.stdout) if result.returncode == 0 else {}
+    except (subprocess.TimeoutExpired, ValueError):
+        return False
+    return (
+        isinstance(statuses, dict)
+        and len(statuses) == len(SERVICES)
+        and all(value == 200 for value in statuses.values())
+    )
 
 
 def public_ports_ready() -> bool:
@@ -71,11 +83,16 @@ def wait(ready: Callable[[], bool], deadline: float) -> bool:
     return False
 
 
-deadline = time.monotonic() + TIMEOUT
-if not wait(applications_ready, deadline):
-    raise SystemExit(f"Applications did not become ready within {TIMEOUT} seconds")
-print("PASS: all ten applications ready")
-if not wait(public_ports_ready, deadline):
-    states = ", ".join(f"{name} {status(url)}" for name, (url, _) in PUBLIC.items())
-    raise SystemExit(f"Kong or Keycloak did not answer within {TIMEOUT} seconds: {states}")
-print("PASS: Kong and Keycloak answer on their public ports")
+def main() -> None:
+    deadline = time.monotonic() + TIMEOUT
+    if not wait(applications_ready, deadline):
+        raise SystemExit(f"Applications did not become ready within {TIMEOUT} seconds")
+    print("PASS: all ten applications ready")
+    if not wait(public_ports_ready, deadline):
+        states = ", ".join(f"{name} {status(url)}" for name, (url, _) in PUBLIC.items())
+        raise SystemExit(f"Kong or Keycloak did not answer within {TIMEOUT} seconds: {states}")
+    print("PASS: Kong and Keycloak answer on their public ports")
+
+
+if __name__ == "__main__":
+    main()

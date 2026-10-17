@@ -4,7 +4,7 @@ services:
     # Postgres 17 with pgvector, for Content's chunk embeddings (docs/decisions/0002-ai-integration.md)
     image: pgvector/pgvector:0.8.1-pg17
     environment:
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Run scripts/setup.py}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Run scripts/setup.py or scripts/upgrade_local.py}
     volumes:
     - postgres-data:/var/lib/postgresql/data
     - ./.local/postgres-init.sql:/docker-entrypoint-initdb.d/01-services.sql:ro
@@ -23,7 +23,7 @@ services:
     - --import-realm
     environment:
       KC_BOOTSTRAP_ADMIN_USERNAME: admin
-      KC_BOOTSTRAP_ADMIN_PASSWORD: ${KEYCLOAK_ADMIN_PASSWORD}
+      KC_BOOTSTRAP_ADMIN_PASSWORD: ${KEYCLOAK_ADMIN_PASSWORD:?Run scripts/setup.py or scripts/upgrade_local.py}
       KC_HOSTNAME: http://localhost:8081
       KC_HOSTNAME_BACKCHANNEL_DYNAMIC: 'true'
       KC_HEALTH_ENABLED: 'true'
@@ -32,6 +32,21 @@ services:
     volumes:
     - ./.local/learning-realm.json:/opt/keycloak/data/import/learning-realm.json:ro
     - keycloak-data:/opt/keycloak/data
+    healthcheck:
+      # The image has no curl or wget: ask the management port's readiness check with bash's /dev/tcp and read
+      # the status code from the response's first line.
+      test:
+      - CMD
+      - bash
+      - -c
+      - >-
+        exec 3<>/dev/tcp/127.0.0.1/9000 &&
+        printf 'GET /health/ready HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n' >&3 &&
+        read -r _ code _ <&3 && [ "$$code" = 200 ]
+      interval: 5s
+      timeout: 5s
+      start_period: 30s
+      retries: 60
   kafka:
     image: apache/kafka:4.1.2
     environment:
@@ -78,10 +93,10 @@ services:
   seaweedfs:
     image: chrislusf/seaweedfs:4.48
     environment:
-      ROOT_USER: ${S3_ROOT_USER}
-      ROOT_PASSWORD: ${S3_ROOT_PASSWORD}
-      CONTENT_USER: ${S3_CONTENT_USER}
-      CONTENT_PASSWORD: ${S3_CONTENT_PASSWORD}
+      ROOT_USER: ${S3_ROOT_USER:?Run scripts/setup.py or scripts/upgrade_local.py}
+      ROOT_PASSWORD: ${S3_ROOT_PASSWORD:?Run scripts/setup.py or scripts/upgrade_local.py}
+      CONTENT_USER: ${S3_CONTENT_USER:?Run scripts/setup.py or scripts/upgrade_local.py}
+      CONTENT_PASSWORD: ${S3_CONTENT_PASSWORD:?Run scripts/setup.py or scripts/upgrade_local.py}
     entrypoint:
     - /bin/sh
     - -ec
@@ -113,7 +128,8 @@ services:
   gateway-config:
     image: python:3.13.7-alpine
     depends_on:
-    - keycloak
+      keycloak:
+        condition: service_healthy
     volumes:
     - ./infra/kong/bootstrap.py:/bootstrap.py:ro
     - kong-config:/output
@@ -153,8 +169,7 @@ services:
       OIDC_ISSUER: http://localhost:8081/realms/learning
       OIDC_JWKS_URL: http://keycloak:8080/realms/learning/protocol/openid-connect/certs
       OIDC_AUDIENCE: learning
-      DATABASE_URL: postgresql://identity:${IDENTITY_DB_PASSWORD}@postgres:5432/identity?sslmode=disable
-      IDENTITY_URL: http://identity:8080
+      DATABASE_URL: postgresql://identity:${IDENTITY_DB_PASSWORD:?Run scripts/setup.py or scripts/upgrade_local.py}@postgres:5432/identity?sslmode=disable
       KAFKA_BROKERS: kafka:9092
     depends_on:
       keycloak:
@@ -174,7 +189,7 @@ services:
       OIDC_ISSUER: http://localhost:8081/realms/learning
       OIDC_JWKS_URL: http://keycloak:8080/realms/learning/protocol/openid-connect/certs
       OIDC_AUDIENCE: learning
-      DATABASE_URL: postgresql://curriculum:${CURRICULUM_DB_PASSWORD}@postgres:5432/curriculum?sslmode=disable
+      DATABASE_URL: postgresql://curriculum:${CURRICULUM_DB_PASSWORD:?Run scripts/setup.py or scripts/upgrade_local.py}@postgres:5432/curriculum?sslmode=disable
       IDENTITY_URL: http://identity:8080
     depends_on:
       keycloak:
@@ -192,19 +207,19 @@ services:
       OIDC_ISSUER: http://localhost:8081/realms/learning
       OIDC_JWKS_URL: http://keycloak:8080/realms/learning/protocol/openid-connect/certs
       OIDC_AUDIENCE: learning
-      DATABASE_URL: postgresql://content:${CONTENT_DB_PASSWORD}@postgres:5432/content?sslmode=disable
+      DATABASE_URL: postgresql://content:${CONTENT_DB_PASSWORD:?Run scripts/setup.py or scripts/upgrade_local.py}@postgres:5432/content?sslmode=disable
       IDENTITY_URL: http://identity:8080
       KAFKA_BROKERS: kafka:9092
       S3_ENDPOINT: seaweedfs:8333
-      S3_ACCESS_KEY: ${S3_CONTENT_USER}
-      S3_SECRET_KEY: ${S3_CONTENT_PASSWORD}
+      S3_ACCESS_KEY: ${S3_CONTENT_USER:?Run scripts/setup.py or scripts/upgrade_local.py}
+      S3_SECRET_KEY: ${S3_CONTENT_PASSWORD:?Run scripts/setup.py or scripts/upgrade_local.py}
       S3_BUCKET: documents
       S3_SECURE: 'false'
       # The indexing worker and search call ai-core as the content-indexer service account (ADR 0002).
       AI_CORE_URL: http://ai-core:8080
       AI_TOKEN_URL: http://keycloak:8080/realms/learning/protocol/openid-connect/token
       AI_CLIENT_ID: content-indexer
-      AI_CLIENT_SECRET: ${CONTENT_INDEXER_CLIENT_SECRET:?Run scripts/setup.py}
+      AI_CLIENT_SECRET: ${CONTENT_INDEXER_CLIENT_SECRET:?Run scripts/setup.py or scripts/upgrade_local.py}
     depends_on:
       keycloak:
         condition: service_started
@@ -225,7 +240,7 @@ services:
       OIDC_ISSUER: http://localhost:8081/realms/learning
       OIDC_JWKS_URL: http://keycloak:8080/realms/learning/protocol/openid-connect/certs
       OIDC_AUDIENCE: learning
-      DATABASE_URL: postgresql://assessment:${ASSESSMENT_DB_PASSWORD}@postgres:5432/assessment?sslmode=disable
+      DATABASE_URL: postgresql://assessment:${ASSESSMENT_DB_PASSWORD:?Run scripts/setup.py or scripts/upgrade_local.py}@postgres:5432/assessment?sslmode=disable
       IDENTITY_URL: http://identity:8080
       KAFKA_BROKERS: kafka:9092
       CURRICULUM_URL: http://curriculum:8080
@@ -247,7 +262,7 @@ services:
       OIDC_ISSUER: http://localhost:8081/realms/learning
       OIDC_JWKS_URL: http://keycloak:8080/realms/learning/protocol/openid-connect/certs
       OIDC_AUDIENCE: learning
-      DATABASE_URL: postgresql://grading:${GRADING_DB_PASSWORD}@postgres:5432/grading?sslmode=disable
+      DATABASE_URL: postgresql://grading:${GRADING_DB_PASSWORD:?Run scripts/setup.py or scripts/upgrade_local.py}@postgres:5432/grading?sslmode=disable
       IDENTITY_URL: http://identity:8080
       KAFKA_BROKERS: kafka:9092
       # AI marking suggestions (ADR 0004), billed to the assessment's teacher through ai-core.
@@ -273,9 +288,11 @@ services:
       OIDC_ISSUER: http://localhost:8081/realms/learning
       OIDC_JWKS_URL: http://keycloak:8080/realms/learning/protocol/openid-connect/certs
       OIDC_AUDIENCE: learning
-      DATABASE_URL: postgresql://analytics:${ANALYTICS_DB_PASSWORD}@postgres:5432/analytics?sslmode=disable
+      DATABASE_URL: postgresql://analytics:${ANALYTICS_DB_PASSWORD:?Run scripts/setup.py or scripts/upgrade_local.py}@postgres:5432/analytics?sslmode=disable
       IDENTITY_URL: http://identity:8080
       KAFKA_BROKERS: kafka:9092
+      # A new group re-reads every retained event, for rebuilding into a new database (operations.md).
+      KAFKA_GROUP: ${ANALYTICS_KAFKA_GROUP:-analytics-v1}
     depends_on:
       keycloak:
         condition: service_started
@@ -304,7 +321,7 @@ services:
       RERANKER_MODEL: rerank-3
       AI_CORE_CACHE_DIR: /var/cache/ai-core
       # Per-user daily AI spend (ADR 0003). Run scripts/upgrade_local.py if .env predates this database.
-      DATABASE_URL: postgresql://aicore:${AICORE_DB_PASSWORD:?Run scripts/upgrade_local.py}@postgres:5432/aicore?sslmode=disable
+      DATABASE_URL: postgresql://aicore:${AICORE_DB_PASSWORD:?Run scripts/setup.py or scripts/upgrade_local.py}@postgres:5432/aicore?sslmode=disable
       SPEND_LIMIT_STUDENT_USD: '5'
       SPEND_LIMIT_TEACHER_USD: '10'
       SPEND_TIMEZONE: Asia/Singapore
@@ -355,14 +372,14 @@ services:
       OIDC_JWKS_URL: http://keycloak:8080/realms/learning/protocol/openid-connect/certs
       OIDC_AUDIENCE: learning
       # Threads and messages only (ADR 0002). Run scripts/upgrade_local.py if .env predates this database.
-      DATABASE_URL: postgresql://chatbot:${CHATBOT_DB_PASSWORD:?Run scripts/upgrade_local.py}@postgres:5432/chatbot?sslmode=disable
+      DATABASE_URL: postgresql://chatbot:${CHATBOT_DB_PASSWORD:?Run scripts/setup.py or scripts/upgrade_local.py}@postgres:5432/chatbot?sslmode=disable
       IDENTITY_URL: http://identity:8080
       # Searches run with the user's own token; ai-core gets this agent's service account.
       CONTENT_URL: http://content:8080
       AI_CORE_URL: http://ai-core:8080
       AI_TOKEN_URL: http://keycloak:8080/realms/learning/protocol/openid-connect/token
       AI_CLIENT_ID: question-chatbot-agent
-      AI_CLIENT_SECRET: ${QUESTION_CHATBOT_AGENT_CLIENT_SECRET:?Run scripts/setup.py}
+      AI_CLIENT_SECRET: ${QUESTION_CHATBOT_AGENT_CLIENT_SECRET:?Run scripts/setup.py or scripts/upgrade_local.py}
       # Purges a deleted classroom's threads (identity.classroom.deleted.v1).
       KAFKA_BROKERS: kafka:9092
     depends_on:
@@ -382,7 +399,8 @@ services:
     ports:
     - 127.0.0.1:4200:80
     depends_on:
-    - kong
+      kong:
+        condition: service_healthy
 volumes:
   postgres-data: {}
   keycloak-data: {}

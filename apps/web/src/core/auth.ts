@@ -1,4 +1,4 @@
-import { Injectable, inject } from '@angular/core';
+import { Injectable, inject, signal } from '@angular/core';
 import Keycloak from 'keycloak-js';
 import { APP_CONFIG } from './config';
 
@@ -6,6 +6,9 @@ import { APP_CONFIG } from './config';
 @Injectable({ providedIn: 'root' })
 export class Auth {
   private readonly keycloak = new Keycloak(inject(APP_CONFIG).keycloak);
+  /** Signed in once, but the session can no longer be refreshed (or an API refused the token): the user must sign
+   * in again. The page, and any unsaved work on it, stays until they do. */
+  readonly expired = signal(false);
 
   /**
    * Completes a sign-in redirect if there is one, otherwise asks Keycloak (without showing its login page) whether
@@ -39,6 +42,7 @@ export class Auth {
     try {
       await this.keycloak.updateToken(30);
     } catch {
+      this.expired.set(true);
       throw new Error('Your session expired. Sign in again; your unsaved work is still here.');
     }
     return this.keycloak.token ?? '';

@@ -89,7 +89,7 @@ export class PerformanceComponent {
   }
 
   load(): void {
-    if (!this.state.validate(this.form)) return;
+    if (!this.state.validate(this.form, 'performance-form')) return;
     this.state.error.set('');
     const studentId = this.form.controls.student.value;
     const classroomId = this.classroomId();

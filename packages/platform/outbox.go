@@ -101,9 +101,13 @@ func (o Outbox) publishBatch(ctx context.Context, writer *kafka.Writer) (int, er
 	return len(batch), nil
 }
 
-// dueRows locks up to OutboxBatch unpublished rows whose next attempt is due, oldest first.
+// dueRows locks up to OutboxBatch unpublished rows whose next attempt is due, oldest first. A row waits while an
+// older event with the same topic and key is backing off after a failed delivery, so one resource's events are not
+// published out of order.
 func dueRows(ctx context.Context, tx pgx.Tx) ([]outboxRow, error) {
-	rows, err := tx.Query(ctx, `SELECT id,topic,partition_key,body FROM outbox WHERE published_at IS NULL AND attempts<$1 AND next_attempt<=now() ORDER BY created_at FOR UPDATE SKIP LOCKED LIMIT $2`, OutboxMaxAttempts, OutboxBatch)
+	rows, err := tx.Query(ctx, `SELECT id,topic,partition_key,body FROM outbox o WHERE published_at IS NULL AND attempts<$1 AND next_attempt<=now()
+		AND NOT EXISTS(SELECT 1 FROM outbox p WHERE p.topic=o.topic AND p.partition_key=o.partition_key AND p.published_at IS NULL AND p.attempts<$1 AND p.next_attempt>now() AND p.created_at<o.created_at)
+		ORDER BY created_at FOR UPDATE SKIP LOCKED LIMIT $2`, OutboxMaxAttempts, OutboxBatch)
 	if err != nil {
 		return nil, err
 	}

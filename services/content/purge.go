@@ -13,7 +13,8 @@ type folders interface {
 }
 
 // purger removes a deleted classroom's documents: their rows (the chunks, vectors and indexing jobs go with them),
-// their originals and figure crops in object storage, and any of their events not yet published.
+// their originals and figure crops in object storage, and any of their events not yet published. It records the
+// classroom as purged, so an upload still under way is refused.
 type purger struct{ files folders }
 
 // purge runs in the consumer's transaction. The objects are removed before the transaction commits, so a failure
@@ -22,6 +23,13 @@ type purger struct{ files folders }
 func (p purger) purge(ctx context.Context, tx pgx.Tx, event platform.Event) error {
 	v, err := platform.DecodeClassroomDeleted(event)
 	if err != nil {
+		return err
+	}
+	// Waits for uploads into the classroom that are committing, and makes later ones see it purged.
+	if _, err = tx.Exec(ctx, "SELECT pg_advisory_xact_lock($1::int, hashtext($2::uuid::text))", classroomLock, v.Classroom); err != nil {
+		return err
+	}
+	if _, err = tx.Exec(ctx, "INSERT INTO purged_classrooms(classroom_id,org_id) VALUES($1,$2) ON CONFLICT DO NOTHING", v.Classroom, v.Org); err != nil {
 		return err
 	}
 	rows, err := tx.Query(ctx, "DELETE FROM documents WHERE classroom_id=$1 AND org_id=$2 RETURNING id::text", v.Classroom, v.Org)

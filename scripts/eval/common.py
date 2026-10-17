@@ -49,8 +49,8 @@ def password(user: str, state: dict) -> str:
 
 class Session:
     """Gateway calls as a local test user (the learning-e2e client, as scripts/integration.py does). Access tokens
-    are short-lived, so a 401 signs in again once. Kong allows 120 requests a minute for everyone, so a 429
-    waits and retries."""
+    are short-lived, so a 401 signs in again once. Kong allows each signed-in session (bearer token) 120 requests a
+    minute, which a long run of queries can reach, so a 429 waits and retries."""
 
     def __init__(self, user: str, state: dict) -> None:
         self.user, self.secret = user, password(user, state)

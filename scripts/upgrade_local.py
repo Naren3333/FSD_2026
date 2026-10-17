@@ -9,25 +9,42 @@ a running Keycloak still need a fresh volume (see operations.md).
 """
 
 import json
-import secrets
 from pathlib import Path
 
 from local_stack import ROOT, admin_client, check, psql, psql_value, read_env
-from setup import AI_CLIENTS, SERVICES, client_secret_key, password_key, realm, service_client
+from setup import (
+    AI_CLIENTS,
+    PEOPLE,
+    SERVICES,
+    client_secret_key,
+    generate_secrets,
+    password_key,
+    realm,
+    service_client,
+)
+
+# Values only read when a volume is first created: added to an .env that lacks them, they do not change a running
+# PostgreSQL superuser, Keycloak admin or local person, whose existing passwords stay in effect.
+FIRST_START_ONLY = {"POSTGRES_PASSWORD", "KEYCLOAK_ADMIN_PASSWORD", *(key for _, _, key in PEOPLE)}
 
 
 def add_missing_secrets(env_path: Path) -> dict[str, str]:
-    """Appends a database password for each service and a client secret for each AI client .env lacks; returns
-    every value in .env."""
+    """Appends every value scripts/setup.py generates that .env lacks (a database password per service, a client
+    secret per AI client, and so on) and returns every value in .env. Existing lines are never changed."""
     text = env_path.read_text(encoding="utf-8")
     env = read_env(env_path)
-    keys = [password_key(name) for name in SERVICES] + [client_secret_key(c) for c in AI_CLIENTS]
-    added = {key: secrets.token_hex(20) for key in keys if not env.get(key)}
+    added = {key: value for key, value in generate_secrets().items() if not env.get(key)}
     if added:
         lines = "".join(f"{k}={v}\n" for k, v in added.items())
         env_path.write_text(text.rstrip("\n") + "\n" + lines, encoding="utf-8")
         env.update(added)
         print("Added to .env: " + ", ".join(added))
+        stale = sorted(FIRST_START_ONLY & added.keys())
+        if stale:
+            print(
+                "Note: " + ", ".join(stale) + " only take effect on fresh volumes; existing ones keep their "
+                "passwords (see operations.md)."
+            )
     return env
 
 

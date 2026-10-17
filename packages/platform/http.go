@@ -99,20 +99,29 @@ func Unauthenticated(w http.ResponseWriter, message string) {
 }
 
 // Decode reads one JSON value of at most 2 MiB into target, rejecting unknown fields. On failure it has already
-// written a 422 response.
+// written the response: 413 for a body over the limit, 422 otherwise.
 func Decode(w http.ResponseWriter, r *http.Request, target any) bool {
 	r.Body = http.MaxBytesReader(w, r.Body, 2<<20)
 	d := json.NewDecoder(r.Body)
 	d.DisallowUnknownFields()
 	if err := d.Decode(target); err != nil {
-		Invalid(w, "Request body does not match the contract.")
+		decodeFailed(w, err, "Request body does not match the contract.")
 		return false
 	}
 	if err := d.Decode(new(any)); err != io.EOF {
-		Invalid(w, "Expected one JSON value.")
+		decodeFailed(w, err, "Expected one JSON value.")
 		return false
 	}
 	return true
+}
+
+func decodeFailed(w http.ResponseWriter, err error, message string) {
+	var tooBig *http.MaxBytesError
+	if errors.As(err, &tooBig) {
+		Error(w, http.StatusRequestEntityTooLarge, "PAYLOAD_TOO_LARGE", "Request body must be at most 2 MiB.")
+		return
+	}
+	Invalid(w, message)
 }
 
 // ID reports whether value is a UUID.

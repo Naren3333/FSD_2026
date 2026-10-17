@@ -39,7 +39,12 @@ class NotConfiguredError(Exception):
 
 
 class StructuredOutputError(Exception):
-    """A refusal, or a cut-off or filtered reply, in JSON-schema mode. Not an OpenAIError, so never retried."""
+    """A refusal, or a cut-off or filtered reply, in JSON-schema mode. Not an OpenAIError, so never retried. OpenAI
+    still bills the reply, so it carries the reply's `usage` and `text` for the caller to charge."""
+
+    def __init__(self, message: str, usage: "Usage | None" = None, text: str = "") -> None:
+        super().__init__(message)
+        self.usage, self.text = usage, text
 
 
 @dataclass(frozen=True)
@@ -72,9 +77,17 @@ def get_client() -> AsyncOpenAI:
     return _client
 
 
-async def embed(texts: list[str]) -> tuple[list[list[float]], int]:
+@dataclass
+class Tally:
+    """The prompt tokens of the embedding batches answered so far: what the caller owes even when a later batch
+    fails."""
+
+    tokens: int = 0
+
+
+async def embed(texts: list[str], tally: Tally | None = None) -> tuple[list[list[float]], int]:
     """Vectors in input order, and the prompt tokens they took. Batches of EMBED_BATCH are sent one after
-    another, each retried on its own."""
+    another, each retried on its own; `tally` counts the tokens of each batch as it is answered."""
     if not texts:
         return [], 0
     client, model = get_client(), get_settings().embedding_model
@@ -91,6 +104,8 @@ async def embed(texts: list[str]) -> tuple[list[list[float]], int]:
             placed[item.index] = item.embedding
         vectors += placed
         tokens += result.usage.prompt_tokens
+        if tally is not None:
+            tally.tokens += result.usage.prompt_tokens
     log.info(
         "embed: model=%s inputs=%d batches=%d tokens=%d",
         model,
@@ -174,12 +189,13 @@ async def generate(
         )
     )
     choice = result.choices[0]
-    if schema is not None:
-        if choice.message.refusal:
-            raise StructuredOutputError(f"{name}: refused")
-        if choice.finish_reason in ("length", "content_filter"):
-            raise StructuredOutputError(f"{name}: finish_reason={choice.finish_reason}")
     usage = usage_of(result.usage)
+    if schema is not None:
+        text = choice.message.content or ""
+        if choice.message.refusal:
+            raise StructuredOutputError(f"{name}: refused", usage, choice.message.refusal)
+        if choice.finish_reason in ("length", "content_filter"):
+            raise StructuredOutputError(f"{name}: finish_reason={choice.finish_reason}", usage, text)
     log.info(
         "generate: %s model=%s tokens_in=%s cached_in=%s tokens_out=%s finish_reason=%s",
         name or "-",
@@ -198,7 +214,7 @@ async def call[T](fn: Callable[[], Awaitable[T]]) -> T:
         try:
             return await fn()
         except openai.OpenAIError as exc:
-            if attempt == MAX_ATTEMPTS or not _retryable(exc):
+            if attempt == MAX_ATTEMPTS or not retryable(exc):
                 raise
             delay = _delay(exc, attempt)
             if delay > MAX_DELAY:
@@ -218,7 +234,7 @@ def deterministic_options(model: str) -> dict[str, Any]:
     return {"temperature": 0}
 
 
-def _retryable(exc: openai.OpenAIError) -> bool:
+def retryable(exc: openai.OpenAIError) -> bool:
     match exc:
         case openai.APITimeoutError():  # subclass of APIConnectionError, so it must come first
             return False
@@ -232,8 +248,8 @@ def _retryable(exc: openai.OpenAIError) -> bool:
             return False
 
 
-def _delay(exc: openai.OpenAIError, attempt: int) -> float:
-    """OpenAI's Retry-After when given, otherwise exponential backoff with full jitter."""
+def retry_after(exc: openai.OpenAIError) -> float | None:
+    """OpenAI's Retry-After, in seconds, when the error carries one."""
     if isinstance(exc, openai.APIStatusError):
         headers = exc.response.headers
         try:
@@ -243,4 +259,15 @@ def _delay(exc: openai.OpenAIError, attempt: int) -> float:
                 return float(s)
         except ValueError:  # e.g. the HTTP-date form, which OpenAI doesn't send
             pass
+    return None
+
+
+def backoff(attempt: int) -> float:
+    """Exponential backoff with full jitter."""
     return random.uniform(0, min(BACKOFF_CAP, BASE_DELAY * 2 ** (attempt - 1)))
+
+
+def _delay(exc: openai.OpenAIError, attempt: int) -> float:
+    """OpenAI's Retry-After when given, otherwise exponential backoff with full jitter."""
+    after = retry_after(exc)
+    return backoff(attempt) if after is None else after

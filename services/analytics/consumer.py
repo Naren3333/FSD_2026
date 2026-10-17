@@ -1,7 +1,12 @@
 """Analytics' events: grading.finalized.v2 (and v1, from before points) stores each finalized evaluation's evidence
 once (inbox), and identity.classroom.deleted.v1 purges a deleted classroom's evidence. Messages that don't match the
-contract are dead-lettered; learning_transport.kafka runs the consumer."""
+contract, or whose event type is not their topic's, are dead-lettered; learning_transport.kafka runs the consumer.
 
+Storing and purging take the same per-classroom lock, so a purge and a finalized grade for its classroom never
+interleave across replicas: either the evidence is stored first and the purge removes it, or the purge commits first
+and the grade sees the tombstone."""
+
+import os
 import threading
 from typing import Any
 
@@ -11,7 +16,9 @@ from psycopg_pool import ConnectionPool
 from domain import FINALIZED_V1, FINALIZED_V2, ClassroomDeletedEvent, Event
 
 CLASSROOM_DELETED = "identity.classroom.deleted.v1"
-GROUP = "analytics-v1"
+DEFAULT_GROUP = "analytics-v1"  # KAFKA_GROUP overrides it, e.g. to rebuild from the start of the topics
+# A transaction-scoped lock on one classroom, taken before reading or writing its tombstone.
+CLASSROOM_LOCK = "SELECT pg_advisory_xact_lock(hashtextextended(%s::text, 0))"
 
 
 def process(pool: ConnectionPool[Any], event: Event) -> None:
@@ -25,6 +32,7 @@ def process(pool: ConnectionPool[Any], event: Event) -> None:
         if inserted is None:
             return
         data = event.data
+        conn.execute(CLASSROOM_LOCK, (data.classroom_id,))
         purged = conn.execute(
             "SELECT 1 FROM purged_classrooms WHERE classroom_id=%s", (data.classroom_id,)
         ).fetchone()
@@ -61,6 +69,7 @@ def purge(pool: ConnectionPool[Any], event: ClassroomDeletedEvent) -> None:
     not stored. Deleting what is already gone changes nothing, so a repeated event is harmless."""
     data = event.data
     with pool.connection() as conn, conn.transaction():
+        conn.execute(CLASSROOM_LOCK, (data.classroom_id,))
         conn.execute(
             "INSERT INTO purged_classrooms(classroom_id,org_id) VALUES(%s,%s) ON CONFLICT DO NOTHING",
             (data.classroom_id, data.org_id),
@@ -85,7 +94,7 @@ def handler(pool: ConnectionPool[Any]) -> Handler:
             purge(pool, deleted)
         else:
             finalized = parse(Event, value)
-            if finalized is None:
+            if finalized is None or finalized.event_type != topic:
                 return False
             process(pool, finalized)
         return True
@@ -94,4 +103,5 @@ def handler(pool: ConnectionPool[Any]) -> Handler:
 
 
 def run(pool: ConnectionPool[Any], stop: threading.Event, connected: threading.Event) -> None:
-    consume(GROUP, [FINALIZED_V1, FINALIZED_V2, CLASSROOM_DELETED], handler(pool), stop, connected)
+    group = os.environ.get("KAFKA_GROUP") or DEFAULT_GROUP
+    consume(group, [FINALIZED_V1, FINALIZED_V2, CLASSROOM_DELETED], handler(pool), stop, connected)

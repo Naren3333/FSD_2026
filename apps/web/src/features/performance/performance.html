@@ -6,7 +6,7 @@
 </div>
 <p>Observed accuracy summarizes finalized question results. It is not a validated mastery probability.</p>
 <section class="panel">
-  <form class="inline-form" novalidate [formGroup]="form" (ngSubmit)="load()">
+  <form id="performance-form" class="inline-form" novalidate [formGroup]="form" (ngSubmit)="load()">
     @if (session.isTeacher()) {
       <app-field
         controlId="performance-student"

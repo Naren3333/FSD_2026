@@ -6,6 +6,7 @@ import base64
 import json
 from dataclasses import replace
 from pathlib import Path
+from typing import Any
 
 import pymupdf
 import pytest
@@ -15,6 +16,7 @@ from fastapi.testclient import TestClient
 from ingest import VisionConfig, figure_context, prompts, snap, vision, vision_calls
 from ingest.chunker import DESCRIBED, chunk_paras
 from ingest.figures import image_name
+from ingest.geometry import Box
 from ingest.headings import outline
 from ingest.parse import read_pages
 from ingest.vision import PageVision, SeenFigure, SeenTable
@@ -26,7 +28,7 @@ BEFORE = "The model has three parts. They are shown below."
 AFTER = "Each part is trained jointly with the others."
 
 
-def described(box, png: bytes = PNG, **kw) -> SeenFigure:
+def described(box: Box, png: bytes = PNG, **kw: Any) -> SeenFigure:
     return SeenFigure(
         box,
         "diagram",
@@ -101,7 +103,7 @@ def see_with_figures(tmp_path: Path, page_answer: dict) -> list:
     )
 
 
-def figure_answer(box=None) -> dict:
+def figure_answer(box: Box | None = None) -> dict:
     x0, y0, x1, y1 = box or make_figure_pdf()[1]
     return {
         "tables": [],
@@ -181,7 +183,9 @@ def test_a_figure_is_a_chunk_of_its_own(tmp_path: Path) -> None:
     lines = figure.content.split("\n")
     assert lines[0] == "Figure 1: The encoder-decoder model." and f"[diagram, {DESCRIBED}]" in figure.content
     assert DESCRIPTION in figure.content and "Key values (approximate): layers ≈ 6" in figure.content
-    assert "Labels: Encoder Attention Decoder" in figure.embed_body and "Labels:" not in figure.content
+    assert (
+        "Labels: Encoder Attention Decoder" in (figure.embed_body or "") and "Labels:" not in figure.content
+    )
 
 
 def test_a_figure_without_a_caption_borrows_nothing(tmp_path: Path) -> None:
@@ -199,7 +203,7 @@ def figures_on(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> dict:
     """The vision pass stubbed to describe the diagram; `crop["png"]` is the crop it returns."""
     crop = {"png": PNG}
 
-    async def see_pages(path, **kw):
+    async def see_pages(path: Path, **kw: object) -> list[PageVision]:
         assert kw["figure_model"] == "figure-model"
         return [PageVision([], [described(make_figure_pdf()[1], png=crop["png"])])]
 

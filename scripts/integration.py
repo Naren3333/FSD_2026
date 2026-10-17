@@ -31,6 +31,7 @@ TEXT = {"Content-Type": "text/plain"}
 PDF = {"Content-Type": "application/pdf"}
 
 T = TypeVar("T")
+DUE_SECONDS = 8  # how far ahead of publishing the lifecycle step's due date is set
 LIVE_AI = False  # --live-ai: the AI paths must work, not just answer "unavailable"
 
 
@@ -43,6 +44,7 @@ def docker(*args: str, input: str | None = None, check: bool = True) -> subproce
         cwd=ROOT,
         input=input,
         text=True,
+        encoding="utf-8",
         capture_output=True,
         check=check,
         timeout=90,
@@ -95,7 +97,8 @@ def request(client: httpx.Client, method: str, path: str, status: int = 200, **k
     service's committed OpenAPI contract."""
     response = client.request(method, path, **kwargs)
     if response.status_code == 429 and status != 429 and "API rate limit exceeded" in response.text:
-        # Kong's limit of 120 requests a minute covers this whole run; wait for the next minute and try once more.
+        # Kong allows each signed-in session (bearer token) 120 requests a minute; a step that makes many calls in
+        # one session can reach it, so wait for the next minute and try once more.
         time.sleep(61 - time.time() % 60)
         response = client.request(method, path, **kwargs)
     assert response.status_code == status, (
@@ -164,7 +167,16 @@ def publish(topic: str, key: str, event: dict[str, Any]) -> None:
 def restart(*services: str) -> None:
     """Restarts containers and waits until every application is ready again, so the next request is not a 502."""
     docker("restart", *services)
-    subprocess.run([sys.executable, str(ROOT / "scripts" / "wait_ready.py")], check=True, capture_output=True)
+    ready = subprocess.run(
+        [sys.executable, str(ROOT / "scripts" / "wait_ready.py")],
+        text=True,
+        encoding="utf-8",
+        capture_output=True,
+        check=False,
+    )
+    assert ready.returncode == 0, (
+        f"Not ready after restarting {', '.join(services)}:\n{ready.stdout}{ready.stderr}"
+    )
 
 
 def inbox_has(service: str, event_id: str) -> bool:
@@ -520,13 +532,15 @@ def lifecycle(u: Users, room_id: str) -> Late:
         },
         {"prompt": "Explain photosynthesis.", "type": "free_response", "rubric": rubric, "max_length": 2000},
     ]
-    due = time.time() + 8
+    # Publishing needs a due date still ahead, and the late submission one already past. The draft starts with a due
+    # date a day away; the last edit before publishing moves it DUE_SECONDS ahead, so only that edit and the publish
+    # run against the clock, however slow the machine.
     draft = {
         "classroom_id": room_id,
         "title": "Photosynthesis draft",
         "status": "draft",
         "questions": [{**q, "skill_id": skill["id"]} for q in questions],
-        "due_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(due)),
+        "due_at": timestamp(time.time() + 86400),
         "late_policy": "accept_flagged",
         "release_policy": "manual",
         "ai_marking": True,
@@ -539,12 +553,15 @@ def lifecycle(u: Users, room_id: str) -> Late:
     assert created["id"] not in [a["id"] for a in request(u.student, "GET", listed)]
     request(u.student, "GET", path, 404)
     request(u.other, "PUT", path, 403, json={**draft, "title": "Forbidden"})
-    edited = request(u.teacher, "PUT", path, json={**draft, "title": "Photosynthesis"})
-    assert edited["title"] == "Photosynthesis"
     spare = request(u.teacher, "POST", "/assessment/assessments", 201, json={**draft, "title": "Spare draft"})
     request(u.teacher, "DELETE", f"/assessment/assessments/{spare['id']}")
     request(u.teacher, "GET", f"/assessment/assessments/{spare['id']}", 404)
 
+    due = time.time() + DUE_SECONDS
+    edited = request(
+        u.teacher, "PUT", path, json={**draft, "title": "Photosynthesis", "due_at": timestamp(due)}
+    )
+    assert edited["title"] == "Photosynthesis"
     published = request(u.teacher, "POST", f"{path}/publish")
     assert published["status"] == "published"
     request(u.teacher, "POST", f"{path}/publish", 409)
@@ -565,6 +582,11 @@ def lifecycle(u: Users, room_id: str) -> Late:
     assert submission["late"] is True
     assert request(u.student, "GET", saved)["answers"] == {}
     return Late(created["id"], skill["id"], short, free, answers)
+
+
+def timestamp(seconds: float) -> str:
+    """A Unix time as the APIs' UTC date-time, to the second."""
+    return time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(seconds))
 
 
 def marking(u: Users, room_id: str, late: Late) -> None:
@@ -616,9 +638,18 @@ def marking(u: Users, room_id: str, late: Late) -> None:
     assert marked["status"] == "draft" and [e["awarded"] for e in marked["evidence"]] == [2, 3]
     request(u.teacher, "POST", finalize, json={"reason": "Marked by hand"})
 
-    # Finalized but not released: the student sees nothing yet.
+    # Finalized but not released: the student sees nothing yet, in Grading or in Analytics. Grading publishes
+    # grading.finalized.v2 only on release, so no event can reach Analytics later either.
     mine = f"/grading/evaluations/mine?classroom_id={room_id}"
     assert grade["id"] not in [r["id"] for r in request(u.student, "GET", mine)]
+    performance = f"/analytics/performance/{u.student_id}?classroom_id={room_id}"
+    unreleased = request(u.student, "GET", performance)["skills"]
+    assert late.skill_id not in [s["skill_id"] for s in unreleased], unreleased
+    finalized_events = (
+        "SELECT count(*) FROM outbox WHERE topic='grading.finalized.v2' "
+        f"AND partition_key='{UUID(grade['id'])}'"
+    )
+    assert sql_value("grading", finalized_events) == "0", "grading.finalized.v2 was published before release"
     counts = request(u.teacher, "GET", f"/grading/evaluations/counts?classroom_id={room_id}")
     assert counts == {"drafts": 0, "finalized": 2, "unreleased": 1}
     release = "/grading/evaluations/release"
@@ -631,9 +662,8 @@ def marking(u: Users, room_id: str, late: Late) -> None:
     assert result["evidence"][1]["feedback"] == feedback and result["late"]
     assert all("suggestion" not in e and "criteria" not in e for e in result["evidence"])
 
-    performance = f"/analytics/performance/{u.student_id}?classroom_id={room_id}"
     observed = eventually(
-        lambda: request(u.teacher, "GET", performance)["skills"],
+        lambda: request(u.student, "GET", performance)["skills"],
         lambda skills: any(s["skill_id"] == late.skill_id for s in skills),
         "part marks in analytics",
     )
@@ -722,19 +752,14 @@ def databases() -> None:
                 isolation = psql("SELECT 1", database=database, user=user, check=False)
                 refused = isolation.returncode != 0 and "permission denied" in isolation.stderr.lower()
                 assert refused, (user, database)
+    # Every numbered migration in the repository has been applied, and nothing else.
     versions = "SELECT string_agg(version::text, ',' ORDER BY version) FROM schema_migrations"
-    for service, expected in [
-        ("content", "1,2"),
-        ("identity", "1,2,3,4,5"),
-        ("assessment", "1,2"),
-        ("grading", "1,2,3"),
-        ("analytics", "1,2,3"),
-        ("curriculum", "1"),
-        ("chatbot", "1"),
-        ("aicore", "1"),
-    ]:
+    folders = {"chatbot": "question-chatbot-agent", "aicore": "ai-core"}
+    for service in SERVICES:
+        files = (ROOT / "services" / folders.get(service, service) / "migrations").glob("*.sql")
+        expected = ",".join(str(n) for n in sorted(int(f.name.split("_", 1)[0]) for f in files))
         migrations = sql_value(service, versions)
-        assert migrations == expected, (service, migrations)
+        assert migrations == expected, (service, migrations, expected)
     vector = sql_value("content", "SELECT count(*) FROM pg_extension WHERE extname='vector'")
     assert vector == "1", "pgvector is not installed in Content's database"
 
@@ -752,14 +777,18 @@ PLACEHOLDER_PROBE = """
 import json, sys, urllib.error, urllib.request
 token, room = sys.stdin.read().split()
 ids = ["00000000-0000-4000-8000-000000000001"]
+billed_to = {"user_id": "integration-test", "org_id": "local-school", "role": "teacher"}
 requests = {
     "question-generation-agent:8080/v1/question_generation": {
-        "document_ids": ids, "skill_ids": ids, "classroom_id": room,
-        "question_type": "numerical", "difficulty": "introductory", "count": 1,
+        "document_ids": ids, "skill_ids": ids, "classroom_id": room, "question_type": "numerical",
+        "points": 1, "difficulty": "introductory", "count": 1, "billed_to": billed_to,
     },
     "student-performance-agent:8080/v1/performance_interpretation": {
         "student_id": "student", "classroom_id": room, "evidence_ids": ids, "skill_ids": ids,
-        "performance_summary": [{"skill_id": ids[0], "attempted": 1, "correct": 1}],
+        "performance_summary": [
+            {"skill_id": ids[0], "attempted": 1, "correct": 1, "marks_awarded": 1, "marks_possible": 1}
+        ],
+        "billed_to": billed_to,
     },
 }
 for path, body in requests.items():
@@ -834,7 +863,7 @@ def main() -> None:
         "AI spend allowance, answer-key secrecy, submissions, draft grading, teacher finalization, students' own "
         "finalized results, the class dashboard's counts and class performance, Kafka analytics, consumer restart, duplicate event and business-key idempotency, "
         "draft and scheduled assessments, saved answers, late submissions, short-answer and rubric marking, "
-        "AI marking suggestions, manual release, part marks in analytics, "
+        "AI marking suggestions, manual release (no analytics before it), part marks in analytics, "
         "student privacy, database isolation, numbered migrations, pgvector, AI service accounts, 501 for unauthorized "
         "agents, per-session rate limiting."
     )

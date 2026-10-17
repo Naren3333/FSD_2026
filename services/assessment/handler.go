@@ -94,7 +94,8 @@ func (s server) create(w http.ResponseWriter, r *http.Request) {
 	platform.JSON(w, http.StatusCreated, v)
 }
 
-// update replaces a draft, and publishes it when the new version says so. A published assessment is immutable.
+// update replaces a draft, and publishes it when the new version says so; without a status it stays a draft. A
+// published assessment is immutable.
 func (s server) update(w http.ResponseWriter, r *http.Request) {
 	if !platform.Teacher(w, r) {
 		return
@@ -114,6 +115,9 @@ func (s server) update(w http.ResponseWriter, r *http.Request) {
 	if existing.Status != statusDraft {
 		notDraft(w)
 		return
+	}
+	if v.Status == "" {
+		v.Status = existing.Status // publishing is irreversible, so only an explicit status publishes
 	}
 	if !s.prepare(w, r, &v) {
 		return
@@ -285,6 +289,10 @@ func (s server) submit(w http.ResponseWriter, r *http.Request) {
 	}
 	c := platform.Actor(r)
 	sub := Submission{ID: uuid.NewString(), Org: c.Org, Student: c.Subject, Answers: input.Answers, Late: v.late(now), SubmittedAt: now}
+	if submittedEventTooLarge(v, sub) {
+		platform.Error(w, http.StatusUnprocessableEntity, "SUBMISSION_TOO_LARGE", "These answers are too long to submit together. Shorten the longest ones and try again.")
+		return
+	}
 	inserted, err := s.store.insertSubmission(r.Context(), v, sub)
 	if err != nil {
 		platform.Fail(w, err)

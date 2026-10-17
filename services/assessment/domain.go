@@ -140,7 +140,8 @@ type PublicAssessment struct {
 	LatePolicy string           `json:"late_policy"`
 }
 
-// normalize fills in what a request may leave out: published status (as before drafts existed), the default
+// normalize fills in what a request may leave out: published status (as before drafts existed; update keeps the
+// draft's status instead), the default
 // policies, one point per objective question, a free response's points from its rubric, and criterion ids.
 func (v *Assessment) normalize() {
 	if v.Status == "" {
@@ -220,10 +221,16 @@ func (q Question) validate() error {
 	if !ok {
 		return errors.New("unsupported question type")
 	}
+	if err := kind.validate(q); err != nil {
+		return err
+	}
 	if q.Points < 1 || q.Points > maxPoints {
+		if q.Type == typeFreeResponse {
+			return errors.New("a free response's rubric must add up to 1–100 points (the top level of each criterion)")
+		}
 		return errors.New("each question is worth 1–100 points")
 	}
-	return kind.validate(q)
+	return nil
 }
 
 // teacherMarked reports whether any question can need a teacher (or an AI suggestion) to mark it.

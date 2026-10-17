@@ -172,3 +172,20 @@ func TestSavedWorkMayBeIncompleteButNotForeign(t *testing.T) {
 		t.Fatal("foreign or overlong work saved")
 	}
 }
+
+func TestAFreeResponsesPointsErrorNamesItsRubric(t *testing.T) {
+	v := fixture()
+	q := essay()
+	for i := range q.Rubric.Criteria {
+		q.Rubric.Criteria[i].Levels = []Level{{0, "none"}, {60, "all"}}
+	}
+	v.Questions = []Question{q}
+	v.normalize()
+	if err := v.Validate(); err == nil || !strings.Contains(err.Error(), "rubric") {
+		t.Fatalf("a rubric worth %d points: %v", v.Questions[0].Points, err)
+	}
+	v.Questions[0].Rubric = nil
+	if err := v.Validate(); err == nil || !strings.Contains(err.Error(), "rubric") {
+		t.Fatalf("no rubric: %v", err)
+	}
+}

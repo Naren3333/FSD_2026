@@ -127,8 +127,8 @@ func (req *searchRequest) normalize() (topK int, rerank bool, problem string) {
 	if req.Rerank != nil {
 		rerank = *req.Rerank
 	}
-	if req.Query == "" || utf8.RuneCountInString(req.Query) > maxQuery || topK < 1 || topK > rrfKeep || len(req.DocumentIDs) > 100 {
-		return 0, false, "Send a query of 1–1000 characters, top_k 1–30 and at most 100 document ids."
+	if req.Query == "" || utf8.RuneCountInString(req.Query) > maxQuery || topK < 1 || topK > rrfKeep || len(req.DocumentIDs) > 100 || len(req.DocTypes) > len(docTypes) {
+		return 0, false, "Send a query of 1–1000 characters, top_k 1–30, at most 100 document ids and at most 3 document types."
 	}
 	for _, id := range req.DocumentIDs {
 		if !platform.ID(id) {
@@ -147,7 +147,11 @@ func (req *searchRequest) normalize() (topK int, rerank bool, problem string) {
 // internal error.
 func searchFailed(w http.ResponseWriter, err error) {
 	if limit, ok := spendLimit(err); ok {
-		platform.ErrorWith(w, http.StatusTooManyRequests, limit.Code, limit.Message, map[string]any{"resets_at": limit.ResetsAt})
+		message := limit.Message
+		if message == "" {
+			message = "Your daily AI allowance is used up until " + limit.ResetsAt.UTC().Format(time.RFC3339) + "."
+		}
+		platform.ErrorWith(w, http.StatusTooManyRequests, limit.Code, message, map[string]any{"resets_at": limit.ResetsAt})
 		return
 	}
 	var unavailable *aiError

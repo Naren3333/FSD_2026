@@ -100,6 +100,39 @@
   },
   "components": {
     "schemas": {
+      "Billed": {
+        "properties": {
+          "user_id": {
+            "type": "string",
+            "maxLength": 200,
+            "minLength": 1,
+            "title": "User Id"
+          },
+          "org_id": {
+            "type": "string",
+            "maxLength": 200,
+            "minLength": 1,
+            "title": "Org Id"
+          },
+          "role": {
+            "type": "string",
+            "enum": [
+              "student",
+              "teacher"
+            ],
+            "title": "Role"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "user_id",
+          "org_id",
+          "role"
+        ],
+        "title": "Billed",
+        "description": "Whose daily AI allowance would pay for the interpretation (ADR 0003), taken from the user's verified token."
+      },
       "ErrorBody": {
         "properties": {
           "code": {
@@ -220,6 +253,9 @@
             "maxItems": 100,
             "minItems": 1,
             "title": "Skill Ids"
+          },
+          "billed_to": {
+            "$ref": "#/components/schemas/Billed"
           }
         },
         "additionalProperties": false,
@@ -229,9 +265,11 @@
           "classroom_id",
           "performance_summary",
           "evidence_ids",
-          "skill_ids"
+          "skill_ids",
+          "billed_to"
         ],
-        "title": "RequestContract"
+        "title": "RequestContract",
+        "description": "Not authorized: always 501."
       },
       "ResponseContract": {
         "properties": {
@@ -291,6 +329,16 @@
             "type": "integer",
             "minimum": 0.0,
             "title": "Correct"
+          },
+          "marks_awarded": {
+            "type": "integer",
+            "minimum": 0.0,
+            "title": "Marks Awarded"
+          },
+          "marks_possible": {
+            "type": "integer",
+            "minimum": 0.0,
+            "title": "Marks Possible"
           }
         },
         "additionalProperties": false,
@@ -298,9 +346,12 @@
         "required": [
           "skill_id",
           "attempted",
-          "correct"
+          "correct",
+          "marks_awarded",
+          "marks_possible"
         ],
-        "title": "SkillSummary"
+        "title": "SkillSummary",
+        "description": "A skill's finalized evidence as Analytics reports it (ADR 0004): questions attempted and answered with full\nmarks, and the points earned out of the points possible, which show part marks."
       },
       "ValidationError": {
         "properties": {

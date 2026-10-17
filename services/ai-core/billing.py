@@ -128,7 +128,9 @@ def ingest_charges(record: costs.IngestCost) -> list[spend.Charge]:
 
 class StreamBill:
     """Charges a streamed reply once, however it ends: with OpenAI's counts when the usage chunk arrived, or an
-    estimate from the text when the stream broke or the caller hung up first."""
+    estimate from the text when the stream broke or the caller hung up first. The estimate can only count the text
+    relayed: reasoning tokens never appear in the stream, so with CHAT_REASONING_EFFORT above "none" (the default)
+    a cut-off stream is under-charged by the reasoning the model did."""
 
     def __init__(
         self, billing: Billing, billed: spend.Billed, correlation: str, model: str, prompt: str

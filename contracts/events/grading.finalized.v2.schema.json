@@ -1,6 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "urn:learning:grading.finalized.v2",
+  "description": "Published when a finalized grade becomes visible to its student: at finalization with release_policy on_finalize, otherwise when the teacher releases the assessment's results. Consumers show its marks to the student, and must deduplicate by evaluation_id.",
   "type": "object",
   "properties": {
     "event_id": {

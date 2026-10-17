@@ -91,8 +91,8 @@ class SeenTable:
             rows,
             cols,
             str(d.get("style") or ""),
-            tuple(str(h) for h in d.get("header") or ()),
-            d.get("caption") or None,
+            tuple(str(h) for h in items(d.get("header"))),
+            text_or_none(d.get("caption")),
             bool(d.get("continues_on_next_page")),
         )
 
@@ -120,8 +120,8 @@ class SeenFigure:
             box,
             str(d.get("type") or ""),
             bool(d.get("informative")),
-            d.get("caption") or None,
-            d.get("title") or None,
+            text_or_none(d.get("caption")),
+            text_or_none(d.get("title")),
         )
 
 
@@ -140,9 +140,9 @@ class SeenText:
         kind = d.get("kind")
         if kind == "table":
             rows = tuple(
-                tuple(clean_cell(c) for c in row) for row in d.get("rows") or [] if isinstance(row, list)
+                tuple(clean_cell(c) for c in row) for row in items(d.get("rows")) if isinstance(row, list)
             )
-            header = tuple(clean_cell(c) for c in d.get("header") or ()) or None
+            header = tuple(clean_cell(c) for c in items(d.get("header"))) or None
             if not any(c for row in rows for c in row):
                 return None
             return cls("table", header=header, rows=rows)
@@ -161,6 +161,20 @@ class PageVision:
     tables: list[SeenTable] = field(default_factory=list)
     figures: list[SeenFigure] = field(default_factory=list)
     transcript: tuple[SeenText, ...] | None = None  # set for a page without a text layer (OCR)
+
+
+def text_or_none(value: object) -> str | None:
+    """A text field of a model answer: a number becomes its text, anything else that isn't text (a list, an
+    object) None. The answers are cached, so one odd field must not fail the same page on every reindex."""
+    if isinstance(value, bool) or not isinstance(value, str | int | float):
+        return None
+    text = str(value)
+    return text if text.strip() else None
+
+
+def items(value: object) -> list:
+    """A list field of a model answer; [] when the model sent something else."""
+    return value if isinstance(value, list) else []
 
 
 def _box(d: dict, width: float, height: float) -> Box | None:
@@ -258,12 +272,12 @@ async def _see_page(
         raw = await cached(page.cache(models.page), lambda: ask(PROMPT, page.render, models.page), "page")
         tables = [
             t
-            for d in raw.get("tables") or []
+            for d in items(raw.get("tables"))
             if isinstance(d, dict) and (t := SeenTable.from_json(d, width, height))
         ]
         figures = [
             f
-            for d in raw.get("figures") or []
+            for d in items(raw.get("figures"))
             if isinstance(d, dict) and (f := SeenFigure.from_json(d, width, height))
         ]
         if transcript is not None:
@@ -279,7 +293,10 @@ async def _see_page(
         log.warning("vision failed for %s, falling back to lines: %s", page, e)
         return None if transcript is None else PageVision(transcript=transcript)
     if models.figure:
-        contexts = [figure_context(texts, f.caption, page.number) for f in figures]
+        # each one scans the whole document's text: off the event loop
+        contexts = await asyncio.to_thread(
+            lambda: [figure_context(texts, f.caption, page.number) for f in figures]
+        )
         todo = [i for i, f in enumerate(figures) if describable(f, tables, width * height, contexts[i])]
         if todo:
             graphics, lines = await pdf.in_thread(geometry, page.path, page.number)
@@ -310,7 +327,7 @@ async def _transcribed_page(page: PageRef, model: str) -> tuple[SeenText, ...] |
     except Exception as e:
         log.warning("%s not transcribed: %s", page, e)
         return None
-    return tuple(b for d in raw.get("blocks") or [] if isinstance(d, dict) and (b := SeenText.from_json(d)))
+    return tuple(b for d in items(raw.get("blocks")) if isinstance(d, dict) and (b := SeenText.from_json(d)))
 
 
 def describable(f: SeenFigure, tables: list[SeenTable], page_area: float, context: str = "") -> bool:
@@ -358,7 +375,7 @@ async def _described(
     values = tuple(
         v
         for v in (
-            " ".join(str(x).split()) for x in raw.get("key_values") or [] if isinstance(x, str | int | float)
+            " ".join(str(x).split()) for x in items(raw.get("key_values")) if isinstance(x, str | int | float)
         )
         if v
     )
@@ -377,6 +394,6 @@ async def _with_transcript(page: PageRef, i: int, t: SeenTable, model: str) -> S
         lambda: ask(TRANSCRIBE_PROMPT, lambda: page.render(pad(t.bbox)), model),
         "transcribe",
     )
-    rows = [tuple(clean_cell(c) for c in row) for row in raw.get("rows") or [] if isinstance(row, list)]
-    header = tuple(clean_cell(c) for c in raw.get("header") or ())
+    rows = [tuple(clean_cell(c) for c in row) for row in items(raw.get("rows")) if isinstance(row, list)]
+    header = tuple(clean_cell(c) for c in items(raw.get("header")))
     return replace(t, transcript=(header, *rows))

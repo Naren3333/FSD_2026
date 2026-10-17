@@ -56,7 +56,7 @@
   @if (session.isTeacher()) {
     <section class="panel">
       <h3>Upload a document</h3>
-      <form novalidate [formGroup]="form" (ngSubmit)="upload()">
+      <form id="upload-form" novalidate [formGroup]="form" (ngSubmit)="upload()">
         <app-field
           controlId="document-title"
           label="Document title"
@@ -67,7 +67,6 @@
             formControlName="title"
             maxlength="160"
             aria-describedby="document-title-help"
-            [attr.aria-invalid]="form.controls.title.touched && form.controls.title.invalid"
           />
         </app-field>
         <app-field

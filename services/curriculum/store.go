@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -14,7 +15,7 @@ type store interface {
 	findKind(ctx context.Context, org, id string) (string, error)
 	insertNode(ctx context.Context, id, org, kind, name string, parent *string) error
 	renameNode(ctx context.Context, org, id, name string) (bool, error)
-	archiveNode(ctx context.Context, org, id string) (bool, error)
+	archiveNode(ctx context.Context, org, id string) (archiveResult, error)
 	insertPrerequisite(ctx context.Context, org, id, prerequisite string) (prerequisiteResult, error)
 }
 
@@ -61,14 +62,31 @@ func (p pgStore) renameNode(ctx context.Context, org, id, name string) (bool, er
 	return res.RowsAffected() != 0, nil
 }
 
-// archiveNode reports whether the node was archived. It stays false when the
-// node is absent, already archived, or still has active children.
-func (p pgStore) archiveNode(ctx context.Context, org, id string) (bool, error) {
+type archiveResult int
+
+const (
+	archived archiveResult = iota
+	archiveMissing
+	archiveHasChildren
+)
+
+// archiveNode archives an active node that has no active children. It answers archiveMissing when there is no active
+// node with that id in the organization, and archiveHasChildren when it still has active children.
+func (p pgStore) archiveNode(ctx context.Context, org, id string) (archiveResult, error) {
 	res, err := p.db.Exec(ctx, "UPDATE nodes SET archived=true WHERE id=$1 AND org_id=$2 AND NOT archived AND NOT EXISTS(SELECT 1 FROM nodes child WHERE child.parent_id=$1 AND NOT child.archived)", id, org)
 	if err != nil {
-		return false, err
+		return archived, err
 	}
-	return res.RowsAffected() != 0, nil
+	if res.RowsAffected() != 0 {
+		return archived, nil
+	}
+	if _, err = p.findKind(ctx, org, id); errors.Is(err, pgx.ErrNoRows) {
+		return archiveMissing, nil
+	}
+	if err != nil {
+		return archived, err
+	}
+	return archiveHasChildren, nil
 }
 
 type prerequisiteResult int

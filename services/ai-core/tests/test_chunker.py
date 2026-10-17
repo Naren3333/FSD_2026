@@ -235,3 +235,15 @@ def test_a_title_only_slide_with_a_table_keeps_just_the_table() -> None:
 def test_a_short_chunk_alone_on_its_page_is_kept() -> None:
     chunks = chunk_paras([Para("Thank you", 1, ())])
     assert [c.content for c in chunks] == ["Thank you"]
+
+
+def test_a_header_wider_than_a_chunk_keeps_every_row() -> None:
+    from ingest.tables import Table
+
+    # the header alone is over MAX_TOKENS; one row is very long, and gets cut into windows
+    header = tuple(f"Assessment criterion {i} with a long descriptive heading" for i in range(80))
+    rows = (*((f"row {r}", *("x",) * 79) for r in range(5)), ("long " * 400, *("y",) * 79))
+    table = Table((0, 0, 100, 100), header, rows)
+    chunks = chunk_paras([Para("table", 1, (), table=table)])
+    content = "\n".join(c.content for c in chunks)
+    assert all(f"| row {r} |" in content for r in range(5)) and "long long" in content

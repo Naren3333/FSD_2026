@@ -22,6 +22,7 @@ func TestEachKindDecidesWhichAnswersAStudentMaySubmit(t *testing.T) {
 		{short, "Lyon", true},
 		{short, "  ", false},
 		{short, strings.Repeat("a", maxAnswer+1), false},
+		{short, strings.Repeat("語", maxAnswer), true}, // characters, not bytes, as saving counts them
 		{written, "héllo", true},
 		{written, "hello!", false},
 		{written, "", false},

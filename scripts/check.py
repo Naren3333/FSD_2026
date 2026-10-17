@@ -92,11 +92,13 @@ def lanes() -> dict[str, list[tuple[list[str], Path]]]:
     result.update({name: go_lane(name) for name in GO_MODULES})
     result["packages/python-platform"] = python_lane(ROOT / "packages/python-platform", typed=False)
     result.update({f"services/{n}": python_lane(ROOT / "services" / n, typed=True) for n in PYTHON_SERVICES})
-    # The repository's own scripts: formatting and lint only, since most need the running stack.
+    # The repository's own scripts and the Kong config generator: formatting, lint, and the tests that need no
+    # stack (most scripts need the running stack, so they are not run here).
     config = str(ROOT / "ruff.toml")
     result["scripts"] = [
-        (python("ruff", "format", "--check", "--config", config, "scripts"), ROOT),
-        (python("ruff", "check", "--config", config, "scripts"), ROOT),
+        (python("ruff", "format", "--check", "--config", config, "scripts", "infra"), ROOT),
+        (python("ruff", "check", "--config", config, "scripts", "infra"), ROOT),
+        (python("pytest", "-q", "-rs", "-p", "no:cacheprovider", "scripts/tests"), ROOT),
     ]
     # The contracts in contracts/ are generated from the code; fail if any differs from what the code produces.
     result["contracts"] = [([sys.executable, "scripts/export_contracts.py", "--check"], ROOT)]

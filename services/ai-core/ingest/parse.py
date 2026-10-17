@@ -101,6 +101,9 @@ class Columns:
     cuts: tuple[float, ...] = ()
 
 
+PYMUPDF_ERRORS = (RuntimeError, pymupdf.mupdf.FzErrorBase)
+
+
 class IngestError(Exception):
     """A failure with a `failure_reason` of its own (anything else becomes INTERNAL)."""
 
@@ -155,7 +158,11 @@ def read_pages(path: Path, vision: list[PageVision | None] | None = None) -> Doc
             heights = [page.rect.height for page in doc_pages]
             widths = [page.rect.width for page in doc_pages]
             toc = [(e[0], unligature(" ".join(str(e[1]).split())), e[2]) for e in doc.get_toc()]
-        except Exception as e:
+        # Only MuPDF's own errors (RuntimeError, FileDataError and the mupdf bindings' FzErrorBase) mean a broken
+        # file. Anything else is a bug here, or bad model output: a 500 the caller retries, never a permanent CORRUPT.
+        except (RecursionError, NotImplementedError):  # RuntimeErrors that are never MuPDF's
+            raise
+        except PYMUPDF_ERRORS as e:
             raise IngestError("CORRUPT", f"PyMuPDF could not read the text: {e}") from e
     body = body_size(pages) or OCR_BODY_SIZE
     columns = [None if ocr[n] else _columns(pages[n], widths[n], body) for n in range(len(pages))]

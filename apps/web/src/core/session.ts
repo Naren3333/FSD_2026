@@ -12,6 +12,9 @@ export class Session {
   readonly isTeacher = computed(() => this.profile()?.role === 'teacher');
   readonly isStudent = computed(() => this.profile()?.role === 'student');
 
+  /** The sign-in has expired; signing in again is the way back. */
+  readonly expired = this.auth.expired;
+
   get signedIn(): boolean {
     return this.auth.authenticated;
   }

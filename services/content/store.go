@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"learning/platform"
 
@@ -26,9 +27,17 @@ type store interface {
 // pgStore is the store in the service's own Postgres database.
 type pgStore struct{ db *pgxpool.Pool }
 
+// classroomLock, with the classroom, serializes a classroom's purge against uploads into it: an upload holds it
+// shared while it inserts, a purge exclusively, so the purge removes every upload committed before it and every
+// later upload sees the classroom in purged_classrooms.
+const classroomLock = 314159
+
+// errClassroomPurged is insertDocument's answer for a classroom that has been deleted and purged.
+var errClassroomPurged = errors.New("the classroom was deleted")
+
 // insertDocument stores the document row, queues a PDF for indexing and emits the outbox event in one
-// transaction. commitAttempted reports whether Commit was called: an uncertain
-// commit may have succeeded, so callers must then retain the stored original.
+// transaction, unless the classroom has been purged (errClassroomPurged). commitAttempted reports whether Commit was
+// called: an uncertain commit may have succeeded, so callers must then keep the stored original.
 func (p pgStore) insertDocument(ctx context.Context, d newDocument) (commitAttempted bool, err error) {
 	tx, err := p.db.Begin(ctx)
 	if err != nil {
@@ -39,6 +48,16 @@ func (p pgStore) insertDocument(ctx context.Context, d newDocument) (commitAttem
 	if err != nil {
 		return false, err
 	}
+	if _, err = tx.Exec(ctx, "SELECT pg_advisory_xact_lock_shared($1::int, hashtext($2::uuid::text))", classroomLock, d.Classroom); err != nil {
+		return false, err
+	}
+	var purged bool
+	if err = tx.QueryRow(ctx, "SELECT EXISTS(SELECT 1 FROM purged_classrooms WHERE classroom_id=$1)", d.Classroom).Scan(&purged); err != nil {
+		return false, err
+	}
+	if purged {
+		return false, errClassroomPurged
+	}
 	_, err = tx.Exec(ctx, "INSERT INTO documents(id,classroom_id,org_id,owner_id,title,mime_type,object_key,sha256,status,doc_type,chunks) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)", d.ID, d.Classroom, d.Org, d.Owner, d.Title, d.Type, d.Key, d.SHA, d.Status, d.DocType, encoded)
 	if err == nil && d.Status == statusIndexing {
 		_, err = tx.Exec(ctx, "INSERT INTO index_jobs(document_id) VALUES($1)", d.ID)
@@ -47,7 +66,7 @@ func (p pgStore) insertDocument(ctx context.Context, d newDocument) (commitAttem
 		err = platform.Emit(ctx, tx, "content.uploaded.v1", d.ID, map[string]any{"document_id": d.ID, "classroom_id": d.Classroom, "org_id": d.Org, "revision": d.Revision, "status": d.Status})
 	}
 	if err == nil {
-		// An uncertain commit may have succeeded. Retain the original for reconciliation.
+		// From here a failure may still have committed the row, so the caller must keep the original.
 		commitAttempted = true
 		err = tx.Commit(ctx)
 	}
@@ -98,7 +117,7 @@ func (p pgStore) findIndexed(ctx context.Context, org, id, image string) (Docume
 }
 
 // queueIndex marks a PDF as indexing and queues its job, unless it is already indexing. Chunks from an earlier
-// index stay searchable until the new result replaces them.
+// index stay searchable until a new result replaces them; a failed reindex keeps them.
 func (p pgStore) queueIndex(ctx context.Context, org, id string) (bool, error) {
 	tx, err := p.db.Begin(ctx)
 	if err != nil {

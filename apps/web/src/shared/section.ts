@@ -42,7 +42,22 @@ export class Section<T> {
     }
   }
 
-  /** Shows a value the page already has, such as the list a mutation just re-read, in place of any pending load. */
+  /** Re-reads the value after a mutation, in place of any pending load. Like a load, it lands only if nothing newer
+   * started meanwhile, so a list re-read for a classroom the user has since left never replaces the current one. A
+   * failure keeps what is on show and is thrown to the caller. */
+  async reload(work: () => Promise<T>): Promise<void> {
+    const request = ++this.request;
+    try {
+      const value = await work();
+      if (request !== this.request) return;
+      this.value.set(value);
+      this.error.set('');
+    } finally {
+      if (request === this.request) this.loading.set(false);
+    }
+  }
+
+  /** Shows a value the page already has, such as a list it just changed locally, in place of any pending load. */
   set(value: T): void {
     this.request++;
     this.value.set(value);

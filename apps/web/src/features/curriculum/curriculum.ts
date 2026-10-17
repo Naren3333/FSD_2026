@@ -57,7 +57,7 @@ export class CurriculumComponent implements OnInit {
   }
 
   create(): void {
-    if (!this.state.validate(this.form)) return;
+    if (!this.state.validate(this.form, 'node-form')) return;
     void this.state.run(async () => {
       const value = this.form.getRawValue();
       await this.curriculum.createNode({ ...value, parent_id: value.parent_id || null });

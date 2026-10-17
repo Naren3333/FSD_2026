@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"learning/platform"
 	"learning/platform/platformtest"
 	"net/http"
@@ -16,6 +17,7 @@ const room = "6f1c5d2e-8a4b-4c3d-9e2f-1a2b3c4d5e6f"
 // memoryStore is an in-memory store: one organization's users, classrooms and enrollments.
 type memoryStore struct {
 	roles      map[string]string   // user -> role
+	students   map[string]bool     // users who may be enrolled: students and dual-role accounts
 	usernames  map[string]string   // user -> username
 	owners     map[string]string   // classroom -> teacher
 	enrolled   map[string][]string // classroom -> students
@@ -24,15 +26,17 @@ type memoryStore struct {
 
 func newMemoryStore() *memoryStore {
 	return &memoryStore{
-		roles:     map[string]string{"teacher-1": "teacher", "student-1": "student", "student-2": "student", "student-3": "student"},
-		usernames: map[string]string{"student-1": "ada", "student-2": "grace", "student-3": "Grace"},
+		roles:     map[string]string{"teacher-1": "teacher", "student-1": "student", "student-2": "student", "student-3": "student", "dual-1": "teacher"},
+		students:  map[string]bool{"student-1": true, "student-2": true, "student-3": true, "dual-1": true},
+		usernames: map[string]string{"student-1": "ada", "student-2": "grace", "student-3": "Grace", "dual-1": "lin"},
 		owners:    map[string]string{room: "teacher-1"},
 		enrolled:  map[string][]string{room: {"student-1"}},
 	}
 }
 
-func (m *memoryStore) registerUser(_ context.Context, _, subject, role, username, name string) error {
+func (m *memoryStore) registerUser(_ context.Context, _, subject, role string, student bool, username, name string) error {
 	m.roles[subject] = role
+	m.students[subject] = student
 	m.registered = append(m.registered, subject+":"+role+":"+username+":"+name)
 	return nil
 }
@@ -54,7 +58,13 @@ func (m *memoryStore) isEnrolled(_ context.Context, classroom, student string) (
 	return false, nil
 }
 
-func (m *memoryStore) insertClassroom(_ context.Context, id, _, _, teacher string) error {
+func (m *memoryStore) insertClassroom(_ context.Context, id, name, _, teacher string) error {
+	switch {
+	case m.roles[teacher] == "":
+		return errProfileRequired
+	case name == "db down":
+		return errors.New("connection refused")
+	}
 	m.owners[id] = teacher
 	return nil
 }
@@ -64,10 +74,13 @@ func (m *memoryStore) listClassrooms(context.Context, string, string, bool) ([]C
 }
 
 func (m *memoryStore) studentExists(_ context.Context, student, _ string) (bool, error) {
-	return m.roles[student] == "student", nil
+	return m.students[student], nil
 }
 
 func (m *memoryStore) insertEnrollment(_ context.Context, classroom, student string) error {
+	if _, ok := m.owners[classroom]; !ok {
+		return platform.ErrNotFound
+	}
 	m.enrolled[classroom] = append(m.enrolled[classroom], student)
 	return nil
 }
@@ -75,7 +88,7 @@ func (m *memoryStore) insertEnrollment(_ context.Context, classroom, student str
 func (m *memoryStore) studentsNamed(_ context.Context, _, username string) ([]string, error) {
 	ids := []string{}
 	for id, name := range m.usernames {
-		if strings.EqualFold(name, username) && m.roles[id] == "student" {
+		if strings.EqualFold(name, username) && m.students[id] {
 			ids = append(ids, id)
 		}
 	}
@@ -110,8 +123,8 @@ func (m *memoryStore) deleteClassroom(_ context.Context, classroom, _ string) er
 
 func (m *memoryStore) listOrgStudents(_ context.Context, _, search string, offset, limit int) ([]Student, int, error) {
 	matching := []Student{}
-	for id, role := range m.roles {
-		if role == "student" && m.usernames[id] != "" && strings.Contains(strings.ToLower(m.usernames[id]), strings.ToLower(search)) {
+	for id, student := range m.students {
+		if student && m.usernames[id] != "" && strings.Contains(strings.ToLower(m.usernames[id]), strings.ToLower(search)) {
 			matching = append(matching, Student{ID: id, Username: m.usernames[id]})
 		}
 	}
@@ -134,7 +147,7 @@ func TestRegisterRecordsTheTeacherRoleFirst(t *testing.T) {
 	if w := call(t, store, http.MethodPost, "/v1/me", "", "service"); w.Code != http.StatusForbidden {
 		t.Fatalf("a caller without a person role registered: %d", w.Code)
 	}
-	if len(store.registered) != 1 || store.registered[0] != "dual:teacher::" {
+	if len(store.registered) != 1 || store.registered[0] != "dual:teacher::" || !store.students["dual"] {
 		t.Fatalf("registered %v", store.registered)
 	}
 }
@@ -167,8 +180,40 @@ func TestCreateValidatesTheName(t *testing.T) {
 	if w := call(t, store, http.MethodPost, "/v1/classrooms", `{"name":"Year 5"}`, "student-1", "student"); w.Code != http.StatusForbidden {
 		t.Fatalf("student created a classroom: %d", w.Code)
 	}
-	if w := call(t, store, http.MethodPost, "/v1/classrooms", `{"name":"Year 5"}`, "teacher-1", "teacher"); w.Code != http.StatusCreated {
-		t.Fatalf("status %d", w.Code)
+	if w := call(t, store, http.MethodPost, "/v1/classrooms", `{"name":" Year 5 "}`, "teacher-1", "teacher"); w.Code != http.StatusCreated || !strings.Contains(w.Body.String(), `"name":"Year 5"`) {
+		t.Fatalf("%d %s", w.Code, w.Body.String())
+	}
+	// The limit counts characters, not bytes.
+	if w := call(t, store, http.MethodPost, "/v1/classrooms", `{"name":"`+strings.Repeat("é", maxName)+`"}`, "teacher-1", "teacher"); w.Code != http.StatusCreated {
+		t.Fatalf("%d characters: %d", maxName, w.Code)
+	}
+	if w := call(t, store, http.MethodPost, "/v1/classrooms", `{"name":"`+strings.Repeat("é", maxName+1)+`"}`, "teacher-1", "teacher"); w.Code != http.StatusUnprocessableEntity {
+		t.Fatalf("%d characters: %d", maxName+1, w.Code)
+	}
+}
+
+func TestCreateTellsAMissingProfileFromAFailure(t *testing.T) {
+	store := newMemoryStore()
+	if w := call(t, store, http.MethodPost, "/v1/classrooms", `{"name":"Year 5"}`, "teacher-9", "teacher"); w.Code != http.StatusConflict || !strings.Contains(w.Body.String(), "PROFILE_REQUIRED") {
+		t.Fatalf("unregistered teacher: %d %s", w.Code, w.Body.String())
+	}
+	if w := call(t, store, http.MethodPost, "/v1/classrooms", `{"name":"db down"}`, "teacher-1", "teacher"); w.Code != http.StatusInternalServerError {
+		t.Fatalf("database failure: %d", w.Code)
+	}
+}
+
+func TestDualRoleAccountsCanBeEnrolledButNotInTheirOwnClassroom(t *testing.T) {
+	store := newMemoryStore()
+	path := "/v1/classrooms/" + room + "/enrollments"
+	if w := call(t, store, http.MethodPost, path, `{"username":"lin"}`, "teacher-1", "teacher"); w.Code != http.StatusOK {
+		t.Fatalf("dual-role account by username: %d %s", w.Code, w.Body.String())
+	}
+	if w := call(t, store, http.MethodPost, path, `{"student_id":"dual-1"}`, "teacher-1", "teacher"); w.Code != http.StatusOK {
+		t.Fatalf("dual-role account by id: %d %s", w.Code, w.Body.String())
+	}
+	store.owners[room] = "dual-1"
+	if w := call(t, store, http.MethodPost, path, `{"student_id":"dual-1"}`, "dual-1", "teacher", "student"); w.Code != http.StatusUnprocessableEntity {
+		t.Fatalf("a teacher enrolled in their own classroom: %d", w.Code)
 	}
 }
 
@@ -282,10 +327,10 @@ func TestOnlyTeachersListTheSchoolsStudents(t *testing.T) {
 		query, want string
 		status      int
 	}{
-		{"", `"total":3`, http.StatusOK},
+		{"", `"total":4`, http.StatusOK},
 		{"?search=GRACE", `"total":2`, http.StatusOK},
-		{"?offset=2&limit=1", `"students":[{"id":"student-3"`, http.StatusOK},
-		{"?offset=5", `"students":[],"total":3`, http.StatusOK},
+		{"?offset=3&limit=1", `"students":[{"id":"student-3"`, http.StatusOK},
+		{"?offset=5", `"students":[],"total":4`, http.StatusOK},
 		{"?limit=0", "", http.StatusUnprocessableEntity},
 		{"?limit=51", "", http.StatusUnprocessableEntity},
 		{"?offset=-1", "", http.StatusUnprocessableEntity},

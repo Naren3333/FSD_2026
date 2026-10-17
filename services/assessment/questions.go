@@ -123,7 +123,7 @@ func (shortAnswer) validate(q Question) error {
 	seen := map[string]bool{}
 	for _, a := range q.AcceptedAnswers {
 		key := normalizeShort(a, q.CaseSensitive)
-		if key == "" || len(a) > maxAnswer || seen[key] {
+		if key == "" || utf8.RuneCountInString(a) > maxAnswer || seen[key] {
 			return errors.New("accepted answers must be unique and nonempty")
 		}
 		seen[key] = true
@@ -132,7 +132,7 @@ func (shortAnswer) validate(q Question) error {
 }
 
 func (shortAnswer) accepts(_ Question, answer string) bool {
-	return strings.TrimSpace(answer) != "" && len(answer) <= maxAnswer
+	return strings.TrimSpace(answer) != "" && utf8.RuneCountInString(answer) <= maxAnswer
 }
 
 func (shortAnswer) limit(Question) int { return maxAnswer }

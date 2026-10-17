@@ -1,5 +1,6 @@
 """What an ingest cost: model calls by kind, cache hits, failures, tokens, retries
-and wall time, plus the time each stage took. One record per ingest, logged and appended to INGEST_COST_LOG.
+and wall time, plus the time each stage took. One record per ingest, logged; `write` also appends it to a JSON
+lines file when given one (eval scripts).
 
 The record lives in a ContextVar set by `ingest()`; the tasks `asyncio.gather` starts copy the context, so they
 all add to the same object. Outside an ingest (tests, eval scripts) there is no record and every hook is a no-op.
@@ -47,7 +48,7 @@ class IngestCost:
     document_id: str
     started: str = field(default_factory=lambda: datetime.now(UTC).isoformat(timespec="seconds"))
     title: str | None = None
-    outcome: str | None = None  # indexed / failed / skipped / abandoned / error
+    outcome: str | None = None  # indexed / failed / skipped (allowance) / abandoned / error
     failure_reason: str | None = None
     pages: int | None = None
     chunks: int | None = None

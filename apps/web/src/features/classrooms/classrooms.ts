@@ -99,7 +99,7 @@ export class ClassroomsComponent {
     void this.everyoneState.run(
       async () => {
         await this.identity.enroll(classroomId, student.id);
-        this.roster.set(await this.identity.roster(classroomId));
+        await this.roster.reload(() => this.identity.roster(classroomId));
       },
       `${this.studentName(student)} enrolled.`,
     );
@@ -118,7 +118,7 @@ export class ClassroomsComponent {
   }
 
   create(): void {
-    if (!this.state.validate(this.form)) return;
+    if (!this.state.validate(this.form, 'classroom-form')) return;
     void this.state.run(async () => {
       await this.identity.createClassroom(this.form.controls.name.value);
       this.form.reset();
@@ -143,7 +143,7 @@ export class ClassroomsComponent {
     void this.rosterState.run(async () => {
       await this.identity.unenroll(classroomId, student.id);
       this.closeRemove();
-      this.roster.set(await this.identity.roster(classroomId));
+      await this.roster.reload(() => this.identity.roster(classroomId));
     }, 'Student removed from the classroom.');
   }
 

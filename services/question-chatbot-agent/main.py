@@ -28,7 +28,7 @@ from learning_transport.db import open_pool
 import config
 from chat import HISTORY_TURNS, SSEResponse, Turn, TurnRequest
 from clients import Services, billed
-from contracts import MessageList, NewMessage, NewThread, Thread, ThreadList, Usage
+from contracts import MAX_MESSAGES, MessageList, NewMessage, NewThread, Thread, ThreadList, Usage
 from purge import run as purge_deleted_classrooms
 from store import MIGRATIONS, PostgresStore, Store
 
@@ -84,18 +84,20 @@ async def owned_thread(store: Store, claims: Claims, thread_id: UUID) -> dict[st
     return thread
 
 
-async def require_access(request: Request, classroom_id: str) -> None:
-    """403 unless Identity says the caller may use the classroom now. Enrollment can end, so this is asked on every
-    read and turn, not only when a thread is created."""
+async def require_access(request: Request, classroom_id: str) -> str:
+    """The caller's relation to the classroom (teacher or student), or 403 unless Identity says the caller may use
+    the classroom now. Enrollment can end, so this is asked on every read and turn, not only when a thread is
+    created. The relation, not the token's role, decides the prompt and the allowance: an account holding both
+    roles is a student in a classroom it is enrolled in."""
     services: Services = request.app.state.services
-    await require_relation(services.identity, request, classroom_id)
+    return await require_relation(services.identity, request, classroom_id)
 
 
-async def accessible_thread(request: Request, claims: Claims, thread_id: UUID) -> dict[str, Any]:
-    """The caller's thread, if they still have access to its classroom."""
+async def accessible_thread(request: Request, claims: Claims, thread_id: UUID) -> tuple[dict[str, Any], str]:
+    """The caller's thread, if they still have access to its classroom, and their relation to that classroom."""
     thread = await owned_thread(store_of(request), claims, thread_id)
-    await require_access(request, str(thread["classroom_id"]))
-    return thread
+    relation = await require_access(request, str(thread["classroom_id"]))
+    return thread, relation
 
 
 @app.get("/health/ready")
@@ -109,10 +111,13 @@ async def ready(request: Request) -> dict[str, str]:
 
 @app.post("/v1/threads", status_code=201, response_model=Thread, responses=ERRORS)
 async def create_thread(body: NewThread, request: Request, claims: Claims = Depends(PERSON)) -> Any:
-    await require_access(request, str(body.classroom_id))
-    return await store_of(request).create_thread(
-        claims.org, claims.subject, claims.person_role or STUDENT, str(body.classroom_id)
+    relation = await require_access(request, str(body.classroom_id))
+    thread = await store_of(request).create_thread(
+        claims.org, claims.subject, relation, str(body.classroom_id)
     )
+    if thread is None:  # the classroom was deleted (and purged) after Identity allowed it
+        raise failure(403, "FORBIDDEN", "You do not have access to this classroom.")
+    return thread
 
 
 @app.get("/v1/threads", response_model=ThreadList, responses=ERRORS)
@@ -128,9 +133,15 @@ async def list_threads(
 
 
 @app.get("/v1/threads/{thread_id}/messages", response_model=MessageList, responses=ERRORS)
-async def list_messages(thread_id: UUID, request: Request, claims: Claims = Depends(PERSON)) -> Any:
+async def list_messages(
+    thread_id: UUID,
+    request: Request,
+    limit: int = Query(default=MAX_MESSAGES, ge=1, le=MAX_MESSAGES),
+    claims: Claims = Depends(PERSON),
+) -> Any:
+    """The thread's latest `limit` messages, oldest first."""
     await accessible_thread(request, claims, thread_id)
-    return {"messages": await store_of(request).messages(str(thread_id))}
+    return {"messages": await store_of(request).messages(str(thread_id), limit)}
 
 
 @app.post(
@@ -142,7 +153,9 @@ async def post_message(
     thread_id: UUID, body: NewMessage, request: Request, claims: Claims = Depends(PERSON)
 ) -> SSEResponse:
     store = store_of(request)
-    thread = await accessible_thread(request, claims, thread_id)
+    thread, relation = await accessible_thread(request, claims, thread_id)
+    # The relation now decides the prompt, so a thread from before the caller's relation changed follows it.
+    thread = {**thread, "role": relation}
     history = await store.start_turn(str(thread_id), body.content, HISTORY_TURNS)
     asked = TurnRequest(
         thread=thread,
@@ -150,7 +163,7 @@ async def post_message(
         correlation=request.state.correlation_id,
         content=body.content,
         history=history,
-        billed_to=billed(claims),
+        billed_to=billed(claims, relation),
     )
     state = request.app.state
     turn = Turn(state.services, store, state.settings, state.pending, asked)

@@ -97,10 +97,12 @@ export interface Rubric {
 }
 /** A question. Answer keys, accepted answers and rubrics come only to the classroom's teacher. */
 export interface Question {
-  id?: string;
+  /** Assigned by Assessment. */
+  id: string;
   prompt: string;
   type: QuestionType;
-  options: string[];
+  /** Multiple choice only; null or empty for the other types. */
+  options: string[] | null;
   answer?: string;
   tolerance?: string;
   accepted_answers?: string[];
@@ -260,6 +262,8 @@ export interface AssessmentProgress {
   id: string;
   title: string;
   submissions: number;
+  status: AssessmentStatus;
+  due_at: string | null;
 }
 /** A classroom enrollment, as Identity confirms adding or removing it. */
 export interface Enrollment {

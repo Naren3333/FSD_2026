@@ -106,5 +106,14 @@ describe('marking form', () => {
       'allowance',
     );
     expect(suggestionReason({ status: 'failed', awarded: 0, reason: 'invalid quote' })).toContain('yourself');
+    expect(
+      suggestionReason({ status: 'pending', awarded: 0, reason: 'AI_PROVIDER_NOT_CONFIGURED' }),
+    ).toContain('tried again');
+    expect(suggestionReason({ status: 'failed', awarded: 0, reason: 'MARKED_BY_TEACHER' })).toContain(
+      'already marked',
+    );
+    expect(suggestionReason({ status: 'failed', awarded: 0, reason: 'AI_OUTPUT_REJECTED' })).toContain(
+      'yourself',
+    );
   });
 });

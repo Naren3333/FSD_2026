@@ -159,7 +159,8 @@ export class AssessmentApi {
   saved(assessmentId: string): Promise<SavedAnswers> {
     return this.gateway.request('assessment', `/assessments/${id(assessmentId)}/saved-answers`);
   }
-  save(assessmentId: string, answers: Record<string, string>): Promise<{ saved_at: string }> {
+  /** Replaces the signed-in student's unsubmitted work and returns what is now saved. */
+  save(assessmentId: string, answers: Record<string, string>): Promise<SavedAnswers> {
     return this.gateway.request('assessment', `/assessments/${id(assessmentId)}/saved-answers`, {
       method: 'PUT',
       body: { answers },

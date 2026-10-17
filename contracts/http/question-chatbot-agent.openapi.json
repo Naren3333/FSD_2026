@@ -215,6 +215,7 @@
     "/v1/threads/{thread_id}/messages": {
       "get": {
         "summary": "List Messages",
+        "description": "The thread's latest `limit` messages, oldest first.",
         "operationId": "list_messages_v1_threads__thread_id__messages_get",
         "parameters": [
           {
@@ -225,6 +226,18 @@
               "type": "string",
               "format": "uuid",
               "title": "Thread Id"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 200,
+              "minimum": 1,
+              "default": 200,
+              "title": "Limit"
             }
           }
         ],
@@ -644,6 +657,7 @@
               "$ref": "#/components/schemas/Message"
             },
             "type": "array",
+            "maxItems": 200,
             "title": "Messages"
           }
         },
@@ -652,7 +666,8 @@
         "required": [
           "messages"
         ],
-        "title": "MessageList"
+        "title": "MessageList",
+        "description": "A thread's latest messages, oldest first."
       },
       "NewMessage": {
         "properties": {

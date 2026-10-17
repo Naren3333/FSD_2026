@@ -1,10 +1,12 @@
 package main
 
 import (
+	"errors"
 	"learning/platform"
 	"net/http"
 	"strconv"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/google/uuid"
 )
@@ -34,7 +36,8 @@ func (s server) register(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	username, name := strings.TrimSpace(c.Username), displayName(c.Name, c.Username)
-	if err := s.store.registerUser(r.Context(), c.Org, c.Subject, role, username, name); err != nil {
+	// An account holding both roles is recorded as a teacher who may also be enrolled in other classrooms.
+	if err := s.store.registerUser(r.Context(), c.Org, c.Subject, role, c.Has("student"), username, name); err != nil {
 		platform.Fail(w, err)
 		return
 	}
@@ -69,12 +72,17 @@ func (s server) create(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	c := platform.Actor(r)
-	id := uuid.NewString()
-	if err := s.store.insertClassroom(r.Context(), id, strings.TrimSpace(input.Name), c.Org, c.Subject); err != nil {
+	id, name := uuid.NewString(), strings.TrimSpace(input.Name)
+	err := s.store.insertClassroom(r.Context(), id, name, c.Org, c.Subject)
+	if errors.Is(err, errProfileRequired) {
 		platform.Error(w, http.StatusConflict, "PROFILE_REQUIRED", "Complete sign-in registration before creating a classroom.")
 		return
 	}
-	platform.JSON(w, http.StatusCreated, Classroom{id, input.Name, c.Subject})
+	if err != nil {
+		platform.Fail(w, err)
+		return
+	}
+	platform.JSON(w, http.StatusCreated, Classroom{id, name, c.Subject})
 }
 
 func (s server) list(w http.ResponseWriter, r *http.Request) {
@@ -136,12 +144,14 @@ func (s server) enroll(w http.ResponseWriter, r *http.Request) {
 		platform.Fail(w, err)
 		return
 	}
+	if problem == "" && student == platform.Actor(r).Subject {
+		problem = "A teacher cannot enroll in their own classroom."
+	}
 	if problem != "" {
 		platform.Error(w, http.StatusUnprocessableEntity, "INVALID_STUDENT", problem)
 		return
 	}
-	if err = s.store.insertEnrollment(r.Context(), id, student); err != nil {
-		platform.Fail(w, err)
+	if err = s.store.insertEnrollment(r.Context(), id, student); !platform.Found(w, err, "Classroom not found.") {
 		return
 	}
 	platform.JSON(w, http.StatusOK, map[string]string{"student_id": student, "classroom_id": id})
@@ -222,7 +232,7 @@ func (s server) students(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	search := strings.TrimSpace(query.Get("search"))
-	if len(search) > maxName {
+	if utf8.RuneCountInString(search) > maxName {
 		platform.Invalid(w, "search must be at most 120 characters.")
 		return
 	}

@@ -39,10 +39,12 @@ const (
 const (
 	maxPDF   = 50 << 20
 	maxText  = 5 << 20
-	maxTitle = 160
+	maxTitle = 160 // characters
 
 	// uploadDeadline is how long one upload may take: a 50 MiB PDF at about 1.5 Mbit/s, matching the web app.
 	uploadDeadline = 5 * time.Minute
+	// downloadDeadline is how long sending an original or a figure may take, on the same reckoning.
+	downloadDeadline = uploadDeadline
 )
 
 type Document struct {

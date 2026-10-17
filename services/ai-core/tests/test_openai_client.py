@@ -4,7 +4,7 @@ Ported from fsd_test's shared tests."""
 import httpx2
 import openai
 import pytest
-from conftest import CACHED_USAGE, chat_response, chat_stream, configured, embedding_response
+from conftest import CACHED_USAGE, FakeOpenAI, chat_response, chat_stream, configured, embedding_response
 
 import openai_client
 from openai_client import StructuredOutputError, Usage
@@ -24,7 +24,7 @@ BOOM = {"error": {"message": "boom"}}
 OK = embedding_response([[0.5, 0.25]])
 
 
-async def test_vectors_follow_index_not_data_order(openai_fake):
+async def test_vectors_follow_index_not_data_order(openai_fake: FakeOpenAI) -> None:
     openai_fake.reply(json=embedding_response([[1.0], [2.0], [3.0]], order=[2, 0, 1]))
     assert await openai_client.embed(["a", "b", "c"]) == ([[1.0], [2.0], [3.0]], 8)
     [req] = openai_fake.requests
@@ -32,7 +32,7 @@ async def test_vectors_follow_index_not_data_order(openai_fake):
     assert openai_fake.timeouts == [30]
 
 
-async def test_batches_of_128_sent_in_order(openai_fake):
+async def test_batches_of_128_sent_in_order(openai_fake: FakeOpenAI) -> None:
     texts = [f"t{i}" for i in range(300)]
     for start, size in [(0, 128), (128, 128), (256, 44)]:
         openai_fake.reply(json=embedding_response([[float(start + i)] for i in range(size)]))
@@ -43,12 +43,21 @@ async def test_batches_of_128_sent_in_order(openai_fake):
     assert vectors == [[float(i)] for i in range(300)]
 
 
-async def test_empty_input_makes_no_request(openai_fake):
+async def test_the_tally_counts_batches_answered_before_a_failure(openai_fake: FakeOpenAI) -> None:
+    openai_fake.reply(json=embedding_response([[0.0]] * 128))
+    openai_fake.reply(400, json=BOOM)
+    tally = openai_client.Tally()
+    with pytest.raises(openai.BadRequestError):
+        await openai_client.embed(["t"] * 200, tally)
+    assert tally.tokens == 8
+
+
+async def test_empty_input_makes_no_request(openai_fake: FakeOpenAI) -> None:
     assert await openai_client.embed([]) == ([], 0)
     assert openai_fake.requests == []
 
 
-async def test_429_twice_then_success(openai_fake):
+async def test_429_twice_then_success(openai_fake: FakeOpenAI) -> None:
     openai_fake.reply(429, json=RATE_LIMITED, times=2)
     openai_fake.reply(json=OK)
     assert await openai_client.embed(["a"]) == ([[0.5, 0.25]], 8)
@@ -56,42 +65,42 @@ async def test_429_twice_then_success(openai_fake):
     assert all(0 <= d <= 8 for d in openai_fake.sleeps)  # full jitter
 
 
-async def test_three_500s_raise_after_three_attempts(openai_fake):
+async def test_three_500s_raise_after_three_attempts(openai_fake: FakeOpenAI) -> None:
     openai_fake.reply(500, json=BOOM, times=3)
     with pytest.raises(openai.InternalServerError):
         await openai_client.embed(["a"])
     assert len(openai_fake.requests) == 3
 
 
-async def test_retry_after_ms_is_honoured(openai_fake):
+async def test_retry_after_ms_is_honoured(openai_fake: FakeOpenAI) -> None:
     openai_fake.reply(429, json=RATE_LIMITED, headers={"retry-after-ms": "1500"})
     openai_fake.reply(json=OK)
     await openai_client.embed(["a"])
     assert openai_fake.sleeps == [1.5]
 
 
-async def test_long_retry_after_fails_at_once(openai_fake):
+async def test_long_retry_after_fails_at_once(openai_fake: FakeOpenAI) -> None:
     openai_fake.reply(429, json=RATE_LIMITED, headers={"retry-after": "30"})
     with pytest.raises(openai.RateLimitError):
         await openai_client.embed(["a"])
     assert len(openai_fake.requests) == 1 and openai_fake.sleeps == []
 
 
-async def test_insufficient_quota_is_not_retried(openai_fake):
+async def test_insufficient_quota_is_not_retried(openai_fake: FakeOpenAI) -> None:
     openai_fake.reply(429, json=QUOTA)
     with pytest.raises(openai.RateLimitError, match="quota"):
         await openai_client.embed(["a"])
     assert len(openai_fake.requests) == 1
 
 
-async def test_client_errors_are_not_retried(openai_fake):
+async def test_client_errors_are_not_retried(openai_fake: FakeOpenAI) -> None:
     openai_fake.reply(400, json={"error": {"message": "Unsupported value"}})
     with pytest.raises(openai.BadRequestError):
         await openai_client.embed(["a"])
     assert len(openai_fake.requests) == 1
 
 
-async def test_connection_error_is_retried(openai_fake):
+async def test_connection_error_is_retried(openai_fake: FakeOpenAI) -> None:
     def refuse(request: httpx2.Request) -> httpx2.Response:
         raise httpx2.ConnectError("connection refused", request=request)
 
@@ -100,7 +109,7 @@ async def test_connection_error_is_retried(openai_fake):
     assert len(openai_fake.requests) == 2
 
 
-async def test_timeout_is_not_retried(openai_fake):
+async def test_timeout_is_not_retried(openai_fake: FakeOpenAI) -> None:
     def hang(request: httpx2.Request) -> httpx2.Response:
         raise httpx2.ReadTimeout("timed out", request=request)
 
@@ -110,7 +119,7 @@ async def test_timeout_is_not_retried(openai_fake):
     assert len(openai_fake.requests) == 1 and openai_fake.sleeps == []
 
 
-def test_missing_key_raises_not_configured(monkeypatch):
+def test_missing_key_raises_not_configured(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(openai_client, "_client", None)
     monkeypatch.setattr(openai_client, "get_settings", lambda: configured(openai_api_key=None))
     with pytest.raises(openai_client.NotConfiguredError):
@@ -126,7 +135,7 @@ async def collect(max_tokens: int = 50) -> list[str | Usage]:
     return [item async for item in openai_client.stream_chat(HELLO, max_tokens)]
 
 
-async def test_stream_relays_tokens_in_order_then_usage(openai_fake):
+async def test_stream_relays_tokens_in_order_then_usage(openai_fake: FakeOpenAI) -> None:
     openai_fake.replies.append(chat_stream(["Photo", "synthesis", " [S1]"]))
     assert await collect() == ["Photo", "synthesis", " [S1]", Usage(120, 7)]
     [req] = openai_fake.requests
@@ -136,29 +145,29 @@ async def test_stream_relays_tokens_in_order_then_usage(openai_fake):
     assert openai_fake.timeouts == [30]
 
 
-async def test_stream_usage_includes_cached_prompt_tokens(openai_fake):
+async def test_stream_usage_includes_cached_prompt_tokens(openai_fake: FakeOpenAI) -> None:
     openai_fake.replies.append(chat_stream(["a"], usage=CACHED_USAGE))
     assert await collect() == ["a", Usage(120, 7, cached_in=100)]
 
 
-async def test_stream_skips_empty_deltas(openai_fake):
+async def test_stream_skips_empty_deltas(openai_fake: FakeOpenAI) -> None:
     openai_fake.replies.append(chat_stream(["a", "", "b"]))
     assert await collect() == ["a", "b", Usage(120, 7)]
 
 
-async def test_stream_without_usage_chunk_yields_empty_usage(openai_fake):
+async def test_stream_without_usage_chunk_yields_empty_usage(openai_fake: FakeOpenAI) -> None:
     openai_fake.replies.append(chat_stream(["a"], usage=None))
     assert await collect() == ["a", Usage(None, None)]
 
 
-async def test_stream_is_retried_before_the_first_token(openai_fake):
+async def test_stream_is_retried_before_the_first_token(openai_fake: FakeOpenAI) -> None:
     openai_fake.reply(429, json=RATE_LIMITED)
     openai_fake.replies.append(chat_stream(["ok"]))
     assert await collect() == ["ok", Usage(120, 7)]
     assert len(openai_fake.requests) == 2 and len(openai_fake.sleeps) == 1
 
 
-async def test_stream_is_not_retried_after_the_first_token(openai_fake):
+async def test_stream_is_not_retried_after_the_first_token(openai_fake: FakeOpenAI) -> None:
     openai_fake.replies.append(chat_stream(["one", "two", "three"], fail_after=2))
     got: list = []
     with pytest.raises(openai.APIConnectionError):
@@ -168,7 +177,7 @@ async def test_stream_is_not_retried_after_the_first_token(openai_fake):
     assert len(openai_fake.requests) == 1 and openai_fake.sleeps == []
 
 
-async def test_breaking_out_early_closes_the_stream(openai_fake):
+async def test_breaking_out_early_closes_the_stream(openai_fake: FakeOpenAI) -> None:
     response = chat_stream(["a", "b", "c"])
     openai_fake.replies.append(response)
     stream = openai_client.stream_chat(HELLO, 50)
@@ -183,7 +192,7 @@ async def test_breaking_out_early_closes_the_stream(openai_fake):
 # ---- generate
 
 
-async def test_reply_usage_includes_cached_prompt_tokens(openai_fake):
+async def test_reply_usage_includes_cached_prompt_tokens(openai_fake: FakeOpenAI) -> None:
     openai_fake.reply(json=chat_response("Hi", usage=CACHED_USAGE))
     reply = await openai_client.generate(HELLO, 40)
     assert reply.usage == Usage(120, 7, cached_in=100)
@@ -202,7 +211,7 @@ async def rewrite() -> openai_client.Completion:
     return await openai_client.generate(HELLO, 100, SCHEMA, name="query_rewrite.v1")
 
 
-async def test_plain_reply(openai_fake):
+async def test_plain_reply(openai_fake: FakeOpenAI) -> None:
     openai_fake.reply(json=chat_response("Hello there"))
     reply = await openai_client.generate(HELLO, 40)
     assert reply == openai_client.Completion("Hello there", Usage(120, 7), "stop")
@@ -210,7 +219,7 @@ async def test_plain_reply(openai_fake):
     assert "response_format" not in req and req["max_completion_tokens"] == 40
 
 
-async def test_schema_reply_is_returned_as_json_text(openai_fake):
+async def test_schema_reply_is_returned_as_json_text(openai_fake: FakeOpenAI) -> None:
     openai_fake.reply(json=chat_response(REWRITE))
     assert (await rewrite()).text == REWRITE
     [req] = openai_fake.requests
@@ -228,14 +237,17 @@ async def test_schema_reply_is_returned_as_json_text(openai_fake):
         (chat_response('{"query": "x"}', finish_reason="content_filter"), "content_filter"),
     ],
 )
-async def test_schema_failures_raise_and_are_not_retried(openai_fake, reply, match):
+async def test_schema_failures_raise_and_are_not_retried(
+    openai_fake: FakeOpenAI, reply: dict, match: str
+) -> None:
     openai_fake.reply(json=reply)
-    with pytest.raises(StructuredOutputError, match=match):
+    with pytest.raises(StructuredOutputError, match=match) as error:
         await rewrite()
     assert len(openai_fake.requests) == 1 and openai_fake.sleeps == []
+    assert error.value.usage == Usage(120, 7)  # billed by OpenAI all the same: the caller charges it
 
 
-async def test_generate_500_is_retried(openai_fake):
+async def test_generate_500_is_retried(openai_fake: FakeOpenAI) -> None:
     openai_fake.reply(500, json=BOOM)
     openai_fake.reply(json=chat_response(REWRITE))
     assert (await rewrite()).text == REWRITE

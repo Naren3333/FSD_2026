@@ -33,8 +33,8 @@ class Finalized(Contract):
     evaluation_id: UUID
     assessment_id: UUID
     classroom_id: UUID
-    org_id: str = Field(min_length=1, max_length=200)
-    student_id: str = Field(min_length=1, max_length=200)
+    org_id: str = Field(min_length=1)
+    student_id: str = Field(min_length=1)
     evidence: list[Evidence] = Field(min_length=1, max_length=50)
 
     @model_validator(mode="after")
@@ -58,7 +58,7 @@ class Event(Envelope):
 
 class ClassroomDeleted(Contract):
     classroom_id: UUID
-    org_id: str = Field(min_length=1, max_length=200)
+    org_id: str = Field(min_length=1)
 
 
 class ClassroomDeletedEvent(Envelope):
@@ -137,7 +137,9 @@ def by_student(students: list[str], rows: list[dict[str, Any]]) -> list[dict[str
 
 
 def summarize(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    """Each skill's counts from evidence rows (skill_id, correct, awarded, possible)."""
+    """Each skill's counts from evidence rows (skill_id, correct, awarded, possible). The weakness indicator counts
+    questions answered with full marks, so part marks don't lift it; that is ADR 0004's definition of "correct", and
+    marks_awarded/marks_possible show the part marks beside it."""
     counts: dict[str, list[int]] = defaultdict(lambda: [0, 0, 0, 0])
     for row in rows:
         skill = counts[str(row["skill_id"])]

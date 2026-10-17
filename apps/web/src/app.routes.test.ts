@@ -11,7 +11,11 @@ beforeAll(() => TestBed.initTestEnvironment(BrowserTestingModule, platformBrowse
 
 /** Runs a route guard the way the router does, for a user with this role (or signed out). The real Session reads
  * the role, from a fake sign-in and a fake Identity. */
-async function guard(path: string, role: 'teacher' | 'student' | null): Promise<string | boolean> {
+async function guard(
+  path: string,
+  role: 'teacher' | 'student' | null,
+  profileFails = false,
+): Promise<string | boolean> {
   TestBed.resetTestingModule();
   TestBed.configureTestingModule({
     providers: [
@@ -20,7 +24,10 @@ async function guard(path: string, role: 'teacher' | 'student' | null): Promise<
       {
         provide: IdentityApi,
         useValue: {
-          register: () => Promise.resolve({ id: 'u1', org_id: 'o1', role, username: '', display_name: '' }),
+          register: () =>
+            profileFails
+              ? Promise.reject(new Error('Identity is unavailable.'))
+              : Promise.resolve({ id: 'u1', org_id: 'o1', role, username: '', display_name: '' }),
         },
       },
     ],
@@ -49,5 +56,11 @@ describe('role landing pages', () => {
     expect(await guard('dashboard', 'teacher')).toBe(true);
     expect(await guard('home', 'student')).toBe(true);
     expect(await guard('results', null)).toBe(true);
+  });
+
+  it('opens nothing while a signed-in user’s profile failed to load, so the shell can offer Try again', async () => {
+    expect(await guard('classrooms', 'teacher', true)).toBe(false);
+    expect(await guard('home', 'student', true)).toBe(false);
+    expect(await guard('', 'student', true)).toBe(false);
   });
 });

@@ -19,7 +19,11 @@
   <section class="panel thread-panel" aria-labelledby="threads-heading">
     <h3 id="threads-heading">Your conversations</h3>
     <p class="caption">Up to 100 most recent, visible only to you</p>
-    <button class="secondary new-thread" (click)="newThread()" [disabled]="streaming() || !classroomId()">
+    <button
+      class="secondary new-thread"
+      (click)="newThread()"
+      [disabled]="state.busy() || streaming() || !classroomId()"
+    >
       New conversation
     </button>
     <app-section-state [section]="threads" loading="Loading conversations…" />
@@ -32,7 +36,7 @@
               [class.active]="thread.id === active()?.id"
               [attr.aria-current]="thread.id === active()?.id ? 'true' : null"
               (click)="open(thread)"
-              [disabled]="streaming()"
+              [disabled]="state.busy() || streaming()"
             >
               <span>{{ thread.title || 'Untitled conversation' }}</span>
               <small>{{ when(thread.last_message_at) }}</small>
@@ -185,7 +189,7 @@
         }
       </ol>
     }
-    <form novalidate [formGroup]="form" (ngSubmit)="send()">
+    <form id="chat-form" novalidate [formGroup]="form" (ngSubmit)="send()">
       <app-field
         controlId="chat-question"
         label="Your question"
@@ -206,7 +210,6 @@
           rows="3"
           [attr.maxlength]="max"
           aria-describedby="chat-question-help"
-          [attr.aria-invalid]="tried() && form.controls.question.invalid"
           (keydown)="shortcut($event)"
         ></textarea>
       </app-field>

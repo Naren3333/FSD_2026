@@ -5,6 +5,7 @@ test branch with the vision pass stubbed."""
 import asyncio
 import json
 from pathlib import Path
+from typing import Any
 
 import httpx2
 import pymupdf
@@ -19,7 +20,7 @@ from ingest.parse import IngestError, read_pages
 from ingest.vision import PageVision, SeenFigure, SeenText
 
 SHA = "ef" * 32
-TRANSCRIPT = [
+TRANSCRIPT: list[dict[str, Any]] = [
     {"kind": "heading", "level": 1, "text": "Sprint Planning"},
     {"kind": "text", "text": "The team picks backlog items it can finish within the sprint."},
     {"kind": "heading", "level": 2, "text": "Who takes part"},
@@ -70,7 +71,7 @@ class Models:
         self,
         fake: FakeOpenAI,
         ocr: dict | int | None = None,
-        page: dict | int | None = None,
+        page: dict | int | str | None = None,
         other: dict | None = None,
     ):
         self.calls: list[str] = []
@@ -310,7 +311,7 @@ def test_a_figure_on_a_transcribed_page_is_kept(tmp_path: Path) -> None:
     )
     doc = read_pages(
         write(tmp_path, make_mixed_pdf("i")),
-        [PageVision([], [figure], tuple(SeenText.from_json(d) for d in TRANSCRIPT[:2]))],
+        [PageVision([], [figure], tuple(b for d in TRANSCRIPT[:2] if (b := SeenText.from_json(d))))],
     )
     [[kept]] = doc.figures
     chunks = chunk_paras(outline(doc.pages, doc.tables, doc.figures), doc.ocr_pages)
@@ -323,7 +324,7 @@ def test_a_figure_on_a_transcribed_page_is_kept(tmp_path: Path) -> None:
 def test_a_scan_is_indexed_from_its_transcript(
     api: TestClient, embeddings: FakeOpenAI, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    async def see_pages(path, **kw):
+    async def see_pages(path: Path, **kw: object) -> list[PageVision]:
         assert kw["ocr_model"] == "ocr-model"
         return [transcript(*TRANSCRIPT)] * 3
 
