@@ -758,7 +758,7 @@ def databases() -> None:
     for service, expected in [
         ("content", "1,2,3,4"),
         ("identity", "1,2,3,4,5,6"),
-        ("assessment", "1,2"),
+        ("assessment", "1,2,3"),
         ("grading", "1,2,3"),
         ("analytics", "1,2,3"),
         ("curriculum", "1"),
