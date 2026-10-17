@@ -27,6 +27,12 @@ const (
 
 const maxFeedback = 2000
 
+// Marking-scheme passage limits, as Assessment checks them.
+const (
+	maxExcerpts    = 5
+	maxExcerptText = 2000
+)
+
 var (
 	errScoreOutOfBounds = errors.New("override score out of bounds")
 	errUnknownQuestion  = errors.New("override references unknown question")
@@ -49,20 +55,30 @@ type Rubric struct {
 	ModelAnswer string      `json:"model_answer,omitempty"`
 }
 
-// Question is a question as Assessment published it, answer key and rubric included.
+// Excerpt is a passage of the classroom's marking scheme the teacher attached to a question, for AI marking
+// suggestions only. Like the rubric it never reaches the student.
+type Excerpt struct {
+	Document string `json:"document_id,omitempty"`
+	Chunk    string `json:"chunk_id,omitempty"`
+	Page     int    `json:"page,omitempty"`
+	Text     string `json:"text"`
+}
+
+// Question is a question as Assessment published it, answer key, rubric and marking-scheme passages included.
 type Question struct {
-	ID              string   `json:"id"`
-	Prompt          string   `json:"prompt"`
-	Type            string   `json:"type"`
-	Options         []string `json:"options"`
-	Answer          string   `json:"answer"`
-	Tolerance       string   `json:"tolerance"`
-	AcceptedAnswers []string `json:"accepted_answers,omitempty"`
-	CaseSensitive   bool     `json:"case_sensitive,omitempty"`
-	Rubric          *Rubric  `json:"rubric,omitempty"`
-	MaxLength       int      `json:"max_length,omitempty"`
-	Points          int      `json:"points"`
-	Skill           string   `json:"skill_id"`
+	ID              string    `json:"id"`
+	Prompt          string    `json:"prompt"`
+	Type            string    `json:"type"`
+	Options         []string  `json:"options"`
+	Answer          string    `json:"answer"`
+	Tolerance       string    `json:"tolerance"`
+	AcceptedAnswers []string  `json:"accepted_answers,omitempty"`
+	CaseSensitive   bool      `json:"case_sensitive,omitempty"`
+	Rubric          *Rubric   `json:"rubric,omitempty"`
+	MaxLength       int       `json:"max_length,omitempty"`
+	MarkingScheme   []Excerpt `json:"marking_scheme,omitempty"`
+	Points          int       `json:"points"`
+	Skill           string    `json:"skill_id"`
 }
 
 // CriterionScore is the level a rubric criterion was given.
@@ -83,6 +99,8 @@ type Suggestion struct {
 	Model      string               `json:"model,omitempty"`
 	// Reason says why a suggestion failed or is still waiting (for the teacher's daily AI allowance, say).
 	Reason string `json:"reason,omitempty"`
+	// SchemePassages is how many of the question's marking-scheme passages the model was given.
+	SchemePassages int `json:"scheme_passages,omitempty"`
 }
 
 // SuggestedCriterion is the level suggested for one criterion, with the student's own words that justify it.

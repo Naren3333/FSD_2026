@@ -212,6 +212,11 @@
                                 },
                                 "reason": {
                                   "type": "string"
+                                },
+                                "scheme_passages": {
+                                  "type": "integer",
+                                  "minimum": 1,
+                                  "maximum": 5
                                 }
                               },
                               "required": [
@@ -1691,6 +1696,11 @@
                               },
                               "reason": {
                                 "type": "string"
+                              },
+                              "scheme_passages": {
+                                "type": "integer",
+                                "minimum": 1,
+                                "maximum": 5
                               }
                             },
                             "required": [
@@ -2269,6 +2279,11 @@
                               },
                               "reason": {
                                 "type": "string"
+                              },
+                              "scheme_passages": {
+                                "type": "integer",
+                                "minimum": 1,
+                                "maximum": 5
                               }
                             },
                             "required": [

@@ -32,6 +32,7 @@ PDF = {"Content-Type": "application/pdf"}
 
 T = TypeVar("T")
 DUE_SECONDS = 8  # how far ahead of publishing the lifecycle step's due date is set
+SCHEME_PASSAGE = "Full accuracy needs light energy, carbon dioxide and water named as the inputs."
 LIVE_AI = False  # --live-ai: the AI paths must work, not just answer "unavailable"
 
 
@@ -453,8 +454,8 @@ def replayed_events(u: Users, room_id: str, graded: Graded) -> None:
     restart("grading", "analytics")
     # Each same-id copy is followed by a fresh-id copy under the same key. Kafka keeps a key's order, so once the
     # consumer has recorded the fresh copy it has also handled the same-id one before it.
-    replay("assessment", "assessment.submitted.v2", graded.submission_id)
-    submitted = replay("assessment", "assessment.submitted.v2", graded.submission_id, fresh_id=True)
+    replay("assessment", "assessment.submitted.v3", graded.submission_id)
+    submitted = replay("assessment", "assessment.submitted.v3", graded.submission_id, fresh_id=True)
     replay("grading", "grading.finalized.v2", graded.grade_id)
     finalized = replay("grading", "grading.finalized.v2", graded.grade_id, fresh_id=True)
     eventually(lambda: inbox_has("grading", submitted), bool, "grading handled the replayed submissions")
@@ -530,7 +531,14 @@ def lifecycle(u: Users, room_id: str) -> Late:
             "accepted_answers": ["oxygen"],
             "points": 2,
         },
-        {"prompt": "Explain photosynthesis.", "type": "free_response", "rubric": rubric, "max_length": 2000},
+        {
+            "prompt": "Explain photosynthesis.",
+            "type": "free_response",
+            "rubric": rubric,
+            "max_length": 2000,
+            # A pasted marking-scheme passage, for AI suggestions only (ADR 0005).
+            "marking_scheme": [{"text": SCHEME_PASSAGE}],
+        },
     ]
     # Publishing needs a due date still ahead, and the late submission one already past. The draft starts with a due
     # date a day away; the last edit before publishing moves it DUE_SECONDS ahead, so only that edit and the publish
@@ -545,6 +553,8 @@ def lifecycle(u: Users, room_id: str) -> Late:
         "release_policy": "manual",
         "ai_marking": True,
     }
+    blank_passage = [{**questions[1], "skill_id": skill["id"], "marking_scheme": [{"text": " "}]}]
+    request(u.teacher, "POST", "/assessment/assessments", 422, json={**draft, "questions": blank_passage})
     created = request(u.teacher, "POST", "/assessment/assessments", 201, json=draft)
     path = f"/assessment/assessments/{created['id']}"
     assert created["status"] == "draft" and created["questions"][1]["points"] == 5
@@ -568,7 +578,10 @@ def lifecycle(u: Users, room_id: str) -> Late:
     request(u.teacher, "PUT", path, 409, json=draft)
     request(u.teacher, "DELETE", path, 409)
     public = request(u.student, "GET", path)
-    assert all(k not in q for q in public["questions"] for k in ["answer", "accepted_answers", "rubric"])
+    secrets = ["answer", "accepted_answers", "rubric", "marking_scheme"]
+    assert all(k not in q for q in public["questions"] for k in secrets)
+    assert SCHEME_PASSAGE not in json.dumps(public)
+    assert published["questions"][1]["marking_scheme"] == [{"text": SCHEME_PASSAGE}]
     short, free = (q["id"] for q in published["questions"])
 
     # Saved work comes back until it is submitted.
@@ -600,6 +613,11 @@ def marking(u: Users, room_id: str, late: Late) -> None:
     [grade] = eventually(lambda: request(u.teacher, "GET", evaluations), lambda rows: len(rows) == 1, "draft")
     assert grade["late"] and grade["answers"] == answers and grade["release_policy"] == "manual"
     assert [e["needs_marking"] for e in grade["evidence"]] == [True, True]
+    # The passage reached Grading with the question (assessment.submitted.v3), for the marker to read.
+    passage = (
+        f"SELECT questions->1->'marking_scheme'->0->>'text' FROM evaluations WHERE id='{UUID(grade['id'])}'"
+    )
+    assert sql_value("grading", passage) == SCHEME_PASSAGE
     tried = eventually(
         lambda: request(u.teacher, "GET", evaluations)[0],
         lambda v: all(
@@ -615,6 +633,7 @@ def marking(u: Users, room_id: str, late: Late) -> None:
             "AI marking suggestions",
         )
         assert all(e["suggestion"]["status"] == "ready" for e in ready["evidence"]), ready["evidence"]
+        assert ready["evidence"][1]["suggestion"]["scheme_passages"] == 1
         assert all(e["awarded"] == 0 and "marked_by" not in e for e in ready["evidence"])
     request(u.teacher, "GET", f"/grading/evaluations?classroom_id={room_id}&assessment_id=nope", 422)
 
@@ -728,7 +747,7 @@ def delete_classroom(u: Users, room_id: str, graded: Graded) -> None:
     duplicate_id = replay("identity", "identity.classroom.deleted.v1", room, fresh_id=True)
     late_id = str(uuid4())
     publish(
-        "assessment.submitted.v2", str(UUID(graded.submission_id)), {**late_submission, "event_id": late_id}
+        "assessment.submitted.v3", str(UUID(graded.submission_id)), {**late_submission, "event_id": late_id}
     )
     eventually(
         lambda: sql_value("content", f"SELECT count(*) FROM inbox WHERE event_id='{duplicate_id}'"),

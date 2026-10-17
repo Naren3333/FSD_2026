@@ -433,8 +433,8 @@ func TestASubmissionTooLargeToPublishIsRefused(t *testing.T) {
 const allTypes = `{"classroom_id":"` + room + `","title":"Mixed","release_policy":"manual","ai_marking":true,"questions":[
 	{"prompt":"Pick the sum","type":"multiple_choice","options":["half","whole"],"answer":"whole","tolerance":"","skill_id":"` + skill + `"},
 	{"prompt":"1/2 + 1/2?","type":"numerical","options":[],"answer":"1.00","tolerance":"0.01","points":2,"skill_id":"` + skill + `"},
-	{"prompt":"Capital of France?","type":"short_answer","accepted_answers":["Paris"],"case_sensitive":true,"skill_id":"` + skill + `"},
-	{"prompt":"Explain.","type":"free_response","max_length":300,"rubric":{"criteria":[{"title":"Clarity","levels":[{"points":0,"descriptor":"Unclear"},{"points":2,"descriptor":"Clear"}]}],"model_answer":"Halves add to a whole."},"skill_id":"` + skill + `"}]}`
+	{"prompt":"Capital of France?","type":"short_answer","accepted_answers":["Paris"],"case_sensitive":true,"marking_scheme":[{"text":"Accept the city's name in French."}],"skill_id":"` + skill + `"},
+	{"prompt":"Explain.","type":"free_response","max_length":300,"rubric":{"criteria":[{"title":"Clarity","levels":[{"points":0,"descriptor":"Unclear"},{"points":2,"descriptor":"Clear"}]}],"model_answer":"Halves add to a whole."},"marking_scheme":[{"document_id":"` + room + `","chunk_id":"` + skill + `","page":3,"text":"Award clarity for naming both halves."}],"skill_id":"` + skill + `"}]}`
 
 // post creates an assessment as the classroom's teacher.
 func post(t *testing.T, s server, body string) Assessment {
@@ -492,13 +492,13 @@ func TestStudentsSeeNoAnswerKey(t *testing.T) {
 			}
 		}
 	}
-	for _, secret := range []string{"Paris", "Halves add", "Clarity", "Unclear", "0.01", "1.00"} {
+	for _, secret := range []string{"Paris", "Halves add", "Clarity", "Unclear", "0.01", "1.00", "marking_scheme", "in French", "both halves"} {
 		if strings.Contains(w.Body.String(), secret) {
 			t.Errorf("leaked %q: %s", secret, w.Body.String())
 		}
 	}
 	s.access = platformtest.Access(platform.RelationTeacher)
-	if w = call(t, s, http.MethodGet, "/v1/assessments/"+v.ID, "", "teacher"); !strings.Contains(w.Body.String(), `"accepted_answers":["Paris"]`) || !strings.Contains(w.Body.String(), "Halves add") {
+	if w = call(t, s, http.MethodGet, "/v1/assessments/"+v.ID, "", "teacher"); !strings.Contains(w.Body.String(), `"accepted_answers":["Paris"]`) || !strings.Contains(w.Body.String(), "Halves add") || !strings.Contains(w.Body.String(), "both halves") {
 		t.Fatalf("teacher view lacks the keys: %s", w.Body.String())
 	}
 }

@@ -3,8 +3,15 @@ import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { FormControl, FormGroup, ReactiveFormsModule, Validators } from '@angular/forms';
 import { ActivatedRoute } from '@angular/router';
 import type { Subscription } from 'rxjs';
-import { AssessmentApi } from '../../api/clients';
-import type { Assessment, AssessmentSummary, Node, Question, SavedAnswers } from '../../api/models';
+import { AssessmentApi, ContentApi } from '../../api/clients';
+import type {
+  Assessment,
+  AssessmentSummary,
+  DocumentRecord,
+  Node,
+  Question,
+  SavedAnswers,
+} from '../../api/models';
 import { ClassroomContext, onClassroomChange } from '../../core/classroom-context';
 import { CurriculumNames } from '../../core/curriculum-names';
 import { Session } from '../../core/session';
@@ -17,6 +24,7 @@ import { Section } from '../../shared/section';
 import { SectionStateComponent } from '../../shared/section-state';
 import { StatusComponent } from '../../shared/status';
 import {
+  MAX_ASSESSMENT_EXCERPTS,
   MAX_CRITERIA,
   MAX_QUESTIONS,
   assessmentForm,
@@ -28,9 +36,11 @@ import {
   rubricTotal,
   teacherMarked,
   toAssessment,
+  usesScheme,
   type DueState,
   type QuestionForm,
 } from './editor';
+import { SchemePickerComponent } from './scheme-picker';
 
 /** How long a student's typing rests before their work is saved. */
 const SAVE_DELAY = 1500;
@@ -45,12 +55,14 @@ const SAVE_DELAY = 1500;
     StatusComponent,
     SectionStateComponent,
     ConfirmDialogComponent,
+    SchemePickerComponent,
   ],
   templateUrl: './assessments.html',
 })
 export class AssessmentsComponent {
   readonly session = inject(Session);
   private readonly assessmentApi = inject(AssessmentApi);
+  private readonly contentApi = inject(ContentApi);
   private readonly curriculum = inject(CurriculumNames);
   readonly classroomId = inject(ClassroomContext).classroomId;
   readonly state = new ActionState();
@@ -62,6 +74,8 @@ export class AssessmentsComponent {
   readonly skills = this.curriculum.skills;
   /** Reading the curriculum for the skill a new question uses. */
   readonly skillsState = new Section<Node[]>();
+  /** The classroom's documents, read once for every question's marking-scheme search. */
+  readonly schemeDocs = new Section<DocumentRecord[]>();
   readonly selected = signal<Assessment | null>(null);
   readonly submitted = signal(false);
   /** The draft the editor is changing; null while it creates a new assessment. */
@@ -74,6 +88,8 @@ export class AssessmentsComponent {
   @ViewChild('clearDialog') clearDialog?: ConfirmDialogComponent;
   readonly maxQuestions = MAX_QUESTIONS;
   readonly maxCriteria = MAX_CRITERIA;
+  readonly maxSchemePassages = MAX_ASSESSMENT_EXCERPTS;
+  readonly usesScheme = usesScheme;
   /** The assessment a link such as student Home asked to open, until the classroom's list has it. */
   private requested = '';
   private saveTimer: ReturnType<typeof setTimeout> | undefined;
@@ -127,10 +143,14 @@ export class AssessmentsComponent {
   load(): void {
     const classroomId = this.classroomId();
     this.assessments.clear();
+    this.schemeDocs.clear();
     if (!classroomId) return;
     void this.assessments.load(() => this.assessmentApi.list(classroomId)).then(() => this.openRequested());
-    // Read fresh, so a skill a colleague just added is there to choose.
-    if (this.session.isTeacher()) void this.skillsState.load(() => this.curriculum.refresh());
+    if (this.session.isTeacher()) {
+      // Read fresh, so a skill a colleague just added is there to choose.
+      void this.skillsState.load(() => this.curriculum.refresh());
+      void this.schemeDocs.load(() => this.contentApi.documents(classroomId));
+    }
   }
 
   /** Opens the requested assessment once it is in the current classroom's list. */

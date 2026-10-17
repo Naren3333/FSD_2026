@@ -496,6 +496,38 @@
                           "skill_id": {
                             "type": "string",
                             "format": "uuid"
+                          },
+                          "marking_scheme": {
+                            "type": "array",
+                            "items": {
+                              "type": "object",
+                              "properties": {
+                                "document_id": {
+                                  "type": "string",
+                                  "format": "uuid"
+                                },
+                                "chunk_id": {
+                                  "type": "string",
+                                  "format": "uuid"
+                                },
+                                "page": {
+                                  "type": "integer",
+                                  "minimum": 1,
+                                  "maximum": 100000
+                                },
+                                "text": {
+                                  "type": "string",
+                                  "minLength": 1,
+                                  "maxLength": 2000
+                                }
+                              },
+                              "required": [
+                                "text"
+                              ],
+                              "additionalProperties": false
+                            },
+                            "minItems": 1,
+                            "maxItems": 5
                           }
                         },
                         "required": [
@@ -987,6 +1019,38 @@
                         "skill_id": {
                           "type": "string",
                           "format": "uuid"
+                        },
+                        "marking_scheme": {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "properties": {
+                              "document_id": {
+                                "type": "string",
+                                "format": "uuid"
+                              },
+                              "chunk_id": {
+                                "type": "string",
+                                "format": "uuid"
+                              },
+                              "page": {
+                                "type": "integer",
+                                "minimum": 1,
+                                "maximum": 100000
+                              },
+                              "text": {
+                                "type": "string",
+                                "minLength": 1,
+                                "maxLength": 2000
+                              }
+                            },
+                            "required": [
+                              "text"
+                            ],
+                            "additionalProperties": false
+                          },
+                          "minItems": 1,
+                          "maxItems": 5
                         }
                       },
                       "required": [
@@ -1514,6 +1578,38 @@
                               "skill_id": {
                                 "type": "string",
                                 "format": "uuid"
+                              },
+                              "marking_scheme": {
+                                "type": "array",
+                                "items": {
+                                  "type": "object",
+                                  "properties": {
+                                    "document_id": {
+                                      "type": "string",
+                                      "format": "uuid"
+                                    },
+                                    "chunk_id": {
+                                      "type": "string",
+                                      "format": "uuid"
+                                    },
+                                    "page": {
+                                      "type": "integer",
+                                      "minimum": 1,
+                                      "maximum": 100000
+                                    },
+                                    "text": {
+                                      "type": "string",
+                                      "minLength": 1,
+                                      "maxLength": 2000
+                                    }
+                                  },
+                                  "required": [
+                                    "text"
+                                  ],
+                                  "additionalProperties": false
+                                },
+                                "minItems": 1,
+                                "maxItems": 5
                               }
                             },
                             "required": [
@@ -2098,6 +2194,38 @@
                           "skill_id": {
                             "type": "string",
                             "format": "uuid"
+                          },
+                          "marking_scheme": {
+                            "type": "array",
+                            "items": {
+                              "type": "object",
+                              "properties": {
+                                "document_id": {
+                                  "type": "string",
+                                  "format": "uuid"
+                                },
+                                "chunk_id": {
+                                  "type": "string",
+                                  "format": "uuid"
+                                },
+                                "page": {
+                                  "type": "integer",
+                                  "minimum": 1,
+                                  "maximum": 100000
+                                },
+                                "text": {
+                                  "type": "string",
+                                  "minLength": 1,
+                                  "maxLength": 2000
+                                }
+                              },
+                              "required": [
+                                "text"
+                              ],
+                              "additionalProperties": false
+                            },
+                            "minItems": 1,
+                            "maxItems": 5
                           }
                         },
                         "required": [
@@ -2589,6 +2717,38 @@
                         "skill_id": {
                           "type": "string",
                           "format": "uuid"
+                        },
+                        "marking_scheme": {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "properties": {
+                              "document_id": {
+                                "type": "string",
+                                "format": "uuid"
+                              },
+                              "chunk_id": {
+                                "type": "string",
+                                "format": "uuid"
+                              },
+                              "page": {
+                                "type": "integer",
+                                "minimum": 1,
+                                "maximum": 100000
+                              },
+                              "text": {
+                                "type": "string",
+                                "minLength": 1,
+                                "maxLength": 2000
+                              }
+                            },
+                            "required": [
+                              "text"
+                            ],
+                            "additionalProperties": false
+                          },
+                          "minItems": 1,
+                          "maxItems": 5
                         }
                       },
                       "required": [
@@ -3082,6 +3242,38 @@
                           "skill_id": {
                             "type": "string",
                             "format": "uuid"
+                          },
+                          "marking_scheme": {
+                            "type": "array",
+                            "items": {
+                              "type": "object",
+                              "properties": {
+                                "document_id": {
+                                  "type": "string",
+                                  "format": "uuid"
+                                },
+                                "chunk_id": {
+                                  "type": "string",
+                                  "format": "uuid"
+                                },
+                                "page": {
+                                  "type": "integer",
+                                  "minimum": 1,
+                                  "maximum": 100000
+                                },
+                                "text": {
+                                  "type": "string",
+                                  "minLength": 1,
+                                  "maxLength": 2000
+                                }
+                              },
+                              "required": [
+                                "text"
+                              ],
+                              "additionalProperties": false
+                            },
+                            "minItems": 1,
+                            "maxItems": 5
                           }
                         },
                         "required": [

@@ -1,7 +1,9 @@
 import { describe, expect, it } from 'vitest';
 import type { Question } from '../../api/models';
 import {
+  MAX_EXCERPT_TEXT,
   assessmentForm,
+  clipText,
   dueState,
   fillForm,
   isoOrNull,
@@ -101,6 +103,48 @@ describe('assessment conversion', () => {
       },
     });
     expect(sent.questions[1].rubric).not.toHaveProperty('model_answer');
+    expect(sent.questions[1]).not.toHaveProperty('marking_scheme');
+  });
+
+  it('sends marking-scheme passages only with the questions a teacher marks', () => {
+    const form = assessmentForm();
+    form.controls.title.setValue('Plants');
+    const [q] = form.controls.questions.controls;
+    const passage = { document_id: 'd1', chunk_id: 'k1', page: 2, text: 'Accept O2.' };
+    q.patchValue({ prompt: 'Gas?', skill_id: 's1', type: 'short_answer', accepted: 'oxygen' });
+    q.controls.marking_scheme.setValue([passage]);
+    expect(toAssessment(form, 'c1', 'draft').questions[0].marking_scheme).toEqual([passage]);
+    // A numerical question keeps no passages, even ones added while it was a short answer.
+    q.patchValue({ type: 'numerical', answer: '1' });
+    expect(q.controls.marking_scheme.enabled).toBe(false);
+    expect(toAssessment(form, 'c1', 'draft').questions[0]).not.toHaveProperty('marking_scheme');
+  });
+
+  it('allows five passages a question and twenty an assessment', () => {
+    const form = assessmentForm();
+    const q = form.controls.questions.at(0);
+    q.controls.type.setValue('free_response');
+    const scheme = q.controls.marking_scheme;
+    scheme.setValue(Array.from({ length: 6 }, () => ({ text: 'x' })));
+    expect(scheme.valid).toBe(false);
+    scheme.setValue([{ text: '  ' }]);
+    expect(scheme.valid).toBe(false);
+    scheme.setValue([{ text: 'é'.repeat(MAX_EXCERPT_TEXT) }]);
+    expect(scheme.valid).toBe(true);
+    for (let i = 0; i < 4; i++) {
+      const more = questionForm();
+      more.controls.type.setValue('short_answer');
+      more.controls.marking_scheme.setValue(Array.from({ length: 5 }, () => ({ text: 'x' })));
+      form.controls.questions.push(more);
+    }
+    expect(form.controls.questions.hasError('schemeTotal')).toBe(true);
+    form.controls.questions.removeAt(4);
+    expect(form.controls.questions.hasError('schemeTotal')).toBe(false);
+  });
+
+  it('cuts text by characters, not UTF-16 units', () => {
+    expect(clipText('😀😀😀', 2)).toBe('😀😀');
+    expect(clipText('abc', 5)).toBe('abc');
   });
 
   it('turns AI marking off when no question is teacher-marked', () => {
@@ -119,6 +163,7 @@ describe('assessment conversion', () => {
       points: 3,
       skill_id: 's1',
       max_length: 900,
+      marking_scheme: [{ text: 'Clarity needs an example.' }],
       rubric: {
         criteria: [
           {
@@ -146,6 +191,9 @@ describe('assessment conversion', () => {
       '0: Unclear\n3: Clear',
     );
     expect(isoOrNull(form.controls.due_at.value)).toBe('2026-10-20T07:00:00.000Z');
+    expect(form.controls.questions.at(0).controls.marking_scheme.value).toEqual([
+      { text: 'Clarity needs an example.' },
+    ]);
     expect(form.dirty).toBe(false);
   });
 });

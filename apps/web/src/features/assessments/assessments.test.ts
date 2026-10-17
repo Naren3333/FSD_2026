@@ -5,7 +5,7 @@ import { BrowserTestingModule, platformBrowserTesting } from '@angular/platform-
 import { ActivatedRoute, convertToParamMap } from '@angular/router';
 import { of } from 'rxjs';
 import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
-import { AssessmentApi } from '../../api/clients';
+import { AssessmentApi, ContentApi } from '../../api/clients';
 import type { Assessment, AssessmentSummary } from '../../api/models';
 import { ClassroomContext } from '../../core/classroom-context';
 import { CurriculumNames } from '../../core/curriculum-names';
@@ -67,6 +67,7 @@ function setup(
   TestBed.configureTestingModule({
     providers: [
       { provide: AssessmentApi, useValue: api },
+      { provide: ContentApi, useValue: { documents: () => Promise.resolve([]) } },
       {
         provide: Session,
         useValue: { isStudent: signal(role === 'student'), isTeacher: signal(role === 'teacher') },

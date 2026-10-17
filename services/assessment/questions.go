@@ -3,6 +3,7 @@ package main
 import (
 	"errors"
 	"fmt"
+	"learning/platform"
 	"regexp"
 	"slices"
 	"strings"
@@ -32,6 +33,12 @@ const (
 	maxModelAnswer   = 5000
 	defaultMaxLength = 5000
 	maxFreeResponse  = 20000
+	// Marking-scheme passages: per question, per passage and per assessment, which keeps the submission event
+	// within maxSubmittedEvent.
+	maxExcerpts           = 5
+	maxExcerptText        = 2000
+	maxExcerptPage        = 100000
+	maxAssessmentExcerpts = 20
 )
 
 // questionKind holds one question type's rules: when a question of that type is well formed, and which answers a
@@ -54,7 +61,7 @@ var errForeignFields = errors.New("the question has fields its type does not use
 
 // objective is the shared limit and the fields an objective question must leave empty.
 func objective(q Question) error {
-	if len(q.AcceptedAnswers) > 0 || q.CaseSensitive || q.Rubric != nil || q.MaxLength != 0 {
+	if len(q.AcceptedAnswers) > 0 || q.CaseSensitive || q.Rubric != nil || q.MaxLength != 0 || len(q.MarkingScheme) > 0 {
 		return errForeignFields
 	}
 	return nil
@@ -128,7 +135,7 @@ func (shortAnswer) validate(q Question) error {
 		}
 		seen[key] = true
 	}
-	return nil
+	return validateScheme(q.MarkingScheme)
 }
 
 func (shortAnswer) accepts(_ Question, answer string) bool {
@@ -167,6 +174,25 @@ func (freeResponse) validate(q Question) error {
 	for _, c := range q.Rubric.Criteria {
 		if err := c.validate(); err != nil {
 			return err
+		}
+	}
+	return validateScheme(q.MarkingScheme)
+}
+
+// validateScheme checks a question's marking-scheme passages: up to maxExcerpts, each with text, and a chunk only
+// with the document it came from.
+func validateScheme(excerpts []Excerpt) error {
+	if len(excerpts) > maxExcerpts {
+		return fmt.Errorf("a question has at most %d marking-scheme passages", maxExcerpts)
+	}
+	for _, e := range excerpts {
+		switch {
+		case strings.TrimSpace(e.Text) == "" || utf8.RuneCountInString(e.Text) > maxExcerptText:
+			return fmt.Errorf("each marking-scheme passage needs 1–%d characters of text", maxExcerptText)
+		case e.Document != "" && !platform.ID(e.Document), e.Chunk != "" && !platform.ID(e.Chunk), e.Chunk != "" && e.Document == "":
+			return errors.New("a marking-scheme passage names its document and chunk by id")
+		case e.Page < 0 || e.Page > maxExcerptPage:
+			return errors.New("a marking-scheme passage's page is out of range")
 		}
 	}
 	return nil

@@ -18,7 +18,7 @@ import (
 // submittedSchema is the published contract of the submission event.
 func submittedSchema(t *testing.T) map[string]any {
 	t.Helper()
-	data, err := os.ReadFile("../../contracts/events/assessment.submitted.v2.schema.json")
+	data, err := os.ReadFile("../../contracts/events/assessment.submitted.v3.schema.json")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -156,6 +156,11 @@ func TestTheSubmittedEventMatchesItsContract(t *testing.T) {
 	for _, q := range event.(map[string]any)["questions"].([]any) {
 		types[q.(map[string]any)["type"].(string)] = true
 	}
+	for _, q := range event.(map[string]any)["questions"].([]any) {
+		if q := q.(map[string]any); (q["type"] == typeShortAnswer || q["type"] == typeFreeResponse) && q["marking_scheme"] == nil {
+			t.Errorf("%v has no marking scheme", q["type"])
+		}
+	}
 	if len(types) != 4 || event.(map[string]any)["ai_marking"] != true || event.(map[string]any)["teacher_id"] != "user" {
 		t.Fatalf("%v", event)
 	}
@@ -178,6 +183,9 @@ func TestTheContractCheckFindsProblems(t *testing.T) {
 		"no points":       func(e map[string]any) { e["questions"].([]any)[0].(map[string]any)["points"] = 0 },
 		"unknown release": func(e map[string]any) { e["release_policy"] = "never" },
 		"blank answer":    func(e map[string]any) { e["answers"] = map[string]any{"q": ""} },
+		"blank passage": func(e map[string]any) {
+			e["questions"].([]any)[0].(map[string]any)["marking_scheme"] = []any{map[string]any{"text": ""}}
+		},
 	} {
 		e := asJSON(t, good).(map[string]any)
 		change(e)

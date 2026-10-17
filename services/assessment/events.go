@@ -12,9 +12,10 @@ import (
 const maxSubmittedEvent = 900_000
 
 // topicSubmitted carries each submission to Grading with the assessment's questions as they were submitted, answer
-// keys and rubrics included, and the settings Grading acts on (contracts/events/assessment.submitted.v2.schema.json).
-// v2 replaced v1 when questions gained points, short answers and free responses (ADR 0004).
-const topicSubmitted = "assessment.submitted.v2"
+// keys, rubrics and marking-scheme passages included, and the settings Grading acts on
+// (contracts/events/assessment.submitted.v3.schema.json). v2 replaced v1 when questions gained points, short answers
+// and free responses (ADR 0004); v3 replaced v2 when they gained marking-scheme passages (ADR 0005).
+const topicSubmitted = "assessment.submitted.v3"
 
 // submittedEventTooLarge reports whether the submission's event would be over maxSubmittedEvent.
 func submittedEventTooLarge(v Assessment, sub Submission) bool {

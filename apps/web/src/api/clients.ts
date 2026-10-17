@@ -20,6 +20,8 @@ import type {
   Performance,
   Profile,
   SavedAnswers,
+  SearchHit,
+  SearchRequest,
   StreamEvent,
   Student,
   Submission,
@@ -108,6 +110,14 @@ export class ContentApi {
       method: 'POST',
       body: {},
     });
+  }
+  /** The passages of the classroom's indexed PDFs that best match the query, within what the caller may read. */
+  async search(request: SearchRequest): Promise<SearchHit[]> {
+    const found = await this.gateway.request<{ results: SearchHit[] }>('content', '/search', {
+      method: 'POST',
+      body: request,
+    });
+    return found.results;
   }
   /** Object URLs the caller revokes. */
   figure(documentId: string, image: string): Promise<string> {

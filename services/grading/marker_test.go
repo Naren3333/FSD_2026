@@ -6,6 +6,7 @@ import (
 	"learning/platform"
 	"net/http"
 	"net/http/httptest"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -196,5 +197,28 @@ func TestTheMarkingCallNamesWhoPays(t *testing.T) {
 	var e *platform.AIError
 	if _, _, err = f.client().generate(t.Context(), nil, markingSchema(), who); !errors.As(err, &e) || e.Code != "EMPTY_OUTPUT" {
 		t.Fatalf("a null output: %v", err)
+	}
+}
+
+func TestTheMarkingSchemeIsContextNeverFeedback(t *testing.T) {
+	q, r := essayRubric()
+	messages, err := markingMessages(q, r, essayAnswer)
+	if err != nil || strings.Contains(messages[1].Content, "marking_scheme") {
+		t.Fatalf("a question without passages sent some: %v %v", messages, err)
+	}
+	q.MarkingScheme = []Excerpt{{Page: 4, Text: "Award the race criterion only when both reads come before either write."}, {Text: "A lock or atomic increment earns the fix."}}
+	if messages, err = markingMessages(q, r, essayAnswer); err != nil {
+		t.Fatal(err)
+	}
+	var task struct {
+		Scheme []string `json:"marking_scheme"`
+	}
+	if err = json.Unmarshal([]byte(messages[1].Content), &task); err != nil || len(task.Scheme) != 2 || task.Scheme[1] != "A lock or atomic increment earns the fix." {
+		t.Fatalf("%+v %v", task, err)
+	}
+	output := reply(t, []map[string]any{criterion("c1", 2, "both read the counter"), criterion("c2", 0)}, "Award the race criterion only when both reads come before either write.")
+	s, err := checkSuggestion(q, r, essayAnswer, output, "m")
+	if err != nil || s.Feedback != "" || !slices.Contains(s.Flags, flagFeedbackWithheld) || s.SchemePassages != 2 {
+		t.Fatalf("%+v %v", s, err)
 	}
 }

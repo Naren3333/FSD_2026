@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/json"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -102,6 +103,14 @@ func TestInvalidAssessmentsAreRefused(t *testing.T) {
 		},
 		"no accepted answers": func(v *Assessment) {
 			v.Questions = []Question{{ID: "q", Prompt: "?", Type: typeShortAnswer, Skill: skillID}}
+		},
+		"too many passages": func(v *Assessment) {
+			v.Questions = nil
+			for range maxAssessmentExcerpts/maxExcerpts + 1 {
+				q := essay()
+				q.MarkingScheme = slices.Repeat([]Excerpt{{Text: "x"}}, maxExcerpts)
+				v.Questions = append(v.Questions, q)
+			}
 		},
 		"duplicate accepted answers": func(v *Assessment) {
 			v.Questions = []Question{{ID: "q", Prompt: "?", Type: typeShortAnswer, AcceptedAnswers: []string{"Paris", " paris "}, Skill: skillID}}

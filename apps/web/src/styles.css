@@ -1035,6 +1035,25 @@ h4 {
   font-size: 0.95rem;
   margin: 0 0 12px;
 }
+.scheme {
+  border-top: 1px solid var(--border);
+  padding-top: 16px;
+  margin-bottom: 18px;
+}
+.scheme-passage {
+  border-left: 3px solid var(--brand-tint);
+  padding-left: 12px;
+  margin-bottom: 16px;
+}
+.scheme-passage .caption {
+  margin: 0 0 6px;
+}
+.scheme-search {
+  align-items: end;
+}
+.scheme-search > button {
+  margin-bottom: 18px;
+}
 .criterion {
   border-left: 3px solid var(--brand-tint);
   padding-left: 12px;
@@ -1110,6 +1129,16 @@ label.check input {
 .suggestion p {
   font-size: 0.875rem;
   margin: 0 0 8px;
+}
+.scheme-used {
+  margin: 0 0 8px;
+  font-size: 0.875rem;
+}
+.scheme-used summary {
+  min-height: 44px;
+  display: flex;
+  align-items: center;
+  cursor: pointer;
 }
 .suggestion blockquote {
   margin: 0 0 8px;

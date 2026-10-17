@@ -126,6 +126,17 @@
                           · {{ suggestion.confidence }} confidence
                         }
                       </p>
+                      @if (suggestion.scheme_passages) {
+                        <details class="scheme-used">
+                          <summary>
+                            Read with {{ suggestion.scheme_passages }} marking-scheme
+                            {{ suggestion.scheme_passages === 1 ? 'passage' : 'passages' }}
+                          </summary>
+                          @for (excerpt of question(grade, evidence)?.marking_scheme ?? []; track $index) {
+                            <p class="passage">{{ excerpt.text }}</p>
+                          }
+                        </details>
+                      }
                       @for (c of suggestion.criteria ?? []; track c.criterion_id) {
                         <p>
                           <strong>{{ levelName(grade, evidence, c.criterion_id, c.points) }}</strong> ·

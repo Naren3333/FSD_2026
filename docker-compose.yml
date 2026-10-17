@@ -82,9 +82,9 @@ services:
     - -ec
     command:
     - for topic in content.uploaded.v1 content.indexed.v1 assessment.submitted.v1 grading.finalized.v1
-      assessment.submitted.v2 grading.finalized.v2 identity.classroom.deleted.v1
+      assessment.submitted.v2 assessment.submitted.v3 grading.finalized.v2 identity.classroom.deleted.v1
       assessment.submitted.v1.dlq grading.finalized.v1.dlq assessment.submitted.v2.dlq
-      grading.finalized.v2.dlq identity.classroom.deleted.v1.dlq; do /opt/kafka/bin/kafka-topics.sh
+      assessment.submitted.v3.dlq grading.finalized.v2.dlq identity.classroom.deleted.v1.dlq; do /opt/kafka/bin/kafka-topics.sh
       --bootstrap-server kafka:9092 --create --if-not-exists --topic $$topic --partitions
       3 --replication-factor 1; done
   # S3-compatible document storage. MinIO's images stopped being publicly downloadable, so this is

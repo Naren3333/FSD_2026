@@ -52,6 +52,17 @@ type Rubric struct {
 	ModelAnswer string      `json:"model_answer,omitempty"`
 }
 
+// Excerpt is a passage of the classroom's marking scheme that the teacher attached to a question, for AI marking
+// suggestions to read alongside the rubric. It is teacher-only, like the rubric. Picked from Content's search, it
+// names its document, chunk and page; pasted by the teacher, it may name none. The ids are references the teacher
+// chose, not authorization to read anything: the text itself travels with the question.
+type Excerpt struct {
+	Document string `json:"document_id,omitempty"`
+	Chunk    string `json:"chunk_id,omitempty"`
+	Page     int    `json:"page,omitempty"`
+	Text     string `json:"text"`
+}
+
 type Question struct {
 	ID              string   `json:"id"`
 	Prompt          string   `json:"prompt"`
@@ -63,8 +74,10 @@ type Question struct {
 	CaseSensitive   bool     `json:"case_sensitive,omitempty"`
 	Rubric          *Rubric  `json:"rubric,omitempty"`
 	MaxLength       int      `json:"max_length,omitempty"`
-	Points          int      `json:"points"`
-	Skill           string   `json:"skill_id"`
+	// MarkingScheme is for short answers and free responses only.
+	MarkingScheme []Excerpt `json:"marking_scheme,omitempty"`
+	Points        int       `json:"points"`
+	Skill         string    `json:"skill_id"`
 }
 
 // Assessment is the teacher's view, with answer keys and rubrics. Status, dates and policies are optional in a
@@ -183,6 +196,13 @@ func (v Assessment) Validate() error {
 		if err := q.validate(); err != nil {
 			return err
 		}
+	}
+	excerpts := 0
+	for _, q := range v.Questions {
+		excerpts += len(q.MarkingScheme)
+	}
+	if excerpts > maxAssessmentExcerpts {
+		return fmt.Errorf("an assessment has at most %d marking-scheme passages", maxAssessmentExcerpts)
 	}
 	if v.AIMarking && !v.teacherMarked() {
 		return errors.New("AI marking needs a short-answer or free-response question")

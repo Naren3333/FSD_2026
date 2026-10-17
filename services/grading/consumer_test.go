@@ -44,6 +44,34 @@ func TestAV2SubmissionKeepsItsSettings(t *testing.T) {
 	}
 }
 
+func TestOnlyAV3SubmissionCarriesAMarkingScheme(t *testing.T) {
+	questions := func(scheme any) map[string]any {
+		event := submittedEvent(t, topicSubmittedV3, nil)
+		var data map[string]any
+		_ = json.Unmarshal(event.Data, &data)
+		q := data["questions"].([]any)[0].(map[string]any)
+		q["marking_scheme"] = scheme
+		return map[string]any{"questions": []any{q}}
+	}
+	passages := []map[string]any{{"document_id": submissionID, "chunk_id": questionID, "page": 2, "text": "Full marks need the reason."}}
+	v, ok := decodeSubmitted(submittedEvent(t, topicSubmittedV3, questions(passages)))
+	if !ok || len(v.Questions[0].MarkingScheme) != 1 || v.Questions[0].MarkingScheme[0].Page != 2 {
+		t.Fatalf("%v %+v", ok, v.Questions)
+	}
+	if v, ok = decodeSubmitted(submittedEvent(t, topicSubmittedV2, questions(passages))); !ok || v.Questions[0].MarkingScheme != nil {
+		t.Fatalf("a v2 event's passages were kept: %+v", v.Questions)
+	}
+	six := make([]map[string]any, maxExcerpts+1)
+	for i := range six {
+		six[i] = map[string]any{"text": "x"}
+	}
+	for name, scheme := range map[string]any{"blank": []map[string]any{{"text": " "}}, "too many": six} {
+		if _, ok = decodeSubmitted(submittedEvent(t, topicSubmittedV3, questions(scheme))); ok {
+			t.Errorf("%s passages accepted", name)
+		}
+	}
+}
+
 func TestAV1SubmissionGetsTodaysDefaults(t *testing.T) {
 	questions := []map[string]any{{"id": questionID, "prompt": "1+1?", "type": "numerical", "options": nil, "answer": "2", "tolerance": "0", "skill_id": skillID}}
 	event := submittedEvent(t, topicSubmittedV1, map[string]any{"questions": questions, "answers": map[string]string{questionID: "2"}, "late": nil, "release_policy": nil, "ai_marking": nil, "teacher_id": nil})

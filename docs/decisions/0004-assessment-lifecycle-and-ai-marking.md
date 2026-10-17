@@ -42,4 +42,4 @@ Assessments published at once, held one-mark multiple-choice and numerical quest
 
 - Kafka needs four new topics (`assessment.submitted.v2`, `grading.finalized.v2` and their `.dlq`); `kafka-init` creates them.
 - An existing local setup needs `python scripts/upgrade_local.py` once. It adds `GRADING_MARKER_CLIENT_SECRET` to `.env` and creates the `grading-marker` client in the running Keycloak; Compose will not start without that secret, so with the stack down it adds the secret and asks to be run again once the stack is up. Then run `docker compose up -d --build` and `docker compose restart kong`, because Kong's CORS rules now allow `PUT`.
-- Not built yet from the plan: reading the classroom's marking scheme from Content as extra context, a second AI opinion for low-confidence suggestions, a question bank, resits, and measuring how often teachers agree with suggestions.
+- Not built yet from the plan: a second AI opinion for low-confidence suggestions, a question bank, resits, and measuring how often teachers agree with suggestions. The classroom's marking scheme as extra context came in ADR 0005.

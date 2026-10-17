@@ -11,6 +11,7 @@ import type {
   Assessment,
   AssessmentSettings,
   Criterion,
+  Excerpt,
   LatePolicy,
   NewAssessment,
   Question,
@@ -24,6 +25,10 @@ import { requiredText } from '../../shared/validators';
 
 export const MAX_QUESTIONS = 50;
 export const MAX_CRITERIA = 10;
+/** Marking-scheme passages: per question, characters per passage, and per assessment. */
+export const MAX_EXCERPTS = 5;
+export const MAX_EXCERPT_TEXT = 2000;
+export const MAX_ASSESSMENT_EXCERPTS = 20;
 const DEFAULT_MAX_LENGTH = 5000;
 
 export type CriterionForm = FormGroup<{
@@ -45,6 +50,8 @@ export type QuestionForm = FormGroup<{
   max_length: FormControl<number>;
   model_answer: FormControl<string>;
   criteria: FormArray<CriterionForm>;
+  /** Short answers and free responses: passages of the marking scheme for AI suggestions. */
+  marking_scheme: FormControl<Excerpt[]>;
 }>;
 
 export type AssessmentForm = FormGroup<{
@@ -141,6 +148,10 @@ export function questionForm(question?: Question): QuestionForm {
         criterionForm(c.levels.length ? c : undefined),
       ),
     ),
+    marking_scheme: new FormControl<Excerpt[]>(question?.marking_scheme ?? [], {
+      nonNullable: true,
+      validators: [schemeValidator],
+    }),
   });
   applyType(form);
   form.controls.type.valueChanges.subscribe(() => applyType(form));
@@ -161,6 +172,7 @@ function applyType(form: QuestionForm): void {
     max_length: type === 'free_response',
     model_answer: type === 'free_response',
     criteria: type === 'free_response',
+    marking_scheme: type === 'short_answer' || type === 'free_response',
   };
   c.answer.setValidators(uses['answer'] ? [Validators.required, Validators.maxLength(500)] : []);
   c.options.setValidators(uses['options'] ? [optionsValidator] : []);
@@ -173,6 +185,37 @@ function applyType(form: QuestionForm): void {
   c.answer.updateValueAndValidity({ emitEvent: false });
   c.options.updateValueAndValidity({ emitEvent: false });
   c.accepted.updateValueAndValidity({ emitEvent: false });
+}
+
+/** At most five passages, each with 1–2,000 characters of text. */
+const schemeValidator: ValidatorFn = (control: AbstractControl<Excerpt[]>) => {
+  const excerpts = control.value;
+  return excerpts.length <= MAX_EXCERPTS &&
+    excerpts.every((e) => e.text.trim() && characters(e.text) <= MAX_EXCERPT_TEXT)
+    ? null
+    : { scheme: true };
+};
+
+/** Characters as Assessment counts them (code points, not UTF-16 units). */
+export function characters(text: string): number {
+  return Array.from(text).length;
+}
+
+/** The text cut to at most `limit` characters. */
+export function clipText(text: string, limit: number): string {
+  return characters(text) <= limit ? text : Array.from(text).slice(0, limit).join('');
+}
+
+/** At most twenty passages across the assessment's questions. */
+const assessmentSchemeValidator: ValidatorFn = (control: AbstractControl) => {
+  const questions = (control as FormArray<QuestionForm>).getRawValue();
+  const total = questions.reduce((sum, q) => sum + (usesScheme(q.type) ? q.marking_scheme.length : 0), 0);
+  return total <= MAX_ASSESSMENT_EXCERPTS ? null : { schemeTotal: true };
+};
+
+/** Whether questions of the type can carry marking-scheme passages: the ones a teacher (or AI) marks. */
+export function usesScheme(type: QuestionType): boolean {
+  return type === 'short_answer' || type === 'free_response';
 }
 
 /** 2–8 unique options. */
@@ -197,7 +240,7 @@ export function assessmentForm(): AssessmentForm {
     late_policy: new FormControl<LatePolicy>('accept_flagged', { nonNullable: true }),
     release_policy: new FormControl<ReleasePolicy>('on_finalize', { nonNullable: true }),
     ai_marking: new FormControl(false, { nonNullable: true }),
-    questions: new FormArray<QuestionForm>([questionForm()]),
+    questions: new FormArray<QuestionForm>([questionForm()], [assessmentSchemeValidator]),
   });
 }
 
@@ -258,6 +301,7 @@ function toQuestion(q: ReturnType<QuestionForm['getRawValue']>): Omit<Question, 
         accepted_answers: optionLines(q.accepted),
         case_sensitive: q.case_sensitive,
         points: q.points,
+        ...scheme(q.marking_scheme),
       };
     case 'free_response':
       return {
@@ -271,12 +315,18 @@ function toQuestion(q: ReturnType<QuestionForm['getRawValue']>): Omit<Question, 
           criteria: q.criteria.map((c) => ({ title: c.title, levels: parseLevels(c.levels) ?? [] })),
           ...(q.model_answer.trim() ? { model_answer: q.model_answer } : {}),
         },
+        ...scheme(q.marking_scheme),
       };
   }
 }
 
+/** The marking_scheme field, left out when there are no passages. */
+function scheme(excerpts: Excerpt[]): { marking_scheme?: Excerpt[] } {
+  return excerpts.length ? { marking_scheme: excerpts } : {};
+}
+
 export function teacherMarked(questions: readonly { type: QuestionType }[]): boolean {
-  return questions.some((q) => q.type === 'short_answer' || q.type === 'free_response');
+  return questions.some((q) => usesScheme(q.type));
 }
 
 /** A datetime-local value (the viewer's own time zone) as an ISO instant, or null when empty. */

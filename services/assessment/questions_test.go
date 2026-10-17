@@ -98,6 +98,13 @@ func TestEachKindRefusesMalformedQuestions(t *testing.T) {
 		"model answer too long":     written(func(q *Question) { q.Rubric.ModelAnswer = strings.Repeat("é", maxModelAnswer+1) }),
 		"eleven criteria":           written(func(q *Question) { q.Rubric.Criteria = slices.Repeat(q.Rubric.Criteria[1:], maxCriteria+1) }),
 		"criterion without a title": written(func(q *Question) { q.Rubric.Criteria[0].Title = " " }),
+		"choice with a scheme":      choice(func(q *Question) { q.MarkingScheme = []Excerpt{{Text: "x"}} }),
+		"blank passage":             written(func(q *Question) { q.MarkingScheme = []Excerpt{{Text: " \n"}} }),
+		"long passage":              short(func(q *Question) { q.MarkingScheme = []Excerpt{{Text: strings.Repeat("é", maxExcerptText+1)}} }),
+		"six passages":              written(func(q *Question) { q.MarkingScheme = slices.Repeat([]Excerpt{{Text: "x"}}, maxExcerpts+1) }),
+		"chunk without document":    written(func(q *Question) { q.MarkingScheme = []Excerpt{{Chunk: skillID, Text: "x"}} }),
+		"document not an id":        written(func(q *Question) { q.MarkingScheme = []Excerpt{{Document: "scheme.pdf", Text: "x"}} }),
+		"negative page":             short(func(q *Question) { q.MarkingScheme = []Excerpt{{Page: -1, Text: "x"}} }),
 	}
 	for name, q := range cases {
 		if questionKinds[q.Type].validate(q) == nil {
@@ -108,6 +115,10 @@ func TestEachKindRefusesMalformedQuestions(t *testing.T) {
 		choice(func(*Question) {}),
 		choice(func(q *Question) { q.Options = many[:maxOptions] }),
 		short(func(*Question) {}),
+		short(func(q *Question) { q.MarkingScheme = []Excerpt{{Text: "Pasted by the teacher"}} }),
+		written(func(q *Question) {
+			q.MarkingScheme = slices.Repeat([]Excerpt{{Document: skillID, Chunk: skillID, Page: 2, Text: strings.Repeat("é", maxExcerptText)}}, maxExcerpts)
+		}),
 		written(func(q *Question) {
 			q.MaxLength, q.Rubric.ModelAnswer = maxFreeResponse, strings.Repeat("é", maxModelAnswer)
 		}),

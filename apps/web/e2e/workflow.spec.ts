@@ -49,6 +49,13 @@ test('teacher and student complete a real assessment through Kong', async ({ bro
   await second.getByLabel('Criterion 1', { exact: true }).fill('Reasoning');
   await second.getByLabel('Criterion 1 levels').fill('0: Missing\n2: Explains rounding');
   await expect(second.getByLabel('Marks')).toHaveValue('2');
+  // A pasted marking-scheme passage, for AI suggestions only; this classroom has no indexed marking scheme.
+  const scheme = second.getByRole('group', { name: 'Marking scheme (optional)' });
+  await expect(scheme.getByText(/No indexed marking scheme or rubric in this classroom/)).toBeVisible();
+  await scheme.getByLabel('Paste a passage').fill('Full marks need rounding in binary named.');
+  await scheme.getByRole('button', { name: 'Add pasted passage to question 2' }).click();
+  await expect(scheme.getByText('Pasted passage', { exact: true })).toBeVisible();
+  await expect(scheme.getByRole('button', { name: 'Remove passage 1 from question 2' })).toBeVisible();
   await teacher.screenshot({ path: 'test-results/editor-desktop.png', fullPage: true });
   // A draft stays with the teacher until it is published.
   await teacher.getByRole('button', { name: 'Create draft', exact: true }).click();
@@ -65,6 +72,7 @@ test('teacher and student complete a real assessment through Kong', async ({ bro
   await todo.getByRole('link', { name: 'Start Browser assessment ' + suffix }).click();
   await expect(student).toHaveURL(/\/assessments\?open=/);
   await student.getByLabel('What is 0.1 plus 0.2?').fill('0.30');
+  await expect(student.getByText('Full marks need rounding in binary named.')).toHaveCount(0);
   await student
     .getByLabel('Why is 0.1 plus 0.2 not exactly 0.3 in binary?')
     .fill('Neither number has an exact binary form, so both are rounded.');

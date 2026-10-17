@@ -84,9 +84,21 @@ question_fields = {
     "points": POINTS,
     "skill_id": UUID,
 }
-question_v2 = obj(
-    question_fields, ["id", "prompt", "type", "options", "answer", "tolerance", "points", "skill_id"]
+QUESTION_REQUIRED = ["id", "prompt", "type", "options", "answer", "tolerance", "points", "skill_id"]
+question_v2 = obj(question_fields, QUESTION_REQUIRED)
+# Since ADR 0005 a short answer or free response may carry passages of the classroom's marking scheme for AI
+# marking suggestions: picked from Content's search (with their document, chunk and page) or pasted by the teacher.
+excerpt = obj(
+    {
+        "document_id": UUID,
+        "chunk_id": UUID,
+        "page": {"type": "integer", "minimum": 1, "maximum": 100000},
+        "text": {"type": "string", "minLength": 1, "maxLength": 2000},
+    },
+    ["text"],
 )
+question_fields = {**question_fields, "marking_scheme": array(excerpt, 1, 5)}
+question_v3 = obj(question_fields, QUESTION_REQUIRED)
 # A criterion's id is assigned by Assessment, so a teacher sends criteria without one.
 input_rubric = obj(
     {
@@ -126,7 +138,7 @@ assessment = obj(
         "id": UUID,
         "classroom_id": UUID,
         "title": TEXT,
-        "questions": array(question_v2, 1, 50),
+        "questions": array(question_v3, 1, 50),
         **settings,
         "published_at": NULLABLE_TIME,
     }
@@ -194,6 +206,8 @@ suggestion = obj(
         "flags": array({"type": "string"}),
         "model": {"type": "string"},
         "reason": {"type": "string"},
+        # How many of the question's marking-scheme passages the model was given (ADR 0005).
+        "scheme_passages": {"type": "integer", "minimum": 1, "maximum": 5},
     },
     ["status", "awarded"],
 )
@@ -728,6 +742,22 @@ payloads = {
             "release_policy": RELEASE,
             "ai_marking": {"type": "boolean"},
             # The teacher whose AI allowance pays for AI marking; empty for assessments made before it was recorded.
+            "teacher_id": {"type": "string"},
+        }
+    ),
+    "assessment.submitted.v3": obj(
+        {
+            "submission_id": UUID,
+            "assessment_id": UUID,
+            "classroom_id": UUID,
+            "org_id": TEXT,
+            "student_id": TEXT,
+            "questions": array(question_v3, 1, 50),
+            "answers": {"type": "object", "additionalProperties": TEXT},
+            "late": {"type": "boolean"},
+            "submitted_at": {"type": "string", "format": "date-time"},
+            "release_policy": RELEASE,
+            "ai_marking": {"type": "boolean"},
             "teacher_id": {"type": "string"},
         }
     ),

@@ -4,17 +4,21 @@ import (
 	"context"
 	"encoding/json"
 	"learning/platform"
+	"slices"
+	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/jackc/pgx/v5"
 )
 
-// Submission topics. v2 carries points, short answers, free responses and the assessment's grading settings; v1
-// events still on Kafka from before v2 are read as v2 with today's defaults (one point a question, results
-// released on finalization, no AI marking).
+// Submission topics. v3 adds marking-scheme passages to v2, which carries points, short answers, free responses and
+// the assessment's grading settings. Events still on Kafka from before are read the same way: v2 without passages,
+// and v1 with today's defaults (one point a question, results released on finalization, no AI marking).
 const (
 	topicSubmittedV1 = "assessment.submitted.v1"
 	topicSubmittedV2 = "assessment.submitted.v2"
+	topicSubmittedV3 = "assessment.submitted.v3"
 	topicFinalized   = "grading.finalized.v2"
 )
 
@@ -38,7 +42,7 @@ func (v Submitted) valid() bool {
 		return false
 	}
 	for _, q := range v.Questions {
-		if q.Points < 1 || q.Points > 100 {
+		if q.Points < 1 || q.Points > 100 || !validScheme(q.MarkingScheme) {
 			return false
 		}
 	}
@@ -46,11 +50,23 @@ func (v Submitted) valid() bool {
 		len(v.Questions) > 0 && len(v.Questions) <= 50 && len(v.Answers) == len(v.Questions)
 }
 
-// decodeSubmitted reads either submission version, filling in what v1 lacks.
+// validScheme reports whether a question's marking-scheme passages are within Assessment's limits.
+func validScheme(excerpts []Excerpt) bool {
+	return len(excerpts) <= maxExcerpts && !slices.ContainsFunc(excerpts, func(e Excerpt) bool {
+		return strings.TrimSpace(e.Text) == "" || utf8.RuneCountInString(e.Text) > maxExcerptText
+	})
+}
+
+// decodeSubmitted reads any submission version, filling in what v1 and v2 lack.
 func decodeSubmitted(event platform.Event) (Submitted, bool) {
 	var v Submitted
 	if json.Unmarshal(event.Data, &v) != nil || event.Resource != v.Submission {
 		return v, false
+	}
+	if event.Type != topicSubmittedV3 {
+		for i := range v.Questions {
+			v.Questions[i].MarkingScheme = nil // only v3 carries passages
+		}
 	}
 	if event.Type == topicSubmittedV1 {
 		v.ReleasePolicy, v.AIMarking, v.Teacher, v.Late = releaseOnFinalize, false, "", false

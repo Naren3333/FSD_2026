@@ -50,6 +50,24 @@ export interface DocumentRecord {
   indexed_at?: string;
   failure_reason?: FailureReason;
 }
+/** One passage Content's search found, with the document it is from. */
+export interface SearchHit {
+  chunk_id: string;
+  document_id: string;
+  title: string;
+  doc_type: DocType;
+  section_path: string | null;
+  page_start: number;
+  page_end: number;
+  content: string;
+}
+export interface SearchRequest {
+  classroom_id: string;
+  query: string;
+  top_k?: number;
+  document_ids?: string[];
+  doc_types?: DocType[];
+}
 export interface Thread {
   id: string;
   classroom_id: string;
@@ -101,7 +119,16 @@ export interface Rubric {
   criteria: Criterion[];
   model_answer?: string;
 }
-/** A question. Answer keys, accepted answers and rubrics come only to the classroom's teacher. */
+/** A passage of the classroom's marking scheme the teacher attached to a question, for AI marking suggestions only.
+ * Picked from search it names its document, chunk and page; pasted by the teacher it may name none. */
+export interface Excerpt {
+  document_id?: string;
+  chunk_id?: string;
+  page?: number;
+  text: string;
+}
+/** A question. Answer keys, accepted answers, rubrics and marking-scheme passages come only to the classroom's
+ * teacher. */
 export interface Question {
   /** Assigned by Assessment. */
   id: string;
@@ -114,6 +141,8 @@ export interface Question {
   accepted_answers?: string[];
   case_sensitive?: boolean;
   rubric?: Rubric;
+  /** Short answers and free responses only: up to five passages. */
+  marking_scheme?: Excerpt[];
   /** A free response's character limit. */
   max_length?: number;
   /** For a free response, the rubric's total. */
@@ -180,6 +209,8 @@ export interface Suggestion {
   model?: string;
   /** Why it failed or still waits, such as the teacher's daily AI allowance. */
   reason?: string;
+  /** How many of the question's marking-scheme passages the AI was given. */
+  scheme_passages?: number;
 }
 export interface Evidence {
   question_id: string;

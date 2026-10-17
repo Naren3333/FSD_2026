@@ -157,7 +157,8 @@
             </button>
           } @else {
             <p class="caption">
-              Teacher preview. Students see the questions without answer keys, accepted answers or rubrics.
+              Teacher preview. Students see the questions without answer keys, accepted answers, rubrics or
+              marking-scheme passages.
             </p>
           }
           @if (!submitted() && due() !== 'closed') {
@@ -409,12 +410,28 @@
                 </app-field>
               }
             }
+            @if (usesScheme(question.controls.type.value)) {
+              <app-scheme-picker
+                [control]="question.controls.marking_scheme"
+                [index]="i"
+                [prompt]="question.controls.prompt.value"
+                [classroomId]="classroomId()"
+                [documents]="schemeDocs"
+                [disabled]="state.busy()"
+              />
+            }
             @if (questions.length > 1) {
               <button type="button" class="secondary" (click)="removeQuestion(i)">
                 Remove question {{ i + 1 }}
               </button>
             }
           </fieldset>
+        }
+        @if (questions.hasError('schemeTotal')) {
+          <p class="error" role="alert">
+            An assessment has at most {{ maxSchemePassages }} marking-scheme passages. Remove some before
+            saving.
+          </p>
         }
         @if (questions.length < maxQuestions) {
           <button type="button" class="secondary add-question" (click)="addQuestion()">Add question</button>
