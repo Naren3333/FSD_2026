@@ -1,0 +1,185 @@
+<details class="generator">
+  <summary>Generate questions from teaching materials</summary>
+  <p class="caption">
+    AI drafts questions from the teaching materials you choose, each with the passage it came from. Nothing is
+    added until you add it, and you can change any draft before saving. Generating uses your daily AI
+    allowance.
+  </p>
+
+  <app-section-state [section]="documents" loading="Loading teaching materials…" />
+  @if (documents.ready()) {
+    @if (choices.length) {
+      <fieldset class="levels">
+        <legend>Teaching materials (up to {{ maxDocuments }})</legend>
+        @for (doc of choices; track doc.id) {
+          <label class="check">
+            <input
+              type="checkbox"
+              [checked]="chosen().includes(doc.id)"
+              (change)="toggleDocument(doc.id, $any($event.target).checked)"
+            />
+            {{ doc.title }}
+          </label>
+        }
+      </fieldset>
+      <app-field controlId="generate-topic" label="Curriculum topic">
+        <select appFieldControl id="generate-topic" [formControl]="topic">
+          <option value="">Choose a topic</option>
+          @for (s of topics(); track s.id) {
+            <option [value]="s.id">{{ s.name }}</option>
+          }
+        </select>
+      </app-field>
+      <fieldset class="levels">
+        <legend>Question types</legend>
+        @for (type of types; track type.value) {
+          <label class="check">
+            <input
+              type="checkbox"
+              [checked]="chosenTypes().includes(type.value)"
+              (change)="toggleType(type.value, $any($event.target).checked)"
+            />
+            {{ type.label }}
+          </label>
+        }
+      </fieldset>
+      <div class="field-row">
+        <app-field controlId="generate-difficulty" label="Difficulty">
+          <select appFieldControl id="generate-difficulty" [formControl]="difficulty">
+            <option value="introductory">Introductory</option>
+            <option value="intermediate">Intermediate</option>
+            <option value="advanced">Advanced</option>
+          </select>
+        </app-field>
+        <app-field controlId="generate-count" label="How many" [hint]="'1–' + maxCount + '.'">
+          <input
+            appFieldControl
+            id="generate-count"
+            type="number"
+            min="1"
+            [max]="maxCount"
+            [formControl]="count"
+            (keydown.enter)="$event.preventDefault(); generate()"
+          />
+        </app-field>
+      </div>
+      <app-field
+        controlId="generate-focus"
+        label="Focus (optional)"
+        [hint]="
+          'What to concentrate on, such as a chapter or idea. ' +
+          focus.value.length +
+          ' of ' +
+          maxFocus +
+          ' characters.'
+        "
+      >
+        <input
+          appFieldControl
+          id="generate-focus"
+          [formControl]="focus"
+          [maxlength]="maxFocus"
+          (keydown.enter)="$event.preventDefault(); generate()"
+        />
+      </app-field>
+      <button
+        id="generate-button"
+        type="button"
+        (click)="generate()"
+        [disabled]="disabled || result.loading()"
+      >
+        Generate questions
+      </button>
+      <p class="caption" aria-live="polite">{{ note() }}</p>
+    } @else {
+      <p class="empty">
+        No indexed teaching material in this classroom yet. Upload a PDF under Teaching materials, and
+        generate questions once it is indexed.
+      </p>
+    }
+  }
+
+  <app-section-state [section]="result" loading="Reading your materials and drafting questions…" />
+  @if (result.ready() && result.value(); as found) {
+    <p class="caption" aria-live="polite">
+      {{ found.returned }} of {{ found.requested }}
+      {{ found.requested === 1 ? 'question' : 'questions' }} drafted.
+      {{ dropped() }}
+    </p>
+    @if (!room) {
+      <p class="caption">The assessment has the most questions it can take. Remove one to add a draft.</p>
+    }
+    @for (item of drafts(); track item.position; let n = $index) {
+      <div class="suggestion" role="group" [attr.aria-label]="'Generated question ' + (n + 1)">
+        <p>
+          <strong>AI-written draft</strong> · {{ typeName(item.draft.question.type) }} ·
+          {{ marks(item.draft.question.points) }} · check it before adding it
+        </p>
+        <p class="answer-text">{{ item.draft.question.prompt }}</p>
+        @switch (item.draft.question.type) {
+          @case ('multiple_choice') {
+            <ul>
+              @for (option of item.draft.question.options ?? []; track option) {
+                <li>
+                  {{ option }}
+                  @if (option === item.draft.question.answer) {
+                    <strong>(answer key)</strong>
+                  }
+                </li>
+              }
+            </ul>
+          }
+          @case ('short_answer') {
+            <p>Accepted answers: {{ (item.draft.question.accepted_answers ?? []).join('; ') }}</p>
+          }
+          @case ('free_response') {
+            @for (criterion of item.draft.question.rubric?.criteria ?? []; track $index) {
+              <p>
+                <strong>{{ criterion.title }}</strong>
+                @for (level of criterion.levels; track $index) {
+                  · {{ level.points }}: {{ level.descriptor }}
+                }
+              </p>
+            }
+            @if (item.draft.question.rubric?.model_answer; as model) {
+              <p>Model answer: {{ model }}</p>
+            }
+          }
+        }
+        @for (points of item.draft.question.marking_scheme ?? []; track $index) {
+          <p>Marking points: {{ points.text }}</p>
+        }
+        <p>Why: {{ item.draft.explanation }}</p>
+        <blockquote>{{ item.draft.evidence }}</blockquote>
+        <details class="scheme-used">
+          <summary>
+            From {{ item.draft.question.sources?.length ?? 0 }}
+            {{ item.draft.question.sources?.length === 1 ? 'passage' : 'passages' }} of your materials
+          </summary>
+          @for (excerpt of item.draft.question.sources ?? []; track $index) {
+            <p class="caption">{{ source(excerpt) }}</p>
+            <p class="passage">{{ excerpt.text }}</p>
+          }
+        </details>
+        <span class="button-row">
+          <button
+            type="button"
+            [id]="'generated-' + item.position + '-add'"
+            (click)="add(item.position)"
+            [disabled]="disabled || !room"
+          >
+            Add to assessment<span class="visually-hidden"> generated question {{ n + 1 }}</span>
+          </button>
+          <button
+            type="button"
+            class="secondary"
+            [id]="'generated-' + item.position + '-discard'"
+            (click)="discard(item.position)"
+          >
+            Discard<span class="visually-hidden"> generated question {{ n + 1 }}</span>
+          </button>
+        </span>
+      </div>
+    }
+  }
+</details>

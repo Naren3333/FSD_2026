@@ -16,7 +16,7 @@ import (
 
 const (
 	room  = "6ff7334b-1a5d-4ea3-aea9-a219dc94a39b"
-	skill = "7a2d6e3f-9b5c-4d4e-8f3a-2b3c4d5e6f70"
+	topic = "7a2d6e3f-9b5c-4d4e-8f3a-2b3c4d5e6f70"
 )
 
 type memoryStore struct {
@@ -121,13 +121,13 @@ func (m *memoryStore) saveAnswers(_ context.Context, assessment, student string,
 	return time.Now(), nil
 }
 
-type fixedSkills skillStatus
+type fixedTopics topicStatus
 
-func (s fixedSkills) check(*http.Request, string) skillStatus { return skillStatus(s) }
+func (s fixedTopics) check(*http.Request, string) topicStatus { return topicStatus(s) }
 
-func newServer(relation string, skillAnswer skillStatus) (server, *memoryStore) {
+func newServer(relation string, topicAnswer topicStatus) (server, *memoryStore) {
 	store := &memoryStore{assessments: map[string]Assessment{}, submitted: map[string]Submission{}, saved: map[string]map[string]string{}}
-	return server{store: store, access: platformtest.Access(relation), skills: fixedSkills(skillAnswer)}, store
+	return server{store: store, access: platformtest.Access(relation), topics: fixedTopics(topicAnswer)}, store
 }
 
 func call(t *testing.T, s server, method, path, body string, roles ...string) *httptest.ResponseRecorder {
@@ -135,30 +135,30 @@ func call(t *testing.T, s server, method, path, body string, roles ...string) *h
 	return platformtest.Serve(s.routes, method, path, body, "user", roles...)
 }
 
-const quiz = `{"classroom_id":"` + room + `","title":"Fractions","questions":[{"prompt":"1/2 + 1/2?","type":"numerical","options":[],"answer":"1","tolerance":"0","skill_id":"` + skill + `"}]}`
+const quiz = `{"classroom_id":"` + room + `","title":"Fractions","questions":[{"prompt":"1/2 + 1/2?","type":"numerical","options":[],"answer":"1","tolerance":"0","topic_id":"` + topic + `"}]}`
 
-func TestCreateChecksTheTeacherAndEverySkill(t *testing.T) {
+func TestCreateChecksTheTeacherAndEveryTopic(t *testing.T) {
 	cases := []struct {
 		relation string
-		skill    skillStatus
+		topic    topicStatus
 		status   int
 	}{
-		{platform.RelationTeacher, skillValid, http.StatusCreated},
-		{platform.RelationStudent, skillValid, http.StatusForbidden},
-		{platform.RelationTeacher, skillInvalid, http.StatusUnprocessableEntity},
-		{platform.RelationTeacher, skillUnavailable, http.StatusServiceUnavailable},
+		{platform.RelationTeacher, topicValid, http.StatusCreated},
+		{platform.RelationStudent, topicValid, http.StatusForbidden},
+		{platform.RelationTeacher, topicInvalid, http.StatusUnprocessableEntity},
+		{platform.RelationTeacher, topicUnavailable, http.StatusServiceUnavailable},
 	}
 	for _, tc := range cases {
-		s, _ := newServer(tc.relation, tc.skill)
+		s, _ := newServer(tc.relation, tc.topic)
 		if w := call(t, s, http.MethodPost, "/v1/assessments", quiz, "teacher"); w.Code != tc.status {
-			t.Errorf("%s/%d: %d %s", tc.relation, tc.skill, w.Code, w.Body.String())
+			t.Errorf("%s/%d: %d %s", tc.relation, tc.topic, w.Code, w.Body.String())
 		}
 	}
 }
 
 func created(t *testing.T, relation string) (server, Assessment) {
 	t.Helper()
-	s, _ := newServer(platform.RelationTeacher, skillValid)
+	s, _ := newServer(platform.RelationTeacher, topicValid)
 	w := call(t, s, http.MethodPost, "/v1/assessments", quiz, "teacher")
 	var v Assessment
 	if err := json.Unmarshal(w.Body.Bytes(), &v); err != nil {
@@ -225,7 +225,7 @@ func TestPurgeRejectsMalformedDeletions(t *testing.T) {
 }
 
 func TestAMalformedOrUnknownAssessmentIsNotFound(t *testing.T) {
-	s, _ := newServer(platform.RelationTeacher, skillValid)
+	s, _ := newServer(platform.RelationTeacher, topicValid)
 	for _, id := range []string{"not-a-uuid", room} {
 		if w := call(t, s, http.MethodGet, "/v1/assessments/"+id, "", "teacher"); w.Code != http.StatusNotFound {
 			t.Errorf("%s: %d", id, w.Code)
@@ -233,10 +233,10 @@ func TestAMalformedOrUnknownAssessmentIsNotFound(t *testing.T) {
 	}
 }
 
-const draftQuiz = `{"classroom_id":"` + room + `","title":"Draft","status":"draft","questions":[{"prompt":"1/2 + 1/2?","type":"numerical","options":[],"answer":"1","tolerance":"0","skill_id":"` + skill + `"}]}`
+const draftQuiz = `{"classroom_id":"` + room + `","title":"Draft","status":"draft","questions":[{"prompt":"1/2 + 1/2?","type":"numerical","options":[],"answer":"1","tolerance":"0","topic_id":"` + topic + `"}]}`
 
 func TestADraftIsTheTeachersUntilPublished(t *testing.T) {
-	s, _ := newServer(platform.RelationTeacher, skillValid)
+	s, _ := newServer(platform.RelationTeacher, topicValid)
 	w := call(t, s, http.MethodPost, "/v1/assessments", draftQuiz, "teacher")
 	var v Assessment
 	if w.Code != http.StatusCreated || json.Unmarshal(w.Body.Bytes(), &v) != nil || v.Status != statusDraft || v.PublishedAt != nil {
@@ -259,7 +259,7 @@ func TestADraftIsTheTeachersUntilPublished(t *testing.T) {
 	if w = call(t, student, http.MethodPut, path, edited, "student"); w.Code != http.StatusForbidden {
 		t.Fatalf("a student edited a draft: %d", w.Code)
 	}
-	moved := strings.Replace(edited, room, skill, 1)
+	moved := strings.Replace(edited, room, topic, 1)
 	if w = call(t, s, http.MethodPut, path, moved, "teacher"); w.Code != http.StatusUnprocessableEntity {
 		t.Fatalf("a draft moved classroom: %d", w.Code)
 	}
@@ -280,7 +280,7 @@ func TestADraftIsTheTeachersUntilPublished(t *testing.T) {
 }
 
 func TestOnlyADraftIsDeleted(t *testing.T) {
-	s, store := newServer(platform.RelationTeacher, skillValid)
+	s, store := newServer(platform.RelationTeacher, topicValid)
 	w := call(t, s, http.MethodPost, "/v1/assessments", draftQuiz, "teacher")
 	var v Assessment
 	_ = json.Unmarshal(w.Body.Bytes(), &v)
@@ -292,7 +292,7 @@ func TestOnlyADraftIsDeleted(t *testing.T) {
 // scheduled creates a published assessment with the given extra JSON fields, as the classroom's teacher.
 func scheduled(t *testing.T, fields string) (server, Assessment) {
 	t.Helper()
-	s, _ := newServer(platform.RelationTeacher, skillValid)
+	s, _ := newServer(platform.RelationTeacher, topicValid)
 	body := strings.Replace(quiz, `"title":"Fractions",`, `"title":"Fractions",`+fields, 1)
 	w := call(t, s, http.MethodPost, "/v1/assessments", body, "teacher")
 	var v Assessment
@@ -333,7 +333,7 @@ func TestLateWorkIsFlaggedOrRefused(t *testing.T) {
 			t.Errorf("%s: %d %s", policy, w.Code, w.Body.String())
 		}
 	}
-	s, _ := newServer(platform.RelationTeacher, skillValid)
+	s, _ := newServer(platform.RelationTeacher, topicValid)
 	past := strings.Replace(quiz, `"title":"Fractions",`, `"title":"Fractions","due_at":`+stamp(time.Now().Add(-time.Hour))+`,`, 1)
 	if w := call(t, s, http.MethodPost, "/v1/assessments", past, "teacher"); w.Code != http.StatusUnprocessableEntity {
 		t.Fatalf("published already past due: %d", w.Code)
@@ -397,7 +397,7 @@ func TestSubmissionsCarryTheGradingSettings(t *testing.T) {
 }
 
 func TestAnUpdateWithoutAStatusKeepsTheDraft(t *testing.T) {
-	s, _ := newServer(platform.RelationTeacher, skillValid)
+	s, _ := newServer(platform.RelationTeacher, topicValid)
 	w := call(t, s, http.MethodPost, "/v1/assessments", draftQuiz, "teacher")
 	var v Assessment
 	if json.Unmarshal(w.Body.Bytes(), &v) != nil {
@@ -409,8 +409,8 @@ func TestAnUpdateWithoutAStatusKeepsTheDraft(t *testing.T) {
 }
 
 func TestASubmissionTooLargeToPublishIsRefused(t *testing.T) {
-	s, store := newServer(platform.RelationTeacher, skillValid)
-	essay := `{"prompt":"Explain.","type":"free_response","max_length":20000,"rubric":{"criteria":[{"title":"Clarity","levels":[{"points":0,"descriptor":"Unclear"},{"points":1,"descriptor":"Clear"}]}]},"skill_id":"` + skill + `"}`
+	s, store := newServer(platform.RelationTeacher, topicValid)
+	essay := `{"prompt":"Explain.","type":"free_response","max_length":20000,"rubric":{"criteria":[{"title":"Clarity","levels":[{"points":0,"descriptor":"Unclear"},{"points":1,"descriptor":"Clear"}]}]},"topic_id":"` + topic + `"}`
 	body := `{"classroom_id":"` + room + `","title":"Essays","questions":[` + strings.TrimSuffix(strings.Repeat(essay+",", 25), ",") + `]}`
 	w := call(t, s, http.MethodPost, "/v1/assessments", body, "teacher")
 	var v Assessment
@@ -431,10 +431,10 @@ func TestASubmissionTooLargeToPublishIsRefused(t *testing.T) {
 
 // allTypes has one question of each type, a manual release and AI marking.
 const allTypes = `{"classroom_id":"` + room + `","title":"Mixed","release_policy":"manual","ai_marking":true,"questions":[
-	{"prompt":"Pick the sum","type":"multiple_choice","options":["half","whole"],"answer":"whole","tolerance":"","skill_id":"` + skill + `"},
-	{"prompt":"1/2 + 1/2?","type":"numerical","options":[],"answer":"1.00","tolerance":"0.01","points":2,"skill_id":"` + skill + `"},
-	{"prompt":"Capital of France?","type":"short_answer","accepted_answers":["Paris"],"case_sensitive":true,"marking_scheme":[{"text":"Accept the city's name in French."}],"skill_id":"` + skill + `"},
-	{"prompt":"Explain.","type":"free_response","max_length":300,"rubric":{"criteria":[{"title":"Clarity","levels":[{"points":0,"descriptor":"Unclear"},{"points":2,"descriptor":"Clear"}]}],"model_answer":"Halves add to a whole."},"marking_scheme":[{"document_id":"` + room + `","chunk_id":"` + skill + `","page":3,"text":"Award clarity for naming both halves."}],"skill_id":"` + skill + `"}]}`
+	{"prompt":"Pick the sum","type":"multiple_choice","options":["half","whole"],"answer":"whole","tolerance":"","topic_id":"` + topic + `","origin":"generated","sources":[{"document_id":"` + room + `","chunk_id":"` + topic + `","page":2,"text":"Two halves make one whole."}]},
+	{"prompt":"1/2 + 1/2?","type":"numerical","options":[],"answer":"1.00","tolerance":"0.01","points":2,"topic_id":"` + topic + `"},
+	{"prompt":"Capital of France?","type":"short_answer","accepted_answers":["Paris"],"case_sensitive":true,"marking_scheme":[{"text":"Accept the city's name in French."}],"topic_id":"` + topic + `"},
+	{"prompt":"Explain.","type":"free_response","max_length":300,"rubric":{"criteria":[{"title":"Clarity","levels":[{"points":0,"descriptor":"Unclear"},{"points":2,"descriptor":"Clear"}]}],"model_answer":"Halves add to a whole."},"marking_scheme":[{"document_id":"` + room + `","chunk_id":"` + topic + `","page":3,"text":"Award clarity for naming both halves."}],"topic_id":"` + topic + `"}]}`
 
 // post creates an assessment as the classroom's teacher.
 func post(t *testing.T, s server, body string) Assessment {
@@ -467,7 +467,7 @@ func snapshot(t *testing.T, m *memoryStore) string {
 }
 
 func TestStudentsSeeNoAnswerKey(t *testing.T) {
-	s, _ := newServer(platform.RelationTeacher, skillValid)
+	s, _ := newServer(platform.RelationTeacher, topicValid)
 	v := post(t, s, allTypes)
 	s.access = platformtest.Access(platform.RelationStudent)
 	w := call(t, s, http.MethodGet, "/v1/assessments/"+v.ID, "", "student")
@@ -487,24 +487,24 @@ func TestStudentsSeeNoAnswerKey(t *testing.T) {
 	}
 	for _, q := range questions {
 		for key := range q.(map[string]any) {
-			if !slices.Contains([]string{"id", "prompt", "type", "options", "max_length", "points", "skill_id"}, key) {
+			if !slices.Contains([]string{"id", "prompt", "type", "options", "max_length", "points", "topic_id"}, key) {
 				t.Errorf("student question has %q", key)
 			}
 		}
 	}
-	for _, secret := range []string{"Paris", "Halves add", "Clarity", "Unclear", "0.01", "1.00", "marking_scheme", "in French", "both halves"} {
+	for _, secret := range []string{"Paris", "Halves add", "Clarity", "Unclear", "0.01", "1.00", "marking_scheme", "in French", "both halves", "sources", "generated", "make one whole"} {
 		if strings.Contains(w.Body.String(), secret) {
 			t.Errorf("leaked %q: %s", secret, w.Body.String())
 		}
 	}
 	s.access = platformtest.Access(platform.RelationTeacher)
-	if w = call(t, s, http.MethodGet, "/v1/assessments/"+v.ID, "", "teacher"); !strings.Contains(w.Body.String(), `"accepted_answers":["Paris"]`) || !strings.Contains(w.Body.String(), "Halves add") || !strings.Contains(w.Body.String(), "both halves") {
+	if w = call(t, s, http.MethodGet, "/v1/assessments/"+v.ID, "", "teacher"); !strings.Contains(w.Body.String(), `"accepted_answers":["Paris"]`) || !strings.Contains(w.Body.String(), "Halves add") || !strings.Contains(w.Body.String(), "both halves") || !strings.Contains(w.Body.String(), `"origin":"generated"`) || !strings.Contains(w.Body.String(), "make one whole") {
 		t.Fatalf("teacher view lacks the keys: %s", w.Body.String())
 	}
 }
 
 func TestStrangersChangeNothing(t *testing.T) {
-	s, store := newServer(platform.RelationTeacher, skillValid)
+	s, store := newServer(platform.RelationTeacher, topicValid)
 	published := post(t, s, quiz)
 	draft := post(t, s, draftQuiz)
 	answer := `{"answers":{"` + published.Questions[0].ID + `":"1"}}`
@@ -538,7 +538,7 @@ func TestStrangersChangeNothing(t *testing.T) {
 }
 
 func TestDeletingNeedsAKnownDraftAndItsTeacher(t *testing.T) {
-	s, store := newServer(platform.RelationTeacher, skillValid)
+	s, store := newServer(platform.RelationTeacher, topicValid)
 	draft := post(t, s, draftQuiz)
 	if w := call(t, s, http.MethodDelete, "/v1/assessments/"+room, "", "teacher"); w.Code != http.StatusNotFound {
 		t.Fatalf("unknown id: %d", w.Code)
@@ -550,7 +550,7 @@ func TestDeletingNeedsAKnownDraftAndItsTeacher(t *testing.T) {
 }
 
 func TestPublishingAfterTheDueDateIsRefused(t *testing.T) {
-	s, store := newServer(platform.RelationTeacher, skillValid)
+	s, store := newServer(platform.RelationTeacher, topicValid)
 	due := time.Now().Add(time.Hour)
 	v := post(t, s, strings.Replace(draftQuiz, `"status":"draft",`, `"status":"draft","due_at":`+stamp(due)+`,`, 1))
 	s.clock = func() time.Time { return due.Add(time.Minute) }
@@ -563,7 +563,7 @@ func TestPublishingAfterTheDueDateIsRefused(t *testing.T) {
 }
 
 func TestAnUpdateCanPublish(t *testing.T) {
-	s, store := newServer(platform.RelationTeacher, skillValid)
+	s, store := newServer(platform.RelationTeacher, topicValid)
 	v := post(t, s, draftQuiz)
 	path := "/v1/assessments/" + v.ID
 	w := call(t, s, http.MethodPut, path, strings.Replace(draftQuiz, `"status":"draft"`, `"status":"published"`, 1), "teacher")
@@ -589,7 +589,7 @@ func TestSavingIsClosedWithTheAssessment(t *testing.T) {
 }
 
 func TestADraftTakesNoSubmission(t *testing.T) {
-	s, store := newServer(platform.RelationTeacher, skillValid)
+	s, store := newServer(platform.RelationTeacher, topicValid)
 	v := post(t, s, draftQuiz)
 	s.access = platformtest.Access(platform.RelationStudent)
 	w := call(t, s, http.MethodPost, "/v1/assessments/"+v.ID+"/submissions", `{"answers":{"`+v.Questions[0].ID+`":"1"}}`, "student")
@@ -599,7 +599,7 @@ func TestADraftTakesNoSubmission(t *testing.T) {
 }
 
 func TestTheCreatorPaysEvenAfterAnotherTeacherEdits(t *testing.T) {
-	s, store := newServer(platform.RelationTeacher, skillValid)
+	s, store := newServer(platform.RelationTeacher, topicValid)
 	v := post(t, s, draftQuiz)
 	if store.assessments[v.ID].CreatedBy != "user" {
 		t.Fatalf("created by %q", store.assessments[v.ID].CreatedBy)
@@ -610,14 +610,14 @@ func TestTheCreatorPaysEvenAfterAnotherTeacherEdits(t *testing.T) {
 	}
 }
 
-func TestAnUpdateChecksItsSkills(t *testing.T) {
-	for skills, want := range map[skillStatus]int{skillInvalid: http.StatusUnprocessableEntity, skillUnavailable: http.StatusServiceUnavailable} {
-		s, store := newServer(platform.RelationTeacher, skillValid)
+func TestAnUpdateChecksItsTopics(t *testing.T) {
+	for topics, want := range map[topicStatus]int{topicInvalid: http.StatusUnprocessableEntity, topicUnavailable: http.StatusServiceUnavailable} {
+		s, store := newServer(platform.RelationTeacher, topicValid)
 		v := post(t, s, draftQuiz)
-		s.skills = fixedSkills(skills)
+		s.topics = fixedTopics(topics)
 		w := call(t, s, http.MethodPut, "/v1/assessments/"+v.ID, strings.Replace(draftQuiz, `"Draft"`, `"Edited"`, 1), "teacher")
 		if w.Code != want || store.assessments[v.ID].Title != "Draft" {
-			t.Errorf("%d: %d %s", skills, w.Code, w.Body.String())
+			t.Errorf("%d: %d %s", topics, w.Code, w.Body.String())
 		}
 	}
 }

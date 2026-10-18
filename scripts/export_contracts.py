@@ -27,6 +27,16 @@ def array(item, minimum=0, maximum=100):
     return {"type": "array", "items": item, "minItems": minimum, "maxItems": maximum}
 
 
+def topics(schema):
+    """The schema with every `skill_id` field named `topic_id`. Since ADR 0007 the curriculum's one level is the topic;
+    the shapes below keep `skill_id` because the event versions published before it carry that name."""
+    if isinstance(schema, list):
+        return ["topic_id" if item == "skill_id" else topics(item) for item in schema]
+    if isinstance(schema, dict):
+        return {("topic_id" if key == "skill_id" else key): topics(value) for key, value in schema.items()}
+    return schema
+
+
 CHECK = "--check" in sys.argv[1:]
 stale = []  # with --check, the contracts that differ from the code
 
@@ -99,6 +109,14 @@ excerpt = obj(
 )
 question_fields = {**question_fields, "marking_scheme": array(excerpt, 1, 5)}
 question_v3 = obj(question_fields, QUESTION_REQUIRED)
+# Since ADR 0006 a question the teacher kept from AI question generation says so and names the passages it came
+# from. Teacher-only provenance in Assessment's HTTP API: neither students nor the submission event get it.
+question_fields = {
+    **question_fields,
+    "sources": array(excerpt, 1, 5),
+    "origin": {"enum": ["generated"], "description": "Left out for a question the teacher wrote."},
+}
+teacher_question = obj(question_fields, QUESTION_REQUIRED)
 # A criterion's id is assigned by Assessment, so a teacher sends criteria without one.
 input_rubric = obj(
     {
@@ -138,7 +156,7 @@ assessment = obj(
         "id": UUID,
         "classroom_id": UUID,
         "title": TEXT,
-        "questions": array(question_v3, 1, 50),
+        "questions": array(teacher_question, 1, 50),
         **settings,
         "published_at": NULLABLE_TIME,
     }
@@ -315,15 +333,8 @@ search_request = obj(
 )
 search_response = obj({"results": array(search_hit, maximum=30), "rerank_fallback": {"type": "boolean"}})
 classroom = obj({"id": UUID, "name": TEXT, "teacher_id": TEXT})
-NODE_NAME = {"type": "string", "minLength": 1, "maxLength": 160}
-node = obj(
-    {
-        "id": UUID,
-        "kind": {"enum": ["subject", "course", "unit", "topic", "skill", "objective"]},
-        "name": NODE_NAME,
-        "parent_id": {"type": ["string", "null"], "format": "uuid"},
-    }
-)
+TOPIC_NAME = {"type": "string", "minLength": 1, "maxLength": 160}
+curriculum_topic = obj({"id": UUID, "name": TOPIC_NAME})
 evaluation = obj(
     {
         "id": UUID,
@@ -481,22 +492,16 @@ operations = {
         school_students,
     ],
     "curriculum": [
-        operation("GET", "/v1/nodes", None, array(node, maximum=200)),
-        operation("GET", "/v1/nodes/{id}", None, node),
+        operation("GET", "/v1/topics", None, array(curriculum_topic, maximum=200)),
+        operation("GET", "/v1/topics/{id}", None, curriculum_topic),
+        operation("POST", "/v1/topics", obj({"name": TOPIC_NAME}), curriculum_topic, 201),
+        operation("PATCH", "/v1/topics/{id}", obj({"name": TOPIC_NAME}), curriculum_topic),
+        operation("DELETE", "/v1/topics/{id}", None, None, 204),
         operation(
             "POST",
-            "/v1/nodes",
-            obj({k: v for k, v in node["properties"].items() if k != "id"}, ["kind", "name"]),
-            node,
-            201,
-        ),
-        operation("PATCH", "/v1/nodes/{id}", obj({"name": NODE_NAME}), obj({"id": UUID, "name": NODE_NAME})),
-        operation("DELETE", "/v1/nodes/{id}", None, None, 204),
-        operation(
-            "POST",
-            "/v1/skills/{id}/prerequisites",
+            "/v1/topics/{id}/prerequisites",
             obj({"prerequisite_id": UUID}),
-            obj({"skill_id": UUID, "prerequisite_id": UUID}),
+            obj({"topic_id": UUID, "prerequisite_id": UUID}),
         ),
     ],
     "content": [
@@ -690,7 +695,7 @@ for name, routes in operations.items():
             "components": {
                 "securitySchemes": {"bearerAuth": {"type": "http", "scheme": "bearer", "bearerFormat": "JWT"}}
             },
-            "paths": paths,
+            "paths": topics(paths),
         },
     )
 
@@ -761,6 +766,24 @@ payloads = {
             "teacher_id": {"type": "string"},
         }
     ),
+    "assessment.submitted.v4": topics(
+        obj(
+            {
+                "submission_id": UUID,
+                "assessment_id": UUID,
+                "classroom_id": UUID,
+                "org_id": TEXT,
+                "student_id": TEXT,
+                "questions": array(question_v3, 1, 50),
+                "answers": {"type": "object", "additionalProperties": TEXT},
+                "late": {"type": "boolean"},
+                "submitted_at": {"type": "string", "format": "date-time"},
+                "release_policy": RELEASE,
+                "ai_marking": {"type": "boolean"},
+                "teacher_id": {"type": "string"},
+            }
+        )
+    ),
     "grading.finalized.v1": obj(
         {
             "evaluation_id": UUID,
@@ -781,12 +804,28 @@ payloads = {
             "evidence": array(final_evidence, 1, 50),
         }
     ),
+    "grading.finalized.v3": topics(
+        obj(
+            {
+                "evaluation_id": UUID,
+                "assessment_id": UUID,
+                "classroom_id": UUID,
+                "org_id": TEXT,
+                "student_id": TEXT,
+                "evidence": array(final_evidence, 1, 50),
+            }
+        )
+    ),
 }
 # When an event is published, for topics whose timing matters to consumers.
-descriptions = {
-    "grading.finalized.v2": "Published when a finalized grade becomes visible to its student: at finalization "
+FINALIZED_TIMING = (
+    "Published when a finalized grade becomes visible to its student: at finalization "
     "with release_policy on_finalize, otherwise when the teacher releases the assessment's results. Consumers "
-    "show its marks to the student, and must deduplicate by evaluation_id.",
+    "show its marks to the student, and must deduplicate by evaluation_id."
+)
+descriptions = {
+    "grading.finalized.v3": FINALIZED_TIMING,
+    "grading.finalized.v2": FINALIZED_TIMING,
 }
 for topic, payload in payloads.items():
     schema = obj(

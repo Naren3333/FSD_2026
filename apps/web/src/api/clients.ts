@@ -12,11 +12,13 @@ import type {
   DocumentRecord,
   Enrollment,
   Evaluation,
+  GenerateRequest,
+  GenerateResult,
   GradingCounts,
-  Node,
+  Guidance,
+  GuidanceRequest,
   Mark,
   NewAssessment,
-  NodeInput,
   Performance,
   Profile,
   SavedAnswers,
@@ -26,6 +28,7 @@ import type {
   Student,
   Submission,
   Thread,
+  Topic,
   Usage,
 } from './models';
 
@@ -78,11 +81,16 @@ export class IdentityApi {
 export class CurriculumApi {
   private readonly gateway = inject(Gateway);
 
-  nodes(): Promise<Node[]> {
-    return this.gateway.request('curriculum', '/nodes');
+  /** The organization's active topics, by name; up to 200. */
+  topics(): Promise<Topic[]> {
+    return this.gateway.request('curriculum', '/topics');
   }
-  createNode(node: NodeInput): Promise<Node> {
-    return this.gateway.request('curriculum', '/nodes', { method: 'POST', body: node });
+  createTopic(topic: { name: string }): Promise<Topic> {
+    return this.gateway.request('curriculum', '/topics', { method: 'POST', body: topic });
+  }
+  /** Hides the topic from every list; nothing is deleted. */
+  archiveTopic(topicId: string): Promise<void> {
+    return this.gateway.request('curriculum', `/topics/${id(topicId)}`, { method: 'DELETE' });
   }
 }
 
@@ -232,7 +240,7 @@ export class AnalyticsApi {
   performance(studentId: string, classroomId: string): Promise<Performance> {
     return this.gateway.request('analytics', `/performance/${id(studentId)}?classroom_id=${id(classroomId)}`);
   }
-  /** For the classroom's teacher: one page of its enrolled students with their finalized skill evidence. */
+  /** For the classroom's teacher: one page of its enrolled students with their finalized topic evidence. */
   classPerformance(classroomId: string, offset: number, limit: number): Promise<ClassPerformance> {
     const query = new URLSearchParams({
       classroom_id: classroomId,
@@ -271,5 +279,32 @@ export class ChatApi {
   /** The signed-in user's AI spend today. */
   usage(): Promise<Usage> {
     return this.gateway.request('chatbot', '/usage');
+  }
+}
+
+/** Generation reads the documents and waits for the model; Kong allows it two minutes. The browser waits a little
+ * longer, so Kong's own timeout (a 504, which says so) arrives first. */
+const GENERATION_TIMEOUT = 2 * 60 * 1000 + 10 * 1000;
+
+/** Drafts from the classroom's documents for its teacher (ADR 0006). Nothing is saved until the teacher saves the
+ * assessment. */
+@Injectable({ providedIn: 'root' })
+export class QuestionGenerationApi {
+  private readonly gateway = inject(Gateway);
+
+  generate(request: GenerateRequest): Promise<GenerateResult> {
+    return this.gateway.request('question-generation', '/questions', {
+      method: 'POST',
+      body: request,
+      timeout: GENERATION_TIMEOUT,
+    });
+  }
+  /** Accepted answers or a rubric, and marking points, for a question the teacher wrote. */
+  guidance(request: GuidanceRequest): Promise<Guidance> {
+    return this.gateway.request('question-generation', '/marking-guidance', {
+      method: 'POST',
+      body: request,
+      timeout: GENERATION_TIMEOUT,
+    });
   }
 }

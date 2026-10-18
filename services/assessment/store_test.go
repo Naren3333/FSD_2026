@@ -110,7 +110,7 @@ func TestStudentsListOnlyWhatIsOpen(t *testing.T) {
 	stored(t, p, "org", statusPublished, &future)
 	stored(t, p, "org", statusDraft, nil)
 	elsewhere := fixture()
-	elsewhere.ID, elsewhere.Classroom = uuid.NewString(), skill
+	elsewhere.ID, elsewhere.Classroom = uuid.NewString(), topic
 	if err := p.insertAssessment(ctx, "org", elsewhere); err != nil {
 		t.Fatal(err)
 	}
@@ -256,5 +256,37 @@ func TestTheListCountsQuestionsAndPointsLikeDecoding(t *testing.T) {
 	list, err := p.listAssessments(ctx, "org", room, "student-1", true, time.Now())
 	if err != nil || len(list) != 1 || list[0].Questions != 3 || list[0].Points != 9 {
 		t.Fatalf("%+v %v", list, err)
+	}
+}
+
+// Migration 004 renames the key of questions stored before topics without changing anything else, and running it
+// again changes nothing.
+func TestTheTopicsMigrationRenamesStoredQuestions(t *testing.T) {
+	p, ctx := testStore(t), context.Background()
+	id, topic := uuid.NewString(), uuid.NewString()
+	old := `[{"id":"q1","prompt":"1 + 1?","type":"numerical","answer":"2","points":2,"skill_id":"` + topic + `"},` +
+		`{"id":"q2","prompt":"Why?","type":"short_answer","accepted_answers":["x"],"skill_id":"` + topic + `","topic_id":"kept"}]`
+	if _, err := p.db.Exec(ctx, "INSERT INTO assessments(id,classroom_id,org_id,title,questions) VALUES($1,$2,'org',$3,$4)", id, room, "Old", old); err != nil {
+		t.Fatal(err)
+	}
+	sql, err := migrations.ReadFile("migrations/004_topics.sql")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for range 2 {
+		if _, err = p.db.Exec(ctx, string(sql)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	v, err := p.findAssessment(ctx, "org", id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(v.Questions) != 2 || v.Questions[0].ID != "q1" || v.Questions[0].Topic != topic || v.Questions[0].Points != 2 ||
+		v.Questions[1].ID != "q2" || v.Questions[1].Topic != "kept" || v.Questions[1].AcceptedAnswers[0] != "x" {
+		t.Fatalf("%+v", v.Questions)
+	}
+	if n := count(t, p, "SELECT count(*) FROM assessments, jsonb_array_elements(questions) q WHERE q ? 'skill_id'"); n != 0 {
+		t.Fatalf("%d questions still have the old key", n)
 	}
 }

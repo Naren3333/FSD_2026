@@ -8,16 +8,16 @@ import (
 	"time"
 )
 
-const skillID = "6ff7334b-1a5d-4ea3-aea9-a219dc94a39b"
+const topicID = "6ff7334b-1a5d-4ea3-aea9-a219dc94a39b"
 
 func fixture() Assessment {
-	v := Assessment{Classroom: "6ff7334b-1a5d-4ea3-aea9-a219dc94a39b", Title: "Fractions", Questions: []Question{{ID: "q1", Prompt: "1 + 1?", Type: "numerical", Answer: "2", Tolerance: "0.01", Skill: skillID}}}
+	v := Assessment{Classroom: "6ff7334b-1a5d-4ea3-aea9-a219dc94a39b", Title: "Fractions", Questions: []Question{{ID: "q1", Prompt: "1 + 1?", Type: "numerical", Answer: "2", Tolerance: "0.01", Topic: topicID}}}
 	v.normalize()
 	return v
 }
 
 func essay() Question {
-	return Question{ID: "q2", Prompt: "Why does the counter race?", Type: typeFreeResponse, Skill: skillID, Rubric: &Rubric{
+	return Question{ID: "q2", Prompt: "Why does the counter race?", Type: typeFreeResponse, Topic: topicID, Rubric: &Rubric{
 		Criteria: []Criterion{
 			{Title: "Names the race", Levels: []Level{{2, "Explains it"}, {0, "Missing"}, {1, "Mentions it"}}},
 			{Title: "Fix", Levels: []Level{{0, "None"}, {3, "Uses a lock"}}},
@@ -28,7 +28,7 @@ func essay() Question {
 
 func TestAnswerKeysNeverPublic(t *testing.T) {
 	v := fixture()
-	v.Questions = append(v.Questions, essay(), Question{ID: "q3", Prompt: "Capital?", Type: typeShortAnswer, AcceptedAnswers: []string{"Paris"}, Skill: skillID})
+	v.Questions = append(v.Questions, essay(), Question{ID: "q3", Prompt: "Capital?", Type: typeShortAnswer, AcceptedAnswers: []string{"Paris"}, Topic: topicID})
 	v.normalize()
 	b, err := json.Marshal(v.Public())
 	if err != nil {
@@ -102,7 +102,7 @@ func TestInvalidAssessmentsAreRefused(t *testing.T) {
 			v.Questions = []Question{q}
 		},
 		"no accepted answers": func(v *Assessment) {
-			v.Questions = []Question{{ID: "q", Prompt: "?", Type: typeShortAnswer, Skill: skillID}}
+			v.Questions = []Question{{ID: "q", Prompt: "?", Type: typeShortAnswer, Topic: topicID}}
 		},
 		"too many passages": func(v *Assessment) {
 			v.Questions = nil
@@ -113,7 +113,7 @@ func TestInvalidAssessmentsAreRefused(t *testing.T) {
 			}
 		},
 		"duplicate accepted answers": func(v *Assessment) {
-			v.Questions = []Question{{ID: "q", Prompt: "?", Type: typeShortAnswer, AcceptedAnswers: []string{"Paris", " paris "}, Skill: skillID}}
+			v.Questions = []Question{{ID: "q", Prompt: "?", Type: typeShortAnswer, AcceptedAnswers: []string{"Paris", " paris "}, Topic: topicID}}
 		},
 	}
 	for name, change := range cases {
@@ -206,7 +206,7 @@ func TestTextLimitsCountCharactersNotBytes(t *testing.T) {
 	q := essay()
 	q.Rubric.Criteria[0].Title = strings.Repeat("語", maxCriterion)
 	q.Rubric.Criteria[0].Levels[0].Descriptor = strings.Repeat("語", maxDescriptor)
-	v.Questions = append(v.Questions, q, Question{ID: "q3", Prompt: "?", Type: typeMultipleChoice, Options: []string{strings.Repeat("語", maxAnswer), "b"}, Answer: "b", Skill: skillID})
+	v.Questions = append(v.Questions, q, Question{ID: "q3", Prompt: "?", Type: typeMultipleChoice, Options: []string{strings.Repeat("語", maxAnswer), "b"}, Answer: "b", Topic: topicID})
 	v.normalize()
 	if err := v.Validate(); err != nil {
 		t.Fatalf("text at the limit in characters refused: %v", err)

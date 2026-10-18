@@ -69,7 +69,7 @@ AI-generated recommendations will be implemented in a future milestone.
 
 ## Feature 4 — Personalized practice generation
 
-Students receive practice questions based on uploaded content, curriculum skills, and demonstrated weaknesses.
+Students receive practice questions based on uploaded content, curriculum topics, and demonstrated weaknesses.
 
 AI-generated questions will be implemented later.
 
@@ -279,13 +279,8 @@ Language: Go.
 
 Owns:
 
-* Subjects.
-* Courses.
-* Units.
-* Topics.
-* Skills.
-* Learning objectives.
-* Prerequisite relationships.
+* Topics, the curriculum's one level (ADR 0007).
+* Prerequisite relationships between topics.
 
 Implement functioning curriculum CRUD operations and appropriate validation.
 
@@ -335,7 +330,7 @@ Owns:
 * Assessments.
 * Assignments.
 * Student submissions.
-* Question-to-skill mappings.
+* Question-to-topic mappings.
 * Assessment lifecycle.
 
 Implement functioning manually authored questions and assessments.
@@ -380,7 +375,6 @@ Owns:
 
 * Derived performance metrics.
 * Topic-level performance.
-* Skill-level performance.
 * Assessment trends.
 * Weakness indicators.
 * Evidence-backed analytical summaries.
@@ -392,7 +386,7 @@ For example:
 ```text
 Student: Student 123
 
-Skill: Fraction Addition
+Topic: Fraction Addition
 
 Questions attempted: 10
 Correct answers: 6
@@ -461,12 +455,12 @@ Language: Python.
 
 Future responsibility:
 
-Generate practice questions from authorized educational content and target skills.
+Generate practice questions from authorized educational content and target topics.
 
 Define a contract accepting:
 
 * Authorized content references.
-* Target skill identifiers.
+* Target topic identifiers.
 * Question type.
 * Difficulty.
 * Question count.
@@ -497,14 +491,14 @@ Define contracts accepting:
 * Authorized student reference.
 * Validated performance summary.
 * Assessment evidence references.
-* Relevant curriculum skills.
+* Relevant curriculum topics.
 
 The eventual output may include:
 
 * Evidence-backed observations.
 * Possible misconceptions.
 * Suggested interventions.
-* Recommended practice skills.
+* Recommended practice topics.
 
 Do not allow this agent to invent grades or modify finalized results.
 
@@ -724,11 +718,8 @@ identity
   enrollments
 
 curriculum
-  subjects
-  courses
-  units
   topics
-  skills
+  prerequisites
 
 content
   documents
@@ -749,7 +740,7 @@ grading
 
 analytics
   performance_metrics
-  skill_statistics
+  topic_statistics
 ```
 
 These are illustrative logical data models, not mandatory exact table names.
@@ -1132,7 +1123,7 @@ For example:
 Teacher creates classroom
            |
            v
-Teacher creates curriculum skill
+Teacher creates curriculum topic
            |
            v
 Teacher creates assessment

@@ -1,56 +1,55 @@
 import { Injectable, computed, inject, signal } from '@angular/core';
 import { CurriculumApi } from '../api/clients';
-import type { Node } from '../api/models';
-import { skillNames } from '../shared/names';
+import type { Topic } from '../api/models';
+import { topicNames } from '../shared/names';
 import { Session } from './session';
 
-/** The organization's curriculum, read once per signed-in user and shared by every page that names skills. It is
- * read again when a page needs a skill it does not know yet (another teacher may have added it) and whenever the
- * curriculum page refreshes or adds to it. */
+/** The organization's topics, read once per signed-in user and shared by every page that names topics. They are
+ * read again when a page needs a topic it does not know yet (another teacher may have added it) and whenever the
+ * curriculum page refreshes or adds to them. */
 @Injectable({ providedIn: 'root' })
 export class CurriculumNames {
   private readonly api = inject(CurriculumApi);
   private readonly session = inject(Session);
   private readonly user = computed(() => this.session.profile()?.id ?? '');
-  private readonly cache = signal<{ user: string; nodes: Node[] } | null>(null);
-  private reading: { user: string; nodes: Promise<Node[]> } | null = null;
+  private readonly cache = signal<{ user: string; topics: Topic[] } | null>(null);
+  private reading: { user: string; topics: Promise<Topic[]> } | null = null;
   private request = 0;
 
-  /** The signed-in user's curriculum; empty until read, and never another user's. */
-  readonly nodes = computed(() => {
+  /** The signed-in user's topics; empty until read, and never another user's. */
+  readonly topics = computed(() => {
     const cache = this.cache();
-    return cache && cache.user === this.user() ? cache.nodes : [];
+    return cache && cache.user === this.user() ? cache.topics : [];
   });
-  readonly skills = computed(() => this.nodes().filter((node) => node.kind === 'skill'));
-  private readonly names = computed(() => skillNames(this.nodes()));
+  private readonly names = computed(() => topicNames(this.topics()));
 
-  /** The skill's name, or '' when the curriculum has no such skill. */
-  skillName(skillId: string): string {
-    return this.names().get(skillId) ?? '';
+  /** The topic's name, or '' when the curriculum has no such topic. */
+  topicName(topicId: string): string {
+    return this.names().get(topicId) ?? '';
   }
 
-  /** Reads the curriculum now, and shares what it read with every page. */
-  refresh(): Promise<Node[]> {
+  /** Reads the topics now, and shares what it read with every page. */
+  refresh(): Promise<Topic[]> {
     const user = this.user();
     const request = ++this.request;
-    const nodes = this.api.nodes().then((nodes) => {
-      if (request === this.request) this.cache.set({ user, nodes });
-      return nodes;
+    const topics = this.api.topics().then((topics) => {
+      if (request === this.request) this.cache.set({ user, topics });
+      return topics;
     });
-    this.reading = { user, nodes };
+    this.reading = { user, topics };
     const forget = () => {
-      if (this.reading?.nodes === nodes) this.reading = null;
+      if (this.reading?.topics === topics) this.reading = null;
     };
-    nodes.then(forget, forget);
-    return nodes;
+    topics.then(forget, forget);
+    return topics;
   }
 
-  /** Resolves once the curriculum has been read for this user and names each of these skills, reading it again
-   * (or joining a read already under way) when it does not. */
-  async need(skillIds: Iterable<string>): Promise<void> {
+  /** Resolves once the topics have been read for this user and name each of these topics, reading them again
+   * (or joining a read already under way) when they do not. */
+  async need(topicIds: Iterable<string>): Promise<void> {
     const user = this.user();
     const known = this.cache()?.user === user;
-    if (known && [...skillIds].every((id) => this.names().has(id))) return;
-    await (this.reading?.user === user ? this.reading.nodes : this.refresh());
+    if (known && [...topicIds].every((id) => this.names().has(id))) return;
+    await (this.reading?.user === user ? this.reading.topics : this.refresh());
   }
 }

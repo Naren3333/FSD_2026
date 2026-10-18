@@ -906,10 +906,10 @@ dialog::backdrop {
 .dashboard-panel {
   margin-top: 24px;
 }
-.skills-table td {
+.topics-table td {
   vertical-align: top;
 }
-.skills-table td > span {
+.topics-table td > span {
   display: block;
 }
 .cell-value {
@@ -1129,6 +1129,22 @@ label.check input {
 .suggestion p {
   font-size: 0.875rem;
   margin: 0 0 8px;
+}
+.generator {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 0 16px;
+  margin-bottom: 18px;
+}
+.generator[open] {
+  padding-bottom: 8px;
+}
+.generator > summary {
+  min-height: 44px;
+  display: flex;
+  align-items: center;
+  cursor: pointer;
+  font-weight: 600;
 }
 .scheme-used {
   margin: 0 0 8px;

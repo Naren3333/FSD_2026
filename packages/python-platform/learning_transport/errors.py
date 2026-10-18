@@ -1,5 +1,6 @@
 """Contracts and error envelopes shared by every service: errors are {"error": {"code", "message"}}."""
 
+import httpx
 from fastapi import HTTPException
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, ConfigDict
@@ -47,3 +48,14 @@ class UpstreamError(Exception):
     def __init__(self, service: str, status: int, code: str = "", resets_at: str | None = None) -> None:
         super().__init__(f"{service} {status} {code}".strip())
         self.service, self.status, self.code, self.resets_at = service, status, code, resets_at
+
+
+def upstream_error(service: str, resp: httpx.Response) -> UpstreamError:
+    """A refused call as an UpstreamError: the service's error code and, for AI_SPEND_LIMIT, when the allowance
+    resets. A body that is not the standard envelope leaves both empty."""
+    try:
+        error = resp.json()["error"]
+        code, resets_at = str(error.get("code") or ""), error.get("resets_at")
+    except (ValueError, KeyError, TypeError, AttributeError):
+        code, resets_at = "", None
+    return UpstreamError(service, resp.status_code, code, str(resets_at) if resets_at else None)

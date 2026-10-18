@@ -43,7 +43,7 @@ export class ResultsComponent {
       // The student's copy of each assessment: prompts and options, never the answer key.
       const [assessments] = await Promise.all([
         assessmentsOf(results, (id) => this.assessmentApi.get(id)),
-        this.curriculum.need(results.flatMap((r) => r.evidence.map((e) => e.skill_id))),
+        this.curriculum.need(results.flatMap((r) => r.evidence.map((e) => e.topic_id))),
       ]);
       return { results, assessments };
     });
@@ -59,8 +59,8 @@ export class ResultsComponent {
       evidence.question_id,
     );
   }
-  skill(evidence: Evidence): string {
-    return this.curriculum.skillName(evidence.skill_id);
+  topic(evidence: Evidence): string {
+    return this.curriculum.topicName(evidence.topic_id);
   }
   outcome(evidence: Evidence): string {
     if (evidence.correct) return 'Correct';

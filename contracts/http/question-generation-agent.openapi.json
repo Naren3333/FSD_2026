@@ -49,15 +49,16 @@
         }
       }
     },
-    "/v1/question_generation": {
+    "/v1/questions": {
       "post": {
-        "summary": "Execute",
-        "operationId": "execute_v1_question_generation_post",
+        "summary": "Generate",
+        "description": "Questions from the chosen documents, checked, for the teacher to review; nothing is saved.",
+        "operationId": "generate_v1_questions_post",
         "requestBody": {
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/RequestContract"
+                "$ref": "#/components/schemas/GenerateRequest"
               }
             }
           },
@@ -69,13 +70,23 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/ResponseContract"
+                  "$ref": "#/components/schemas/GenerateResponse"
                 }
               }
             }
           },
-          "501": {
-            "description": "Not Implemented",
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden",
             "content": {
               "application/json": {
                 "schema": {
@@ -85,11 +96,130 @@
             }
           },
           "422": {
-            "description": "Validation Error",
+            "description": "Unprocessable Content",
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Too Many Requests",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "Bad Gateway",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Service Unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/marking-guidance": {
+      "post": {
+        "summary": "Marking Guidance",
+        "description": "A rubric or accepted answers, and marking points, for a question the teacher wrote; nothing is saved.",
+        "operationId": "marking_guidance_v1_marking_guidance_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/GuidanceRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Guidance"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Unprocessable Content",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Too Many Requests",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "Bad Gateway",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Service Unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
                 }
               }
             }
@@ -100,6 +230,141 @@
   },
   "components": {
     "schemas": {
+      "Criterion": {
+        "properties": {
+          "title": {
+            "type": "string",
+            "title": "Title"
+          },
+          "levels": {
+            "items": {
+              "$ref": "#/components/schemas/Level"
+            },
+            "type": "array",
+            "title": "Levels"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "title",
+          "levels"
+        ],
+        "title": "Criterion"
+      },
+      "DraftQuestion": {
+        "properties": {
+          "prompt": {
+            "type": "string",
+            "title": "Prompt"
+          },
+          "type": {
+            "type": "string",
+            "enum": [
+              "multiple_choice",
+              "short_answer",
+              "free_response"
+            ],
+            "title": "Type"
+          },
+          "topic_id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Topic Id"
+          },
+          "points": {
+            "type": "integer",
+            "maximum": 100.0,
+            "minimum": 1.0,
+            "title": "Points"
+          },
+          "options": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Options"
+          },
+          "answer": {
+            "type": "string",
+            "title": "Answer"
+          },
+          "tolerance": {
+            "type": "string",
+            "const": "",
+            "title": "Tolerance",
+            "default": ""
+          },
+          "accepted_answers": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Accepted Answers"
+          },
+          "case_sensitive": {
+            "type": "boolean",
+            "title": "Case Sensitive",
+            "default": false
+          },
+          "rubric": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Rubric"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "max_length": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Max Length"
+          },
+          "marking_scheme": {
+            "items": {
+              "$ref": "#/components/schemas/Excerpt"
+            },
+            "type": "array",
+            "title": "Marking Scheme"
+          },
+          "sources": {
+            "items": {
+              "$ref": "#/components/schemas/Excerpt"
+            },
+            "type": "array",
+            "maxItems": 5,
+            "minItems": 1,
+            "title": "Sources"
+          },
+          "origin": {
+            "type": "string",
+            "const": "generated",
+            "title": "Origin",
+            "default": "generated"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "prompt",
+          "type",
+          "topic_id",
+          "points",
+          "options",
+          "answer",
+          "sources"
+        ],
+        "title": "DraftQuestion",
+        "description": "A question as Assessment takes it in a draft, with its sources and origin (ADR 0006)."
+      },
       "ErrorBody": {
         "properties": {
           "code": {
@@ -143,102 +408,94 @@
         ],
         "title": "ErrorResponse"
       },
-      "GeneratedQuestion": {
+      "Excerpt": {
         "properties": {
-          "prompt": {
+          "document_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Document Id"
+          },
+          "chunk_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Chunk Id"
+          },
+          "page": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "minimum": 1.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Page"
+          },
+          "text": {
             "type": "string",
-            "title": "Prompt"
-          },
-          "answer_key": {
-            "type": "string",
-            "title": "Answer Key"
-          },
-          "explanation": {
-            "type": "string",
-            "title": "Explanation"
-          },
-          "source_references": {
-            "items": {
-              "$ref": "#/components/schemas/SourceReference"
-            },
-            "type": "array",
-            "title": "Source References"
-          },
-          "skill_ids": {
-            "items": {
-              "type": "string",
-              "format": "uuid"
-            },
-            "type": "array",
-            "title": "Skill Ids"
-          },
-          "validation_metadata": {
-            "additionalProperties": {
-              "type": "string"
-            },
-            "type": "object",
-            "title": "Validation Metadata"
+            "maxLength": 2000,
+            "minLength": 1,
+            "title": "Text"
           }
         },
         "additionalProperties": false,
         "type": "object",
         "required": [
-          "prompt",
-          "answer_key",
-          "explanation",
-          "source_references",
-          "skill_ids",
-          "validation_metadata"
+          "text"
         ],
-        "title": "GeneratedQuestion"
+        "title": "Excerpt",
+        "description": "A passage, as Assessment stores it: from a document (with its ids and page), or written with no ids."
       },
-      "HTTPValidationError": {
+      "GenerateRequest": {
         "properties": {
-          "detail": {
-            "items": {
-              "$ref": "#/components/schemas/ValidationError"
-            },
-            "type": "array",
-            "title": "Detail"
-          }
-        },
-        "type": "object",
-        "title": "HTTPValidationError"
-      },
-      "RequestContract": {
-        "properties": {
+          "classroom_id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Classroom Id"
+          },
           "document_ids": {
             "items": {
               "type": "string",
               "format": "uuid"
             },
             "type": "array",
-            "maxItems": 20,
+            "maxItems": 10,
             "minItems": 1,
             "title": "Document Ids"
           },
-          "skill_ids": {
-            "items": {
-              "type": "string",
-              "format": "uuid"
-            },
-            "type": "array",
-            "maxItems": 20,
-            "minItems": 1,
-            "title": "Skill Ids"
-          },
-          "classroom_id": {
+          "topic_id": {
             "type": "string",
             "format": "uuid",
-            "title": "Classroom Id"
+            "title": "Topic Id"
           },
-          "question_type": {
-            "type": "string",
-            "enum": [
-              "multiple_choice",
-              "numerical"
-            ],
-            "title": "Question Type"
+          "question_types": {
+            "items": {
+              "type": "string",
+              "enum": [
+                "multiple_choice",
+                "short_answer",
+                "free_response"
+              ]
+            },
+            "type": "array",
+            "maxItems": 3,
+            "minItems": 1,
+            "title": "Question Types"
           },
           "difficulty": {
             "type": "string",
@@ -251,123 +508,255 @@
           },
           "count": {
             "type": "integer",
-            "maximum": 20.0,
+            "maximum": 10.0,
             "minimum": 1.0,
             "title": "Count"
           },
-          "performance_context_id": {
-            "anyOf": [
-              {
-                "type": "string",
-                "format": "uuid"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Performance Context Id"
+          "focus": {
+            "type": "string",
+            "maxLength": 300,
+            "title": "Focus",
+            "default": ""
+          },
+          "existing_prompts": {
+            "items": {
+              "type": "string",
+              "maxLength": 2000
+            },
+            "type": "array",
+            "maxItems": 50,
+            "title": "Existing Prompts",
+            "default": []
           }
         },
         "additionalProperties": false,
         "type": "object",
         "required": [
-          "document_ids",
-          "skill_ids",
           "classroom_id",
-          "question_type",
+          "document_ids",
+          "topic_id",
+          "question_types",
           "difficulty",
           "count"
         ],
-        "title": "RequestContract"
+        "title": "GenerateRequest"
       },
-      "ResponseContract": {
+      "GenerateResponse": {
         "properties": {
           "questions": {
             "items": {
-              "$ref": "#/components/schemas/GeneratedQuestion"
+              "$ref": "#/components/schemas/Generated"
             },
             "type": "array",
             "title": "Questions"
           },
+          "requested": {
+            "type": "integer",
+            "title": "Requested"
+          },
+          "returned": {
+            "type": "integer",
+            "title": "Returned"
+          },
+          "dropped": {
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "type": "object",
+            "title": "Dropped"
+          },
           "requires_teacher_review": {
             "type": "boolean",
             "const": true,
-            "title": "Requires Teacher Review"
+            "title": "Requires Teacher Review",
+            "default": true
           }
         },
         "additionalProperties": false,
         "type": "object",
         "required": [
           "questions",
-          "requires_teacher_review"
+          "requested",
+          "returned",
+          "dropped"
         ],
-        "title": "ResponseContract"
+        "title": "GenerateResponse"
       },
-      "SourceReference": {
+      "Generated": {
         "properties": {
-          "document_id": {
+          "question": {
+            "$ref": "#/components/schemas/DraftQuestion"
+          },
+          "evidence": {
             "type": "string",
-            "format": "uuid",
-            "title": "Document Id"
+            "title": "Evidence"
           },
-          "revision": {
-            "type": "integer",
-            "minimum": 1.0,
-            "title": "Revision"
-          },
-          "chunk_ordinal": {
-            "type": "integer",
-            "minimum": 0.0,
-            "title": "Chunk Ordinal"
-          },
-          "source_sha256": {
+          "explanation": {
             "type": "string",
-            "pattern": "^[a-f0-9]{64}$",
-            "title": "Source Sha256"
+            "title": "Explanation"
           }
         },
         "additionalProperties": false,
         "type": "object",
         "required": [
-          "document_id",
-          "revision",
-          "chunk_ordinal",
-          "source_sha256"
+          "question",
+          "evidence",
+          "explanation"
         ],
-        "title": "SourceReference"
+        "title": "Generated"
       },
-      "ValidationError": {
+      "Guidance": {
         "properties": {
-          "loc": {
+          "type": {
+            "type": "string",
+            "enum": [
+              "short_answer",
+              "free_response"
+            ],
+            "title": "Type"
+          },
+          "accepted_answers": {
             "items": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "integer"
-                }
-              ]
+              "type": "string"
             },
             "type": "array",
-            "title": "Location"
+            "title": "Accepted Answers"
           },
-          "msg": {
+          "rubric": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Rubric"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "marking_points": {
+            "$ref": "#/components/schemas/Excerpt"
+          },
+          "sources": {
+            "items": {
+              "$ref": "#/components/schemas/Excerpt"
+            },
+            "type": "array",
+            "title": "Sources"
+          },
+          "evidence": {
             "type": "string",
-            "title": "Message"
+            "title": "Evidence"
+          },
+          "requires_teacher_review": {
+            "type": "boolean",
+            "const": true,
+            "title": "Requires Teacher Review",
+            "default": true
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "type",
+          "accepted_answers",
+          "rubric",
+          "marking_points",
+          "sources",
+          "evidence"
+        ],
+        "title": "Guidance"
+      },
+      "GuidanceRequest": {
+        "properties": {
+          "classroom_id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Classroom Id"
+          },
+          "document_ids": {
+            "items": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "type": "array",
+            "maxItems": 10,
+            "minItems": 1,
+            "title": "Document Ids"
+          },
+          "prompt": {
+            "type": "string",
+            "maxLength": 2000,
+            "minLength": 1,
+            "title": "Prompt"
           },
           "type": {
             "type": "string",
-            "title": "Error Type"
+            "enum": [
+              "short_answer",
+              "free_response"
+            ],
+            "title": "Type"
+          },
+          "points": {
+            "type": "integer",
+            "maximum": 100.0,
+            "minimum": 1.0,
+            "title": "Points",
+            "default": 1
           }
         },
+        "additionalProperties": false,
         "type": "object",
         "required": [
-          "loc",
-          "msg",
+          "classroom_id",
+          "document_ids",
+          "prompt",
           "type"
         ],
-        "title": "ValidationError"
+        "title": "GuidanceRequest",
+        "description": "Marking guidance for a question the teacher wrote, drafted from the documents they choose."
+      },
+      "Level": {
+        "properties": {
+          "points": {
+            "type": "integer",
+            "maximum": 100.0,
+            "minimum": 0.0,
+            "title": "Points"
+          },
+          "descriptor": {
+            "type": "string",
+            "title": "Descriptor"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "points",
+          "descriptor"
+        ],
+        "title": "Level"
+      },
+      "Rubric": {
+        "properties": {
+          "criteria": {
+            "items": {
+              "$ref": "#/components/schemas/Criterion"
+            },
+            "type": "array",
+            "title": "Criteria"
+          },
+          "model_answer": {
+            "type": "string",
+            "title": "Model Answer"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "criteria",
+          "model_answer"
+        ],
+        "title": "Rubric"
       }
     }
   }

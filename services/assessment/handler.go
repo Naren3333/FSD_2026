@@ -10,11 +10,11 @@ import (
 )
 
 // server answers Assessment's HTTP routes: assessments, submissions and saved work in its store, classroom access
-// from Identity and skills from Curriculum.
+// from Identity and topics from Curriculum.
 type server struct {
 	store  store
 	access platform.ClassroomAccess
-	skills skills
+	topics topics
 	clock  func() time.Time // time.Now unless a test sets it
 }
 
@@ -38,7 +38,7 @@ func (s server) routes(mux *http.ServeMux) {
 	mux.HandleFunc("PUT /v1/assessments/{id}/saved-answers", s.save)
 }
 
-// prepare fills in and checks an assessment a teacher sent, then checks its skills with Curriculum. On failure the
+// prepare fills in and checks an assessment a teacher sent, then checks its topics with Curriculum. On failure the
 // response is written. Questions get new ids: nothing refers to a draft's questions yet.
 func (s server) prepare(w http.ResponseWriter, r *http.Request, v *Assessment) bool {
 	v.normalize()
@@ -50,12 +50,12 @@ func (s server) prepare(w http.ResponseWriter, r *http.Request, v *Assessment) b
 		platform.Invalid(w, err.Error())
 		return false
 	}
-	switch checkAll(r, s.skills, v.skillIDs()) {
-	case skillUnavailable:
+	switch checkAll(r, s.topics, v.topicIDs()) {
+	case topicUnavailable:
 		platform.Unavailable(w, "Curriculum unavailable.")
 		return false
-	case skillInvalid:
-		platform.Error(w, http.StatusUnprocessableEntity, "INVALID_SKILL", "Every skill must exist in your curriculum.")
+	case topicInvalid:
+		platform.Error(w, http.StatusUnprocessableEntity, "INVALID_TOPIC", "Every topic must exist in your curriculum.")
 		return false
 	}
 	for i := range v.Questions {

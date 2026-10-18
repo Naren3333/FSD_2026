@@ -6,7 +6,7 @@ import type {
   AssessmentProgress,
   ClassPerformance,
   GradingCounts,
-  SkillMetric,
+  TopicMetric,
   Student,
 } from '../../api/models';
 import { ClassroomContext, onClassroomChange } from '../../core/classroom-context';
@@ -36,22 +36,22 @@ export class DashboardComponent {
   readonly counts = new Section<GradingCounts>();
   readonly performance = new Section<ClassPerformance>();
   private readonly names = computed(() => studentNames(this.roster.value() ?? []));
-  /** The class skills table shows this many students at a time. */
+  /** The class topics table shows this many students at a time. */
   readonly pageSize = 20;
   readonly page = signal(0);
-  /** The skills any student on this page has evidence for, by name (or id, for a skill with none). */
-  readonly skillRows = computed(() => {
-    const ids = new Set(this.performance.value()?.students.flatMap((s) => s.skills.map((m) => m.skill_id)));
-    const label = (id: string) => this.skill(id) || id;
+  /** The topics any student on this page has evidence for, by name (or id, for a topic with none). */
+  readonly topicRows = computed(() => {
+    const ids = new Set(this.performance.value()?.students.flatMap((s) => s.topics.map((m) => m.topic_id)));
+    const label = (id: string) => this.topic(id) || id;
     return [...ids].sort((a, b) => label(a).localeCompare(label(b)));
   });
-  /** Each student's evidence on this page, by skill. */
+  /** Each student's evidence on this page, by topic. */
   private readonly metrics = computed(
     () =>
       new Map(
         this.performance
           .value()
-          ?.students.map((s) => [s.student_id, new Map(s.skills.map((m) => [m.skill_id, m]))]),
+          ?.students.map((s) => [s.student_id, new Map(s.topics.map((m) => [m.topic_id, m]))]),
       ),
   );
 
@@ -88,7 +88,7 @@ export class DashboardComponent {
         this.page() * this.pageSize,
         this.pageSize,
       );
-      await this.curriculum.need(page.students.flatMap((s) => s.skills.map((m) => m.skill_id)));
+      await this.curriculum.need(page.students.flatMap((s) => s.topics.map((m) => m.topic_id)));
       return page;
     });
   }
@@ -97,13 +97,13 @@ export class DashboardComponent {
     return this.names().get(studentId) ?? studentId;
   }
 
-  /** The skill's name, or '' when the curriculum has none. */
-  skill(skillId: string): string {
-    return this.curriculum.skillName(skillId);
+  /** The topic's name, or '' when the curriculum has none. */
+  topic(topicId: string): string {
+    return this.curriculum.topicName(topicId);
   }
 
-  metric(studentId: string, skillId: string): SkillMetric | undefined {
-    return this.metrics().get(studentId)?.get(skillId);
+  metric(studentId: string, topicId: string): TopicMetric | undefined {
+    return this.metrics().get(studentId)?.get(topicId);
   }
 
   /** "12 of 20 students submitted", or just the count when former students' submissions exceed the roster. */

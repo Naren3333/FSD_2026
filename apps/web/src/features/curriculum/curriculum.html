@@ -3,64 +3,67 @@
     <p class="eyebrow">Give learning a structure</p>
     <h2>Curriculum</h2>
   </div>
-  <button class="secondary" (click)="load()" [disabled]="state.busy() || nodes.loading()">
-    Refresh curriculum
+  <button class="secondary" (click)="load()" [disabled]="state.busy() || topics.loading()">
+    Refresh topics
   </button>
 </div>
-<p>
-  Subjects lead to courses, units, topics and skills. A standalone skill can support your first assessment.
-</p>
+<p>Questions and evidence are tagged with a topic. Add a topic to begin authoring an assessment.</p>
 <div class="split">
   <section class="panel">
-    <h3>Learning map</h3>
-    <p class="caption">Up to 200 active curriculum nodes</p>
-    <app-section-state [section]="nodes" loading="Loading curriculum…" />
-    @if (nodes.ready()) {
-      @for (node of nodes.value() ?? []; track node.id) {
+    <h3>Topics</h3>
+    <p class="caption">Up to 200 active topics</p>
+    <app-section-state [section]="topics" loading="Loading topics…" />
+    @if (topics.ready()) {
+      @for (topic of topics.value() ?? []; track topic.id) {
         <article class="record">
-          <span class="badge">{{ node.kind }}</span>
-          <strong>{{ node.name }}</strong>
+          <strong>{{ topic.name }}</strong>
+          @if (session.isTeacher()) {
+            <span class="button-row">
+              <button class="secondary" (click)="confirmArchive(topic)" [disabled]="state.busy()">
+                Archive<span class="visually-hidden"> topic {{ topic.name }}</span>
+              </button>
+            </span>
+          }
         </article>
       } @empty {
-        <p class="empty">No curriculum yet. Add a skill to begin authoring an assessment.</p>
+        <p class="empty">No topics yet. Add a topic to begin authoring an assessment.</p>
       }
     }
   </section>
   @if (session.isTeacher()) {
     <section class="panel">
-      <h3>Add curriculum</h3>
-      <form id="node-form" novalidate [formGroup]="form" (ngSubmit)="create()">
-        <app-field controlId="node-kind" label="Level">
-          <select appFieldControl id="node-kind" formControlName="kind">
-            @for (kind of kinds; track kind) {
-              <option [value]="kind">{{ kind }}</option>
-            }
-          </select>
-        </app-field>
+      <h3>Add a topic</h3>
+      <form id="topic-form" novalidate [formGroup]="form" (ngSubmit)="create()">
         <app-field
-          controlId="node-name"
+          controlId="topic-name"
           label="Name"
           [invalid]="form.controls.name.touched && form.controls.name.invalid"
           error="Enter a name of 1–160 characters."
         >
-          <input appFieldControl id="node-name" formControlName="name" maxlength="160" />
+          <input appFieldControl id="topic-name" formControlName="name" maxlength="160" />
         </app-field>
-        <app-field
-          controlId="node-parent"
-          label="Parent"
-          hint="Optional. Choose the preceding curriculum level."
-        >
-          <select appFieldControl id="node-parent" formControlName="parent_id">
-            <option value="">Standalone</option>
-            @for (node of nodes.value() ?? []; track node.id) {
-              <option [value]="node.id">{{ node.kind }} · {{ node.name }}</option>
-            }
-          </select>
-        </app-field>
-        <button [disabled]="state.busy()">Add curriculum</button>
+        <button [disabled]="state.busy()">Add topic</button>
         <button type="reset" class="secondary clear-form" [disabled]="state.busy()">Clear form</button>
       </form>
     </section>
   }
 </div>
-<app-status [state]="state" />
+@if (!archiving()) {
+  <app-status [state]="state" />
+}
+<app-confirm-dialog
+  #archiveDialog
+  dialogId="archive-topic"
+  heading="Archive this topic?"
+  confirmLabel="Archive"
+  [state]="archiveState"
+  (confirm)="archive()"
+  (closed)="archiving.set(null)"
+>
+  @if (archiving(); as topic) {
+    <p>
+      <strong>{{ topic.name }}</strong> will no longer be listed or offered for new questions. Nothing is
+      deleted: assessments and evidence that already use it keep it, shown by its id instead of its name.
+    </p>
+  }
+</app-confirm-dialog>

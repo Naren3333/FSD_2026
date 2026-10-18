@@ -1,0 +1,84 @@
+@let id = 'question-' + index + '-guidance';
+<div class="scheme" role="group" [attr.aria-labelledby]="id + '-heading'">
+  <h4 [id]="id + '-heading'">Draft marking guidance with AI (optional)</h4>
+  <p class="caption">
+    {{
+      question.controls.type.value === 'short_answer'
+        ? 'AI suggests accepted answers and marking points from your documents.'
+        : 'AI drafts a rubric, a model answer and marking points from your documents.'
+    }}
+    Nothing changes until you use it. Uses your daily AI allowance.
+  </p>
+  <app-section-state [section]="documents" loading="Loading documents…" />
+  @if (documents.ready()) {
+    @if (choices.length) {
+      <div class="field-row scheme-search">
+        <app-field [controlId]="id + '-document'" label="Draft from">
+          <select appFieldControl [id]="id + '-document'" [formControl]="document">
+            <option value="">All teaching materials</option>
+            @for (doc of choices; track doc.id) {
+              <option [value]="doc.id">{{ doc.title }}</option>
+            }
+          </select>
+        </app-field>
+        <button type="button" class="secondary" (click)="draft()" [disabled]="disabled || result.loading()">
+          Draft marking guidance<span class="visually-hidden"> for question {{ index + 1 }}</span>
+        </button>
+      </div>
+      <p class="caption" aria-live="polite">{{ note() }}</p>
+    } @else {
+      <p class="empty">No indexed document in this classroom yet. Upload a PDF to draft guidance from it.</p>
+    }
+  }
+  <app-section-state [section]="result" loading="Reading your documents and drafting guidance…" />
+  @if (result.ready() && result.value(); as g) {
+    <div
+      class="suggestion"
+      role="group"
+      [attr.aria-label]="'AI marking guidance for question ' + (index + 1)"
+    >
+      <p><strong>AI-written guidance</strong> · check it before using it</p>
+      @if (g.type === 'short_answer') {
+        <p>Accepted answers: {{ g.accepted_answers.join('; ') }}</p>
+      } @else if (g.rubric) {
+        @for (criterion of g.rubric.criteria; track $index) {
+          <p>
+            <strong>{{ criterion.title }}</strong>
+          </p>
+          <p class="passage">{{ levelLines(criterion) }}</p>
+        }
+        <p>Model answer: {{ g.rubric.model_answer }}</p>
+      }
+      <p>Marking points:</p>
+      <p class="passage">{{ g.marking_points.text }}</p>
+      <blockquote>{{ g.evidence }}</blockquote>
+      <details class="scheme-used">
+        <summary>
+          From {{ g.sources.length }} {{ g.sources.length === 1 ? 'passage' : 'passages' }} of your documents
+        </summary>
+        @for (excerpt of g.sources; track $index) {
+          <p class="caption">{{ source(excerpt) }}</p>
+          <p class="passage">{{ excerpt.text }}</p>
+        }
+      </details>
+      @if (used()) {
+        <p [id]="id + '-used'" tabindex="-1" aria-live="polite">
+          Used. Review the question, then save the assessment.
+        </p>
+      } @else if (stale()) {
+        <p>The question changed since this was drafted. Draft it again.</p>
+      } @else {
+        <p>
+          {{
+            g.type === 'short_answer'
+              ? 'Using it adds these accepted answers to yours'
+              : 'Using it replaces the rubric and model answer'
+          }}{{ schemeFull() ? '.' : ', and adds the marking points as a marking-scheme passage.' }}
+        </p>
+        <button type="button" (click)="use()" [disabled]="disabled">
+          Use this<span class="visually-hidden"> guidance for question {{ index + 1 }}</span>
+        </button>
+      }
+    </div>
+  }
+</div>

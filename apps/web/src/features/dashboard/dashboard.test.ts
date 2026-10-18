@@ -44,9 +44,9 @@ const performance: ClassPerformance = {
     {
       student_id: 's1',
       evidence_status: 'available',
-      skills: [
+      topics: [
         {
-          skill_id: 'k1',
+          topic_id: 'k1',
           attempted: 4,
           correct: 3,
           observed_accuracy: 0.75,
@@ -55,7 +55,7 @@ const performance: ClassPerformance = {
         },
       ],
     },
-    { student_id: 's2', evidence_status: 'no_finalized_evidence', skills: [] },
+    { student_id: 's2', evidence_status: 'no_finalized_evidence', topics: [] },
   ],
 };
 
@@ -85,7 +85,7 @@ async function render(parts: Parts = {}, classroomId = 'c1') {
         provide: CurriculumNames,
         useValue: {
           need: () => Promise.resolve(),
-          skillName: (id: string) => (id === 'k1' ? 'Adding fractions' : ''),
+          topicName: (id: string) => (id === 'k1' ? 'Adding fractions' : ''),
         },
       },
       {
@@ -133,7 +133,7 @@ describe('class dashboard states', () => {
     const page = await render({ roster: never, progress: never, counts: never, performance: never });
     await page.settle();
     expect(page.text()).toContain('Loading assessments…');
-    expect(page.text()).toContain('Loading class skills…');
+    expect(page.text()).toContain('Loading class topics…');
     for (const label of ['Needs grading', 'Students enrolled', 'Published assessments'])
       expect(page.stat(label)).toEqual({ value: '…', caption: 'Loading…' });
     expect(page.text()).not.toContain('No published assessments yet');
@@ -162,7 +162,7 @@ describe('class dashboard states', () => {
     expect(page.text()).toContain('Adding fractions');
   });
 
-  it('keeps the grading count and roster when class skills fail', async () => {
+  it('keeps the grading count and roster when class topics fail', async () => {
     const page = await render({ performance: Promise.reject(new Error('Analytics is unavailable.')) });
     await page.settle();
     expect(page.alerts()).toEqual(['Analytics is unavailable.']);
@@ -191,7 +191,7 @@ describe('class dashboard states', () => {
     const page = await render({
       performance: Promise.resolve({
         ...performance,
-        students: performance.students.map((s) => ({ ...s, skills: [] })),
+        students: performance.students.map((s) => ({ ...s, topics: [] })),
       }),
     });
     await page.settle();

@@ -8,9 +8,10 @@ import type {
   Assessment,
   AssessmentSummary,
   DocumentRecord,
-  Node,
+  Excerpt,
   Question,
   SavedAnswers,
+  Topic,
 } from '../../api/models';
 import { ClassroomContext, onClassroomChange } from '../../core/classroom-context';
 import { CurriculumNames } from '../../core/curriculum-names';
@@ -31,15 +32,23 @@ import {
   clearForm,
   criterionForm,
   dueState,
+  excerptLabel,
   fillForm,
+  markWrittenBy,
+  marksText,
   questionForm,
   rubricTotal,
+  schemeTotal,
   teacherMarked,
   toAssessment,
+  untouched,
   usesScheme,
   type DueState,
   type QuestionForm,
 } from './editor';
+import { QuestionGeneratorComponent } from './generator';
+import { MarkingGuidanceComponent } from './guidance';
+import { SchemeMatcherComponent } from './scheme-matcher';
 import { SchemePickerComponent } from './scheme-picker';
 
 /** How long a student's typing rests before their work is saved. */
@@ -56,6 +65,9 @@ const SAVE_DELAY = 1500;
     SectionStateComponent,
     ConfirmDialogComponent,
     SchemePickerComponent,
+    QuestionGeneratorComponent,
+    MarkingGuidanceComponent,
+    SchemeMatcherComponent,
   ],
   templateUrl: './assessments.html',
 })
@@ -71,9 +83,9 @@ export class AssessmentsComponent {
   /** Clearing the student's answers, in its confirmation dialog. */
   readonly clearState = new ActionState();
   readonly assessments = new Section<AssessmentSummary[]>();
-  readonly skills = this.curriculum.skills;
-  /** Reading the curriculum for the skill a new question uses. */
-  readonly skillsState = new Section<Node[]>();
+  readonly topics = this.curriculum.topics;
+  /** Reading the curriculum for the topic a new question uses. */
+  readonly topicsState = new Section<Topic[]>();
   /** The classroom's documents, read once for every question's marking-scheme search. */
   readonly schemeDocs = new Section<DocumentRecord[]>();
   readonly selected = signal<Assessment | null>(null);
@@ -147,8 +159,8 @@ export class AssessmentsComponent {
     if (!classroomId) return;
     void this.assessments.load(() => this.assessmentApi.list(classroomId)).then(() => this.openRequested());
     if (this.session.isTeacher()) {
-      // Read fresh, so a skill a colleague just added is there to choose.
-      void this.skillsState.load(() => this.curriculum.refresh());
+      // Read fresh, so a topic a colleague just added is there to choose.
+      void this.topicsState.load(() => this.curriculum.refresh());
       void this.schemeDocs.load(() => this.contentApi.documents(classroomId));
     }
   }
@@ -165,13 +177,52 @@ export class AssessmentsComponent {
 
   addQuestion(): void {
     if (this.questions.length >= MAX_QUESTIONS) return;
-    // A new question starts with the previous one's skill, which is usually the same.
-    const skill = this.questions.at(this.questions.length - 1)?.controls.skill_id.value ?? '';
+    // A new question starts with the previous one's topic, which is usually the same.
+    const topic = this.questions.at(this.questions.length - 1)?.controls.topic_id.value ?? '';
     const q = questionForm();
-    q.controls.skill_id.setValue(skill);
+    q.controls.topic_id.setValue(topic);
     this.questions.push(q);
     this.form.markAsDirty();
     this.focusLater(`question-${this.questions.length - 1}-prompt`);
+  }
+
+  /** Adds a generated draft the teacher kept, in place of the editor's one question if the teacher has not started
+   * it. Its marking points are left out when the assessment already has all the marking-scheme passages it can. */
+  addGenerated(question: Omit<Question, 'id'>): void {
+    const replace = this.questions.length === 1 && untouched(this.questions.at(0));
+    if (!replace && this.questions.length >= MAX_QUESTIONS) return;
+    const room = MAX_ASSESSMENT_EXCERPTS - (replace ? 0 : this.schemePassages());
+    const scheme = question.marking_scheme ?? [];
+    const kept =
+      usesScheme(question.type) && scheme.length > room ? { ...question, marking_scheme: [] } : question;
+    const form = questionForm(kept);
+    for (const excerpt of kept.marking_scheme ?? [])
+      markWrittenBy(form.controls.marking_scheme, excerpt, 'ai');
+    if (replace) this.questions.setControl(0, form);
+    else this.questions.push(form);
+    this.form.markAsDirty();
+    const position = replace ? 1 : this.questions.length;
+    this.state.message.set(
+      `Generated question added as question ${position}.` +
+        (kept === question
+          ? ''
+          : ` Its marking points were left out: the assessment has ${MAX_ASSESSMENT_EXCERPTS} marking-scheme passages already.`),
+    );
+  }
+
+  /** The editor's question prompts, so generation leaves out near-duplicates. */
+  prompts(): string[] {
+    return this.questions.controls.map((q) => q.controls.prompt.value);
+  }
+
+  /** Marking-scheme passages across the editor's questions. */
+  schemePassages(): number {
+    return schemeTotal(this.questions.getRawValue());
+  }
+
+  /** Where a generated question's passage is from. */
+  sourceOf(excerpt: Excerpt): string {
+    return excerptLabel(excerpt, this.schemeDocs.value());
   }
 
   removeQuestion(index: number): void {
@@ -427,7 +478,7 @@ export class AssessmentsComponent {
   }
 
   points(question: Question): string {
-    return question.points === 1 ? '1 mark' : `${question.points} marks`;
+    return marksText(question.points);
   }
 
   /** The help line under a student's answer: its marks, and for written answers how much is left. */

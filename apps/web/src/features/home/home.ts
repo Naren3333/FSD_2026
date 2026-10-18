@@ -13,7 +13,7 @@ import { Section } from '../../shared/section';
 import { SectionStateComponent } from '../../shared/section-state';
 
 /** A student's start page for the current classroom: what is still to do, what waits for the teacher, recent
- * finalized results and the skills to practise. Grades show only once the teacher has finalized them. */
+ * finalized results and the topics to practise. Grades show only once the teacher has finalized them. */
 @Component({
   selector: 'app-home',
   standalone: true,
@@ -51,7 +51,7 @@ export class HomeComponent {
   });
   readonly recent = computed(() => this.results.value()?.slice(0, this.recentCount) ?? []);
   readonly practise = computed(
-    () => this.performance.value()?.skills.filter((s) => s.weakness_indicator) ?? [],
+    () => this.performance.value()?.topics.filter((s) => s.weakness_indicator) ?? [],
   );
   private readonly titles = computed(
     () => new Map((this.assessments.value() ?? []).map((a) => [a.id, a.title])),
@@ -73,7 +73,7 @@ export class HomeComponent {
     void this.results.load(() => this.grading.mine(classroomId));
     void this.performance.load(async () => {
       const performance = await this.analytics.performance(studentId, classroomId);
-      await this.curriculum.need(performance.skills.map((s) => s.skill_id));
+      await this.curriculum.need(performance.topics.map((s) => s.topic_id));
       return performance;
     });
   }
@@ -91,8 +91,8 @@ export class HomeComponent {
     return this.titles().get(result.assessment_id) ?? 'Assessment';
   }
 
-  /** The skill's name, or '' when the curriculum has none. */
-  skill(skillId: string): string {
-    return this.curriculum.skillName(skillId);
+  /** The topic's name, or '' when the curriculum has none. */
+  topic(topicId: string): string {
+    return this.curriculum.topicName(topicId);
   }
 }

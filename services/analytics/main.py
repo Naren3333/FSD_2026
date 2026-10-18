@@ -1,4 +1,4 @@
-"""Learning Analytics: per-student skill accuracy from finalized grades only."""
+"""Learning Analytics: per-student topic accuracy from finalized grades only."""
 
 import os
 import threading
@@ -70,10 +70,10 @@ def ready(request: Request) -> dict[str, str]:
     return {"status": "ready"}
 
 
-def skill_evidence(pool: ConnectionPool[Any], org: str, classroom_id: UUID, student_id: str) -> list[Any]:
+def topic_evidence(pool: ConnectionPool[Any], org: str, classroom_id: UUID, student_id: str) -> list[Any]:
     with pool.connection() as conn:
         return conn.execute(
-            "SELECT skill_id,correct,awarded,possible FROM evidence WHERE org_id=%s AND classroom_id=%s AND student_id=%s",
+            "SELECT topic_id,correct,awarded,possible FROM evidence WHERE org_id=%s AND classroom_id=%s AND student_id=%s",
             (org, classroom_id, student_id),
         ).fetchall()
 
@@ -86,7 +86,7 @@ MAX_PAGE = 50
 def class_evidence(pool: ConnectionPool[Any], org: str, classroom_id: UUID, students: list[str]) -> list[Any]:
     with pool.connection() as conn:
         return conn.execute(
-            "SELECT student_id,skill_id,correct,awarded,possible FROM evidence WHERE org_id=%s AND classroom_id=%s"
+            "SELECT student_id,topic_id,correct,awarded,possible FROM evidence WHERE org_id=%s AND classroom_id=%s"
             " AND student_id = ANY(%s)",
             (org, classroom_id, students),
         ).fetchall()
@@ -100,7 +100,7 @@ async def class_performance(
     limit: int = Query(default=20, ge=1, le=MAX_PAGE),
     claims: Claims = Depends(requires(TEACHER)),
 ) -> ClassPerformanceResponse:
-    """One page of the classroom's enrolled students with their skill evidence, for its own teacher only. The
+    """One page of the classroom's enrolled students with their topic evidence, for its own teacher only. The
     roster comes from Identity with the teacher's token, so only currently enrolled students appear."""
     identity: IdentityClient = request.app.state.identity
     await require_relation(
@@ -151,13 +151,13 @@ async def performance(
         denied=("ACCESS_DENIED", "Classroom or student access could not be verified."),
     )
     rows = await run_in_threadpool(
-        skill_evidence, request.app.state.pool, claims.org, classroom_id, student_id
+        topic_evidence, request.app.state.pool, claims.org, classroom_id, student_id
     )
     return PerformanceResponse.model_validate(
         {
             "student_id": student_id,
             "classroom_id": str(classroom_id),
-            "skills": summarize(rows),
+            "topics": summarize(rows),
             "evidence_status": "no_finalized_evidence" if not rows else "available",
             "interpretation": INTERPRETATION,
         }

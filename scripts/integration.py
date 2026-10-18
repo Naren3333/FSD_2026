@@ -9,6 +9,7 @@ of them to work instead, which makes a few small paid calls billed to the test u
 """
 
 import argparse
+import contextlib
 import dataclasses
 import functools
 import json
@@ -23,10 +24,21 @@ from uuid import UUID, uuid4
 
 import httpx
 from jsonschema import Draft202012Validator, FormatChecker
-from local_stack import BASE, ROOT, TOKEN_URL, env, password_token, psql, psql_value, sse_events
-from setup import SERVICES, client_secret_key
+from local_stack import (
+    BASE,
+    ROOT,
+    TOKEN_URL,
+    delete_topics,
+    env,
+    password_token,
+    psql,
+    psql_value,
+    sse_events,
+)
+from setup import AI_CLIENTS, SERVICES, client_secret_key
 
-CONTRACTS = {"chatbot": "question-chatbot-agent"}  # gateway path → contract file
+# gateway path → contract file
+CONTRACTS = {"chatbot": "question-chatbot-agent", "question-generation": "question-generation-agent"}
 TEXT = {"Content-Type": "text/plain"}
 PDF = {"Content-Type": "application/pdf"}
 
@@ -347,21 +359,66 @@ def chat(u: Users, room_id: str) -> None:
     assert httpx.get(BASE + "/chatbot/usage").status_code == 401
 
 
+def question_generation(u: Users, room_id: str) -> None:
+    """Only the classroom's teacher may generate questions or marking guidance (ADR 0006). The search runs with the
+    teacher's own token over the chosen document; this classroom's PDF has no indexed passages, so the agent refuses
+    with INSUFFICIENT_SOURCE (or SEARCH_UNAVAILABLE without provider keys) before any model call, never with made-up
+    questions."""
+    topic = new_topic(u.teacher, "Integration question generation")
+    pdf = next(
+        d
+        for d in request(u.teacher, "GET", f"/content/documents?classroom_id={room_id}")
+        if d["title"] == "PDF"
+    )
+    body = {
+        "classroom_id": room_id,
+        "document_ids": [pdf["id"]],
+        "topic_id": topic["id"],
+        "question_types": ["multiple_choice", "short_answer"],
+        "difficulty": "introductory",
+        "count": 2,
+    }
+    guidance = {
+        "classroom_id": room_id,
+        "document_ids": [pdf["id"]],
+        "prompt": "What is a fraction?",
+        "type": "short_answer",
+    }
+    for path, sent in (
+        ("/question-generation/questions", body),
+        ("/question-generation/marking-guidance", guidance),
+    ):
+        assert httpx.post(BASE + path, json=sent).status_code == 401
+        request(u.student, "POST", path, 403, json=sent)
+        request(u.other, "POST", path, 403, json=sent)
+        request(u.teacher, "POST", path, 422, json={**sent, "document_ids": []})
+        answered = u.teacher.post(path, json=sent, timeout=120)
+        expected = (
+            {422: "INSUFFICIENT_SOURCE"}
+            if LIVE_AI
+            else {422: "INSUFFICIENT_SOURCE", 503: "SEARCH_UNAVAILABLE"}
+        )
+        assert answered.status_code in expected, answered.text
+        assert answered.json()["error"]["code"] == expected[answered.status_code], answered.text
+        validate_response("POST", path, answered.status_code, answered.json())
+    unknown = request(
+        u.teacher, "POST", "/question-generation/questions", 422, json={**body, "topic_id": room_id}
+    )
+    assert unknown["error"]["code"] == "UNKNOWN_TOPIC", unknown
+
+
 @dataclass
 class Graded:
     submission_id: str
     grade_id: str
     performance_path: str
-    skills: list[dict[str, Any]]  # the student's performance after finalization
+    topics: list[dict[str, Any]]  # the student's performance after finalization
 
 
 def assess_and_grade(u: Users, room_id: str) -> Graded:
     """Answer-key secrecy, one submission, draft grading, teacher finalization, the student's own results and
     analytics."""
-    skill = request(
-        u.teacher, "POST", "/curriculum/nodes", 201,
-        json={"kind": "skill", "name": "Integration exact decimals", "parent_id": None},
-    )  # fmt: skip
+    topic = new_topic(u.teacher, "Integration exact decimals")
     questions = [
         {"prompt": "0.1 + 0.2?", "type": "numerical", "answer": "0.3", "tolerance": "0", "options": []},
         {
@@ -377,7 +434,7 @@ def assess_and_grade(u: Users, room_id: str) -> Graded:
         json={
             "classroom_id": room_id,
             "title": "Decimal test",
-            "questions": [{**q, "skill_id": skill["id"]} for q in questions],
+            "questions": [{**q, "topic_id": topic["id"]} for q in questions],
         },
     )  # fmt: skip
     public = request(u.student, "GET", f"/assessment/assessments/{assessment['id']}")
@@ -416,7 +473,7 @@ def assess_and_grade(u: Users, room_id: str) -> Graded:
     request(u.teacher, "GET", mine, 403)
     request(u.other, "GET", mine, 403)
     performance = f"/analytics/performance/{u.student_id}?classroom_id={room_id}"
-    assert request(u.teacher, "GET", performance)["skills"] == []
+    assert request(u.teacher, "GET", performance)["topics"] == []
 
     # Only the classroom's teacher finalizes, once.
     finalize = f"/grading/evaluations/{grade['id']}/finalize"
@@ -433,15 +490,15 @@ def assess_and_grade(u: Users, room_id: str) -> Graded:
 
     result = eventually(
         lambda: request(u.teacher, "GET", performance),
-        lambda r: len(r["skills"]) == 1,
+        lambda r: len(r["topics"]) == 1,
         "analytics consumption",
     )
-    observed = result["skills"][0]
+    observed = result["topics"][0]
     assert observed["attempted"] == 2 and observed["correct"] == 1 and observed["observed_accuracy"] == 0.5
     assert observed["evidence_status"] == "insufficient_evidence"
     request(u.student, "GET", f"/analytics/performance/{u.teacher_id}?classroom_id={room_id}", 403)
     request(u.other, "GET", performance, 403)
-    return Graded(submission["id"], grade["id"], performance, result["skills"])
+    return Graded(submission["id"], grade["id"], performance, result["topics"])
 
 
 def summaries(rows: list[dict[str, Any]], entry: dict[str, Any]) -> list[dict[str, Any]]:
@@ -454,21 +511,21 @@ def replayed_events(u: Users, room_id: str, graded: Graded) -> None:
     restart("grading", "analytics")
     # Each same-id copy is followed by a fresh-id copy under the same key. Kafka keeps a key's order, so once the
     # consumer has recorded the fresh copy it has also handled the same-id one before it.
-    replay("assessment", "assessment.submitted.v3", graded.submission_id)
-    submitted = replay("assessment", "assessment.submitted.v3", graded.submission_id, fresh_id=True)
-    replay("grading", "grading.finalized.v2", graded.grade_id)
-    finalized = replay("grading", "grading.finalized.v2", graded.grade_id, fresh_id=True)
+    replay("assessment", "assessment.submitted.v4", graded.submission_id)
+    submitted = replay("assessment", "assessment.submitted.v4", graded.submission_id, fresh_id=True)
+    replay("grading", "grading.finalized.v3", graded.grade_id)
+    finalized = replay("grading", "grading.finalized.v3", graded.grade_id, fresh_id=True)
     eventually(lambda: inbox_has("grading", submitted), bool, "grading handled the replayed submissions")
     eventually(
         lambda: inbox_has("analytics", finalized), bool, "analytics handled the replayed finalizations"
     )
-    assert request(u.teacher, "GET", graded.performance_path)["skills"] == graded.skills
+    assert request(u.teacher, "GET", graded.performance_path)["topics"] == graded.topics
     assert len(request(u.teacher, "GET", f"/grading/evaluations?classroom_id={room_id}")) == 1
 
 
 def class_dashboard(u: Users, room_id: str, graded: Graded) -> None:
     """The class dashboard's numbers, for the classroom's teacher only: submissions per assessment, grades waiting
-    and finalized, and one page of enrolled students with their skill evidence."""
+    and finalized, and one page of enrolled students with their topic evidence."""
     query = f"?classroom_id={room_id}"
     progress = f"/assessment/assessments/progress{query}"
     assert {"title": "Decimal test", "submissions": 1} in [
@@ -480,7 +537,7 @@ def class_dashboard(u: Users, room_id: str, graded: Graded) -> None:
     page = request(u.teacher, "GET", performance)
     assert page["total"] >= 1 and page["offset"] == 0
     [student] = [s for s in page["students"] if s["student_id"] == u.student_id]
-    assert student["skills"] == graded.skills and student["evidence_status"] == "available"
+    assert student["topics"] == graded.topics and student["evidence_status"] == "available"
     request(u.teacher, "GET", f"/analytics/performance{query}&limit=51", 422)
     for path in [progress, counts, performance]:
         request(u.student, "GET", path, 403)
@@ -490,7 +547,7 @@ def class_dashboard(u: Users, room_id: str, graded: Graded) -> None:
 @dataclass
 class Late:
     assessment_id: str
-    skill_id: str
+    topic_id: str
     short: str  # the short-answer question
     free: str  # the free-response question
     answers: dict[str, str]
@@ -503,10 +560,7 @@ def lifecycle(u: Users, room_id: str) -> Late:
     u = dataclasses.replace(
         u, teacher=login("teacher", "TEACHER_PASSWORD"), student=login("student", "STUDENT_PASSWORD")
     )
-    skill = request(
-        u.teacher, "POST", "/curriculum/nodes", 201,
-        json={"kind": "skill", "name": "Integration photosynthesis", "parent_id": None},
-    )  # fmt: skip
+    topic = new_topic(u.teacher, "Integration photosynthesis")
     rubric = {
         "criteria": [
             {
@@ -547,13 +601,13 @@ def lifecycle(u: Users, room_id: str) -> Late:
         "classroom_id": room_id,
         "title": "Photosynthesis draft",
         "status": "draft",
-        "questions": [{**q, "skill_id": skill["id"]} for q in questions],
+        "questions": [{**q, "topic_id": topic["id"]} for q in questions],
         "due_at": timestamp(time.time() + 86400),
         "late_policy": "accept_flagged",
         "release_policy": "manual",
         "ai_marking": True,
     }
-    blank_passage = [{**questions[1], "skill_id": skill["id"], "marking_scheme": [{"text": " "}]}]
+    blank_passage = [{**questions[1], "topic_id": topic["id"], "marking_scheme": [{"text": " "}]}]
     request(u.teacher, "POST", "/assessment/assessments", 422, json={**draft, "questions": blank_passage})
     created = request(u.teacher, "POST", "/assessment/assessments", 201, json=draft)
     path = f"/assessment/assessments/{created['id']}"
@@ -594,7 +648,7 @@ def lifecycle(u: Users, room_id: str) -> Late:
     submission = request(u.student, "POST", f"{path}/submissions", 201, json={"answers": answers})
     assert submission["late"] is True
     assert request(u.student, "GET", saved)["answers"] == {}
-    return Late(created["id"], skill["id"], short, free, answers)
+    return Late(created["id"], topic["id"], short, free, answers)
 
 
 def timestamp(seconds: float) -> str:
@@ -613,7 +667,7 @@ def marking(u: Users, room_id: str, late: Late) -> None:
     [grade] = eventually(lambda: request(u.teacher, "GET", evaluations), lambda rows: len(rows) == 1, "draft")
     assert grade["late"] and grade["answers"] == answers and grade["release_policy"] == "manual"
     assert [e["needs_marking"] for e in grade["evidence"]] == [True, True]
-    # The passage reached Grading with the question (assessment.submitted.v3), for the marker to read.
+    # The passage reached Grading with the question (assessment.submitted.v4), for the marker to read.
     passage = (
         f"SELECT questions->1->'marking_scheme'->0->>'text' FROM evaluations WHERE id='{UUID(grade['id'])}'"
     )
@@ -658,17 +712,17 @@ def marking(u: Users, room_id: str, late: Late) -> None:
     request(u.teacher, "POST", finalize, json={"reason": "Marked by hand"})
 
     # Finalized but not released: the student sees nothing yet, in Grading or in Analytics. Grading publishes
-    # grading.finalized.v2 only on release, so no event can reach Analytics later either.
+    # grading.finalized.v3 only on release, so no event can reach Analytics later either.
     mine = f"/grading/evaluations/mine?classroom_id={room_id}"
     assert grade["id"] not in [r["id"] for r in request(u.student, "GET", mine)]
     performance = f"/analytics/performance/{u.student_id}?classroom_id={room_id}"
-    unreleased = request(u.student, "GET", performance)["skills"]
-    assert late.skill_id not in [s["skill_id"] for s in unreleased], unreleased
+    unreleased = request(u.student, "GET", performance)["topics"]
+    assert late.topic_id not in [s["topic_id"] for s in unreleased], unreleased
     finalized_events = (
-        "SELECT count(*) FROM outbox WHERE topic='grading.finalized.v2' "
+        "SELECT count(*) FROM outbox WHERE topic='grading.finalized.v3' "
         f"AND partition_key='{UUID(grade['id'])}'"
     )
-    assert sql_value("grading", finalized_events) == "0", "grading.finalized.v2 was published before release"
+    assert sql_value("grading", finalized_events) == "0", "grading.finalized.v3 was published before release"
     counts = request(u.teacher, "GET", f"/grading/evaluations/counts?classroom_id={room_id}")
     assert counts == {"drafts": 0, "finalized": 2, "unreleased": 1}
     release = "/grading/evaluations/release"
@@ -682,11 +736,11 @@ def marking(u: Users, room_id: str, late: Late) -> None:
     assert all("suggestion" not in e and "criteria" not in e for e in result["evidence"])
 
     observed = eventually(
-        lambda: request(u.student, "GET", performance)["skills"],
-        lambda skills: any(s["skill_id"] == late.skill_id for s in skills),
+        lambda: request(u.student, "GET", performance)["topics"],
+        lambda topics: any(s["topic_id"] == late.topic_id for s in topics),
         "part marks in analytics",
     )
-    [part] = [s for s in observed if s["skill_id"] == late.skill_id]
+    [part] = [s for s in observed if s["topic_id"] == late.topic_id]
     assert (part["attempted"], part["correct"], part["marks_awarded"], part["marks_possible"]) == (2, 1, 5, 7)
 
 
@@ -747,7 +801,7 @@ def delete_classroom(u: Users, room_id: str, graded: Graded) -> None:
     duplicate_id = replay("identity", "identity.classroom.deleted.v1", room, fresh_id=True)
     late_id = str(uuid4())
     publish(
-        "assessment.submitted.v3", str(UUID(graded.submission_id)), {**late_submission, "event_id": late_id}
+        "assessment.submitted.v4", str(UUID(graded.submission_id)), {**late_submission, "event_id": late_id}
     )
     eventually(
         lambda: sql_value("content", f"SELECT count(*) FROM inbox WHERE event_id='{duplicate_id}'"),
@@ -777,10 +831,10 @@ def databases() -> None:
     for service, expected in [
         ("content", "1,2,3,4"),
         ("identity", "1,2,3,4,5,6"),
-        ("assessment", "1,2,3"),
-        ("grading", "1,2,3"),
-        ("analytics", "1,2,3"),
-        ("curriculum", "1"),
+        ("assessment", "1,2,3,4"),
+        ("grading", "1,2,3,4"),
+        ("analytics", "1,2,3,4"),
+        ("curriculum", "1,2"),
         ("chatbot", "1,2"),
         ("aicore", "1,2"),
     ]:
@@ -792,7 +846,7 @@ def databases() -> None:
 
 def ai_service_accounts(u: Users) -> None:
     """Service accounts reach the private AI service (200 with provider keys, 503 without); people do not."""
-    for client_id in ["content-indexer", "question-chatbot-agent", "grading-marker"]:
+    for client_id in AI_CLIENTS:
         assert ai_core_status(service_token(client_id)) in ((200,) if LIVE_AI else (200, 503)), client_id
     assert ai_core_status(u.student.headers["Authorization"].removeprefix("Bearer ")) == 403
 
@@ -804,13 +858,9 @@ import json, sys, urllib.error, urllib.request
 token, room = sys.stdin.read().split()
 ids = ["00000000-0000-4000-8000-000000000001"]
 requests = {
-    "question-generation-agent:8080/v1/question_generation": {
-        "document_ids": ids, "skill_ids": ids, "classroom_id": room,
-        "question_type": "numerical", "difficulty": "introductory", "count": 1,
-    },
     "student-performance-agent:8080/v1/performance_interpretation": {
-        "student_id": "student", "classroom_id": room, "evidence_ids": ids, "skill_ids": ids,
-        "performance_summary": [{"skill_id": ids[0], "attempted": 1, "correct": 1}],
+        "student_id": "student", "classroom_id": room, "evidence_ids": ids, "topic_ids": ids,
+        "performance_summary": [{"topic_id": ids[0], "attempted": 1, "correct": 1}],
     },
 }
 for path, body in requests.items():
@@ -825,12 +875,12 @@ for path, body in requests.items():
 
 
 def unauthorized_agents() -> None:
-    """Question generation and performance interpretation still answer 501 to a valid, authorized request."""
+    """Performance interpretation still answers 501 to a valid, authorized request."""
     token = service_token("content-indexer")
     probe = docker("exec", "-T", "analytics", "python", "-c", PLACEHOLDER_PROBE, input=f"{token} {uuid4()}")
     lines = probe.stdout.split("\n")
     results = [line.split() for line in lines if line.strip()]
-    assert len(results) == 2, probe.stdout
+    assert len(results) == 1, probe.stdout
     for path, status, code in results:
         assert (status, code) == ("501", "AI_CAPABILITY_NOT_IMPLEMENTED"), (path, status, code)
 
@@ -841,6 +891,45 @@ def rate_limit_per_session() -> None:
     statuses = [busy.get("/identity/classrooms").status_code for _ in range(125)]
     assert statuses.count(429) > 0, "Kong did not rate limit a session making 125 requests in a minute"
     request(other, "GET", "/identity/classrooms")
+
+
+# The topics this run created, deleted when it ends so test topics never pile up in the local curriculum.
+CREATED_TOPICS: list[str] = []
+
+
+def new_topic(teacher: httpx.Client, name: str) -> dict[str, Any]:
+    topic: dict[str, Any] = request(teacher, "POST", "/curriculum/topics", 201, json={"name": name})
+    assert set(topic) == {"id", "name"}, topic
+    CREATED_TOPICS.append(topic["id"])
+    return topic
+
+
+def delete_test_topics(topic_ids: list[str]) -> None:
+    """Deletes test topics outright. Only for topics this run created: by now its classroom is purged, so nothing of
+    the run still names them."""
+    if topic_ids:
+        delete_topics("id IN (" + ",".join(f"'{UUID(i)}'" for i in topic_ids) + ")")
+
+
+def remove_topics() -> None:
+    """Archiving hides a topic from the curriculum list (a second archive is a 404); then the run's topics are
+    deleted."""
+    teacher = login("teacher", "TEACHER_PASSWORD")
+    first = CREATED_TOPICS[0]
+    request(teacher, "DELETE", f"/curriculum/topics/{first}", 204)
+    assert first not in {t["id"] for t in request(teacher, "GET", "/curriculum/topics")}, (
+        "archived topic listed"
+    )
+    request(teacher, "DELETE", f"/curriculum/topics/{first}", 404)
+    delete_test_topics(CREATED_TOPICS)
+    assert sql_value("curriculum", f"SELECT count(*) FROM topics WHERE id='{UUID(first)}'") == "0"
+    CREATED_TOPICS.clear()
+
+
+def remove_leftovers() -> None:
+    """After a failed run, deletes what it created without checking, so the failure stays the one reported."""
+    with contextlib.suppress(subprocess.SubprocessError, ValueError):
+        delete_test_topics(CREATED_TOPICS)
 
 
 def step[R](label: str, action: Callable[[], R]) -> R:
@@ -862,11 +951,31 @@ def main() -> None:
     if LIVE_AI and not env().get("OPENAI_API_KEY"):
         raise SystemExit("--live-ai needs OPENAI_API_KEY in .env")
     started = time.monotonic()
+    try:
+        run()
+    finally:
+        remove_leftovers()
+    print(f"Finished in {time.monotonic() - started:.0f}s{' with live AI' if LIVE_AI else ''}.")
+    print(
+        "PASS: gateway auth, classroom isolation, enrollment by username, rosters, the school's student list, unenrollment, classroom deletion and its cross-service purge, curriculum, "
+        "S3 upload/extraction, PDF indexing jobs, teacher-only rubrics, search access, chat threads and streaming, "
+        "teacher-only question generation and marking guidance, "
+        "AI spend allowance, answer-key secrecy, submissions, draft grading, teacher finalization, students' own "
+        "finalized results, the class dashboard's counts and class performance, Kafka analytics, consumer restart, duplicate event and business-key idempotency, "
+        "draft and scheduled assessments, saved answers, late submissions, short-answer and rubric marking, "
+        "AI marking suggestions, manual release (no analytics before it), part marks in analytics, "
+        "student privacy, database isolation, numbered migrations, pgvector, AI service accounts, 501 for unauthorized "
+        "agents, per-session rate limiting."
+    )
+
+
+def run() -> None:
     users = step("Signing in", sign_in)
     room_id = step("Classroom and enrollment", lambda: classroom(users))["id"]
     step("Documents and indexing", lambda: documents(users, room_id))
     step("Search", lambda: search(users, room_id))
     step("Chat", lambda: chat(users, room_id))
+    step("Question generation", lambda: question_generation(users, room_id))
     graded = step("Assessment and grading", lambda: assess_and_grade(users, room_id))
     step("Restart and replayed events", lambda: replayed_events(users, room_id, graded))
     step("Class dashboard", lambda: class_dashboard(users, room_id, graded))
@@ -878,17 +987,7 @@ def main() -> None:
     step("AI service accounts", lambda: ai_service_accounts(users))
     step("Unauthorized agents answer 501", unauthorized_agents)
     step("Per-session rate limit", rate_limit_per_session)
-    print(f"Finished in {time.monotonic() - started:.0f}s{' with live AI' if LIVE_AI else ''}.")
-    print(
-        "PASS: gateway auth, classroom isolation, enrollment by username, rosters, the school's student list, unenrollment, classroom deletion and its cross-service purge, curriculum, "
-        "S3 upload/extraction, PDF indexing jobs, teacher-only rubrics, search access, chat threads and streaming, "
-        "AI spend allowance, answer-key secrecy, submissions, draft grading, teacher finalization, students' own "
-        "finalized results, the class dashboard's counts and class performance, Kafka analytics, consumer restart, duplicate event and business-key idempotency, "
-        "draft and scheduled assessments, saved answers, late submissions, short-answer and rubric marking, "
-        "AI marking suggestions, manual release (no analytics before it), part marks in analytics, "
-        "student privacy, database isolation, numbered migrations, pgvector, AI service accounts, 501 for unauthorized "
-        "agents, per-session rate limiting."
-    )
+    step("Removing this run's topics", remove_topics)
 
 
 if __name__ == "__main__":

@@ -10,8 +10,9 @@ ROOT = Path(__file__).resolve().parents[1]
 # ai-core's usage ledger (ADR 0003).
 SERVICES = ["identity", "curriculum", "content", "assessment", "grading", "analytics", "chatbot", "aicore"]
 # Service accounts that call the private AI services (client-credentials grant, `ai-client` role).
-# grading-marker asks for AI marking suggestions (ADR 0004).
-AI_CLIENTS = ["content-indexer", "question-chatbot-agent", "grading-marker"]
+# grading-marker asks for AI marking suggestions (ADR 0004); question-generation-agent drafts questions and marking
+# guidance (ADR 0006).
+AI_CLIENTS = ["content-indexer", "question-chatbot-agent", "grading-marker", "question-generation-agent"]
 # Local people: username, realm role, and the .env key holding their password.
 PEOPLE = [
     ("teacher", "teacher", "TEACHER_PASSWORD"),

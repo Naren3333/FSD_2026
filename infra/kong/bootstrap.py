@@ -41,6 +41,16 @@ CHATBOT = {
     ],
 }
 
+# Question generation makes one model call of up to a few thousand tokens after a search, so it may take a minute.
+QUESTION_GENERATION = {
+    "name": "question-generation-agent",
+    "url": "http://question-generation-agent:8080/v1",
+    "connect_timeout": 5000,
+    "read_timeout": 120_000,
+    "write_timeout": TIMEOUT_MS,
+    "routes": [{"name": "question-generation", "paths": ["/api/question-generation"], "strip_path": True}],
+}
+
 PLUGINS = [
     {
         "name": "jwt",
@@ -92,7 +102,7 @@ def main() -> None:
     )
     config = {
         "_format_version": "3.0",
-        "services": [*(business_service(name) for name in BUSINESS_SERVICES), CHATBOT],
+        "services": [*(business_service(name) for name in BUSINESS_SERVICES), CHATBOT, QUESTION_GENERATION],
         "consumers": [
             {
                 "username": "keycloak",

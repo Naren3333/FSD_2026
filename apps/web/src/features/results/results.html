@@ -38,7 +38,7 @@
               </span>
               <strong>{{ evidence.awarded }} / {{ evidence.possible }}</strong>
               · {{ prompt(result, evidence) || 'Question ' + (index + 1) }}
-              <span class="caption">Skill: {{ skill(evidence) || 'not in the curriculum' }}</span>
+              <span class="caption">Topic: {{ topic(evidence) || 'not in the curriculum' }}</span>
             </p>
             @if (result.answers[evidence.question_id]; as answer) {
               <p class="caption">Your answer</p>

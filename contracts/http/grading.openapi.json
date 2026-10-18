@@ -83,7 +83,7 @@
                               "type": "string",
                               "format": "uuid"
                             },
-                            "skill_id": {
+                            "topic_id": {
                               "type": "string",
                               "format": "uuid"
                             },
@@ -228,7 +228,7 @@
                           },
                           "required": [
                             "question_id",
-                            "skill_id",
+                            "topic_id",
                             "correct",
                             "awarded",
                             "possible"
@@ -590,7 +590,7 @@
                               "type": "string",
                               "format": "uuid"
                             },
-                            "skill_id": {
+                            "topic_id": {
                               "type": "string",
                               "format": "uuid"
                             },
@@ -614,7 +614,7 @@
                           },
                           "required": [
                             "question_id",
-                            "skill_id",
+                            "topic_id",
                             "correct",
                             "awarded",
                             "possible"
@@ -1567,7 +1567,7 @@
                             "type": "string",
                             "format": "uuid"
                           },
-                          "skill_id": {
+                          "topic_id": {
                             "type": "string",
                             "format": "uuid"
                           },
@@ -1712,7 +1712,7 @@
                         },
                         "required": [
                           "question_id",
-                          "skill_id",
+                          "topic_id",
                           "correct",
                           "awarded",
                           "possible"
@@ -2150,7 +2150,7 @@
                             "type": "string",
                             "format": "uuid"
                           },
-                          "skill_id": {
+                          "topic_id": {
                             "type": "string",
                             "format": "uuid"
                           },
@@ -2295,7 +2295,7 @@
                         },
                         "required": [
                           "question_id",
-                          "skill_id",
+                          "topic_id",
                           "correct",
                           "awarded",
                           "possible"

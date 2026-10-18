@@ -12,7 +12,8 @@ export type Service =
   | 'assessment'
   | 'grading'
   | 'analytics'
-  | 'chatbot';
+  | 'chatbot'
+  | 'question-generation';
 
 export interface RequestOptions {
   method?: 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE';
@@ -32,6 +33,8 @@ export class Gateway {
   async request<T>(service: Service, path: string, options: RequestOptions = {}): Promise<T> {
     const timeout = AbortSignal.timeout(options.timeout ?? this.config.requestTimeout);
     const response = await this.send(service, path, options, timeout);
+    // 204 No Content, such as an archive, has no body to read.
+    if (response.status === 204) return undefined as T;
     return response.json() as Promise<T>;
   }
 
@@ -101,5 +104,6 @@ async function failure(response: Response): Promise<string> {
   if (response.status === 401) return 'Your session expired. Sign in again.';
   if (response.status === 403) return 'You do not have access to this resource.';
   if (response.status === 413) return 'This is too large to send. Shorten it and try again.';
+  if (response.status === 504) return 'The service took too long to answer. Retry later.';
   return `The operation failed (${response.status}). Retry later.`;
 }

@@ -39,6 +39,9 @@ const (
 	maxExcerptText        = 2000
 	maxExcerptPage        = 100000
 	maxAssessmentExcerpts = 20
+	// Source passages of a generated question (ADR 0006). They stay in Assessment, so they don't count towards the
+	// assessment's marking-scheme passages.
+	maxSources = 5
 )
 
 // questionKind holds one question type's rules: when a question of that type is well formed, and which answers a
@@ -182,17 +185,26 @@ func (freeResponse) validate(q Question) error {
 // validateScheme checks a question's marking-scheme passages: up to maxExcerpts, each with text, and a chunk only
 // with the document it came from.
 func validateScheme(excerpts []Excerpt) error {
-	if len(excerpts) > maxExcerpts {
-		return fmt.Errorf("a question has at most %d marking-scheme passages", maxExcerpts)
+	return validateExcerpts(excerpts, maxExcerpts, "marking-scheme passage")
+}
+
+// validateSources checks a generated question's source passages, which have the same shape.
+func validateSources(sources []Excerpt) error {
+	return validateExcerpts(sources, maxSources, "source passage")
+}
+
+func validateExcerpts(excerpts []Excerpt, most int, what string) error {
+	if len(excerpts) > most {
+		return fmt.Errorf("a question has at most %d %ss", most, what)
 	}
 	for _, e := range excerpts {
 		switch {
 		case strings.TrimSpace(e.Text) == "" || utf8.RuneCountInString(e.Text) > maxExcerptText:
-			return fmt.Errorf("each marking-scheme passage needs 1–%d characters of text", maxExcerptText)
+			return fmt.Errorf("each %s needs 1–%d characters of text", what, maxExcerptText)
 		case e.Document != "" && !platform.ID(e.Document), e.Chunk != "" && !platform.ID(e.Chunk), e.Chunk != "" && e.Document == "":
-			return errors.New("a marking-scheme passage names its document and chunk by id")
+			return fmt.Errorf("a %s names its document and chunk by id", what)
 		case e.Page < 0 || e.Page > maxExcerptPage:
-			return errors.New("a marking-scheme passage's page is out of range")
+			return fmt.Errorf("a %s's page is out of range", what)
 		}
 	}
 	return nil

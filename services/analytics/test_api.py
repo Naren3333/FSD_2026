@@ -12,7 +12,7 @@ from learning_transport.testing import as_caller, token_claims
 from main import app
 
 ROOM = str(uuid4())
-SKILL = str(uuid4())
+TOPIC = str(uuid4())
 AUTH = {"Authorization": "Bearer token"}
 
 
@@ -80,7 +80,7 @@ def serve() -> Iterator[Any]:
 def evidence(student: str, correct: bool) -> dict[str, Any]:
     return {
         "student_id": student,
-        "skill_id": SKILL,
+        "topic_id": TOPIC,
         "correct": correct,
         "awarded": int(correct),
         "possible": 1,
@@ -106,7 +106,7 @@ def test_a_page_of_the_roster_reads_only_its_students(serve):
         )
     assert result.status_code == 200
     assert [s["student_id"] for s in result.json()["students"]] == ["s2"]
-    assert result.json()["students"][0]["skills"][0]["attempted"] == 1
+    assert result.json()["students"][0]["topics"][0]["attempted"] == 1
     assert pool.queries[0][0] == "org" and pool.queries[0][2] == ["s2"]
 
 
@@ -150,17 +150,17 @@ def test_a_student_without_evidence_has_none_reported(serve):
     with as_caller(app, token_claims("student", sub="s1", org="org")):
         result = client.get("/v1/performance/s1", params={"classroom_id": ROOM}, headers=AUTH)
     assert result.status_code == 200
-    assert result.json()["evidence_status"] == "no_finalized_evidence" and result.json()["skills"] == []
+    assert result.json()["evidence_status"] == "no_finalized_evidence" and result.json()["topics"] == []
 
 
-def test_a_student_reads_their_own_skills(serve):
+def test_a_student_reads_their_own_topics(serve):
     pool = FakePool([evidence("s1", n < 3) for n in range(5)])
     identity = FakeIdentity("student")
     client = serve(identity, pool)
     with as_caller(app, token_claims("student", sub="s1", org="org")):
         result = client.get("/v1/performance/s1", params={"classroom_id": ROOM}, headers=AUTH)
     assert result.status_code == 200 and result.json()["evidence_status"] == "available"
-    assert result.json()["skills"][0]["observed_accuracy"] == 0.6
+    assert result.json()["topics"][0]["observed_accuracy"] == 0.6
     assert identity.asked == ["s1"] and pool.queries[0] == ("org", pool.queries[0][1], "s1")
 
 
@@ -187,7 +187,7 @@ def test_the_classrooms_teacher_reads_a_student(serve):
     client = serve(FakeIdentity("teacher"), FakePool([evidence("s2", True)]))
     with as_caller(app, token_claims("teacher", sub="t1", org="org")):
         result = client.get("/v1/performance/s2", params={"classroom_id": ROOM}, headers=AUTH)
-    assert result.status_code == 200 and result.json()["skills"][0]["correct"] == 1
+    assert result.status_code == 200 and result.json()["topics"][0]["correct"] == 1
 
 
 @pytest.mark.parametrize(

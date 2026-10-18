@@ -36,7 +36,7 @@ func TestEachKindDecidesWhichAnswersAStudentMaySubmit(t *testing.T) {
 }
 
 func TestAnUnknownTypeIsRejected(t *testing.T) {
-	q := Question{Prompt: "Explain.", Type: "essay", Points: 1, Skill: "6ff7334b-1a5d-4ea3-aea9-a219dc94a39b"}
+	q := Question{Prompt: "Explain.", Type: "essay", Points: 1, Topic: "6ff7334b-1a5d-4ea3-aea9-a219dc94a39b"}
 	if q.validate() == nil {
 		t.Fatal("accepted an essay question")
 	}
@@ -102,7 +102,7 @@ func TestEachKindRefusesMalformedQuestions(t *testing.T) {
 		"blank passage":             written(func(q *Question) { q.MarkingScheme = []Excerpt{{Text: " \n"}} }),
 		"long passage":              short(func(q *Question) { q.MarkingScheme = []Excerpt{{Text: strings.Repeat("é", maxExcerptText+1)}} }),
 		"six passages":              written(func(q *Question) { q.MarkingScheme = slices.Repeat([]Excerpt{{Text: "x"}}, maxExcerpts+1) }),
-		"chunk without document":    written(func(q *Question) { q.MarkingScheme = []Excerpt{{Chunk: skillID, Text: "x"}} }),
+		"chunk without document":    written(func(q *Question) { q.MarkingScheme = []Excerpt{{Chunk: topicID, Text: "x"}} }),
 		"document not an id":        written(func(q *Question) { q.MarkingScheme = []Excerpt{{Document: "scheme.pdf", Text: "x"}} }),
 		"negative page":             short(func(q *Question) { q.MarkingScheme = []Excerpt{{Page: -1, Text: "x"}} }),
 	}
@@ -117,7 +117,7 @@ func TestEachKindRefusesMalformedQuestions(t *testing.T) {
 		short(func(*Question) {}),
 		short(func(q *Question) { q.MarkingScheme = []Excerpt{{Text: "Pasted by the teacher"}} }),
 		written(func(q *Question) {
-			q.MarkingScheme = slices.Repeat([]Excerpt{{Document: skillID, Chunk: skillID, Page: 2, Text: strings.Repeat("é", maxExcerptText)}}, maxExcerpts)
+			q.MarkingScheme = slices.Repeat([]Excerpt{{Document: topicID, Chunk: topicID, Page: 2, Text: strings.Repeat("é", maxExcerptText)}}, maxExcerpts)
 		}),
 		written(func(q *Question) {
 			q.MaxLength, q.Rubric.ModelAnswer = maxFreeResponse, strings.Repeat("é", maxModelAnswer)
@@ -137,5 +137,33 @@ func TestStoredQuestionsWithoutPointsAreWorthOne(t *testing.T) {
 	}
 	if _, err = decodeQuestions([]byte(`{`)); err == nil {
 		t.Fatal("decoded malformed questions")
+	}
+}
+
+func TestGeneratedQuestionsKeepTheirSources(t *testing.T) {
+	source := Excerpt{Document: topicID, Chunk: topicID, Page: 4, Text: "Unit tests check one function on its own."}
+	for name, change := range map[string]func(q *Question){
+		"unknown origin":     func(q *Question) { q.Origin = "imported" },
+		"six sources":        func(q *Question) { q.Sources = slices.Repeat([]Excerpt{source}, maxSources+1) },
+		"blank source":       func(q *Question) { q.Sources = []Excerpt{{Text: " "}} },
+		"chunk without file": func(q *Question) { q.Sources = []Excerpt{{Chunk: topicID, Text: "x"}} },
+	} {
+		v := fixture()
+		change(&v.Questions[0])
+		if v.Validate() == nil {
+			t.Errorf("%s: accepted", name)
+		}
+	}
+	v := fixture()
+	v.Questions[0].Origin, v.Questions[0].Sources = originGenerated, slices.Repeat([]Excerpt{source}, maxSources)
+	if err := v.Validate(); err != nil {
+		t.Fatal(err)
+	}
+	// Sources are not marking-scheme passages: they never count towards the assessment's twenty.
+	for range maxAssessmentExcerpts {
+		v.Questions = append(v.Questions, v.Questions[0])
+	}
+	if err := v.Validate(); err != nil {
+		t.Fatal(err)
 	}
 }

@@ -85,8 +85,8 @@ export class PerformanceComponent {
     this.load();
   }
 
-  skill(skillId: string): string {
-    return this.curriculum.skillName(skillId);
+  topic(topicId: string): string {
+    return this.curriculum.topicName(topicId);
   }
 
   load(): void {
@@ -97,7 +97,7 @@ export class PerformanceComponent {
     this.result.clear();
     void this.result.load(async () => {
       const performance = await this.analytics.performance(studentId, classroomId);
-      await this.curriculum.need(performance.skills.map((s) => s.skill_id));
+      await this.curriculum.need(performance.topics.map((s) => s.topic_id));
       this.form.markAsPristine();
       return performance;
     });

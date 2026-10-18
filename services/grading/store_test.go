@@ -27,14 +27,14 @@ func testDB(t *testing.T) *pgxpool.Pool {
 	return platformtest.DB(t, "GRADING_TEST_DATABASE_URL", migrations)
 }
 
-// submit consumes a v2 submission, the free response of submittedEvent with AI marking unless change says otherwise.
+// submit consumes a v4 submission, the free response of submittedEvent with AI marking unless change says otherwise.
 func submit(t *testing.T, db *pgxpool.Pool, id, student string, change map[string]any) {
 	t.Helper()
 	data := map[string]any{"submission_id": id, "student_id": student}
 	for k, v := range change {
 		data[k] = v
 	}
-	event := submittedEvent(t, topicSubmittedV2, data)
+	event := submittedEvent(t, topicSubmittedV4, data)
 	event.Resource = id
 	tx, err := db.Begin(t.Context())
 	if err != nil {
@@ -51,7 +51,7 @@ func submit(t *testing.T, db *pgxpool.Pool, id, student string, change map[strin
 
 // autoMarked is a submission change: one numerical question worth 2, answered correctly, released by hand.
 var autoMarked = map[string]any{
-	"questions":  []map[string]any{{"id": questionID, "prompt": "1+1?", "type": "numerical", "options": nil, "answer": "2", "tolerance": "0", "points": 2, "skill_id": skillID}},
+	"questions":  []map[string]any{{"id": questionID, "prompt": "1+1?", "type": "numerical", "options": nil, "answer": "2", "tolerance": "0", "points": 2, "topic_id": topicID}},
 	"answers":    map[string]string{questionID: "2"},
 	"ai_marking": false,
 }
@@ -130,6 +130,79 @@ func TestAManualReleaseShowsOnlyWhatWasFinalizedBeforeIt(t *testing.T) {
 	}
 	if n, err := s.release(ctx, "org", submissionID, "teacher-1"); err != nil || n != 0 {
 		t.Fatalf("a repeated release: %d %v", n, err)
+	}
+}
+
+func TestTheFinalizedEventAndStoredGradeNameTheTopic(t *testing.T) {
+	db := testDB(t)
+	submit(t, db, submissionA, "student-a", map[string]any{"ai_marking": false, "release_policy": "on_finalize"})
+	if _, err := (pgStore{db}).finalizeEvaluation(t.Context(), "org", submissionA, "teacher-1", "Checked", map[string]Mark{questionID: {Criteria: map[string]int{"c1": 3}}}); err != nil {
+		t.Fatal(err)
+	}
+	var stored, payload []byte
+	if err := db.QueryRow(t.Context(), "SELECT evidence->0 || questions->0 FROM evaluations WHERE id=$1", submissionA).Scan(&stored); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.QueryRow(t.Context(), "SELECT body FROM outbox WHERE topic=$1 AND partition_key=$2", "grading.finalized.v3", submissionA).Scan(&payload); err != nil {
+		t.Fatal(err)
+	}
+	var item map[string]any
+	if err := json.Unmarshal(stored, &item); err != nil || item["topic_id"] != topicID || item["skill_id"] != nil {
+		t.Fatalf("stored: %s %v", stored, err)
+	}
+	var event struct {
+		Data struct {
+			Evidence []map[string]any `json:"evidence"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(payload, &event); err != nil || len(event.Data.Evidence) != 1 || event.Data.Evidence[0]["topic_id"] != topicID || event.Data.Evidence[0]["skill_id"] != nil {
+		t.Fatalf("published: %s %v", payload, err)
+	}
+}
+
+// TestTopicMigrationRenamesStoredSkillIDs stores grades as 003 left them, then checks 004 renames only the key.
+func TestTopicMigrationRenamesStoredSkillIDs(t *testing.T) {
+	db := platformtest.DB(t, "GRADING_TEST_DATABASE_URL", nil)
+	ctx := t.Context()
+	ordered, err := platform.Migrations(migrations)
+	if err != nil || len(ordered) < 4 || ordered[3].Name != "004_topics.sql" {
+		t.Fatalf("%v %v", ordered, err)
+	}
+	for _, m := range ordered[:3] {
+		if _, err = db.Exec(ctx, m.SQL); err != nil {
+			t.Fatalf("%s: %v", m.Name, err)
+		}
+	}
+	evidence := `[{"question_id":"q1","skill_id":"s1","awarded":1,"suggestion":{"status":"ready"}},{"question_id":"q2","skill_id":"s2","awarded":0},"odd"]`
+	questions := `[{"id":"q1","skill_id":"s1","rubric":{"criteria":[]}},{"id":"q2","topic_id":"t2","skill_id":"s2"}]`
+	if _, err = db.Exec(ctx, "INSERT INTO evaluations(id,assessment_id,classroom_id,org_id,student_id,evidence,questions) VALUES($1,$1,$1,'org','s',$2,$3),($4,$4,$4,'org','s','[]',NULL)", submissionA, evidence, questions, submissionB); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = db.Exec(ctx, "INSERT INTO audit(evaluation_id,actor_id,action,reason,before_evidence,after_evidence) VALUES($1,'t','mark','r',$2,'[]')", submissionA, evidence); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = db.Exec(ctx, ordered[3].SQL); err != nil {
+		t.Fatal(err)
+	}
+	want := map[string]string{
+		"evidence":        `[{"awarded": 1, "topic_id": "s1", "suggestion": {"status": "ready"}, "question_id": "q1"}, {"awarded": 0, "topic_id": "s2", "question_id": "q2"}, "odd"]`,
+		"questions":       `[{"id": "q1", "rubric": {"criteria": []}, "topic_id": "s1"}, {"id": "q2", "topic_id": "t2"}]`,
+		"before_evidence": `[{"awarded": 1, "topic_id": "s1", "suggestion": {"status": "ready"}, "question_id": "q1"}, {"awarded": 0, "topic_id": "s2", "question_id": "q2"}, "odd"]`,
+		"after_evidence":  `[]`,
+	}
+	var got [4]string
+	if err = db.QueryRow(ctx, "SELECT v.evidence::text,v.questions::text,a.before_evidence::text,a.after_evidence::text FROM evaluations v JOIN audit a ON a.evaluation_id=v.id WHERE v.id=$1", submissionA).Scan(&got[0], &got[1], &got[2], &got[3]); err != nil {
+		t.Fatal(err)
+	}
+	for i, column := range []string{"evidence", "questions", "before_evidence", "after_evidence"} {
+		if got[i] != want[column] {
+			t.Errorf("%s: %s", column, got[i])
+		}
+	}
+	var empty string
+	var none *string
+	if err = db.QueryRow(ctx, "SELECT evidence::text,questions::text FROM evaluations WHERE id=$1", submissionB).Scan(&empty, &none); err != nil || empty != "[]" || none != nil {
+		t.Fatalf("%q %v %v", empty, none, err)
 	}
 }
 
@@ -213,7 +286,7 @@ func TestFinalizeChecksItsRulesInTheStore(t *testing.T) {
 		want     error
 	}{
 		{"score above the question's points", submissionA, map[string]Mark{questionID: {Awarded: points(3)}}, errScoreOutOfBounds},
-		{"unknown question", submissionA, map[string]Mark{skillID: {Awarded: points(1)}}, errUnknownQuestion},
+		{"unknown question", submissionA, map[string]Mark{topicID: {Awarded: points(1)}}, errUnknownQuestion},
 		{"a free response left unmarked", submissionB, nil, errUnmarked},
 		{"points on a rubric", submissionB, map[string]Mark{questionID: {Awarded: points(3)}}, errInvalidCriteria},
 	}

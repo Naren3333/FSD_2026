@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { Assessment, Evaluation } from '../api/models';
-import { assessmentsOf, promptOf, skillNames, studentName, studentNames, total } from './names';
+import { assessmentsOf, promptOf, topicNames, studentName, studentNames, total } from './names';
 
 const evaluation = (id: string, assessment: string): Evaluation => ({
   id,
@@ -22,17 +22,20 @@ describe('names', () => {
     expect([...names]).toEqual([['s1', 'ada']]);
   });
 
-  it('names skills only, and finds a question prompt by assessment and question', () => {
-    const skills = skillNames([
-      { id: 'k1', kind: 'skill', name: 'Fractions', parent_id: 't1' },
-      { id: 't1', kind: 'topic', name: 'Number', parent_id: null },
+  it('names topics by id, and finds a question prompt by assessment and question', () => {
+    const topics = topicNames([
+      { id: 'k1', name: 'Fractions' },
+      { id: 't1', name: 'Number' },
     ]);
-    expect([...skills]).toEqual([['k1', 'Fractions']]);
+    expect([...topics]).toEqual([
+      ['k1', 'Fractions'],
+      ['t1', 'Number'],
+    ]);
     const assessment: Assessment = {
       id: 'a1',
       classroom_id: 'c',
       title: 'Quiz',
-      questions: [{ id: 'q1', prompt: 'What is 1/2 + 1/4?', type: 'numerical', options: [], skill_id: 'k1' }],
+      questions: [{ id: 'q1', prompt: 'What is 1/2 + 1/4?', type: 'numerical', options: [], topic_id: 'k1' }],
     };
     const assessments = new Map([['a1', assessment]]);
     expect(promptOf(assessments, 'a1', 'q1')).toBe('What is 1/2 + 1/4?');
@@ -43,8 +46,8 @@ describe('names', () => {
   it('totals marks and loads each referenced assessment once', async () => {
     expect(
       total([
-        { question_id: 'q1', skill_id: 'k', correct: true, awarded: 1, possible: 1 },
-        { question_id: 'q2', skill_id: 'k', correct: false, awarded: 0, possible: 2 },
+        { question_id: 'q1', topic_id: 'k', correct: true, awarded: 1, possible: 1 },
+        { question_id: 'q2', topic_id: 'k', correct: false, awarded: 0, possible: 2 },
       ]),
     ).toEqual({ awarded: 1, possible: 3 });
     const asked: string[] = [];

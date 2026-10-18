@@ -8,6 +8,12 @@ from pydantic import Field, model_validator
 
 FINALIZED_V1 = "grading.finalized.v1"
 FINALIZED_V2 = "grading.finalized.v2"
+FINALIZED_V3 = "grading.finalized.v3"
+FINALIZED = (FINALIZED_V1, FINALIZED_V2, FINALIZED_V3)
+# v1 and v2 name each evidence item's topic by this older field; v3 calls it topic_id. Old events may still be queued
+# or replayed, so they are read with the field mapped onto topic_id.
+LEGACY_VERSIONS = (FINALIZED_V1, FINALIZED_V2)
+LEGACY_TOPIC_FIELD = "skill_id"
 
 
 class Evidence(Contract):
@@ -15,7 +21,7 @@ class Evidence(Contract):
     to 100 points and may earn part of them."""
 
     question_id: UUID
-    skill_id: UUID
+    topic_id: UUID
     correct: bool
     awarded: int = Field(ge=0, le=100, strict=True)
     possible: int = Field(ge=1, le=100, strict=True)
@@ -47,9 +53,29 @@ class Finalized(Contract):
 class Event(Envelope):
     data: Finalized
 
+    @model_validator(mode="before")
+    @classmethod
+    def legacy_topic_field(cls, value: Any) -> Any:
+        """An older version's evidence names its topic by the legacy field; read it as topic_id. A legacy event that
+        already says topic_id is not that version, and is rejected."""
+        if not isinstance(value, dict) or value.get("event_type") not in LEGACY_VERSIONS:
+            return value
+        data = value.get("data")
+        if not isinstance(data, dict) or not isinstance(data.get("evidence"), list):
+            return value
+        if any(isinstance(item, dict) and "topic_id" in item for item in data["evidence"]):
+            raise ValueError("This version's evidence has no topic_id field")
+        evidence = [
+            {("topic_id" if k == LEGACY_TOPIC_FIELD else k): v for k, v in item.items()}
+            if isinstance(item, dict)
+            else item
+            for item in data["evidence"]
+        ]
+        return {**value, "data": {**data, "evidence": evidence}}
+
     @model_validator(mode="after")
     def finalized(self) -> "Event":
-        if self.event_type not in (FINALIZED_V1, FINALIZED_V2) or self.resource_id != self.data.evaluation_id:
+        if self.event_type not in FINALIZED or self.resource_id != self.data.evaluation_id:
             raise ValueError("Not a finalized grading event")
         if self.event_type == FINALIZED_V1 and any(e.possible != 1 for e in self.data.evidence):
             raise ValueError("A v1 question is worth one point")
@@ -72,11 +98,11 @@ class ClassroomDeletedEvent(Envelope):
         return self
 
 
-class SkillMetric(Contract):
-    """A skill's finalized evidence: questions attempted and answered with full marks, and the marks earned out of
+class TopicMetric(Contract):
+    """A topic's finalized evidence: questions attempted and answered with full marks, and the marks earned out of
     the marks possible (which shows part marks)."""
 
-    skill_id: UUID
+    topic_id: UUID
     attempted: int = Field(ge=1)
     correct: int = Field(ge=0)
     observed_accuracy: float = Field(ge=0, le=1)
@@ -86,7 +112,7 @@ class SkillMetric(Contract):
     weakness_indicator: bool
 
     @model_validator(mode="after")
-    def evidence_matches(self) -> "SkillMetric":
+    def evidence_matches(self) -> "TopicMetric":
         if self.correct > self.attempted or self.observed_accuracy != round(self.correct / self.attempted, 4):
             raise ValueError("Accuracy must match the observed counts")
         if self.marks_awarded > self.marks_possible or self.marks_possible < self.attempted:
@@ -99,12 +125,12 @@ class SkillMetric(Contract):
 
 class StudentPerformance(Contract):
     student_id: str
-    skills: list[SkillMetric]
+    topics: list[TopicMetric]
     evidence_status: Literal["no_finalized_evidence", "available"]
 
 
 class ClassPerformanceResponse(Contract):
-    """One page of a classroom's enrolled students, in Identity's roster order, each with their skill evidence."""
+    """One page of a classroom's enrolled students, in Identity's roster order, each with their topic evidence."""
 
     classroom_id: UUID
     total: int = Field(ge=0)
@@ -116,20 +142,20 @@ class ClassPerformanceResponse(Contract):
 class PerformanceResponse(Contract):
     student_id: str
     classroom_id: UUID
-    skills: list[SkillMetric]
+    topics: list[TopicMetric]
     evidence_status: Literal["no_finalized_evidence", "available"]
     interpretation: str
 
 
 def by_student(students: list[str], rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    """Each student's skill summary, in the given order; a student without evidence has no skills."""
+    """Each student's topic summary, in the given order; a student without evidence has no topics."""
     evidence: dict[str, list[dict[str, Any]]] = defaultdict(list)
     for row in rows:
         evidence[row["student_id"]].append(row)
     return [
         {
             "student_id": student,
-            "skills": summarize(evidence[student]),
+            "topics": summarize(evidence[student]),
             "evidence_status": "available" if evidence[student] else "no_finalized_evidence",
         }
         for student in students
@@ -137,19 +163,19 @@ def by_student(students: list[str], rows: list[dict[str, Any]]) -> list[dict[str
 
 
 def summarize(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    """Each skill's counts from evidence rows (skill_id, correct, awarded, possible). The weakness indicator counts
+    """Each topic's counts from evidence rows (topic_id, correct, awarded, possible). The weakness indicator counts
     questions answered with full marks, so part marks don't lift it; that is ADR 0004's definition of "correct", and
     marks_awarded/marks_possible show the part marks beside it."""
     counts: dict[str, list[int]] = defaultdict(lambda: [0, 0, 0, 0])
     for row in rows:
-        skill = counts[str(row["skill_id"])]
-        skill[0] += 1
-        skill[1] += int(row["correct"])
-        skill[2] += int(row["awarded"])
-        skill[3] += int(row["possible"])
+        topic = counts[str(row["topic_id"])]
+        topic[0] += 1
+        topic[1] += int(row["correct"])
+        topic[2] += int(row["awarded"])
+        topic[3] += int(row["possible"])
     return [
         {
-            "skill_id": skill,
+            "topic_id": topic,
             "attempted": n,
             "correct": correct,
             "observed_accuracy": round(correct / n, 4),
@@ -158,5 +184,5 @@ def summarize(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
             "evidence_status": "insufficient_evidence" if n < 5 else "observed",
             "weakness_indicator": n >= 5 and correct / n < 0.6,
         }
-        for skill, (n, correct, awarded, possible) in sorted(counts.items())
+        for topic, (n, correct, awarded, possible) in sorted(counts.items())
     ]

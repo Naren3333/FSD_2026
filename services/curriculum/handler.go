@@ -1,7 +1,6 @@
 package main
 
 import (
-	"errors"
 	"learning/platform"
 	"net/http"
 	"strings"
@@ -13,16 +12,16 @@ import (
 type server struct{ store store }
 
 func (s server) routes(mux *http.ServeMux) {
-	mux.HandleFunc("GET /v1/nodes", s.list)
-	mux.HandleFunc("GET /v1/nodes/{id}", s.get)
-	mux.HandleFunc("POST /v1/nodes", s.create)
-	mux.HandleFunc("PATCH /v1/nodes/{id}", s.rename)
-	mux.HandleFunc("DELETE /v1/nodes/{id}", s.archive)
-	mux.HandleFunc("POST /v1/skills/{id}/prerequisites", s.addPrerequisite)
+	mux.HandleFunc("GET /v1/topics", s.list)
+	mux.HandleFunc("GET /v1/topics/{id}", s.get)
+	mux.HandleFunc("POST /v1/topics", s.create)
+	mux.HandleFunc("PATCH /v1/topics/{id}", s.rename)
+	mux.HandleFunc("DELETE /v1/topics/{id}", s.archive)
+	mux.HandleFunc("POST /v1/topics/{id}/prerequisites", s.addPrerequisite)
 }
 
 func (s server) list(w http.ResponseWriter, r *http.Request) {
-	result, err := s.store.listNodes(r.Context(), platform.Actor(r).Org)
+	result, err := s.store.listTopics(r.Context(), platform.Actor(r).Org)
 	if err != nil {
 		platform.Fail(w, err)
 		return
@@ -31,109 +30,94 @@ func (s server) list(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s server) get(w http.ResponseWriter, r *http.Request) {
-	if !nodeID(w, r) {
+	if !topicID(w, r) {
 		return
 	}
-	v, err := s.store.findNode(r.Context(), platform.Actor(r).Org, r.PathValue("id"))
-	if !platform.Found(w, err, "Node not found.") {
+	v, err := s.store.findTopic(r.Context(), platform.Actor(r).Org, r.PathValue("id"))
+	if !platform.Found(w, err, "Topic not found.") {
 		return
 	}
 	platform.JSON(w, http.StatusOK, v)
+}
+
+// named decodes a body of just a name and checks it, answering the failure itself.
+func named(w http.ResponseWriter, r *http.Request) (string, bool) {
+	var v struct {
+		Name string `json:"name"`
+	}
+	if !platform.Decode(w, r, &v) {
+		return "", false
+	}
+	if !validName(v.Name) {
+		platform.Invalid(w, "Provide a name of 1–160 characters.")
+		return "", false
+	}
+	return strings.TrimSpace(v.Name), true
 }
 
 func (s server) create(w http.ResponseWriter, r *http.Request) {
 	if !platform.Teacher(w, r) {
 		return
 	}
-	var v Input
-	if !platform.Decode(w, r, &v) {
+	name, ok := named(w, r)
+	if !ok {
 		return
 	}
-	if !valid(v) {
-		platform.Invalid(w, "Provide a supported kind, a name of 1–160 characters and an optional parent UUID.")
-		return
-	}
-	org := platform.Actor(r).Org
-	// A node may stand alone; a parent, when given, must be the level above it.
-	parentOK := v.Parent == nil
-	if v.Parent != nil {
-		kind, err := s.store.findKind(r.Context(), org, *v.Parent)
-		if err != nil && !errors.Is(err, platform.ErrNotFound) {
-			platform.Fail(w, err)
-			return
-		}
-		parentOK = err == nil && expectedParent[v.Kind] == kind
-	}
-	if !parentOK {
-		platform.Error(w, http.StatusUnprocessableEntity, "INVALID_PARENT", "Parent must be the preceding curriculum level in your organization.")
-		return
-	}
-	id, name := uuid.NewString(), strings.TrimSpace(v.Name)
-	if err := s.store.insertNode(r.Context(), id, org, v.Kind, name, v.Parent); err != nil {
+	id := uuid.NewString()
+	if err := s.store.insertTopic(r.Context(), id, platform.Actor(r).Org, name); err != nil {
 		platform.Fail(w, err)
 		return
 	}
-	platform.JSON(w, http.StatusCreated, Node{id, v.Kind, name, v.Parent})
+	platform.JSON(w, http.StatusCreated, Topic{id, name})
 }
 
 func (s server) rename(w http.ResponseWriter, r *http.Request) {
-	if !platform.Teacher(w, r) || !nodeID(w, r) {
+	if !platform.Teacher(w, r) || !topicID(w, r) {
 		return
 	}
-	var v struct {
-		Name string `json:"name"`
-	}
-	if !platform.Decode(w, r, &v) {
+	name, ok := named(w, r)
+	if !ok {
 		return
 	}
-	if !validName(v.Name) {
-		platform.Invalid(w, "Provide a name of 1–160 characters.")
-		return
-	}
-	name := strings.TrimSpace(v.Name)
-	updated, err := s.store.renameNode(r.Context(), platform.Actor(r).Org, r.PathValue("id"), name)
+	updated, err := s.store.renameTopic(r.Context(), platform.Actor(r).Org, r.PathValue("id"), name)
 	if err != nil {
 		platform.Fail(w, err)
 		return
 	}
 	if !updated {
-		platform.NotFound(w, "Node not found.")
+		platform.NotFound(w, "Topic not found.")
 		return
 	}
-	platform.JSON(w, http.StatusOK, map[string]string{"id": r.PathValue("id"), "name": name})
+	platform.JSON(w, http.StatusOK, Topic{r.PathValue("id"), name})
 }
 
 func (s server) archive(w http.ResponseWriter, r *http.Request) {
-	if !platform.Teacher(w, r) || !nodeID(w, r) {
+	if !platform.Teacher(w, r) || !topicID(w, r) {
 		return
 	}
-	result, err := s.store.archiveNode(r.Context(), platform.Actor(r).Org, r.PathValue("id"))
+	archived, err := s.store.archiveTopic(r.Context(), platform.Actor(r).Org, r.PathValue("id"))
 	if err != nil {
 		platform.Fail(w, err)
 		return
 	}
-	switch result {
-	case archiveMissing:
-		platform.NotFound(w, "Node not found.")
-		return
-	case archiveHasChildren:
-		platform.Error(w, http.StatusConflict, "ARCHIVE_CONFLICT", "Archive the node's children first.")
+	if !archived {
+		platform.NotFound(w, "Topic not found.")
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
 }
 
-// nodeID reports whether the path's node id is a UUID, answering 404 like a missing node when it is not.
-func nodeID(w http.ResponseWriter, r *http.Request) bool {
+// topicID reports whether the path's topic id is a UUID, answering 404 like a missing topic when it is not.
+func topicID(w http.ResponseWriter, r *http.Request) bool {
 	if !platform.ID(r.PathValue("id")) {
-		platform.NotFound(w, "Node not found.")
+		platform.NotFound(w, "Topic not found.")
 		return false
 	}
 	return true
 }
 
 func (s server) addPrerequisite(w http.ResponseWriter, r *http.Request) {
-	if !platform.Teacher(w, r) || !nodeID(w, r) {
+	if !platform.Teacher(w, r) || !topicID(w, r) {
 		return
 	}
 	var input struct {
@@ -144,7 +128,7 @@ func (s server) addPrerequisite(w http.ResponseWriter, r *http.Request) {
 	}
 	id := r.PathValue("id")
 	if !platform.ID(input.Prerequisite) || id == input.Prerequisite {
-		platform.Error(w, http.StatusUnprocessableEntity, "INVALID_PREREQUISITE", "Choose a different skill.")
+		platform.Error(w, http.StatusUnprocessableEntity, "INVALID_PREREQUISITE", "Choose a different topic.")
 		return
 	}
 	result, err := s.store.insertPrerequisite(r.Context(), platform.Actor(r).Org, id, input.Prerequisite)
@@ -154,11 +138,11 @@ func (s server) addPrerequisite(w http.ResponseWriter, r *http.Request) {
 	}
 	switch result {
 	case prerequisiteInvalid:
-		platform.Error(w, http.StatusUnprocessableEntity, "INVALID_PREREQUISITE", "Both skills must be active in your organization.")
+		platform.Error(w, http.StatusUnprocessableEntity, "INVALID_PREREQUISITE", "Both topics must be active in your organization.")
 		return
 	case prerequisiteCycle:
 		platform.Error(w, http.StatusConflict, "PREREQUISITE_CYCLE", "This prerequisite would create a cycle.")
 		return
 	}
-	platform.JSON(w, http.StatusOK, map[string]string{"skill_id": id, "prerequisite_id": input.Prerequisite})
+	platform.JSON(w, http.StatusOK, map[string]string{"topic_id": id, "prerequisite_id": input.Prerequisite})
 }

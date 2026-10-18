@@ -12,15 +12,25 @@ import (
 	"github.com/jackc/pgx/v5"
 )
 
-// Submission topics. v3 adds marking-scheme passages to v2, which carries points, short answers, free responses and
-// the assessment's grading settings. Events still on Kafka from before are read the same way: v2 without passages,
-// and v1 with today's defaults (one point a question, results released on finalization, no AI marking).
+// Submission event versions. v4 is v3 with each question's curriculum topic in topic_id. v3 adds marking-scheme
+// passages to v2, which carries points, short answers, free responses and the assessment's grading settings. Events
+// still on Kafka from before are read the same way, their questions' skill_id taken as the topic: v3 as it is, v2
+// without passages, and v1 with today's defaults (one point a question, results released on finalization, no AI
+// marking). Grading publishes grading.finalized.v3 only, its evidence carrying topic_id.
 const (
 	topicSubmittedV1 = "assessment.submitted.v1"
 	topicSubmittedV2 = "assessment.submitted.v2"
 	topicSubmittedV3 = "assessment.submitted.v3"
-	topicFinalized   = "grading.finalized.v2"
+	topicSubmittedV4 = "assessment.submitted.v4"
+	topicFinalized   = "grading.finalized.v3"
 )
+
+// legacyTopics are the curriculum references of a v1 to v3 submission's questions, in order.
+type legacyTopics struct {
+	Questions []struct {
+		Topic string `json:"skill_id"`
+	} `json:"questions"`
+}
 
 type Submitted struct {
 	Submission    string            `json:"submission_id"`
@@ -57,15 +67,25 @@ func validScheme(excerpts []Excerpt) bool {
 	})
 }
 
-// decodeSubmitted reads any submission version, filling in what v1 and v2 lack.
+// decodeSubmitted reads any submission version, filling in what v1 and v2 lack and taking a v1 to v3 question's
+// skill_id as its topic.
 func decodeSubmitted(event platform.Event) (Submitted, bool) {
 	var v Submitted
 	if json.Unmarshal(event.Data, &v) != nil || event.Resource != v.Submission {
 		return v, false
 	}
-	if event.Type != topicSubmittedV3 {
+	if event.Type != topicSubmittedV4 {
+		var legacy legacyTopics
+		if json.Unmarshal(event.Data, &legacy) != nil || len(legacy.Questions) != len(v.Questions) {
+			return v, false
+		}
 		for i := range v.Questions {
-			v.Questions[i].MarkingScheme = nil // only v3 carries passages
+			v.Questions[i].Topic = legacy.Questions[i].Topic
+		}
+	}
+	if event.Type != topicSubmittedV3 && event.Type != topicSubmittedV4 {
+		for i := range v.Questions {
+			v.Questions[i].MarkingScheme = nil // only v3 and v4 carry passages
 		}
 	}
 	if event.Type == topicSubmittedV1 {
@@ -83,7 +103,7 @@ func (v Submitted) score() ([]Evidence, error) {
 	seen := map[string]bool{}
 	for _, q := range v.Questions {
 		answer, exists := v.Answers[q.ID]
-		if !exists || seen[q.ID] || !platform.ID(q.ID) || !platform.ID(q.Skill) {
+		if !exists || seen[q.ID] || !platform.ID(q.ID) || !platform.ID(q.Topic) {
 			return nil, platform.InvalidEvent{Reason: "invalid question references"}
 		}
 		seen[q.ID] = true

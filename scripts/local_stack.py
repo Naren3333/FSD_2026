@@ -143,6 +143,19 @@ def psql_value(sql: str, *, database: str = "postgres", user: str = "postgres") 
     return psql(sql, database=database, user=user).stdout.strip()
 
 
+def delete_topics(where: str) -> str:
+    """Deletes the topics a condition on Curriculum's `topics` picks, with their prerequisite links, straight from
+    Curriculum's database. Test data only: an assessment or grade that named a deleted topic shows its id instead.
+    Returns how many were deleted. apps/web/e2e/helpers.ts deleteTestTopic runs the same statement."""
+    ids = f"(SELECT id FROM topics WHERE {where})"
+    return psql_value(
+        f"WITH p AS (DELETE FROM prerequisites WHERE topic_id IN {ids} OR prerequisite_id IN {ids}), "
+        f"d AS (DELETE FROM topics WHERE id IN {ids} RETURNING 1) SELECT count(*) FROM d",
+        database="curriculum",
+        user="curriculum",
+    )
+
+
 def psql_json(sql: str, *, database: str = "postgres", user: str = "postgres") -> list[dict[str, Any]]:
     """The rows a SELECT returns, each a dict by column name. PostgreSQL encodes them as one JSON array, so text
     holding tabs, line breaks or anything else comes back intact."""

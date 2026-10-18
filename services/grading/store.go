@@ -222,14 +222,14 @@ func (p pgStore) finalizeEvaluation(ctx context.Context, org, id, actor, reason 
 	return v, err
 }
 
-// emitFinalized publishes grading.finalized.v2 through the outbox when a grade becomes visible to its student:
+// emitFinalized publishes grading.finalized.v3 through the outbox when a grade becomes visible to its student:
 // Analytics shows the student their own marks from it, so it must never go out before the release.
 func emitFinalized(ctx context.Context, tx pgx.Tx, org string, v Evaluation) error {
 	return platform.Emit(ctx, tx, topicFinalized, v.ID, map[string]any{"evaluation_id": v.ID, "assessment_id": v.Assessment, "classroom_id": v.Classroom, "org_id": org, "student_id": v.Student, "evidence": final(v.Evidence)})
 }
 
 // release shows the assessment's finalized, unreleased grades to their students, with an audit entry and a
-// grading.finalized.v2 event each, and returns how many it released. Drafts stay drafts: finalizing one later
+// grading.finalized.v3 event each, and returns how many it released. Drafts stay drafts: finalizing one later
 // releases it only if its assessment releases on finalization, or at the next release.
 func (p pgStore) release(ctx context.Context, org, assessment, actor string) (int, error) {
 	tx, err := p.db.Begin(ctx)

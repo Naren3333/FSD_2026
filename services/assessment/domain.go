@@ -77,8 +77,17 @@ type Question struct {
 	// MarkingScheme is for short answers and free responses only.
 	MarkingScheme []Excerpt `json:"marking_scheme,omitempty"`
 	Points        int       `json:"points"`
-	Skill         string    `json:"skill_id"`
+	Topic         string    `json:"topic_id"`
+	// Sources are the passages of the classroom's documents a generated question came from, and Origin is "generated"
+	// for a question the teacher kept from AI question generation (docs/decisions/0006-question-generation.md). Both
+	// are teacher-only provenance: never in the student projection or the submission event.
+	Sources []Excerpt `json:"sources,omitempty"`
+	Origin  string    `json:"origin,omitempty"`
 }
+
+// originGenerated marks a question the teacher kept from AI question generation; a question without an origin was
+// written by the teacher.
+const originGenerated = "generated"
 
 // Assessment is the teacher's view, with answer keys and rubrics. Status, dates and policies are optional in a
 // request (normalize fills them) and always present in a response.
@@ -141,7 +150,7 @@ type PublicQuestion struct {
 	Options   []string `json:"options"`
 	MaxLength int      `json:"max_length,omitempty"`
 	Points    int      `json:"points"`
-	Skill     string   `json:"skill_id"`
+	Topic     string   `json:"topic_id"`
 }
 type PublicAssessment struct {
 	ID         string           `json:"id"`
@@ -234,14 +243,20 @@ func (v Assessment) publishable(now time.Time) error {
 }
 
 func (q Question) validate() error {
-	if strings.TrimSpace(q.Prompt) == "" || utf8.RuneCountInString(q.Prompt) > maxPrompt || !platform.ID(q.Skill) {
-		return errors.New("each question needs a prompt and curriculum skill")
+	if strings.TrimSpace(q.Prompt) == "" || utf8.RuneCountInString(q.Prompt) > maxPrompt || !platform.ID(q.Topic) {
+		return errors.New("each question needs a prompt and curriculum topic")
 	}
 	kind, ok := questionKinds[q.Type]
 	if !ok {
 		return errors.New("unsupported question type")
 	}
 	if err := kind.validate(q); err != nil {
+		return err
+	}
+	if q.Origin != "" && q.Origin != originGenerated {
+		return errors.New("a question's origin is generated or left out")
+	}
+	if err := validateSources(q.Sources); err != nil {
 		return err
 	}
 	if q.Points < 1 || q.Points > maxPoints {
@@ -260,12 +275,12 @@ func (v Assessment) teacherMarked() bool {
 	})
 }
 
-// skillIDs are the distinct skills the questions assess.
-func (v Assessment) skillIDs() []string {
+// topicIDs are the distinct topics the questions assess.
+func (v Assessment) topicIDs() []string {
 	var ids []string
 	for _, q := range v.Questions {
-		if !slices.Contains(ids, q.Skill) {
-			ids = append(ids, q.Skill)
+		if !slices.Contains(ids, q.Topic) {
+			ids = append(ids, q.Topic)
 		}
 	}
 	return ids
@@ -285,7 +300,7 @@ func (v Assessment) closed(now time.Time) bool { return v.late(now) && v.LatePol
 func (v Assessment) Public() PublicAssessment {
 	p := PublicAssessment{v.ID, v.Classroom, v.Title, []PublicQuestion{}, v.OpensAt, v.DueAt, v.LatePolicy}
 	for _, q := range v.Questions {
-		p.Questions = append(p.Questions, PublicQuestion{q.ID, q.Prompt, q.Type, q.Options, q.MaxLength, q.Points, q.Skill})
+		p.Questions = append(p.Questions, PublicQuestion{q.ID, q.Prompt, q.Type, q.Options, q.MaxLength, q.Points, q.Topic})
 	}
 	return p
 }

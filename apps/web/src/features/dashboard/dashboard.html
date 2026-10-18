@@ -77,32 +77,32 @@
     }
   </section>
 
-  <section class="panel dashboard-panel" aria-labelledby="skills-title">
-    <h3 id="skills-title">Class skills</h3>
+  <section class="panel dashboard-panel" aria-labelledby="topics-title">
+    <h3 id="topics-title">Class topics</h3>
     <p class="caption">
       Observed accuracy from finalized grades, {{ pageSize }} students at a time. Choose a student for their
       full performance.
     </p>
-    <app-section-state [section]="performance" loading="Loading class skills…" />
+    <app-section-state [section]="performance" loading="Loading class topics…" />
     @if (performance.ready() && performance.value(); as data) {
       @if (!data.total) {
         <p class="empty">
           No students enrolled yet. Enroll them under <a routerLink="/classrooms">Classrooms</a>.
         </p>
-      } @else if (!skillRows().length) {
+      } @else if (!topicRows().length) {
         <p class="empty">
           No finalized grades for these students yet. Finalize drafts in
-          <a routerLink="/review">Grading review</a> to see their skills here.
+          <a routerLink="/review">Grading review</a> to see their topics here.
         </p>
       } @else {
-        <div class="table-scroll" tabindex="0" role="region" aria-label="Class skills table">
-          <table class="skills-table">
+        <div class="table-scroll" tabindex="0" role="region" aria-label="Class topics table">
+          <table class="topics-table">
             <caption>
-              Skills by student
+              Topics by student
             </caption>
             <thead>
               <tr>
-                <th scope="col">Skill</th>
+                <th scope="col">Topic</th>
                 @for (student of data.students; track student.student_id) {
                   <th scope="col">
                     <a routerLink="/performance" [queryParams]="{ student: student.student_id }">{{
@@ -113,18 +113,18 @@
               </tr>
             </thead>
             <tbody>
-              @for (skillId of skillRows(); track skillId) {
+              @for (topicId of topicRows(); track topicId) {
                 <tr>
                   <th scope="row">
-                    @if (skill(skillId); as name) {
+                    @if (topic(topicId); as name) {
                       {{ name }}
                     } @else {
-                      <span class="identifier">{{ skillId }}</span>
+                      <span class="identifier">{{ topicId }}</span>
                     }
                   </th>
                   @for (student of data.students; track student.student_id) {
                     <td>
-                      @if (metric(student.student_id, skillId); as m) {
+                      @if (metric(student.student_id, topicId); as m) {
                         <span class="cell-value">{{ m.observed_accuracy | percent: '1.0-0' }}</span>
                         <span class="caption">{{ m.correct }} of {{ m.attempted }} correct</span>
                         @if (m.weakness_indicator) {
@@ -148,7 +148,7 @@
         </p>
       }
       <app-pager
-        label="Class skills pages"
+        label="Class topics pages"
         [page]="page()"
         [pageSize]="pageSize"
         [total]="data.total"

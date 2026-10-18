@@ -1,5 +1,15 @@
 import { test, expect } from '@playwright/test';
-import { createClassroom, env, expectNoHorizontalScroll, login } from './helpers';
+import {
+  createClassroom,
+  deleteTopicsAfterEach,
+  env,
+  expectNoHorizontalScroll,
+  login,
+  topicToDelete,
+} from './helpers';
+
+deleteTopicsAfterEach();
+
 test('teacher and student complete a real assessment through Kong', async ({ browser }) => {
   const teacher = await browser.newPage(),
     student = await browser.newPage();
@@ -30,17 +40,17 @@ test('teacher and student complete a real assessment through Kong', async ({ bro
     everyone.getByRole('article').filter({ hasText: 'Student Local' }).getByText('Enrolled', { exact: true }),
   ).toBeVisible();
   await teacher.getByRole('link', { name: 'Curriculum', exact: true }).click();
-  await teacher.getByLabel('Name', { exact: true }).fill('Browser skill ' + suffix);
-  await teacher.getByRole('button', { name: 'Add curriculum', exact: true }).click();
-  await expect(teacher.getByText('Curriculum added.', { exact: true })).toBeVisible();
+  await teacher.getByLabel('Name', { exact: true }).fill(topicToDelete('Browser topic ' + suffix));
+  await teacher.getByRole('button', { name: 'Add topic', exact: true }).click();
+  await expect(teacher.getByText('Topic added.', { exact: true })).toBeVisible();
   await teacher.getByRole('link', { name: 'Assessments', exact: true }).click();
   await teacher.getByRole('button', { name: 'Refresh assessments' }).click();
   await teacher.getByLabel('Assessment title').fill('Browser assessment ' + suffix);
   const first = teacher.getByRole('group', { name: 'Question 1' });
   await first.getByLabel('Question', { exact: true }).fill('What is 0.1 plus 0.2?');
-  await first.getByLabel('Curriculum skill').selectOption({ label: 'Browser skill ' + suffix });
+  await first.getByLabel('Curriculum topic').selectOption({ label: 'Browser topic ' + suffix });
   await first.getByLabel('Correct answer').fill('0.3');
-  // A written response is marked by the teacher against its rubric; the new question keeps the skill.
+  // A written response is marked by the teacher against its rubric; the new question keeps the topic.
   await teacher.getByRole('button', { name: 'Add question', exact: true }).click();
   const second = teacher.getByRole('group', { name: 'Question 2' });
   await expect(second.getByLabel('Question', { exact: true })).toBeFocused();
@@ -91,13 +101,13 @@ test('teacher and student complete a real assessment through Kong', async ({ bro
     await teacher.getByRole('button', { name: 'Refresh grades' }).click();
     await expect(teacher.getByRole('button', { name: 'Review grade', exact: true })).toBeVisible();
   }).toPass({ timeout: 30000 });
-  // The review shows names, not ids: the student, the assessment, the question and its skill.
+  // The review shows names, not ids: the student, the assessment, the question and its topic.
   await expect(teacher.getByRole('heading', { name: 'Student Local', exact: true })).toBeVisible();
   await expect(
     teacher.locator('article').getByText('Browser assessment ' + suffix, { exact: false }),
   ).toBeVisible();
   await expect(teacher.getByText('What is 0.1 plus 0.2?', { exact: false })).toBeVisible();
-  await expect(teacher.getByText('Skill: Browser skill ' + suffix, { exact: true })).toHaveCount(2);
+  await expect(teacher.getByText('Topic: Browser topic ' + suffix, { exact: true })).toHaveCount(2);
   // A draft is the teacher's alone until it is finalized.
   await student.getByRole('link', { name: 'My results', exact: true }).click();
   await student.getByRole('button', { name: 'Refresh results' }).click();
@@ -126,7 +136,7 @@ test('teacher and student complete a real assessment through Kong', async ({ bro
   ).toBeVisible();
   await expect(student.getByText('Correct', { exact: true })).toHaveCount(2);
   await expect(student.getByText('Clear reasoning.', { exact: true })).toBeVisible();
-  await expect(student.getByText('Skill: Browser skill ' + suffix, { exact: true })).toHaveCount(2);
+  await expect(student.getByText('Topic: Browser topic ' + suffix, { exact: true })).toHaveCount(2);
   await student.getByRole('link', { name: 'My progress', exact: true }).click();
   await expect(async () => {
     await student.getByRole('button', { name: 'View my performance' }).click();
@@ -134,21 +144,21 @@ test('teacher and student complete a real assessment through Kong', async ({ bro
   }).toPass({ timeout: 30000 });
   await expect(student.getByRole('cell', { name: 'Insufficient evidence' })).toBeVisible();
   await expect(
-    student.getByRole('rowheader', { name: 'Browser skill ' + suffix, exact: true }),
+    student.getByRole('rowheader', { name: 'Browser topic ' + suffix, exact: true }),
   ).toBeVisible();
-  // The class dashboard counts the finalized grade and shows the class's skills; a student's name opens their
+  // The class dashboard counts the finalized grade and shows the class's topics; a student's name opens their
   // full performance.
   await teacher.getByRole('link', { name: 'Class dashboard', exact: true }).click();
-  const skills = teacher.getByRole('region', { name: 'Class skills table' });
+  const topics = teacher.getByRole('region', { name: 'Class topics table' });
   await expect(async () => {
     await teacher.getByRole('button', { name: 'Refresh dashboard' }).click();
     await expect(
-      skills.getByRole('rowheader', { name: 'Browser skill ' + suffix, exact: true }),
+      topics.getByRole('rowheader', { name: 'Browser topic ' + suffix, exact: true }),
     ).toBeVisible();
   }).toPass({ timeout: 30000 });
   await expect(teacher.getByText('1 of 1 students submitted', { exact: true })).toBeVisible();
-  await expect(skills.getByText('100%', { exact: true })).toBeVisible();
-  await skills.getByRole('link', { name: 'Student Local', exact: true }).click();
+  await expect(topics.getByText('100%', { exact: true })).toBeVisible();
+  await topics.getByRole('link', { name: 'Student Local', exact: true }).click();
   await expect(teacher).toHaveURL(/\/performance\?student=/);
   await expect(teacher.getByLabel('Student', { exact: true })).toHaveValue(/.+/);
   await expect(teacher.getByRole('cell', { name: '100%' })).toBeVisible();
@@ -176,7 +186,9 @@ test('teacher and student complete a real assessment through Kong', async ({ bro
 test('anonymous workspace has honest unavailable state and keyboard navigation', async ({ page }) => {
   await page.goto('/');
   await expect(page.getByRole('heading', { level: 1 })).toBeVisible();
-  await expect(page.getByText(/AI-generated questions and feedback are not implemented/)).toBeVisible();
+  await expect(
+    page.getByText(/AI interpretation of student\s+performance is not implemented yet/),
+  ).toBeVisible();
   await page.keyboard.press('Tab');
   await expect(page.getByRole('link', { name: 'Skip to workspace' })).toBeFocused();
   await page.screenshot({ path: 'test-results/welcome.png', fullPage: true });

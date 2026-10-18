@@ -34,15 +34,15 @@
   <app-section-state [section]="result" loading="Loading performance…" />
   @if (result.ready()) {
     @if (result.value(); as data) {
-      @if (data.skills.length) {
-        <div class="table-scroll" tabindex="0" role="region" aria-label="Skill evidence table">
+      @if (data.topics.length) {
+        <div class="table-scroll" tabindex="0" role="region" aria-label="Topic evidence table">
           <table>
             <caption>
-              Finalized evidence by skill
+              Finalized evidence by topic
             </caption>
             <thead>
               <tr>
-                <th scope="col">Skill</th>
+                <th scope="col">Topic</th>
                 <th scope="col">Attempted</th>
                 <th scope="col">Full marks</th>
                 <th scope="col">Marks earned</th>
@@ -52,13 +52,13 @@
               </tr>
             </thead>
             <tbody>
-              @for (row of data.skills; track row.skill_id) {
+              @for (row of data.topics; track row.topic_id) {
                 <tr>
                   <th scope="row">
-                    @if (skill(row.skill_id); as name) {
+                    @if (topic(row.topic_id); as name) {
                       {{ name }}
                     } @else {
-                      <span class="identifier">{{ row.skill_id }}</span>
+                      <span class="identifier">{{ row.topic_id }}</span>
                     }
                   </th>
                   <td>{{ row.attempted | number }}</td>
@@ -89,7 +89,7 @@
         <p class="caption">
           Full marks counts questions answered for every mark; marks earned includes part marks on written
           answers. Fewer than five questions is reported as insufficient evidence. Needs practice marks a
-          skill with five or more questions and under 60% correct. These are reporting thresholds, not a
+          topic with five or more questions and under 60% correct. These are reporting thresholds, not a
           statistical validation.
         </p>
       } @else {

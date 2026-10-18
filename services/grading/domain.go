@@ -78,7 +78,7 @@ type Question struct {
 	MaxLength       int       `json:"max_length,omitempty"`
 	MarkingScheme   []Excerpt `json:"marking_scheme,omitempty"`
 	Points          int       `json:"points"`
-	Skill           string    `json:"skill_id"`
+	Topic           string    `json:"topic_id"`
 }
 
 // CriterionScore is the level a rubric criterion was given.
@@ -122,7 +122,7 @@ const (
 // free response, or a short answer matching none of the accepted answers.
 type Evidence struct {
 	Question     string           `json:"question_id"`
-	Skill        string           `json:"skill_id"`
+	Topic        string           `json:"topic_id"`
 	Correct      bool             `json:"correct"`
 	Awarded      int              `json:"awarded"`
 	Possible     int              `json:"possible"`
@@ -153,7 +153,7 @@ type Evaluation struct {
 // suggestions.
 type OwnEvidence struct {
 	Question string `json:"question_id"`
-	Skill    string `json:"skill_id"`
+	Topic    string `json:"topic_id"`
 	Correct  bool   `json:"correct"`
 	Awarded  int    `json:"awarded"`
 	Possible int    `json:"possible"`
@@ -177,15 +177,15 @@ type OwnResult struct {
 func (v Evaluation) own() OwnResult {
 	evidence := make([]OwnEvidence, len(v.Evidence))
 	for i, e := range v.Evidence {
-		evidence[i] = OwnEvidence{e.Question, e.Skill, e.Correct, e.Awarded, e.Possible, e.Feedback}
+		evidence[i] = OwnEvidence{e.Question, e.Topic, e.Correct, e.Awarded, e.Possible, e.Feedback}
 	}
 	return OwnResult{v.ID, v.Assessment, v.Classroom, v.Student, v.Status, evidence, v.Answers, v.Late, v.FinalizedAt, v.ReleasedAt}
 }
 
-// FinalEvidence is a question's finalized marks as grading.finalized.v2 carries them to Analytics.
+// FinalEvidence is a question's finalized marks as grading.finalized.v3 carries them to Analytics.
 type FinalEvidence struct {
 	Question string `json:"question_id"`
-	Skill    string `json:"skill_id"`
+	Topic    string `json:"topic_id"`
 	Correct  bool   `json:"correct"`
 	Awarded  int    `json:"awarded"`
 	Possible int    `json:"possible"`
@@ -194,7 +194,7 @@ type FinalEvidence struct {
 func final(evidence []Evidence) []FinalEvidence {
 	out := make([]FinalEvidence, len(evidence))
 	for i, e := range evidence {
-		out[i] = FinalEvidence{e.Question, e.Skill, e.Correct, e.Awarded, e.Possible}
+		out[i] = FinalEvidence{e.Question, e.Topic, e.Correct, e.Awarded, e.Possible}
 	}
 	return out
 }

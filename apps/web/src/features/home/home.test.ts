@@ -35,7 +35,7 @@ const result = (assessmentId: string): Evaluation => ({
   classroom_id: 'c1',
   student_id: 'u1',
   status: 'finalized',
-  evidence: [{ question_id: 'q1', skill_id: 'k1', correct: true, awarded: 1, possible: 1 }],
+  evidence: [{ question_id: 'q1', topic_id: 'k1', correct: true, awarded: 1, possible: 1 }],
   answers: {},
   late: false,
   finalized_at: '2026-10-16T00:00:00Z',
@@ -46,7 +46,7 @@ const noEvidence: Performance = {
   classroom_id: 'c1',
   evidence_status: 'no_finalized_evidence',
   interpretation: '',
-  skills: [],
+  topics: [],
 };
 
 /** The student's Home for classroom c1, each part answering as given. */
@@ -63,7 +63,7 @@ function render(
       { provide: AssessmentApi, useValue: { list: () => assessments } },
       { provide: GradingApi, useValue: { mine: () => results } },
       { provide: AnalyticsApi, useValue: { performance: () => performance } },
-      { provide: CurriculumNames, useValue: { need: () => Promise.resolve(), skillName: () => '' } },
+      { provide: CurriculumNames, useValue: { need: () => Promise.resolve(), topicName: () => '' } },
       { provide: ClassroomContext, useValue: { classroomId: signal('c1'), classroomName: signal('3A') } },
     ],
   });
@@ -139,6 +139,6 @@ describe('home empty states', () => {
     expect(page.panel('To do')).toContain('No assessments in this classroom yet.');
     expect(page.panel('Waiting for your teacher')).toContain('Nothing waiting.');
     expect(page.panel('Recent results')).toContain('No finalized results yet.');
-    expect(page.panel('Skills to practise')).toContain('No finalized grades yet');
+    expect(page.panel('Topics to practise')).toContain('No finalized grades yet');
   });
 });

@@ -24,7 +24,7 @@ async function render(results: Promise<Evaluation[]>) {
     providers: [
       { provide: GradingApi, useValue: { mine: () => results } },
       { provide: AssessmentApi, useValue: { get: () => Promise.reject(new Error('unused')) } },
-      { provide: CurriculumNames, useValue: { need: () => Promise.resolve(), skillName: () => '' } },
+      { provide: CurriculumNames, useValue: { need: () => Promise.resolve(), topicName: () => '' } },
       { provide: ClassroomContext, useValue: { classroomId: signal('c1') } },
     ],
   });

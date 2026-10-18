@@ -28,9 +28,9 @@ docker compose down
 
 1. Sign in as a student once; the header shows their username.
 2. Sign in as a teacher, create a classroom, and enroll the student from All students (search by name or that username). The classroom's students are listed above it.
-3. Add a curriculum skill and create an assessment.
+3. Add a curriculum topic and create an assessment.
 4. As the student, refresh classrooms in the header, select the classroom and submit the assessment.
-5. As the teacher, review and finalize the grade, then view Learning performance. The student sees the finalized grade under My results and their skills under My progress.
+5. As the teacher, review and finalize the grade, then view Learning performance. The student sees the finalized grade under My results and their topics under My progress.
 6. As the teacher, upload a PDF under Teaching materials and wait for it to show as indexed. Then, as the teacher or the student, ask about it under Ask the materials. Each provider call costs money on your API keys. Each user has a daily AI allowance ($5 for a student, $10 for a teacher), shown in the header.
 
 ## Development
@@ -57,6 +57,6 @@ Integration, database and browser tests require the Docker stack to be running; 
 
 ## Current scope
 
-This is a local development foundation, not production ready. PDFs are indexed and document chat answers from them with sources once `OPENAI_API_KEY` (and, for reranking, `VOYAGE_API_KEY`) are set in `.env`; without them uploads wait in indexing and chat answers fail with a clear message. AI question generation and performance interpretation return `501 Not Implemented`. Assessments have up to 50 questions (multiple choice, numerical, short answer and rubric-marked free response); grades stay drafts until the teacher finalizes them, AI marking suggestions never change a mark, and students see results only once released.
+This is a local development foundation, not production ready. PDFs are indexed and document chat answers from them with sources once `OPENAI_API_KEY` (and, for reranking, `VOYAGE_API_KEY`) are set in `.env`; without them uploads wait in indexing and chat answers fail with a clear message. Teachers can generate draft questions and marking guidance from a classroom's indexed PDFs (ADR 0006), which they review before anything is saved; performance interpretation returns `501 Not Implemented`. Assessments have up to 50 questions (multiple choice, numerical, short answer and rubric-marked free response); grades stay drafts until the teacher finalizes them, AI marking suggestions never change a mark, and students see results only once released.
 
 See [architecture](docs/architecture/system.md), [operations](docs/development/operations.md), and [handover](docs/development/handover.md) for technical details and remaining work.

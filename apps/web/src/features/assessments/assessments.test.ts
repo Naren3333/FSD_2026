@@ -29,7 +29,7 @@ const assessment = (change: Partial<Assessment> = {}): Assessment => ({
   classroom_id: 'c1',
   title: 'Fractions',
   questions: [
-    { id: QUESTION, prompt: 'Half of 1?', type: 'numerical', options: null, points: 1, skill_id: 's1' },
+    { id: QUESTION, prompt: 'Half of 1?', type: 'numerical', options: null, points: 1, topic_id: 's1' },
   ],
   due_at: null,
   late_policy: 'accept_flagged',
@@ -74,7 +74,7 @@ function setup(
       },
       {
         provide: CurriculumNames,
-        useValue: { skills: signal([]), refresh: () => Promise.resolve([]) },
+        useValue: { topics: signal([]), refresh: () => Promise.resolve([]) },
       },
       { provide: ClassroomContext, useValue: { classroomId } },
       { provide: ActivatedRoute, useValue: { queryParamMap: of(convertToParamMap({})) } },
@@ -208,3 +208,68 @@ describe('a teacher previewing an assessment', () => {
     expect(page.answers.controls[QUESTION].value).toBe('');
   });
 });
+
+describe('a teacher keeping generated questions', () => {
+  it('fills the blank first question, then adds after it', async () => {
+    vi.useFakeTimers();
+    const { page, settle, unsaved } = setup('teacher');
+    await settle();
+    const generated = {
+      prompt: 'Which test checks one function?',
+      type: 'short_answer' as const,
+      options: [],
+      accepted_answers: ['unit test'],
+      points: 1,
+      topic_id: 's1',
+      sources: [{ text: 'A unit test checks one function.' }],
+      origin: 'generated' as const,
+    };
+    page.addGenerated(generated);
+    expect(page.questions.length).toBe(1);
+    expect(page.questions.at(0).controls.origin.value).toBe('generated');
+    page.addGenerated({ ...generated, prompt: 'Name another test.' });
+    expect(page.prompts()).toEqual(['Which test checks one function?', 'Name another test.']);
+    expect(page.state.message()).toBe('Generated question added as question 2.');
+    expect(unsaved.any()).toBe(true);
+    expect(page.canSuggest()).toBe(true);
+  });
+
+  it('keeps a first question the teacher has started, even without wording', async () => {
+    vi.useFakeTimers();
+    const { page, settle } = setup('teacher');
+    await settle();
+    const first = page.questions.at(0).controls;
+    first.type.setValue('multiple_choice');
+    first.type.markAsDirty();
+    page.addGenerated(generatedShortAnswer());
+    expect(page.questions.length).toBe(2);
+    expect(page.questions.at(0).controls.type.value).toBe('multiple_choice');
+  });
+
+  it('leaves out marking points the assessment has no room for', async () => {
+    vi.useFakeTimers();
+    const { page, settle } = setup('teacher');
+    await settle();
+    const full = Array.from({ length: 5 }, (_, n) => ({ text: `Point ${n}` }));
+    for (let n = 0; n < 4; n++) page.addGenerated({ ...generatedShortAnswer(`Q${n}`), marking_scheme: full });
+    expect(page.schemePassages()).toBe(20);
+    page.addGenerated(generatedShortAnswer('One more'));
+    expect(page.questions.at(4).controls.marking_scheme.value).toEqual([]);
+    expect(page.state.message()).toContain('Its marking points were left out');
+    expect(page.questions.hasError('schemeTotal')).toBe(false);
+  });
+});
+
+function generatedShortAnswer(prompt = 'Which test checks one function?') {
+  return {
+    prompt,
+    type: 'short_answer' as const,
+    options: [],
+    accepted_answers: ['unit test'],
+    points: 1,
+    topic_id: 's1',
+    sources: [{ text: 'A unit test checks one function.' }],
+    marking_scheme: [{ text: '1 mark: names a unit test.' }],
+    origin: 'generated' as const,
+  };
+}

@@ -71,6 +71,7 @@ function setup(prompt = 'Which gas do plants give off?') {
   picker.documents = documents;
   picker.classroomId = 'c1';
   picker.prompt = prompt;
+  picker.ngOnInit();
   return { picker, search };
 }
 
@@ -140,5 +141,11 @@ describe('the marking-scheme picker', () => {
     picker.find();
     await vi.waitFor(() => expect(picker.results.error()).toBe('Search is unavailable.'));
     expect(picker.control.value).toEqual([{ text: 'Kept.' }]);
+  });
+
+  it('shows passages added from outside the picker', () => {
+    const { picker } = setup();
+    picker.control.setValue([{ text: 'Added by guidance.' }]);
+    expect(picker.excerpts()).toEqual([{ text: 'Added by guidance.' }]);
   });
 });

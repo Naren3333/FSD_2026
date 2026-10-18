@@ -19,9 +19,9 @@
     }
   },
   "paths": {
-    "/v1/nodes": {
+    "/v1/topics": {
       "get": {
-        "operationId": "GET_v1_nodes",
+        "operationId": "GET_v1_topics",
         "parameters": [],
         "responses": {
           "200": {
@@ -37,34 +37,15 @@
                         "type": "string",
                         "format": "uuid"
                       },
-                      "kind": {
-                        "enum": [
-                          "subject",
-                          "course",
-                          "unit",
-                          "topic",
-                          "skill",
-                          "objective"
-                        ]
-                      },
                       "name": {
                         "type": "string",
                         "minLength": 1,
                         "maxLength": 160
-                      },
-                      "parent_id": {
-                        "type": [
-                          "string",
-                          "null"
-                        ],
-                        "format": "uuid"
                       }
                     },
                     "required": [
                       "id",
-                      "kind",
-                      "name",
-                      "parent_id"
+                      "name"
                     ],
                     "additionalProperties": false
                   },
@@ -315,7 +296,7 @@
         }
       },
       "post": {
-        "operationId": "POST_v1_nodes",
+        "operationId": "POST_v1_topics",
         "parameters": [],
         "responses": {
           "201": {
@@ -329,34 +310,15 @@
                       "type": "string",
                       "format": "uuid"
                     },
-                    "kind": {
-                      "enum": [
-                        "subject",
-                        "course",
-                        "unit",
-                        "topic",
-                        "skill",
-                        "objective"
-                      ]
-                    },
                     "name": {
                       "type": "string",
                       "minLength": 1,
                       "maxLength": 160
-                    },
-                    "parent_id": {
-                      "type": [
-                        "string",
-                        "null"
-                      ],
-                      "format": "uuid"
                     }
                   },
                   "required": [
                     "id",
-                    "kind",
-                    "name",
-                    "parent_id"
+                    "name"
                   ],
                   "additionalProperties": false
                 }
@@ -643,31 +605,13 @@
               "schema": {
                 "type": "object",
                 "properties": {
-                  "kind": {
-                    "enum": [
-                      "subject",
-                      "course",
-                      "unit",
-                      "topic",
-                      "skill",
-                      "objective"
-                    ]
-                  },
                   "name": {
                     "type": "string",
                     "minLength": 1,
                     "maxLength": 160
-                  },
-                  "parent_id": {
-                    "type": [
-                      "string",
-                      "null"
-                    ],
-                    "format": "uuid"
                   }
                 },
                 "required": [
-                  "kind",
                   "name"
                 ],
                 "additionalProperties": false
@@ -677,9 +621,9 @@
         }
       }
     },
-    "/v1/nodes/{id}": {
+    "/v1/topics/{id}": {
       "get": {
-        "operationId": "GET_v1_nodes_id",
+        "operationId": "GET_v1_topics_id",
         "parameters": [
           {
             "name": "id",
@@ -703,34 +647,15 @@
                       "type": "string",
                       "format": "uuid"
                     },
-                    "kind": {
-                      "enum": [
-                        "subject",
-                        "course",
-                        "unit",
-                        "topic",
-                        "skill",
-                        "objective"
-                      ]
-                    },
                     "name": {
                       "type": "string",
                       "minLength": 1,
                       "maxLength": 160
-                    },
-                    "parent_id": {
-                      "type": [
-                        "string",
-                        "null"
-                      ],
-                      "format": "uuid"
                     }
                   },
                   "required": [
                     "id",
-                    "kind",
-                    "name",
-                    "parent_id"
+                    "name"
                   ],
                   "additionalProperties": false
                 }
@@ -978,7 +903,7 @@
         }
       },
       "patch": {
-        "operationId": "PATCH_v1_nodes_id",
+        "operationId": "PATCH_v1_topics_id",
         "parameters": [
           {
             "name": "id",
@@ -1313,7 +1238,7 @@
         }
       },
       "delete": {
-        "operationId": "DELETE_v1_nodes_id",
+        "operationId": "DELETE_v1_topics_id",
         "parameters": [
           {
             "name": "id",
@@ -1570,9 +1495,9 @@
         }
       }
     },
-    "/v1/skills/{id}/prerequisites": {
+    "/v1/topics/{id}/prerequisites": {
       "post": {
-        "operationId": "POST_v1_skills_id_prerequisites",
+        "operationId": "POST_v1_topics_id_prerequisites",
         "parameters": [
           {
             "name": "id",
@@ -1592,7 +1517,7 @@
                 "schema": {
                   "type": "object",
                   "properties": {
-                    "skill_id": {
+                    "topic_id": {
                       "type": "string",
                       "format": "uuid"
                     },
@@ -1602,7 +1527,7 @@
                     }
                   },
                   "required": [
-                    "skill_id",
+                    "topic_id",
                     "prerequisite_id"
                   ],
                   "additionalProperties": false

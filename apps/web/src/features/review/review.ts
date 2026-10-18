@@ -123,13 +123,13 @@ export class ReviewComponent {
     if (classroomId) void this.grades.load(() => this.read(classroomId, this.filter.value));
   }
 
-  /** The evaluations with the names of their students, assessments, questions and skills. */
+  /** The evaluations with the names of their students, assessments, questions and topics. */
   private async read(classroomId: string, assessmentId: string): Promise<Grades> {
     const grades = await this.grading.evaluations(classroomId, assessmentId);
     const [roster, assessments] = await Promise.all([
       this.identity.roster(classroomId),
       assessmentsOf(grades, (id) => this.assessmentApi.get(id)),
-      this.curriculum.need(grades.flatMap((g) => g.evidence.map((e) => e.skill_id))),
+      this.curriculum.need(grades.flatMap((g) => g.evidence.map((e) => e.topic_id))),
     ]);
     return { grades, students: studentNames(roster), assessments };
   }
@@ -150,8 +150,8 @@ export class ReviewComponent {
       ?.assessments.get(grade.assessment_id)
       ?.questions.find((q) => q.id === evidence.question_id);
   }
-  skill(evidence: Evidence): string {
-    return this.curriculum.skillName(evidence.skill_id);
+  topic(evidence: Evidence): string {
+    return this.curriculum.topicName(evidence.topic_id);
   }
   toMark(grade: Evaluation): number {
     return grade.evidence.filter((e) => e.needs_marking).length;

@@ -1,16 +1,22 @@
-import { Component, Input, computed, inject, signal } from '@angular/core';
+import { Component, DestroyRef, Input, OnInit, computed, inject, signal } from '@angular/core';
 import { FormControl, ReactiveFormsModule } from '@angular/forms';
 import { ContentApi } from '../../api/clients';
 import type { DocumentRecord, Excerpt, SearchHit } from '../../api/models';
 import { FieldComponent, FieldControlDirective } from '../../shared/field';
 import { Section } from '../../shared/section';
 import { SectionStateComponent } from '../../shared/section-state';
-import { MAX_EXCERPTS, MAX_EXCERPT_TEXT, characters, clipText } from './editor';
+import {
+  MAX_EXCERPTS,
+  MAX_EXCERPT_TEXT,
+  MAX_QUERY,
+  characters,
+  clipText,
+  excerptLabel,
+  markWrittenBy,
+} from './editor';
 
 /** How many passages one search offers. */
 const SEARCH_RESULTS = 5;
-/** The longest search query Content takes. */
-const MAX_QUERY = 1000;
 
 /** The classroom's documents a marking-scheme passage can come from: indexed rubrics and marking schemes. */
 export function schemeDocuments(documents: readonly DocumentRecord[]): DocumentRecord[] {
@@ -36,8 +42,9 @@ export function excerptOf(hit: SearchHit): Excerpt {
   imports: [ReactiveFormsModule, FieldComponent, FieldControlDirective, SectionStateComponent],
   templateUrl: './scheme-picker.html',
 })
-export class SchemePickerComponent {
+export class SchemePickerComponent implements OnInit {
   private readonly content = inject(ContentApi);
+  private readonly destroyRef = inject(DestroyRef);
   /** The question's passages. */
   @Input({ required: true }) control!: FormControl<Excerpt[]>;
   /** The question's position, for unique ids and labels. */
@@ -60,6 +67,12 @@ export class SchemePickerComponent {
   private readonly changes = signal(0);
   readonly excerpts = computed(() => (this.changes(), this.control.value));
   readonly full = computed(() => this.excerpts().length >= MAX_EXCERPTS);
+
+  ngOnInit(): void {
+    // Drafted guidance and scheme matching add passages from outside the picker.
+    const watch = this.control.valueChanges.subscribe(() => this.changes.update((n) => n + 1));
+    this.destroyRef.onDestroy(() => watch.unsubscribe());
+  }
 
   get choices(): DocumentRecord[] {
     return schemeDocuments(this.documents.value() ?? []);
@@ -101,6 +114,7 @@ export class SchemePickerComponent {
   addPasted(): void {
     const text = this.pasted.value.trim();
     if (!text || this.full() || characters(text) > MAX_EXCERPT_TEXT) return;
+    markWrittenBy(this.control, { text }, 'teacher');
     this.set([...this.control.value, { text }]);
     this.pasted.reset();
   }
@@ -109,12 +123,9 @@ export class SchemePickerComponent {
     this.set(this.control.value.filter((_, i) => i !== position));
   }
 
-  /** Where a passage is from: its document and page, or that the teacher pasted it. */
+  /** Where a passage is from: its document and page, or that AI wrote it or someone pasted it. */
   source(excerpt: Excerpt): string {
-    if (!excerpt.document_id) return 'Pasted passage';
-    const title =
-      this.documents.value()?.find((d) => d.id === excerpt.document_id)?.title ?? 'Marking scheme';
-    return excerpt.page ? `${title}, page ${excerpt.page}` : title;
+    return excerptLabel(excerpt, this.documents.value(), this.control);
   }
 
   pages(hit: SearchHit): string {
@@ -130,6 +141,5 @@ export class SchemePickerComponent {
   private set(excerpts: Excerpt[]): void {
     this.control.setValue(excerpts);
     this.control.markAsDirty();
-    this.changes.update((n) => n + 1);
   }
 }

@@ -44,7 +44,7 @@ def pool() -> Iterator[ConnectionPool[Any]]:
 
 
 def grade(classroom: str | None = None) -> Event:
-    event = finalized("grading.finalized.v2", 3)
+    event = finalized("grading.finalized.v3", 3)
     if classroom:
         event["data"]["classroom_id"] = classroom  # type: ignore[index]
     return Event.model_validate(event)
@@ -154,9 +154,9 @@ def test_a_purge_waits_for_a_grade_of_its_classroom_in_progress(pool):
         )
         e = event.data.evidence[0]
         conn.execute(
-            "INSERT INTO evidence(evaluation_id,question_id,assessment_id,classroom_id,org_id,student_id,skill_id,"
+            "INSERT INTO evidence(evaluation_id,question_id,assessment_id,classroom_id,org_id,student_id,topic_id,"
             "correct,awarded,possible) VALUES(%s,%s,%s,%s,'org','s1',%s,true,3,3)",
-            (event.data.evaluation_id, e.question_id, event.data.assessment_id, room, e.skill_id),
+            (event.data.evaluation_id, e.question_id, event.data.assessment_id, room, e.topic_id),
         )
     thread.join(5)
     assert done.is_set() and evidence_of(pool, room) == 0

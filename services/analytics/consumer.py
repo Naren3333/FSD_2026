@@ -1,6 +1,7 @@
-"""Analytics' events: grading.finalized.v2 (and v1, from before points) stores each finalized evaluation's evidence
-once (inbox), and identity.classroom.deleted.v1 purges a deleted classroom's evidence. Messages that don't match the
-contract, or whose event type is not their topic's, are dead-lettered; learning_transport.kafka runs the consumer.
+"""Analytics' events: grading.finalized.v3 (and v2 and v1, still read for queued or replayed events, with their
+evidence's older field mapped onto topic_id) stores each finalized evaluation's evidence once (inbox), and
+identity.classroom.deleted.v1 purges a deleted classroom's evidence. Messages that don't match the contract, or whose
+event type is not their Kafka topic's, are dead-lettered; learning_transport.kafka runs the consumer.
 
 Storing and purging take the same per-classroom lock, so a purge and a finalized grade for its classroom never
 interleave across replicas: either the evidence is stored first and the purge removes it, or the purge commits first
@@ -14,7 +15,7 @@ from learning_transport.db import LOCK_CLASSROOM, lock
 from learning_transport.kafka import Handler, consume, parse
 from psycopg_pool import ConnectionPool
 
-from domain import FINALIZED_V1, FINALIZED_V2, ClassroomDeletedEvent, Event
+from domain import FINALIZED, ClassroomDeletedEvent, Event
 
 CLASSROOM_DELETED = "identity.classroom.deleted.v1"
 DEFAULT_GROUP = "analytics-v1"  # KAFKA_GROUP overrides it, e.g. to rebuild from the start of the topics
@@ -47,7 +48,7 @@ def process(pool: ConnectionPool[Any], event: Event) -> None:
         for e in data.evidence:
             conn.execute(
                 "INSERT INTO evidence(evaluation_id,question_id,assessment_id,classroom_id,org_id,student_id,"
-                "skill_id,correct,awarded,possible) VALUES(%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)",
+                "topic_id,correct,awarded,possible) VALUES(%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)",
                 (
                     data.evaluation_id,
                     e.question_id,
@@ -55,7 +56,7 @@ def process(pool: ConnectionPool[Any], event: Event) -> None:
                     data.classroom_id,
                     data.org_id,
                     data.student_id,
-                    e.skill_id,
+                    e.topic_id,
                     e.correct,
                     e.awarded,
                     e.possible,
@@ -103,4 +104,4 @@ def handler(pool: ConnectionPool[Any]) -> Handler:
 
 def run(pool: ConnectionPool[Any], stop: threading.Event, connected: threading.Event) -> None:
     group = os.environ.get("KAFKA_GROUP") or DEFAULT_GROUP
-    consume(group, [FINALIZED_V1, FINALIZED_V2, CLASSROOM_DELETED], handler(pool), stop, connected)
+    consume(group, [*FINALIZED, CLASSROOM_DELETED], handler(pool), stop, connected)

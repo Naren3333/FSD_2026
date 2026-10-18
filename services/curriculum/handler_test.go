@@ -2,77 +2,74 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"learning/platform"
 	"learning/platform/platformtest"
 	"net/http"
 	"net/http/httptest"
-	"strings"
 	"testing"
 )
 
 const (
-	topicID = "6f1c5d2e-8a4b-4c3d-9e2f-1a2b3c4d5e6f"
-	skillA  = "7a2d6e3f-9b5c-4d4e-8f3a-2b3c4d5e6f70"
-	skillB  = "8b3e7f40-ac6d-4e5f-9a4b-3c4d5e6f7081"
+	topicA = "7a2d6e3f-9b5c-4d4e-8f3a-2b3c4d5e6f70"
+	topicB = "8b3e7f40-ac6d-4e5f-9a4b-3c4d5e6f7081"
 )
 
-// memoryStore keeps nodes by id and prerequisite edges; it answers a cycle when the reverse edge exists.
+// memoryStore keeps topics by id and prerequisite edges; it answers a cycle when the reverse edge exists.
 type memoryStore struct {
-	nodes  map[string]Node
+	topics map[string]Topic
 	edges  map[[2]string]bool
-	broken bool // every lookup fails as if the database were down
+	broken bool // every call fails as if the database were down
 }
 
 func newMemoryStore() *memoryStore {
 	return &memoryStore{
-		nodes: map[string]Node{
-			topicID: {topicID, "topic", "Fractions", nil},
-			skillA:  {skillA, "skill", "Add fractions", nil},
-			skillB:  {skillB, "skill", "Compare fractions", nil},
+		topics: map[string]Topic{
+			topicA: {topicA, "Add fractions"},
+			topicB: {topicB, "Compare fractions"},
 		},
 		edges: map[[2]string]bool{},
 	}
 }
 
-func (m *memoryStore) listNodes(context.Context, string) ([]Node, error) { return nil, nil }
+var errDown = errors.New("connection refused")
 
-func (m *memoryStore) findNode(_ context.Context, _, id string) (Node, error) {
+func (m *memoryStore) listTopics(context.Context, string) ([]Topic, error) { return nil, nil }
+
+func (m *memoryStore) findTopic(_ context.Context, _, id string) (Topic, error) {
 	if m.broken {
-		return Node{}, errors.New("connection refused")
+		return Topic{}, errDown
 	}
-	n, ok := m.nodes[id]
+	v, ok := m.topics[id]
 	if !ok {
-		return Node{}, platform.ErrNotFound
+		return Topic{}, platform.ErrNotFound
 	}
-	return n, nil
+	return v, nil
 }
 
-func (m *memoryStore) findKind(ctx context.Context, org, id string) (string, error) {
-	n, err := m.findNode(ctx, org, id)
-	return n.Kind, err
-}
-
-func (m *memoryStore) insertNode(_ context.Context, id, _, kind, name string, parent *string) error {
-	m.nodes[id] = Node{id, kind, name, parent}
+func (m *memoryStore) insertTopic(_ context.Context, id, _, name string) error {
+	if m.broken {
+		return errDown
+	}
+	m.topics[id] = Topic{id, name}
 	return nil
 }
 
-func (m *memoryStore) renameNode(context.Context, string, string, string) (bool, error) {
+func (m *memoryStore) renameTopic(_ context.Context, _, id, name string) (bool, error) {
+	if _, ok := m.topics[id]; !ok {
+		return false, nil
+	}
+	m.topics[id] = Topic{id, name}
 	return true, nil
 }
 
-func (m *memoryStore) archiveNode(_ context.Context, _, id string) (archiveResult, error) {
-	if _, ok := m.nodes[id]; !ok {
-		return archiveMissing, nil
+func (m *memoryStore) archiveTopic(_ context.Context, _, id string) (bool, error) {
+	if _, ok := m.topics[id]; !ok {
+		return false, nil
 	}
-	for _, n := range m.nodes {
-		if n.Parent != nil && *n.Parent == id {
-			return archiveHasChildren, nil
-		}
-	}
-	delete(m.nodes, id)
-	return archived, nil
+	delete(m.topics, id)
+	return true, nil
 }
 
 func (m *memoryStore) insertPrerequisite(_ context.Context, _, id, prerequisite string) (prerequisiteResult, error) {
@@ -88,119 +85,123 @@ func call(t *testing.T, store store, method, path, body string, roles ...string)
 	return platformtest.Serve(server{store: store}.routes, method, path, body, "user", roles...)
 }
 
-func TestANodeNeedsTheLevelAboveAsParent(t *testing.T) {
+func TestATopicIsJustANameAndTheResponseEchoesItTrimmed(t *testing.T) {
 	store := newMemoryStore()
 	cases := []struct {
 		body   string
 		status int
 	}{
-		{`{"kind":"skill","name":"Simplify","parent_id":"` + topicID + `"}`, http.StatusCreated},
-		{`{"kind":"unit","name":"Number","parent_id":"` + topicID + `"}`, http.StatusUnprocessableEntity},
-		{`{"kind":"skill","name":"Simplify","parent_id":"` + skillA + `"}`, http.StatusUnprocessableEntity},
-		{`{"kind":"chapter","name":"Simplify"}`, http.StatusUnprocessableEntity},
-		{`{"kind":"skill","name":"Simplify"}`, http.StatusCreated}, // a standalone skill
-		{`{"kind":"subject","name":"Maths"}`, http.StatusCreated},
-		{`{"kind":"skill","name":"Simplify","parent_id":"` + skillB[:35] + `9"}`, http.StatusUnprocessableEntity},
+		{`{"name":"  Fractions "}`, http.StatusCreated},
+		{`{"name":" "}`, http.StatusUnprocessableEntity},
+		{`{"name":"Fractions","kind":"skill"}`, http.StatusUnprocessableEntity}, // levels are gone
+		{`{"name":"Fractions","parent_id":null}`, http.StatusUnprocessableEntity},
 	}
 	for _, tc := range cases {
-		if w := call(t, store, http.MethodPost, "/v1/nodes", tc.body, "teacher"); w.Code != tc.status {
+		w := call(t, store, http.MethodPost, "/v1/topics", tc.body, "teacher")
+		if w.Code != tc.status {
 			t.Errorf("%s: %d %s", tc.body, w.Code, w.Body.String())
 		}
+		if w.Code == http.StatusCreated {
+			var got Topic
+			if err := json.Unmarshal(w.Body.Bytes(), &got); err != nil || got.Name != "Fractions" || !platform.ID(got.ID) {
+				t.Errorf("created %s, %v", w.Body.String(), err)
+			}
+		}
 	}
-	if w := call(t, store, http.MethodPost, "/v1/nodes", cases[0].body, "student"); w.Code != http.StatusForbidden {
+	if w := call(t, store, http.MethodPost, "/v1/topics", `{"name":"Fractions"}`, "student"); w.Code != http.StatusForbidden {
 		t.Fatalf("a student changed the curriculum: %d", w.Code)
+	}
+}
+
+func TestRenameEchoesTheTrimmedName(t *testing.T) {
+	store := newMemoryStore()
+	w := call(t, store, http.MethodPatch, "/v1/topics/"+topicB, `{"name":" Halves "}`, "teacher")
+	if w.Code != http.StatusOK || w.Body.String() != `{"id":"`+topicB+`","name":"Halves"}`+"\n" {
+		t.Fatalf("%d %s", w.Code, w.Body.String())
+	}
+	if w = call(t, store, http.MethodPatch, "/v1/topics/"+topicB[:35]+"9", `{"name":"Halves"}`, "teacher"); w.Code != http.StatusNotFound {
+		t.Fatalf("renamed a missing topic: %d", w.Code)
 	}
 }
 
 func TestPrerequisitesRejectSelfReferenceAndCycles(t *testing.T) {
 	store := newMemoryStore()
-	path := func(id string) string { return "/v1/skills/" + id + "/prerequisites" }
-	if w := call(t, store, http.MethodPost, path(skillA), `{"prerequisite_id":"`+skillA+`"}`, "teacher"); w.Code != http.StatusUnprocessableEntity {
+	path := func(id string) string { return "/v1/topics/" + id + "/prerequisites" }
+	if w := call(t, store, http.MethodPost, path(topicA), `{"prerequisite_id":"`+topicA+`"}`, "teacher"); w.Code != http.StatusUnprocessableEntity {
 		t.Fatalf("self prerequisite: %d", w.Code)
 	}
-	if w := call(t, store, http.MethodPost, path(skillA), `{"prerequisite_id":"`+skillB+`"}`, "teacher"); w.Code != http.StatusOK {
-		t.Fatalf("status %d", w.Code)
+	w := call(t, store, http.MethodPost, path(topicA), `{"prerequisite_id":"`+topicB+`"}`, "teacher")
+	if w.Code != http.StatusOK || w.Body.String() != `{"prerequisite_id":"`+topicB+`","topic_id":"`+topicA+`"}`+"\n" {
+		t.Fatalf("%d %s", w.Code, w.Body.String())
 	}
-	if w := call(t, store, http.MethodPost, path(skillB), `{"prerequisite_id":"`+skillA+`"}`, "teacher"); w.Code != http.StatusConflict {
+	if w := call(t, store, http.MethodPost, path(topicB), `{"prerequisite_id":"`+topicA+`"}`, "teacher"); w.Code != http.StatusConflict {
 		t.Fatalf("cycle accepted: %d", w.Code)
 	}
 }
 
-func TestCreateAndRenameEchoTheTrimmedName(t *testing.T) {
-	store := newMemoryStore()
-	w := call(t, store, http.MethodPost, "/v1/nodes", `{"kind":"subject","name":"  Maths "}`, "teacher")
-	if w.Code != http.StatusCreated || !strings.Contains(w.Body.String(), `"name":"Maths"`) {
-		t.Fatalf("%d %s", w.Code, w.Body.String())
-	}
-	w = call(t, store, http.MethodPatch, "/v1/nodes/"+topicID, `{"name":" Halves "}`, "teacher")
-	if w.Code != http.StatusOK || !strings.Contains(w.Body.String(), `"name":"Halves"`) {
-		t.Fatalf("%d %s", w.Code, w.Body.String())
-	}
-	// The limit counts characters, not bytes.
-	if w = call(t, store, http.MethodPatch, "/v1/nodes/"+topicID, `{"name":"`+strings.Repeat("é", maxName)+`"}`, "teacher"); w.Code != http.StatusOK {
-		t.Fatalf("%d characters: %d", maxName, w.Code)
-	}
-}
-
-func TestAFailedParentLookupIsAnInternalError(t *testing.T) {
+func TestAFailedInsertIsAnInternalError(t *testing.T) {
 	store := newMemoryStore()
 	store.broken = true
-	if w := call(t, store, http.MethodPost, "/v1/nodes", `{"kind":"skill","name":"Simplify","parent_id":"`+topicID+`"}`, "teacher"); w.Code != http.StatusInternalServerError {
+	if w := call(t, store, http.MethodPost, "/v1/topics", `{"name":"Simplify"}`, "teacher"); w.Code != http.StatusInternalServerError {
 		t.Fatalf("status %d", w.Code)
 	}
 }
 
 func TestArchive(t *testing.T) {
 	store := newMemoryStore()
-	child := topicID
-	store.nodes[skillA] = Node{skillA, "skill", "Add fractions", &child}
 	cases := []struct {
 		id     string
 		status int
 	}{
 		{"not-a-uuid", http.StatusNotFound},
-		{skillB[:35] + "9", http.StatusNotFound},
-		{topicID, http.StatusConflict},
-		{skillA, http.StatusNoContent},
-		{skillA, http.StatusNotFound}, // already archived
+		{topicB[:35] + "9", http.StatusNotFound},
+		{topicA, http.StatusNoContent},
+		{topicA, http.StatusNotFound}, // already archived
 	}
 	for _, tc := range cases {
-		if w := call(t, store, http.MethodDelete, "/v1/nodes/"+tc.id, "", "teacher"); w.Code != tc.status {
+		if w := call(t, store, http.MethodDelete, "/v1/topics/"+tc.id, "", "teacher"); w.Code != tc.status {
 			t.Errorf("%s: %d %s", tc.id, w.Code, w.Body.String())
 		}
 	}
 }
 
 func TestAMalformedPathIDIsNotFoundBeforeTheBodyIsRead(t *testing.T) {
-	for _, tc := range [][2]string{{http.MethodPatch, "/v1/nodes/x"}, {http.MethodPost, "/v1/skills/x/prerequisites"}} {
+	for _, tc := range [][2]string{{http.MethodPatch, "/v1/topics/x"}, {http.MethodPost, "/v1/topics/x/prerequisites"}} {
 		if w := call(t, newMemoryStore(), tc[0], tc[1], "not json", "teacher"); w.Code != http.StatusNotFound {
 			t.Errorf("%s %s: %d", tc[0], tc[1], w.Code)
 		}
 	}
 }
 
-func TestAMissingNodeIsNotFound(t *testing.T) {
-	if w := call(t, newMemoryStore(), http.MethodGet, "/v1/nodes/"+skillB[:35]+"9", "", "student"); w.Code != http.StatusNotFound {
-		t.Fatalf("status %d", w.Code)
+func TestReadingATopic(t *testing.T) {
+	if w := call(t, newMemoryStore(), http.MethodGet, "/v1/topics/"+topicA, "", "student"); w.Code != http.StatusOK || w.Body.String() != `{"id":"`+topicA+`","name":"Add fractions"}`+"\n" {
+		t.Fatalf("%d %s", w.Code, w.Body.String())
 	}
-	if w := call(t, newMemoryStore(), http.MethodGet, "/v1/nodes/not-a-uuid", "", "student"); w.Code != http.StatusNotFound {
-		t.Fatalf("status %d", w.Code)
+	for _, id := range []string{topicB[:35] + "9", "not-a-uuid"} {
+		if w := call(t, newMemoryStore(), http.MethodGet, "/v1/topics/"+id, "", "student"); w.Code != http.StatusNotFound {
+			t.Fatalf("%s: status %d", id, w.Code)
+		}
+	}
+	store := newMemoryStore()
+	store.broken = true
+	if w := call(t, store, http.MethodGet, "/v1/topics/"+topicA, "", "student"); w.Code != http.StatusInternalServerError {
+		t.Fatalf("an outage answered %d", w.Code)
 	}
 }
 
 func TestStudentsCannotChangeTheCurriculum(t *testing.T) {
 	store := newMemoryStore()
 	cases := [][3]string{
-		{http.MethodPatch, "/v1/nodes/" + topicID, `{"name":"Halves"}`},
-		{http.MethodDelete, "/v1/nodes/" + skillA, ""},
-		{http.MethodPost, "/v1/skills/" + skillA + "/prerequisites", `{"prerequisite_id":"` + skillB + `"}`},
+		{http.MethodPatch, "/v1/topics/" + topicB, `{"name":"Halves"}`},
+		{http.MethodDelete, "/v1/topics/" + topicA, ""},
+		{http.MethodPost, "/v1/topics/" + topicA + "/prerequisites", `{"prerequisite_id":"` + topicB + `"}`},
 	}
 	for _, tc := range cases {
 		if w := call(t, store, tc[0], tc[1], tc[2], "student"); w.Code != http.StatusForbidden {
 			t.Errorf("%s %s by a student: %d", tc[0], tc[1], w.Code)
 		}
 	}
-	if _, ok := store.nodes[skillA]; !ok || len(store.edges) != 0 || store.nodes[topicID].Name != "Fractions" {
-		t.Fatalf("the curriculum changed: %v %v", store.nodes, store.edges)
+	if _, ok := store.topics[topicA]; !ok || len(store.edges) != 0 || store.topics[topicB].Name != "Compare fractions" {
+		t.Fatalf("the curriculum changed: %v %v", store.topics, store.edges)
 	}
 }

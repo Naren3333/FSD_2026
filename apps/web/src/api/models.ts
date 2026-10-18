@@ -19,13 +19,10 @@ export interface Classroom {
   name: string;
   teacher_id: string;
 }
-/** Curriculum levels, top down; each node's parent is the level above it. */
-export type NodeKind = 'subject' | 'course' | 'unit' | 'topic' | 'skill' | 'objective';
-export interface Node {
+/** A curriculum topic: the single level questions and evidence are tagged with. */
+export interface Topic {
   id: string;
-  kind: NodeKind;
   name: string;
-  parent_id: string | null;
 }
 export type DocType = 'teaching_material' | 'rubric' | 'marking_scheme';
 export type DocumentStatus = 'extracted' | 'extraction_unsupported' | 'indexing' | 'indexed' | 'failed';
@@ -100,8 +97,6 @@ export interface StreamEvent {
   event: string;
   data: Record<string, unknown>;
 }
-/** The fields a new node needs: its level, name and the node one level above it. */
-export type NodeInput = Omit<Node, 'id'>;
 export type QuestionType = 'numerical' | 'multiple_choice' | 'short_answer' | 'free_response';
 /** One level of a rubric criterion: its points and what work at that level looks like. */
 export interface Level {
@@ -147,7 +142,10 @@ export interface Question {
   max_length?: number;
   /** For a free response, the rubric's total. */
   points: number;
-  skill_id: string;
+  topic_id: string;
+  /** Generated questions only: the classroom passages the question was drawn from (ADR 0006). Teacher only. */
+  sources?: Excerpt[];
+  origin?: 'generated';
 }
 export type AssessmentStatus = 'draft' | 'published';
 /** Late work is accepted and flagged for the teacher, or refused after the due date. */
@@ -214,7 +212,7 @@ export interface Suggestion {
 }
 export interface Evidence {
   question_id: string;
-  skill_id: string;
+  topic_id: string;
   correct: boolean;
   awarded: number;
   possible: number;
@@ -251,8 +249,8 @@ export interface Usage {
   limit_usd: number;
   resets_at: string;
 }
-export interface SkillMetric {
-  skill_id: string;
+export interface TopicMetric {
+  topic_id: string;
   attempted: number;
   /** Questions answered with full marks. */
   correct: number;
@@ -272,14 +270,14 @@ export interface Performance {
   classroom_id: string;
   evidence_status: PerformanceStatus;
   interpretation: string;
-  skills: SkillMetric[];
+  topics: TopicMetric[];
 }
-/** One page of a classroom's enrolled students, in roster order, each with their finalized skill evidence. */
+/** One page of a classroom's enrolled students, in roster order, each with their finalized topic evidence. */
 export interface ClassPerformance {
   classroom_id: string;
   total: number;
   offset: number;
-  students: { student_id: string; skills: SkillMetric[]; evidence_status: PerformanceStatus }[];
+  students: { student_id: string; topics: TopicMetric[]; evidence_status: PerformanceStatus }[];
   interpretation: string;
 }
 /** An assessment in a classroom's list, with whether the signed-in user has submitted it. */
@@ -313,4 +311,51 @@ export interface GradingCounts {
   finalized: number;
   /** Finalized grades students cannot see until the teacher releases them. */
   unreleased: number;
+}
+/** The question types the agent generates (ADR 0006). */
+export type GeneratableType = 'multiple_choice' | 'short_answer' | 'free_response';
+export type Difficulty = 'introductory' | 'intermediate' | 'advanced';
+/** What a teacher asks the question-generation agent for. */
+export interface GenerateRequest {
+  classroom_id: string;
+  document_ids: string[];
+  topic_id: string;
+  question_types: GeneratableType[];
+  difficulty: Difficulty;
+  count: number;
+  focus?: string;
+  /** The prompts the editor already holds, so near-duplicates are dropped. */
+  existing_prompts?: string[];
+}
+/** A drafted question, with the quote from its sources that supports its key. Never saved until the teacher keeps it. */
+export interface GeneratedQuestion {
+  question: Omit<Question, 'id'>;
+  evidence: string;
+  explanation: string;
+}
+export interface GenerateResult {
+  questions: GeneratedQuestion[];
+  requested: number;
+  returned: number;
+  /** Drafts the checks refused, by reason. */
+  dropped: Record<string, number>;
+  requires_teacher_review: true;
+}
+/** Marking guidance for a short answer or free response the teacher wrote. */
+export interface GuidanceRequest {
+  classroom_id: string;
+  document_ids: string[];
+  prompt: string;
+  type: 'short_answer' | 'free_response';
+  points?: number;
+}
+export interface Guidance {
+  type: 'short_answer' | 'free_response';
+  accepted_answers: string[];
+  rubric: Rubric | null;
+  /** What earns each mark, as a marking-scheme passage the teacher wrote (no document). */
+  marking_points: Excerpt;
+  sources: Excerpt[];
+  evidence: string;
+  requires_teacher_review: true;
 }

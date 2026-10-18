@@ -23,7 +23,7 @@ const quiz: Assessment = {
   classroom_id: 'c1',
   title: 'Fractions quiz',
   questions: [
-    { id: 'q1', prompt: 'Half of 1?', type: 'numerical', options: null, points: 1, skill_id: 'k1' },
+    { id: 'q1', prompt: 'Half of 1?', type: 'numerical', options: null, points: 1, topic_id: 'k1' },
   ],
 };
 const grade = (student: string, status: Evaluation['status']): Evaluation => ({
@@ -33,7 +33,7 @@ const grade = (student: string, status: Evaluation['status']): Evaluation => ({
   student_id: student,
   status,
   evidence: [
-    { question_id: 'q1', skill_id: 'k1', correct: true, awarded: 1, possible: 1, marked_by: 'auto' },
+    { question_id: 'q1', topic_id: 'k1', correct: true, awarded: 1, possible: 1, marked_by: 'auto' },
   ],
   answers: { q1: '0.5' },
   late: false,
@@ -60,7 +60,7 @@ function render(grades: Promise<Evaluation[]>) {
         provide: AssessmentApi,
         useValue: { list: () => Promise.resolve([]), get: () => Promise.resolve(quiz) },
       },
-      { provide: CurriculumNames, useValue: { need: () => Promise.resolve(), skillName: () => 'Halves' } },
+      { provide: CurriculumNames, useValue: { need: () => Promise.resolve(), topicName: () => 'Halves' } },
       { provide: ClassroomContext, useValue: { classroomId: signal('c1') } },
     ],
   });

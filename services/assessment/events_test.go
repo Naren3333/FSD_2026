@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"os"
 	"slices"
+	"strings"
 	"testing"
 	"time"
 	"unicode/utf8"
@@ -18,7 +19,7 @@ import (
 // submittedSchema is the published contract of the submission event.
 func submittedSchema(t *testing.T) map[string]any {
 	t.Helper()
-	data, err := os.ReadFile("../../contracts/events/assessment.submitted.v3.schema.json")
+	data, err := os.ReadFile("../../contracts/events/assessment.submitted.v4.schema.json")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -140,7 +141,7 @@ func asJSON(t *testing.T, value any) any {
 }
 
 func TestTheSubmittedEventMatchesItsContract(t *testing.T) {
-	s, store := newServer(platform.RelationTeacher, skillValid)
+	s, store := newServer(platform.RelationTeacher, topicValid)
 	v := post(t, s, allTypes)
 	s.access = platformtest.Access(platform.RelationStudent)
 	r := platformtest.Request(platformtest.Claims("student-1", "student"), http.MethodPost, "/v1/assessments/"+v.ID+"/submissions", mixedAnswers(v))
@@ -160,6 +161,10 @@ func TestTheSubmittedEventMatchesItsContract(t *testing.T) {
 		if q := q.(map[string]any); (q["type"] == typeShortAnswer || q["type"] == typeFreeResponse) && q["marking_scheme"] == nil {
 			t.Errorf("%v has no marking scheme", q["type"])
 		}
+	}
+	// Where a generated question came from stays with the teacher (ADR 0006).
+	if body, _ := json.Marshal(event); strings.Contains(string(body), "sources") || strings.Contains(string(body), "generated") {
+		t.Errorf("the event carries provenance: %s", body)
 	}
 	if len(types) != 4 || event.(map[string]any)["ai_marking"] != true || event.(map[string]any)["teacher_id"] != "user" {
 		t.Fatalf("%v", event)

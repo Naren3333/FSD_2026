@@ -4,7 +4,7 @@
 
 The repository began empty. It now contains exactly ten independent application services, their Dockerfiles and tests, an Angular client, and reproducible local Kong OSS / Keycloak / Kafka / PostgreSQL / S3-compatible object storage (SeaweedFS since ADR 0002; originally MinIO) infrastructure. No existing application or data was replaced. Service responsibilities, data ownership, diagrams and authentication/event boundaries are documented in `docs/architecture/system.md`.
 
-Go implements Identity/Classroom, Curriculum, Content, Assessment and Grading. These are transactional, explicitly authorized operations with bounded request handling and SQL transactions. Python/FastAPI implements deterministic Analytics and the four AI applications (ai-core and the question chatbot, implemented since ADR 0002; question generation and performance interpretation, still 501 placeholders), with Pydantic contracts suitable for later analytical/model tooling. Angular 21 with strict TypeScript implements the browser. Shell/SQL/configuration are operational artifacts; no third backend language or extra business service was introduced.
+Go implements Identity/Classroom, Curriculum, Content, Assessment and Grading. These are transactional, explicitly authorized operations with bounded request handling and SQL transactions. Python/FastAPI implements deterministic Analytics and the four AI applications (ai-core and the question chatbot, implemented since ADR 0002; question generation since ADR 0006; performance interpretation, still a 501 placeholder), with Pydantic contracts suitable for later analytical/model tooling. Angular 21 with strict TypeScript implements the browser. Shell/SQL/configuration are operational artifacts; no third backend language or extra business service was introduced.
 
 ## Repository layout
 
@@ -30,7 +30,7 @@ DESIGN.md / UX-CONTRACT.md          UI design and behavioral ownership
 
 - OIDC authorization code + PKCE login. Services verify RS256, issuer, audience, expiration and organization. Resource policy comes from Identity. Unknown identity headers confer no privileges.
 - User-profile registration with username and display name, teacher-owned classroom creation/listing, same-organization student enrollment by username, classroom rosters and unenrollment, classroom/student access checks.
-- Curriculum node create/read/rename/archive, stable IDs, parent validation, and prerequisite insertion with serialized cycle detection.
+- Curriculum topic create/read/rename/archive, stable IDs, and prerequisite insertion with serialized cycle detection (one level since ADR 0007).
 - Authorized uploads into a restricted S3 bucket, real UTF-8 extraction/chunk provenance, SHA-256, original-file retrieval and metadata. PDFs (up to 50 MiB) are indexed asynchronously through ai-core into searchable chunks (ADR 0002 stage 3); documents are typed teaching material, rubric or marking scheme, and students see teaching material only.
 - Teacher-authored assessments of up to 50 questions (multiple choice, numerical, short answer, rubric-marked free response) that start as editable drafts and are immutable once published, with opening and due dates, late and release policies, students' saved answers, enrolled-student submission, answer-key-safe student projection, and one submission per assessment/student (ADR 0004).
 - Kafka-triggered deterministic draft grading with exact rational decimal arithmetic and inclusive tolerance; short answers that match no accepted answer and free responses wait for the teacher's marks, optionally with AI suggestions. Teacher review is mandatory; finalization writes the record and an audit entry atomically, and `grading.finalized.v2` goes out through the outbox when the grade is released (at finalization, or at the teacher's release for a manual-release assessment).
@@ -39,7 +39,7 @@ DESIGN.md / UX-CONTRACT.md          UI design and behavioral ownership
 
 ## AI contracts and future interfaces
 
-Since ADR 0002 the private AI Service (ai-core) is implemented: `/v1/ingest`, `/v1/inference` and `/v1/rerank`, for callers with the `ai-client` role; see "fsd_test integration" below. Originally it exposed only a 501 `/v1/inference`. Question Chatbot is implemented for students and teachers (stage 4, below), published by Kong at `/api/chatbot`, with its own `chatbot` database for threads and messages. Question Generation exposes `/v1/question_generation` and Student Performance exposes `/v1/performance_interpretation`; each checks authentication and the `ai-client` role, validates its request, and returns HTTP 501 with `AI_CAPABILITY_NOT_IMPLEMENTED` and a capability name. Normal users do not receive the internal role; neither of those two is published by Kong or has a database.
+Since ADR 0002 the private AI Service (ai-core) is implemented: `/v1/ingest`, `/v1/inference` and `/v1/rerank`, for callers with the `ai-client` role; see "fsd_test integration" below. Originally it exposed only a 501 `/v1/inference`. Question Chatbot is implemented for students and teachers (stage 4, below), published by Kong at `/api/chatbot`, with its own `chatbot` database for threads and messages. Question Generation is implemented for teachers since ADR 0006 (see "Question generation" below), published by Kong at `/api/question-generation`, with no database. Student Performance exposes `/v1/performance_interpretation`; it checks authentication and the `ai-client` role, validates its request, and returns HTTP 501 with `AI_CAPABILITY_NOT_IMPLEMENTED` and a capability name. Normal users do not receive the internal role; it is not published by Kong and has no database.
 
 OpenAPI defines request and future response schemas (questions/keys/explanations/provenance, evidence-backed observations/interventions, answers/citations/insufficient evidence, provider-independent generation/embedding output). The agent schemas are **interfaces only**; Content's indexing and search are implemented (see below). Tests replace verified claims with clearly scoped test doubles for placeholder behavior; runtime code never registers those doubles. Separate auth tests exercise real RSA signature, expiry, issuer and audience verification.
 
@@ -95,6 +95,21 @@ In the sandbox (Docker 29.8.2) on 2026-10-13, after `docker compose up -d --buil
 Not run: a chat turn against the real OpenAI and Voyage APIs (only a real ingest has been run, on the desktop), the premium UI audit (its tool is not in the repository), and any production deployment. GitHub Actions has since run the full gate on `main`, including the live Docker integration and Playwright jobs. Stages 4 to 6 have not yet been run on the Windows desktop.
 
 Kong now re-resolves service names every 5 seconds (`KONG_DNS_VALID_TTL`). Before this, recreating one service while Kong kept running sent its requests to the old container address (502) until Kong restarted. A new route still needs `docker compose restart kong`, because Kong reads its route file at start.
+
+## Question generation (ADR 0006, 2026-10-17)
+
+- **Agent:** `services/question-generation-agent` is a stateless pipeline (`pipeline.py`): teacher check at Identity, the skill from Curriculum and passages from Content search, all with the teacher's token; one structured ai-core `generate` call as the `question-generation-agent` service account, billed to the teacher; then `checks.py` keeps only drafts that cite given passages, quote evidence found in them and fit Assessment's limits, and counts the rest by reason. `POST /v1/questions` returns draft questions; `POST /v1/marking-guidance` drafts accepted answers or a rubric, and marking points, for a question the teacher wrote. Nothing is stored. `RELEVANCE_FLOOR` (default 0.3) is not yet calibrated.
+- **Assessment:** questions accept optional `sources` (up to five passages) and `origin: "generated"`, shown to the teacher only and left out of `assessment.submitted.v3`. No migration.
+- **Web:** the editor has "Generate questions from teaching materials" (review, then add or discard each draft), "Draft marking guidance" per short answer or written response, and "Match scheme to questions", which adds the best passage of one marking scheme to each teacher-marked question through Content's search.
+- **Wiring:** Keycloak client `question-generation-agent` (`scripts/setup.py`, `scripts/upgrade_local.py`), `QUESTION_GENERATION_AGENT_CLIENT_SECRET` in `.env`, Kong route `/api/question-generation` with a two-minute read timeout. `integration.py` checks access (401, students and other teachers 403), validation and the honest failure without provider keys. `e2e/generation.spec.ts` runs the editor flow in the browser (generate with a failure then drafts, add and discard, guidance, scheme matching, saving the draft, phone width) with the agent and documents stubbed.
+- **Review fixes (2026-10-17):** unscored (fallback) search results are refused with `503 RERANK_UNAVAILABLE` before the model call, as in the chatbot; a malformed search reply is `503 SEARCH_UNAVAILABLE`. The editor keeps the 20-passage assessment limit when guidance is used or a draft kept, refuses guidance for a reworded question, never replaces a question 1 the teacher started, and labels marking points the model wrote (while the editor is open). `learning_transport.upstream_error` replaces the two agents' copies of `_error`.
+- **Verified 2026-10-17 in the cloud container:** `check.py`, `integration.py` and all six browser tests passed against the Docker stack.
+- **Not verified yet:** generation against the real OpenAI and Voyage APIs, so neither the quality of drafts nor the relevance floor has been checked with real documents.
+
+## Curriculum archiving and test topics (2026-10-17; names updated for ADR 0007)
+
+- Teachers archive curriculum topics from the Curriculum page (`DELETE /v1/topics/{id}`, which only sets `archived`), behind the shared confirmation dialog. The gateway client now treats `204 No Content` as an empty result.
+- Test topics are deleted, not archived: `integration.py` records the topics it creates, checks archiving on one, then deletes them all in Curriculum's database after its classroom is purged; the browser tests delete theirs the same way after each test, passed or failed (`topicToDelete` and `deleteTopicsAfterEach` in `e2e/helpers.ts`; the SQL is `local_stack.delete_topics`'s, after `generation.spec.ts` archives its topic through the page). `scripts/delete_test_topics.py` deletes what older runs left (dry run unless `--apply`). This is test-data cleanup only; the product never deletes curriculum.
 
 ## Student results, rosters and names (2026-10-14)
 
@@ -192,13 +207,26 @@ Kong's rate limit (120 requests a minute) was counted per Kong consumer, and eve
 - **Grading:** reads v1, v2 and v3 submissions (consumer groups `grading-v1`, `grading-submitted-v2`, `grading-submitted-v3`; ready only while all run). The marking prompt adds the passages' text as `marking_scheme`; feedback repeating a passage is withheld like the model answer; a suggestion records `scheme_passages`.
 - **Web:** under each short-answer and written-response question, a Marking scheme part: choose an indexed marking scheme or rubric of the classroom, Find passages (Content search with the teacher's token, the question as the query, five results), add the ones that apply, or paste one. Loading, empty, failed-search and full states. Grading review shows "Read with N marking-scheme passages" on a suggestion, with the passages.
 - **Checks:** Go unit tests (Assessment validation, the student view, the v3 contract; Grading decoding of each version, the prompt and the feedback check), web unit tests (`scheme-picker.test.ts`, `editor.test.ts`), `integration.py` (`lifecycle`: a blank passage is refused, the teacher view keeps the passage, the student view hides it; `marking`: the passage reaches Grading's evaluation), `e2e/workflow.spec.ts` (pasting a passage, the student never sees it).
+- **Cleanup:** `premium-ui.json` removed. It configured the premium UI audit, whose tool is not in the repository, and nothing read it.
+
+## Curriculum is topics only (2026-10-18, ADR 0007)
+
+The project owner cut the unused curriculum levels and renamed the one left from skill to topic everywhere. Sections above dated before 2026-10-18 say "skill" or "node" where the code now says "topic".
+
+- **Curriculum:** `GET/POST /v1/topics`, `GET/PATCH/DELETE /v1/topics/{id}`, `POST /v1/topics/{id}/prerequisites`; a topic is `{id, name}`. Migration `002_topics.sql` (destructive, authorized) deletes every node that was not a skill, drops `kind` and `parent_id`, and renames `nodes` to `topics` and `prerequisites.skill_id` to `topic_id`.
+- **Fields and codes:** `skill_id` is `topic_id` in every current API and event; `UNKNOWN_TOPIC` (question generation), `INVALID_TOPIC` (Assessment); Analytics returns `topics` (`TopicMetric`); the student-performance contract uses `topic_ids`.
+- **Events:** Assessment publishes `assessment.submitted.v4` and Grading `grading.finalized.v3` only. Grading consumes v1–v4 (new group `grading-submitted-v4`), Analytics v1–v3, reading older versions' `skill_id` as the topic. `kafka-init` creates the new topics and their `.dlq`.
+- **Stored data:** Assessment and Grading `004_topics.sql` rename the JSON key inside stored questions, evidence and audit; Analytics `004_topics.sql` renames `evidence.skill_id`. Outbox and inbox rows are left as written.
+- **Web:** the Curriculum page is one list of topics with an add form (name only) and archive; every label says topic.
+- **Scripts:** `local_stack.delete_topics`, `scripts/delete_test_topics.py` (also matches the old "Browser skill"/"Testing skill" names).
+- **Upgrading a local stack:** `docker compose up -d --build`; the services apply their migrations on start.
 
 ## Incomplete requirements and risks
 
 The full requested definition of done is **not claimed**. The coherent core workflow is implemented, but these requirements remain incomplete or narrower than the full brief:
 
 - Separate reusable question-bank CRUD and resits. Each student can submit an assessment once.
-- Document revision workflows beyond revision 1, lesson-plan persistence, and the question generation and performance interpretation agents.
+- Document revision workflows beyond revision 1, lesson-plan persistence, and the performance interpretation agent. From ADR 0006: numerical generated questions, a question bank and student self-practice.
 - Topic-level analytics, assessment trends, richer teacher summaries and durable archival/reconciliation beyond Kafka's configured 30-day retention.
 - Complete pagination in the UI. Lists are capped (one assessment's grades at 500).
 - Production Kafka TLS/SASL/ACLs, deployment network policies, per-service machine identities, managed OIDC persistence, automated signing-key rollover, separate migration/runtime roles, backups/restore testing, secret management and dependency/image vulnerability audits.
@@ -206,4 +234,4 @@ The full requested definition of done is **not claimed**. The coherent core work
 - S3/SQL atomicity requires a staged-upload saga and orphan reconciliation. Ambiguous commits retain originals to avoid deleting a possibly committed document. No destructive cleanup is scheduled.
 - Static checks and focused browser tests are not a comprehensive WCAG/assistive-technology, multi-browser, offline, load, chaos or security assessment.
 
-Recommended next milestone: the class-level performance table, the multi-question editor and teacher marking are delivered (above). Next: the items under "Not built yet" in the ADR 0004 section (question bank, resits), cursor pagination, then the question generation or performance interpretation agent, each behind its own ADR as AGENTS.md requires. Preserve teacher approval and evidence provenance throughout.
+Recommended next milestone: the class-level performance table, the multi-question editor and teacher marking are delivered (above). Next: the items under "Not built yet" in the ADR 0004 section (question bank, resits), cursor pagination, then the question bank on top of ADR 0006's generation, or the performance interpretation agent, each behind its own ADR as AGENTS.md requires. Preserve teacher approval and evidence provenance throughout.

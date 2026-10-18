@@ -13,7 +13,7 @@ var migrations embed.FS
 
 func main() {
 	platform.Serve("assessment", migrations, platform.EventMigration, func(a *platform.App) ([]func(context.Context), error) {
-		s := server{store: pgStore{a.DB}, access: a.Identity(), skills: curriculum{platform.Required("CURRICULUM_URL"), a.Client}}
+		s := server{store: pgStore{a.DB}, access: a.Identity(), topics: curriculum{platform.Required("CURRICULUM_URL"), a.Client}}
 		s.routes(a.Mux)
 		classrooms := platform.Consumer{DB: a.DB, Group: "assessment-classrooms-v1"}
 		return []func(context.Context){

@@ -11,6 +11,7 @@ import type {
   Assessment,
   AssessmentSettings,
   Criterion,
+  DocumentRecord,
   Excerpt,
   LatePolicy,
   NewAssessment,
@@ -29,6 +30,10 @@ export const MAX_CRITERIA = 10;
 export const MAX_EXCERPTS = 5;
 export const MAX_EXCERPT_TEXT = 2000;
 export const MAX_ASSESSMENT_EXCERPTS = 20;
+export const MAX_PROMPT = 2000;
+export const MAX_ACCEPTED = 20;
+/** The longest search query Content takes. */
+export const MAX_QUERY = 1000;
 const DEFAULT_MAX_LENGTH = 5000;
 
 export type CriterionForm = FormGroup<{
@@ -40,7 +45,7 @@ export type CriterionForm = FormGroup<{
 export type QuestionForm = FormGroup<{
   prompt: FormControl<string>;
   type: FormControl<QuestionType>;
-  skill_id: FormControl<string>;
+  topic_id: FormControl<string>;
   points: FormControl<number>;
   options: FormControl<string>;
   answer: FormControl<string>;
@@ -52,6 +57,9 @@ export type QuestionForm = FormGroup<{
   criteria: FormArray<CriterionForm>;
   /** Short answers and free responses: passages of the marking scheme for AI suggestions. */
   marking_scheme: FormControl<Excerpt[]>;
+  /** Generated questions: the passages they were drawn from, kept for the teacher (ADR 0006). */
+  sources: FormControl<Excerpt[]>;
+  origin: FormControl<'' | 'generated'>;
 }>;
 
 export type AssessmentForm = FormGroup<{
@@ -118,11 +126,14 @@ export function criterionForm(criterion?: Criterion): CriterionForm {
   });
 }
 
-export function questionForm(question?: Question): QuestionForm {
+export function questionForm(question?: Omit<Question, 'id'>): QuestionForm {
   const form: QuestionForm = new FormGroup({
-    prompt: new FormControl(question?.prompt ?? '', { nonNullable: true, validators: requiredText(2000) }),
+    prompt: new FormControl(question?.prompt ?? '', {
+      nonNullable: true,
+      validators: requiredText(MAX_PROMPT),
+    }),
     type: new FormControl<QuestionType>(question?.type ?? 'numerical', { nonNullable: true }),
-    skill_id: new FormControl(question?.skill_id ?? '', {
+    topic_id: new FormControl(question?.topic_id ?? '', {
       nonNullable: true,
       validators: [Validators.required],
     }),
@@ -152,6 +163,8 @@ export function questionForm(question?: Question): QuestionForm {
       nonNullable: true,
       validators: [schemeValidator],
     }),
+    sources: new FormControl<Excerpt[]>(question?.sources ?? [], { nonNullable: true }),
+    origin: new FormControl<'' | 'generated'>(question?.origin ?? '', { nonNullable: true }),
   });
   applyType(form);
   form.controls.type.valueChanges.subscribe(() => applyType(form));
@@ -206,12 +219,57 @@ export function clipText(text: string, limit: number): string {
   return characters(text) <= limit ? text : Array.from(text).slice(0, limit).join('');
 }
 
+/** Marking-scheme passages across the assessment's questions, counting only questions that keep them. */
+export function schemeTotal(
+  questions: readonly { type: QuestionType; marking_scheme?: readonly Excerpt[] }[],
+): number {
+  return questions.reduce((sum, q) => sum + (usesScheme(q.type) ? (q.marking_scheme?.length ?? 0) : 0), 0);
+}
+
 /** At most twenty passages across the assessment's questions. */
-const assessmentSchemeValidator: ValidatorFn = (control: AbstractControl) => {
-  const questions = (control as FormArray<QuestionForm>).getRawValue();
-  const total = questions.reduce((sum, q) => sum + (usesScheme(q.type) ? q.marking_scheme.length : 0), 0);
-  return total <= MAX_ASSESSMENT_EXCERPTS ? null : { schemeTotal: true };
-};
+const assessmentSchemeValidator: ValidatorFn = (control: AbstractControl) =>
+  schemeTotal((control as FormArray<QuestionForm>).getRawValue()) <= MAX_ASSESSMENT_EXCERPTS
+    ? null
+    : { schemeTotal: true };
+
+/** Whether a question is still as the editor made it: no wording and nothing the teacher set. */
+export function untouched(question: QuestionForm): boolean {
+  return question.pristine && !question.controls.prompt.value.trim();
+}
+
+/** "1 mark" or "N marks". */
+export function marksText(points: number): string {
+  return points === 1 ? '1 mark' : `${points} marks`;
+}
+
+/** Where each of a question's text-only marking-scheme passages came from, for this session: the model's drafted
+ * marking points, or the teacher's paste. Neither carries a document, so once the assessment is reloaded they can no
+ * longer be told apart. */
+const writtenBy = new WeakMap<FormControl<Excerpt[]>, Map<string, 'ai' | 'teacher'>>();
+
+export function markWrittenBy(control: FormControl<Excerpt[]>, excerpt: Excerpt, by: 'ai' | 'teacher'): void {
+  if (excerpt.document_id) return;
+  writtenBy.set(control, new Map([...(writtenBy.get(control) ?? []), [excerpt.text, by]]));
+}
+
+/** Where a passage is from: its document and page, or that AI wrote it or the teacher pasted it, or, when that is no
+ * longer known, that it is not from a document. */
+export function excerptLabel(
+  excerpt: Excerpt,
+  documents: readonly DocumentRecord[] | null | undefined,
+  scheme?: FormControl<Excerpt[]>,
+): string {
+  if (!excerpt.document_id) {
+    const by = scheme && writtenBy.get(scheme)?.get(excerpt.text);
+    return by === 'ai'
+      ? 'AI-written marking points'
+      : by === 'teacher'
+        ? 'Pasted passage'
+        : 'Written passage, not from a document';
+  }
+  const title = documents?.find((d) => d.id === excerpt.document_id)?.title ?? 'Class document';
+  return excerpt.page ? `${title}, page ${excerpt.page}` : title;
+}
 
 /** Whether questions of the type can carry marking-scheme passages: the ones a teacher (or AI) marks. */
 export function usesScheme(type: QuestionType): boolean {
@@ -229,7 +287,7 @@ const optionsValidator: ValidatorFn = (control: AbstractControl<string>) => {
 /** 1–20 accepted answers. */
 const acceptedValidator: ValidatorFn = (control: AbstractControl<string>) => {
   const accepted = optionLines(control.value);
-  return accepted.length >= 1 && accepted.length <= 20 ? null : { accepted: true };
+  return accepted.length >= 1 && accepted.length <= MAX_ACCEPTED ? null : { accepted: true };
 };
 
 export function assessmentForm(): AssessmentForm {
@@ -287,7 +345,14 @@ export function toAssessment(
 }
 
 function toQuestion(q: ReturnType<QuestionForm['getRawValue']>): Omit<Question, 'id'> {
-  const base = { prompt: q.prompt, type: q.type, skill_id: q.skill_id, options: [] as string[] };
+  const base = {
+    prompt: q.prompt,
+    type: q.type,
+    topic_id: q.topic_id,
+    options: [] as string[],
+    ...(q.origin ? { origin: q.origin } : {}),
+    ...(q.sources.length ? { sources: q.sources } : {}),
+  };
   switch (q.type) {
     case 'multiple_choice':
       return { ...base, options: optionLines(q.options), answer: q.answer, tolerance: '', points: q.points };

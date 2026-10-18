@@ -493,7 +493,7 @@
                             "minimum": 1,
                             "maximum": 100
                           },
-                          "skill_id": {
+                          "topic_id": {
                             "type": "string",
                             "format": "uuid"
                           },
@@ -528,6 +528,44 @@
                             },
                             "minItems": 1,
                             "maxItems": 5
+                          },
+                          "sources": {
+                            "type": "array",
+                            "items": {
+                              "type": "object",
+                              "properties": {
+                                "document_id": {
+                                  "type": "string",
+                                  "format": "uuid"
+                                },
+                                "chunk_id": {
+                                  "type": "string",
+                                  "format": "uuid"
+                                },
+                                "page": {
+                                  "type": "integer",
+                                  "minimum": 1,
+                                  "maximum": 100000
+                                },
+                                "text": {
+                                  "type": "string",
+                                  "minLength": 1,
+                                  "maxLength": 2000
+                                }
+                              },
+                              "required": [
+                                "text"
+                              ],
+                              "additionalProperties": false
+                            },
+                            "minItems": 1,
+                            "maxItems": 5
+                          },
+                          "origin": {
+                            "enum": [
+                              "generated"
+                            ],
+                            "description": "Left out for a question the teacher wrote."
                           }
                         },
                         "required": [
@@ -538,7 +576,7 @@
                           "answer",
                           "tolerance",
                           "points",
-                          "skill_id"
+                          "topic_id"
                         ],
                         "additionalProperties": false
                       },
@@ -1016,7 +1054,7 @@
                           "minimum": 1,
                           "maximum": 100
                         },
-                        "skill_id": {
+                        "topic_id": {
                           "type": "string",
                           "format": "uuid"
                         },
@@ -1051,12 +1089,50 @@
                           },
                           "minItems": 1,
                           "maxItems": 5
+                        },
+                        "sources": {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "properties": {
+                              "document_id": {
+                                "type": "string",
+                                "format": "uuid"
+                              },
+                              "chunk_id": {
+                                "type": "string",
+                                "format": "uuid"
+                              },
+                              "page": {
+                                "type": "integer",
+                                "minimum": 1,
+                                "maximum": 100000
+                              },
+                              "text": {
+                                "type": "string",
+                                "minLength": 1,
+                                "maxLength": 2000
+                              }
+                            },
+                            "required": [
+                              "text"
+                            ],
+                            "additionalProperties": false
+                          },
+                          "minItems": 1,
+                          "maxItems": 5
+                        },
+                        "origin": {
+                          "enum": [
+                            "generated"
+                          ],
+                          "description": "Left out for a question the teacher wrote."
                         }
                       },
                       "required": [
                         "prompt",
                         "type",
-                        "skill_id"
+                        "topic_id"
                       ],
                       "additionalProperties": false
                     },
@@ -1575,7 +1651,7 @@
                                 "minimum": 1,
                                 "maximum": 100
                               },
-                              "skill_id": {
+                              "topic_id": {
                                 "type": "string",
                                 "format": "uuid"
                               },
@@ -1610,6 +1686,44 @@
                                 },
                                 "minItems": 1,
                                 "maxItems": 5
+                              },
+                              "sources": {
+                                "type": "array",
+                                "items": {
+                                  "type": "object",
+                                  "properties": {
+                                    "document_id": {
+                                      "type": "string",
+                                      "format": "uuid"
+                                    },
+                                    "chunk_id": {
+                                      "type": "string",
+                                      "format": "uuid"
+                                    },
+                                    "page": {
+                                      "type": "integer",
+                                      "minimum": 1,
+                                      "maximum": 100000
+                                    },
+                                    "text": {
+                                      "type": "string",
+                                      "minLength": 1,
+                                      "maxLength": 2000
+                                    }
+                                  },
+                                  "required": [
+                                    "text"
+                                  ],
+                                  "additionalProperties": false
+                                },
+                                "minItems": 1,
+                                "maxItems": 5
+                              },
+                              "origin": {
+                                "enum": [
+                                  "generated"
+                                ],
+                                "description": "Left out for a question the teacher wrote."
                               }
                             },
                             "required": [
@@ -1620,7 +1734,7 @@
                               "answer",
                               "tolerance",
                               "points",
-                              "skill_id"
+                              "topic_id"
                             ],
                             "additionalProperties": false
                           },
@@ -1742,7 +1856,7 @@
                                 "minimum": 1,
                                 "maximum": 100
                               },
-                              "skill_id": {
+                              "topic_id": {
                                 "type": "string",
                                 "format": "uuid"
                               }
@@ -1753,7 +1867,7 @@
                               "type",
                               "options",
                               "points",
-                              "skill_id"
+                              "topic_id"
                             ],
                             "additionalProperties": false
                           },
@@ -2191,7 +2305,7 @@
                             "minimum": 1,
                             "maximum": 100
                           },
-                          "skill_id": {
+                          "topic_id": {
                             "type": "string",
                             "format": "uuid"
                           },
@@ -2226,6 +2340,44 @@
                             },
                             "minItems": 1,
                             "maxItems": 5
+                          },
+                          "sources": {
+                            "type": "array",
+                            "items": {
+                              "type": "object",
+                              "properties": {
+                                "document_id": {
+                                  "type": "string",
+                                  "format": "uuid"
+                                },
+                                "chunk_id": {
+                                  "type": "string",
+                                  "format": "uuid"
+                                },
+                                "page": {
+                                  "type": "integer",
+                                  "minimum": 1,
+                                  "maximum": 100000
+                                },
+                                "text": {
+                                  "type": "string",
+                                  "minLength": 1,
+                                  "maxLength": 2000
+                                }
+                              },
+                              "required": [
+                                "text"
+                              ],
+                              "additionalProperties": false
+                            },
+                            "minItems": 1,
+                            "maxItems": 5
+                          },
+                          "origin": {
+                            "enum": [
+                              "generated"
+                            ],
+                            "description": "Left out for a question the teacher wrote."
                           }
                         },
                         "required": [
@@ -2236,7 +2388,7 @@
                           "answer",
                           "tolerance",
                           "points",
-                          "skill_id"
+                          "topic_id"
                         ],
                         "additionalProperties": false
                       },
@@ -2714,7 +2866,7 @@
                           "minimum": 1,
                           "maximum": 100
                         },
-                        "skill_id": {
+                        "topic_id": {
                           "type": "string",
                           "format": "uuid"
                         },
@@ -2749,12 +2901,50 @@
                           },
                           "minItems": 1,
                           "maxItems": 5
+                        },
+                        "sources": {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "properties": {
+                              "document_id": {
+                                "type": "string",
+                                "format": "uuid"
+                              },
+                              "chunk_id": {
+                                "type": "string",
+                                "format": "uuid"
+                              },
+                              "page": {
+                                "type": "integer",
+                                "minimum": 1,
+                                "maximum": 100000
+                              },
+                              "text": {
+                                "type": "string",
+                                "minLength": 1,
+                                "maxLength": 2000
+                              }
+                            },
+                            "required": [
+                              "text"
+                            ],
+                            "additionalProperties": false
+                          },
+                          "minItems": 1,
+                          "maxItems": 5
+                        },
+                        "origin": {
+                          "enum": [
+                            "generated"
+                          ],
+                          "description": "Left out for a question the teacher wrote."
                         }
                       },
                       "required": [
                         "prompt",
                         "type",
-                        "skill_id"
+                        "topic_id"
                       ],
                       "additionalProperties": false
                     },
@@ -3239,7 +3429,7 @@
                             "minimum": 1,
                             "maximum": 100
                           },
-                          "skill_id": {
+                          "topic_id": {
                             "type": "string",
                             "format": "uuid"
                           },
@@ -3274,6 +3464,44 @@
                             },
                             "minItems": 1,
                             "maxItems": 5
+                          },
+                          "sources": {
+                            "type": "array",
+                            "items": {
+                              "type": "object",
+                              "properties": {
+                                "document_id": {
+                                  "type": "string",
+                                  "format": "uuid"
+                                },
+                                "chunk_id": {
+                                  "type": "string",
+                                  "format": "uuid"
+                                },
+                                "page": {
+                                  "type": "integer",
+                                  "minimum": 1,
+                                  "maximum": 100000
+                                },
+                                "text": {
+                                  "type": "string",
+                                  "minLength": 1,
+                                  "maxLength": 2000
+                                }
+                              },
+                              "required": [
+                                "text"
+                              ],
+                              "additionalProperties": false
+                            },
+                            "minItems": 1,
+                            "maxItems": 5
+                          },
+                          "origin": {
+                            "enum": [
+                              "generated"
+                            ],
+                            "description": "Left out for a question the teacher wrote."
                           }
                         },
                         "required": [
@@ -3284,7 +3512,7 @@
                           "answer",
                           "tolerance",
                           "points",
-                          "skill_id"
+                          "topic_id"
                         ],
                         "additionalProperties": false
                       },

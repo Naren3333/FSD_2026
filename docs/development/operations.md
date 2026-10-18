@@ -30,13 +30,23 @@ A manual-release assessment's finalized grades reach students, and Analytics, on
 
 Run `docker compose up -d --build`: `kafka-init` creates `assessment.submitted.v3` and its `.dlq`, and Grading starts a third submission consumer (group `grading-submitted-v3`). No migration and no `.env` change. Deploy Grading before or with Assessment: Assessment writes v3 only, and an older Grading does not read it, so submissions would wait on the topic until Grading is upgraded.
 
+## Question generation (ADR 0006)
+
+An existing local setup needs one upgrade: `python scripts/upgrade_local.py` adds `QUESTION_GENERATION_AGENT_CLIENT_SECRET` to `.env` and, with the stack up, creates the `question-generation-agent` client in Keycloak (its service account gets `ai-client`). Then `docker compose up -d --build` and `docker compose restart kong` (new `/api/question-generation` route). The agent will not start without the secret, so when the stack is down the script adds the secret and stops; start the stack, run the script again, then `docker compose restart question-generation-agent`.
+
+The agent stores nothing. Its log line `generated` records how many questions were requested, returned and dropped by reason; `guidance rejected` records why drafted guidance was refused. `422 INSUFFICIENT_SOURCE` means the best passage of the chosen documents scored below `RELEVANCE_FLOOR` (default 0.3, set on the `question-generation-agent` service); lower it only after checking real documents. Without a Voyage key, or when reranking times out, search falls back to unscored order, which the floor cannot check, so the agent answers `503 RERANK_UNAVAILABLE` before any model call, as the chatbot does.
+
+## Test topics in the curriculum
+
+`scripts/integration.py` and the browser tests create topics as the local teacher and delete them when they finish, passed or failed, straight from Curriculum's database (`local_stack.delete_topics`; the browser tests run the same statement). Runs before 2026-10-17 left theirs behind: `python scripts/delete_test_topics.py` lists them and `--apply` deletes them. It matches only the test names exactly (browser test names end in a 13-digit timestamp, and the older "Browser skill" and "Testing skill" names are matched too); a test classroom that used one shows its id instead. Teachers archive their own topics from the Curriculum page, which only hides them. The curriculum lists at most 200 active topics, so leftovers could otherwise push real topics out of the list.
+
 ## Test students
 
 `python scripts/seed_students.py` adds thirty local test students (aisha.rahman, ben.tan and so on) to the Keycloak realm and signs each in once so a teacher can enroll them by username. They share one generated password, printed at the end and kept in `.local/seed-students.json`. Re-running keeps them and their password.
 
 ## Health and logs
 
-Each application exposes `/health/live` and `/health/ready` on its private port 8080. Persistent apps check PostgreSQL; Content also checks the document bucket; Grading marks readiness unavailable after its consumer stops; Analytics and the chatbot check only their database, because their consumers restart themselves and a broker outage only delays new evidence or purges (watch for `consumer_stopped_uncommitted` and `consumer_restarting` in their logs). The two AI placeholders (question generation and performance interpretation) need only valid authentication configuration; the chatbot also checks its database. ai-core's readiness reports whether the OpenAI and Voyage keys are set, without calling either (a paid probe on every check would cost money and latency); a provider outage shows per request as `502 AI_PROVIDER_FAILED`.
+Each application exposes `/health/live` and `/health/ready` on its private port 8080. Persistent apps check PostgreSQL; Content also checks the document bucket; Grading marks readiness unavailable after its consumer stops; Analytics and the chatbot check only their database, because their consumers restart themselves and a broker outage only delays new evidence or purges (watch for `consumer_stopped_uncommitted` and `consumer_restarting` in their logs). Question generation and the performance-interpretation placeholder need only valid authentication configuration; the chatbot also checks its database. ai-core's readiness reports whether the OpenAI and Voyage keys are set, without calling either (a paid probe on every check would cost money and latency); a provider outage shows per request as `502 AI_PROVIDER_FAILED`.
 
 ai-core keeps one disk cache, the `ai-core-cache` volume: vision-model answers keyed by page content, model and prompt version, so re-indexing an unchanged document makes no vision calls. It holds no business records and can be deleted at any time; the next ingest repopulates it at the cost of new model calls. A readiness probe is a dependency snapshot, not proof of fresh analytical results.
 

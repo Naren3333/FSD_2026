@@ -27,7 +27,7 @@ The owner decided to:
 - **Service accounts:** Content's indexer and the chatbot call ai-core with Keycloak client-credentials tokens (`content-indexer`, `question-chatbot-agent`) that carry `ai-client` and the audience.
   - Locally, their `org_id` is a fixed claim. Multi-organization deployments need delegated identity (token exchange) before this is production-ready.
 - **Identity:** the `X-Principal` header is removed. Identity always comes from verified JWTs.
-- **Unchanged:** question-generation-agent and student-performance-agent keep returning 501 until their own implementation is authorized.
+- **Unchanged:** question-generation-agent and student-performance-agent keep returning 501 until their own implementation is authorized. (Question generation was authorized in ADR 0006.)
 
 ## Consequences
 

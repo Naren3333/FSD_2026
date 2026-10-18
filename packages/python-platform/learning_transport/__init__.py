@@ -11,6 +11,7 @@ from learning_transport.errors import (
     UpstreamError,
     failure,
     unavailable,
+    upstream_error,
 )
 from learning_transport.identity import RELATION_STUDENT, RELATION_TEACHER, IdentityClient, require_relation
 from learning_transport.sse import read_events, sse_event
@@ -42,4 +43,5 @@ __all__ = [
     "requires",
     "sse_event",
     "unavailable",
+    "upstream_error",
 ]

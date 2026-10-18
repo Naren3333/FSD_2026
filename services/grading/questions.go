@@ -96,7 +96,7 @@ func (freeResponse) mark(q Question, _ string) (bool, bool, error) {
 // evaluate marks one answer: the question's points when its kind says it is correct, none when wrong, and none
 // yet when it needs the teacher.
 func evaluate(q Question, answer string) (Evidence, error) {
-	e := Evidence{Question: q.ID, Skill: q.Skill, Possible: max(q.Points, 1)}
+	e := Evidence{Question: q.ID, Topic: q.Topic, Possible: max(q.Points, 1)}
 	kind, ok := questionKinds[q.Type]
 	if !ok {
 		return e, errors.New("unsupported question type")

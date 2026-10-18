@@ -7,7 +7,15 @@ from dataclasses import dataclass
 from typing import Any
 
 import httpx
-from learning_transport import STUDENT, Claims, IdentityClient, ServiceToken, UpstreamError, read_events
+from learning_transport import (
+    STUDENT,
+    Claims,
+    IdentityClient,
+    ServiceToken,
+    UpstreamError,
+    read_events,
+    upstream_error,
+)
 
 from config import Settings
 
@@ -62,7 +70,7 @@ class Services:
         except httpx.HTTPError:
             raise UpstreamError("content", 0) from None
         if resp.status_code != 200:
-            raise _error("content", resp)
+            raise upstream_error("content", resp)
         data = resp.json()
         return data["results"], bool(data.get("rerank_fallback"))
 
@@ -153,14 +161,4 @@ class Services:
         """ai-core's error; a refused token is dropped so the next call fetches a new one."""
         if resp.status_code == 401:
             self.token.reset()
-        return _error("ai-core", resp)
-
-
-def _error(service: str, resp: httpx.Response) -> UpstreamError:
-    """The service's error code and, for AI_SPEND_LIMIT, when the allowance resets."""
-    try:
-        error = resp.json()["error"]
-        code, resets_at = str(error.get("code") or ""), error.get("resets_at")
-    except (ValueError, KeyError, TypeError, AttributeError):
-        code, resets_at = "", None
-    return UpstreamError(service, resp.status_code, code, str(resets_at) if resets_at else None)
+        return upstream_error("ai-core", resp)

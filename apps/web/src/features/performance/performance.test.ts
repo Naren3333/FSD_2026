@@ -21,12 +21,12 @@ const template = (path: string) => readFileSync(new URL(path, import.meta.url), 
 beforeAll(() => TestBed.initTestEnvironment(BrowserTestingModule, platformBrowserTesting()));
 
 const ana: Student = { id: 's1', username: 'ana', display_name: 'Ana Lim' };
-const evidence = (skills: Performance['skills']): Performance => ({
+const evidence = (topics: Performance['topics']): Performance => ({
   student_id: 's1',
   classroom_id: 'c1',
-  evidence_status: skills.length ? 'available' : 'no_finalized_evidence',
+  evidence_status: topics.length ? 'available' : 'no_finalized_evidence',
   interpretation: '',
-  skills,
+  topics,
 });
 
 /** A teacher's performance page for classroom c1, opened from a link to Ana's evidence, whose roster and evidence
@@ -43,7 +43,7 @@ function render(roster: Promise<Student[]>, performance: Promise<Performance>, s
       { provide: AnalyticsApi, useValue: { performance: () => performance } },
       {
         provide: CurriculumNames,
-        useValue: { need: () => Promise.resolve(), skillName: (id: string) => (id === 'k1' ? 'Halves' : '') },
+        useValue: { need: () => Promise.resolve(), topicName: (id: string) => (id === 'k1' ? 'Halves' : '') },
       },
       { provide: ClassroomContext, useValue: { classroomId: signal('c1') } },
       { provide: ActivatedRoute, useValue: { queryParamMap: of(convertToParamMap({ student })) } },
@@ -86,7 +86,7 @@ describe('performance states', () => {
     expect(page.text()).toContain('Identity is unavailable.');
   });
 
-  it('shows the linked student’s evidence loading, then their skills', async () => {
+  it('shows the linked student’s evidence loading, then their topics', async () => {
     let resolve!: (p: Performance) => void;
     const page = render(Promise.resolve([ana]), new Promise((yes) => (resolve = yes)));
     await page.settle();
@@ -94,7 +94,7 @@ describe('performance states', () => {
     resolve(
       evidence([
         {
-          skill_id: 'k1',
+          topic_id: 'k1',
           attempted: 6,
           correct: 2,
           observed_accuracy: 2 / 6,

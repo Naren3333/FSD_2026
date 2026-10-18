@@ -44,7 +44,7 @@ describe('rubric levels', () => {
 describe('question form', () => {
   it('validates only the fields its type uses', () => {
     const q = questionForm();
-    q.patchValue({ prompt: 'Gas?', skill_id: 's1', type: 'short_answer' });
+    q.patchValue({ prompt: 'Gas?', topic_id: 's1', type: 'short_answer' });
     expect(q.controls.answer.enabled).toBe(false);
     expect(q.valid).toBe(false); // no accepted answers yet
     q.controls.accepted.setValue('oxygen\nO2');
@@ -62,13 +62,13 @@ describe('assessment conversion', () => {
     const [short] = form.controls.questions.controls;
     short.patchValue({
       prompt: 'Gas?',
-      skill_id: 's1',
+      topic_id: 's1',
       type: 'short_answer',
       accepted: 'oxygen\n',
       points: 2,
     });
     const free = questionForm();
-    free.patchValue({ prompt: 'Explain.', skill_id: 's1', type: 'free_response', max_length: 800 });
+    free.patchValue({ prompt: 'Explain.', topic_id: 's1', type: 'free_response', max_length: 800 });
     free.controls.criteria.at(0).patchValue({ title: 'Accuracy', levels: '0: Wrong\n4: Right' });
     form.controls.questions.push(free);
     form.controls.ai_marking.setValue(true);
@@ -78,7 +78,7 @@ describe('assessment conversion', () => {
     expect(sent.questions[0]).toEqual({
       prompt: 'Gas?',
       type: 'short_answer',
-      skill_id: 's1',
+      topic_id: 's1',
       options: [],
       answer: '',
       tolerance: '',
@@ -111,7 +111,7 @@ describe('assessment conversion', () => {
     form.controls.title.setValue('Plants');
     const [q] = form.controls.questions.controls;
     const passage = { document_id: 'd1', chunk_id: 'k1', page: 2, text: 'Accept O2.' };
-    q.patchValue({ prompt: 'Gas?', skill_id: 's1', type: 'short_answer', accepted: 'oxygen' });
+    q.patchValue({ prompt: 'Gas?', topic_id: 's1', type: 'short_answer', accepted: 'oxygen' });
     q.controls.marking_scheme.setValue([passage]);
     expect(toAssessment(form, 'c1', 'draft').questions[0].marking_scheme).toEqual([passage]);
     // A numerical question keeps no passages, even ones added while it was a short answer.
@@ -161,7 +161,7 @@ describe('assessment conversion', () => {
       type: 'free_response',
       options: [],
       points: 3,
-      skill_id: 's1',
+      topic_id: 's1',
       max_length: 900,
       marking_scheme: [{ text: 'Clarity needs an example.' }],
       rubric: {
@@ -211,5 +211,28 @@ describe('dates', () => {
     expect(dueState('2026-10-17T00:00:00Z', 'reject', now)).toBe('upcoming');
     expect(dueState('2026-10-15T00:00:00Z', 'accept_flagged', now)).toBe('late');
     expect(dueState('2026-10-15T00:00:00Z', 'reject', now)).toBe('closed');
+  });
+});
+
+describe('generated questions', () => {
+  it('keep their sources and origin through the editor', () => {
+    const form = assessmentForm();
+    const generated: Omit<Question, 'id'> = {
+      prompt: 'Which test checks one function?',
+      type: 'multiple_choice',
+      options: ['Unit', 'End-to-end'],
+      answer: 'Unit',
+      points: 1,
+      topic_id: 's1',
+      sources: [{ document_id: 'd1', chunk_id: 'k1', page: 2, text: 'A unit test checks one function.' }],
+      origin: 'generated',
+    };
+    form.controls.questions.setControl(0, questionForm(generated));
+    form.controls.questions.push(questionForm());
+    const [kept, written] = toAssessment(form, 'c1', 'draft').questions;
+    expect(kept.origin).toBe('generated');
+    expect(kept.sources).toEqual(generated.sources);
+    expect(written).not.toHaveProperty('origin');
+    expect(written).not.toHaveProperty('sources');
   });
 });

@@ -8,7 +8,7 @@ const rubricQuestion: Question = {
   type: 'free_response',
   options: [],
   points: 5,
-  skill_id: 's1',
+  topic_id: 's1',
   rubric: {
     criteria: [
       {
@@ -31,9 +31,9 @@ const rubricQuestion: Question = {
   },
 };
 const evidence: Evidence[] = [
-  { question_id: 'auto', skill_id: 's1', correct: true, awarded: 1, possible: 1, marked_by: 'auto' },
-  { question_id: 'short', skill_id: 's1', correct: false, awarded: 0, possible: 2, needs_marking: true },
-  { question_id: 'free', skill_id: 's1', correct: false, awarded: 0, possible: 5, needs_marking: true },
+  { question_id: 'auto', topic_id: 's1', correct: true, awarded: 1, possible: 1, marked_by: 'auto' },
+  { question_id: 'short', topic_id: 's1', correct: false, awarded: 0, possible: 2, needs_marking: true },
+  { question_id: 'free', topic_id: 's1', correct: false, awarded: 0, possible: 5, needs_marking: true },
 ];
 
 describe('marking form', () => {

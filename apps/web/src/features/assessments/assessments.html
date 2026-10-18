@@ -69,7 +69,7 @@
             !classroomId()
               ? 'Select a classroom to continue.'
               : session.isTeacher()
-                ? 'No assessments yet. Create one using a curriculum skill.'
+                ? 'No assessments yet. Create one using a curriculum topic.'
                 : 'No assessments yet. Your teacher has not published any.'
           }}
         </p>
@@ -192,10 +192,31 @@
         >
           <input appFieldControl id="assessment-title" formControlName="title" maxlength="160" />
         </app-field>
+        <app-question-generator
+          [classroomId]="classroomId()"
+          [documents]="schemeDocs"
+          [existingPrompts]="prompts()"
+          [room]="questions.length < maxQuestions"
+          [disabled]="state.busy()"
+          (keep)="addGenerated($event)"
+        />
 
         @for (question of questions.controls; track question; let i = $index) {
           <fieldset class="question-set" [formGroup]="question">
             <legend>Question {{ i + 1 }}</legend>
+            @if (question.controls.origin.value === 'generated') {
+              <details class="scheme-used">
+                <summary>
+                  AI-generated from {{ question.controls.sources.value.length }}
+                  {{ question.controls.sources.value.length === 1 ? 'passage' : 'passages' }} of your
+                  materials
+                </summary>
+                @for (excerpt of question.controls.sources.value; track $index) {
+                  <p class="caption">{{ sourceOf(excerpt) }}</p>
+                  <p class="passage">{{ excerpt.text }}</p>
+                }
+              </details>
+            }
             <app-field
               [controlId]="'question-' + i + '-prompt'"
               label="Question"
@@ -251,14 +272,14 @@
               }
             </div>
             <app-field
-              [controlId]="'question-' + i + '-skill'"
-              label="Curriculum skill"
-              [invalid]="question.controls.skill_id.touched && question.controls.skill_id.invalid"
+              [controlId]="'question-' + i + '-topic'"
+              label="Curriculum topic"
+              [invalid]="question.controls.topic_id.touched && question.controls.topic_id.invalid"
             >
-              <select appFieldControl [id]="'question-' + i + '-skill'" formControlName="skill_id">
-                <option value="">Choose a skill</option>
-                @for (skill of skills(); track skill.id) {
-                  <option [value]="skill.id">{{ skill.name }}</option>
+              <select appFieldControl [id]="'question-' + i + '-topic'" formControlName="topic_id">
+                <option value="">Choose a topic</option>
+                @for (topic of topics(); track topic.id) {
+                  <option [value]="topic.id">{{ topic.name }}</option>
                 }
               </select>
             </app-field>
@@ -411,6 +432,14 @@
               }
             }
             @if (usesScheme(question.controls.type.value)) {
+              <app-marking-guidance
+                [question]="question"
+                [index]="i"
+                [assessmentPassages]="schemePassages()"
+                [classroomId]="classroomId()"
+                [documents]="schemeDocs"
+                [disabled]="state.busy()"
+              />
               <app-scheme-picker
                 [control]="question.controls.marking_scheme"
                 [index]="i"
@@ -426,6 +455,14 @@
               </button>
             }
           </fieldset>
+        }
+        @if (canSuggest()) {
+          <app-scheme-matcher
+            [questions]="questions"
+            [classroomId]="classroomId()"
+            [documents]="schemeDocs"
+            [disabled]="state.busy()"
+          />
         }
         @if (questions.hasError('schemeTotal')) {
           <p class="error" role="alert">
@@ -493,7 +530,7 @@
             </button>
           }
         </div>
-        <app-section-state [section]="skillsState" loading="Loading curriculum skills…" />
+        <app-section-state [section]="topicsState" loading="Loading curriculum topics…" />
       </form>
     </section>
   }

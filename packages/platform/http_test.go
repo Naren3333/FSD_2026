@@ -144,7 +144,7 @@ func TestForwardCarriesTheCallersTokenAndCorrelation(t *testing.T) {
 	r := httptest.NewRequest(http.MethodPost, "/", nil)
 	r.Header.Set("Authorization", "Bearer caller")
 	r = r.WithContext(context.WithValue(r.Context(), correlationKey, "corr-1"))
-	req, err := Forward(r, http.MethodGet, "http://curriculum/v1/nodes/x")
+	req, err := Forward(r, http.MethodGet, "http://curriculum/v1/topics/x")
 	if err != nil || req.Header.Get("Authorization") != "Bearer caller" || req.Header.Get("X-Correlation-ID") != "corr-1" || req.Method != http.MethodGet {
 		t.Fatalf("%v %v", err, req)
 	}

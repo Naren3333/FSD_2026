@@ -1,19 +1,20 @@
 .git
-.env
+**/.env
 .local
-.venv
+**/.venv
 **/node_modules
 **/dist
 **/__pycache__
 **/.pytest_cache
 **/.mypy_cache
 **/.ruff_cache
+**/*.egg-info
 **/*.exe
 **/.angular
 
-# Go binaries
-services/*/identity
-services/*/curriculum
-services/*/content
-services/*/assessment
-services/*/grading
+# Go binaries that `go build` writes next to each service
+services/identity/identity
+services/curriculum/curriculum
+services/content/content
+services/assessment/assessment
+services/grading/grading

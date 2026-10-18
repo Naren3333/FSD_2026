@@ -73,15 +73,15 @@
   </section>
 
   <section class="panel dashboard-panel" aria-labelledby="practise-title">
-    <h3 id="practise-title">Skills to practise</h3>
-    <app-section-state [section]="performance" loading="Loading your skills…" />
+    <h3 id="practise-title">Topics to practise</h3>
+    <app-section-state [section]="performance" loading="Loading your topics…" />
     @if (performance.ready()) {
-      @for (metric of practise(); track metric.skill_id) {
+      @for (metric of practise(); track metric.topic_id) {
         <article class="record roster-row">
-          @if (skill(metric.skill_id); as name) {
+          @if (topic(metric.topic_id); as name) {
             <strong>{{ name }}</strong>
           } @else {
-            <strong class="identifier">{{ metric.skill_id }}</strong>
+            <strong class="identifier">{{ metric.topic_id }}</strong>
           }
           <span
             >{{ metric.correct }} of {{ metric.attempted }} correct ({{
@@ -92,14 +92,14 @@
       } @empty {
         <p class="empty">
           {{
-            performance.value()?.skills?.length
-              ? 'No skill needs practice right now.'
+            performance.value()?.topics?.length
+              ? 'No topic needs practice right now.'
               : 'No finalized grades yet, so there is nothing to suggest.'
           }}
         </p>
       }
       <p class="caption">
-        A skill needs practice after five or more questions under 60% correct. This is a reporting threshold,
+        A topic needs practice after five or more questions under 60% correct. This is a reporting threshold,
         not a mastery measure. <a routerLink="/performance">See your progress</a>
       </p>
     }

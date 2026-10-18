@@ -194,7 +194,7 @@
           },
           "performance_summary": {
             "items": {
-              "$ref": "#/components/schemas/SkillSummary"
+              "$ref": "#/components/schemas/TopicSummary"
             },
             "type": "array",
             "maxItems": 100,
@@ -211,7 +211,7 @@
             "minItems": 1,
             "title": "Evidence Ids"
           },
-          "skill_ids": {
+          "topic_ids": {
             "items": {
               "type": "string",
               "format": "uuid"
@@ -219,7 +219,7 @@
             "type": "array",
             "maxItems": 100,
             "minItems": 1,
-            "title": "Skill Ids"
+            "title": "Topic Ids"
           }
         },
         "additionalProperties": false,
@@ -229,7 +229,7 @@
           "classroom_id",
           "performance_summary",
           "evidence_ids",
-          "skill_ids"
+          "topic_ids"
         ],
         "title": "RequestContract"
       },
@@ -256,13 +256,13 @@
             "type": "array",
             "title": "Suggested Interventions"
           },
-          "recommended_skill_ids": {
+          "recommended_topic_ids": {
             "items": {
               "type": "string",
               "format": "uuid"
             },
             "type": "array",
-            "title": "Recommended Skill Ids"
+            "title": "Recommended Topic Ids"
           }
         },
         "additionalProperties": false,
@@ -271,16 +271,16 @@
           "observations",
           "possible_misconceptions",
           "suggested_interventions",
-          "recommended_skill_ids"
+          "recommended_topic_ids"
         ],
         "title": "ResponseContract"
       },
-      "SkillSummary": {
+      "TopicSummary": {
         "properties": {
-          "skill_id": {
+          "topic_id": {
             "type": "string",
             "format": "uuid",
-            "title": "Skill Id"
+            "title": "Topic Id"
           },
           "attempted": {
             "type": "integer",
@@ -296,11 +296,11 @@
         "additionalProperties": false,
         "type": "object",
         "required": [
-          "skill_id",
+          "topic_id",
           "attempted",
           "correct"
         ],
-        "title": "SkillSummary"
+        "title": "TopicSummary"
       },
       "ValidationError": {
         "properties": {

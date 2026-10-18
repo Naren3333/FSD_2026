@@ -9,29 +9,29 @@ import (
 	"sync"
 )
 
-type skillStatus int
+type topicStatus int
 
 const (
-	skillValid skillStatus = iota
-	skillInvalid
-	skillUnavailable
+	topicValid topicStatus = iota
+	topicInvalid
+	topicUnavailable
 )
 
-// skills checks that a node is a skill in the caller's curriculum.
-type skills interface {
-	check(r *http.Request, skill string) skillStatus
+// topics checks that a topic exists in the caller's curriculum.
+type topics interface {
+	check(r *http.Request, topic string) topicStatus
 }
 
-// checkAll checks every skill at once and reports the worst answer: unavailable if Curriculum couldn't answer for
-// any of them, otherwise invalid if any is not a skill.
-func checkAll(r *http.Request, s skills, ids []string) skillStatus {
-	statuses := make([]skillStatus, len(ids))
+// checkAll checks every topic at once and reports the worst answer: unavailable if Curriculum couldn't answer for
+// any of them, otherwise invalid if any is not a topic.
+func checkAll(r *http.Request, s topics, ids []string) topicStatus {
+	statuses := make([]topicStatus, len(ids))
 	var wg sync.WaitGroup
 	for i, id := range ids {
 		wg.Go(func() { statuses[i] = s.check(r, id) })
 	}
 	wg.Wait()
-	worst := skillValid
+	worst := topicValid
 	for _, status := range statuses {
 		worst = max(worst, status)
 	}
@@ -44,35 +44,31 @@ type curriculum struct {
 	client *http.Client
 }
 
-// check asks the curriculum service whether the node exists and is a skill. A node Curriculum says is missing or
-// refuses (4xx) is invalid; Curriculum failing (5xx) or answering with a body it cannot read is unavailable, so an
-// outage is never reported to the teacher as an invalid skill.
-func (c curriculum) check(r *http.Request, skill string) skillStatus {
-	req, err := platform.Forward(r, http.MethodGet, c.base+"/v1/nodes/"+skill)
+// check asks the curriculum service whether the topic exists in the caller's curriculum: a 200 with the topic is
+// valid. A topic Curriculum says is missing or refuses (4xx) is invalid; Curriculum failing (5xx) or answering with
+// a body it cannot read is unavailable, so an outage is never reported to the teacher as an invalid topic.
+func (c curriculum) check(r *http.Request, topic string) topicStatus {
+	req, err := platform.Forward(r, http.MethodGet, c.base+"/v1/topics/"+topic)
 	if err != nil {
 		slog.Error("curriculum_request_invalid", "error", err.Error())
-		return skillUnavailable
+		return topicUnavailable
 	}
 	res, err := c.client.Do(req)
 	if err != nil {
-		return skillUnavailable
+		return topicUnavailable
 	}
 	defer res.Body.Close()
 	switch {
 	case res.StatusCode >= http.StatusInternalServerError:
-		return skillUnavailable
+		return topicUnavailable
 	case res.StatusCode != http.StatusOK:
-		return skillInvalid
+		return topicInvalid
 	}
-	var node struct {
-		ID   string `json:"id"`
-		Kind string `json:"kind"`
+	var found struct {
+		ID string `json:"id"`
 	}
-	if json.NewDecoder(io.LimitReader(res.Body, 64<<10)).Decode(&node) != nil {
-		return skillUnavailable
+	if json.NewDecoder(io.LimitReader(res.Body, 64<<10)).Decode(&found) != nil || found.ID == "" {
+		return topicUnavailable
 	}
-	if node.Kind != "skill" {
-		return skillInvalid
-	}
-	return skillValid
+	return topicValid
 }

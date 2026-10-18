@@ -1,4 +1,4 @@
-import type { Assessment, Evaluation, Evidence, Node, Student } from '../api/models';
+import type { Assessment, Evaluation, Evidence, Student, Topic } from '../api/models';
 
 /** Turns the ids the grading APIs return into the names people recognise. Unknown ids stay ids. */
 
@@ -12,9 +12,9 @@ export function studentNames(roster: readonly Student[]): Map<string, string> {
   return new Map(roster.filter((s) => studentName(s)).map((s) => [s.id, studentName(s)]));
 }
 
-/** Each curriculum skill's name by id. */
-export function skillNames(nodes: readonly Node[]): Map<string, string> {
-  return new Map(nodes.filter((n) => n.kind === 'skill').map((n) => [n.id, n.name]));
+/** Each curriculum topic's name by id. */
+export function topicNames(topics: readonly Topic[]): Map<string, string> {
+  return new Map(topics.map((t) => [t.id, t.name]));
 }
 
 /** The prompt of a question in its assessment, or '' when the assessment or question is unknown. */
