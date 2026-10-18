@@ -3,15 +3,14 @@ startup wait."""
 
 import argparse
 import json
-import os
 import subprocess
 import time
 import urllib.error
 import urllib.request
 from collections.abc import Callable
-from pathlib import Path
 
-ROOT = Path(__file__).resolve().parents[1]
+from local_stack import KEYCLOAK_PORT, KONG_PORT, ROOT
+
 TIMEOUT = 180  # seconds for both phases together, unless --timeout says otherwise
 SERVICES = [
     "identity",
@@ -29,8 +28,8 @@ SERVICES = [
 # starts last and needs a few seconds to listen after its container starts, so the applications being ready says
 # nothing about it.
 PUBLIC = {
-    "kong": (f"http://127.0.0.1:{os.environ.get('KONG_PORT') or 8000}/api/identity/classrooms", 401),
-    "keycloak": (f"http://127.0.0.1:{os.environ.get('KEYCLOAK_PORT') or 8081}/realms/learning", 200),
+    "kong": (f"http://127.0.0.1:{KONG_PORT}/api/identity/classrooms", 401),
+    "keycloak": (f"http://127.0.0.1:{KEYCLOAK_PORT}/realms/learning", 200),
 }
 # Runs inside the analytics container, on the private network, and prints each service's readiness status.
 PROBE = f"""

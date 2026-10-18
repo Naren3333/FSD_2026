@@ -44,11 +44,11 @@
           </li>
         } @empty {
           <li class="empty">
-            {{
-              classroomId()
-                ? 'No conversations yet. Ask a question to start one.'
-                : 'Select a classroom to ask about its materials.'
-            }}
+            @if (classroomId()) {
+              No conversations yet. Ask a question to start one.
+            } @else {
+              <app-no-classroom>Select a classroom to ask about its materials.</app-no-classroom>
+            }
           </li>
         }
       </ul>
@@ -188,11 +188,11 @@
           </li>
         } @empty {
           <li class="empty">
-            {{
-              classroomId()
-                ? 'Ask about the teaching materials in this classroom, for example a definition or a worked step.'
-                : 'Select a classroom first.'
-            }}
+            @if (classroomId()) {
+              Ask about the teaching materials in this classroom, for example a definition or a worked step.
+            } @else if (classroomsKnown()) {
+              Select a classroom first.
+            }
           </li>
         }
       </ol>

@@ -157,7 +157,7 @@ func (m *memoryStore) listProgress(_ context.Context, _, _ string, enrolled []st
 	return result, nil
 }
 
-func (m *memoryStore) insertSubmission(_ context.Context, v Assessment, sub Submission) (bool, bool, error) {
+func (m *memoryStore) insertSubmission(_ context.Context, v Assessment, sub Submission) (inserted, late bool, err error) {
 	current, ok := m.assessments[v.ID]
 	switch {
 	case !ok:
@@ -176,6 +176,14 @@ func (m *memoryStore) insertSubmission(_ context.Context, v Assessment, sub Subm
 	m.events = append(m.events, submittedEvent(v, sub))
 	delete(m.saved, key)
 	return true, sub.Late, nil
+}
+
+func (m *memoryStore) findSubmission(_ context.Context, assessment, student string) (OwnSubmission, error) {
+	v, ok := m.submitted[assessment+"/"+student]
+	if !ok {
+		return OwnSubmission{}, platform.ErrNotFound
+	}
+	return OwnSubmission{Answers: v.Answers, SubmittedAt: v.SubmittedAt, Late: v.Late}, nil
 }
 
 func (m *memoryStore) findSaved(_ context.Context, assessment, student string) (SavedAnswers, error) {
@@ -246,6 +254,7 @@ func TestCreateChecksTheTeacherAndEveryTopic(t *testing.T) {
 		{platform.RelationStudent, topicValid, http.StatusForbidden},
 		{platform.RelationTeacher, topicInvalid, http.StatusUnprocessableEntity},
 		{platform.RelationTeacher, topicUnavailable, http.StatusServiceUnavailable},
+		{platform.RelationTeacher, topicUnauthenticated, http.StatusUnauthorized},
 	}
 	for _, tc := range cases {
 		s, _ := newServer(tc.relation, tc.topic)
@@ -539,6 +548,34 @@ func TestSavedWorkUntilSubmission(t *testing.T) {
 	)
 }
 
+func TestOnlyTheSubmittingStudentReadsTheirSubmission(t *testing.T) {
+	s, v := created(t, platform.RelationStudent)
+	path := "/v1/assessments/" + v.ID + "/submission"
+	answer := `{"answers":{"` + v.Questions[0].ID + `":"0.5"}}`
+	run(t,
+		step{"read before submitting", s, http.MethodGet, path, "", "student", http.StatusNotFound, "", ""},
+		step{"submit", s, http.MethodPost, "/v1/assessments/" + v.ID + "/submissions", answer, "student", http.StatusCreated, "", ""},
+		// The student's own answer, never the answer key ("1").
+		step{"read", s, http.MethodGet, path, "", "student", http.StatusOK, `{"answers":{"` + v.Questions[0].ID + `":"0.5"},"submitted_at":"`, `"1"`},
+		step{"read as a teacher", s, http.MethodGet, path, "", "teacher", http.StatusForbidden, "", ""},
+		step{"an unknown assessment", s, http.MethodGet, "/v1/assessments/" + room + "/submission", "", "student", http.StatusNotFound, "", ""},
+	)
+	if w := call(t, s, http.MethodGet, path, "", "student"); !strings.Contains(w.Body.String(), `"late":false`) || strings.Contains(w.Body.String(), `"answer":`) {
+		t.Fatalf("%s", w.Body.String())
+	}
+	// Another student of the classroom, who has not submitted, reads nothing of it.
+	other := platformtest.ServeRequest(s.routes, platformtest.Request(platformtest.Claims("student-2", "student"), http.MethodGet, path, ""))
+	if other.Code != http.StatusNotFound {
+		t.Fatalf("another student: %d %s", other.Code, other.Body.String())
+	}
+	// Nor does a student who is not in the classroom.
+	outside := s
+	outside.access = platformtest.Access("")
+	if w := call(t, outside, http.MethodGet, path, "", "student"); w.Code != http.StatusForbidden {
+		t.Fatalf("a student outside the classroom: %d", w.Code)
+	}
+}
+
 func TestMissingAnswersAreRefused(t *testing.T) {
 	s, v := created(t, platform.RelationStudent)
 	store := s.store.(*memoryStore)
@@ -785,7 +822,7 @@ func TestTheCreatorPaysEvenAfterAnotherTeacherEdits(t *testing.T) {
 }
 
 func TestAnUpdateChecksItsTopics(t *testing.T) {
-	for topics, want := range map[topicStatus]int{topicInvalid: http.StatusUnprocessableEntity, topicUnavailable: http.StatusServiceUnavailable} {
+	for topics, want := range map[topicStatus]int{topicInvalid: http.StatusUnprocessableEntity, topicUnavailable: http.StatusServiceUnavailable, topicUnauthenticated: http.StatusUnauthorized} {
 		s, store := newServer(platform.RelationTeacher, topicValid)
 		v := post(t, s, draftQuiz)
 		s.topics = fixedTopics(topics)

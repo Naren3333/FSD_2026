@@ -38,6 +38,7 @@ function render(
   classroomId = 'c1',
   original: (id: string) => Promise<string> = () => Promise.resolve('blob:pdf'),
   remove: (id: string) => Promise<void> = () => Promise.resolve(),
+  classroomsKnown = true,
 ) {
   TestBed.resetTestingModule();
   TestBed.configureTestingModule({
@@ -47,7 +48,15 @@ function render(
         useValue: { isTeacher: signal(role === 'teacher'), isStudent: signal(role === 'student') },
       },
       { provide: ContentApi, useValue: { documents: () => documents, original, remove } },
-      { provide: ClassroomContext, useValue: { classroomId: signal(classroomId) } },
+      {
+        provide: ClassroomContext,
+        useValue: {
+          classroomId: signal(classroomId),
+          known: signal(classroomsKnown),
+          loading: signal(!classroomsKnown),
+          error: signal(''),
+        },
+      },
     ],
   });
   TestBed.overrideComponent(MaterialsComponent, { set: { template: template('./materials.html') } });
@@ -87,6 +96,13 @@ describe('materials states', () => {
     const page = render(Promise.resolve([]), 'teacher', '');
     await page.settle();
     expect(page.library()).toContain('Select a classroom to view its materials.');
+  });
+
+  it('says the classrooms are loading, not that none is chosen, until they are known', async () => {
+    const page = render(Promise.resolve([]), 'teacher', '', undefined, undefined, false);
+    await page.settle();
+    expect(page.library()).toContain('Loading your classrooms…');
+    expect(page.library()).not.toContain('Select a classroom');
   });
 
   it('shows the failure, not the empty text, when the list fails', async () => {
@@ -255,6 +271,32 @@ describe('deleting a material', () => {
     expect(status).toContain('The library could not be refreshed. Content is unavailable.');
     expect(page.library()).toContain('Fractions notes');
     expect(page.library()).not.toContain('Old notes');
+  });
+
+  it('keeps refreshing indexing status when the list cannot be re-read after a delete', async () => {
+    const indexing = doc({ id: 'd3', title: 'New notes', status: 'indexing' });
+    const page = render(Promise.resolve([indexing, doc({ id: 'd2', title: 'Old notes' })]));
+    await page.settle();
+    const component = page.fixture.componentInstance;
+    expect(component.polling()).toBe(true);
+    const content = TestBed.inject(ContentApi) as unknown as { documents: () => Promise<DocumentRecord[]> };
+    content.documents = () => Promise.reject(new Error('Content is unavailable.'));
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    try {
+      component.confirmDelete(doc({ id: 'd2', title: 'Old notes' }));
+      component.remove();
+      await vi.waitFor(() =>
+        expect(component.state.error()).toContain('The library could not be refreshed.'),
+      );
+      const poll = vi.fn(() => Promise.resolve([{ ...indexing, status: 'indexed' as const }]));
+      content.documents = poll;
+      await vi.advanceTimersByTimeAsync(5000);
+      expect(poll).toHaveBeenCalled();
+      expect(component.polling()).toBe(false);
+    } finally {
+      vi.useRealTimers();
+      page.fixture.destroy();
+    }
   });
 
   it('keeps the document and explains when the delete fails', async () => {

@@ -31,7 +31,12 @@ const evidence = (topics: Performance['topics']): Performance => ({
 
 /** A teacher's performance page for classroom c1, opened from a link to Ana's evidence, whose roster and evidence
  * load as given. */
-function render(roster: Promise<Student[]>, performance: Promise<Performance>, student = 's1') {
+function render(
+  roster: Promise<Student[]>,
+  performance: Promise<Performance>,
+  student = 's1',
+  need: () => Promise<void> = () => Promise.resolve(),
+) {
   TestBed.resetTestingModule();
   TestBed.configureTestingModule({
     providers: [
@@ -43,7 +48,7 @@ function render(roster: Promise<Student[]>, performance: Promise<Performance>, s
       { provide: AnalyticsApi, useValue: { performance: () => performance } },
       {
         provide: CurriculumNames,
-        useValue: { need: () => Promise.resolve(), topicName: (id: string) => (id === 'k1' ? 'Halves' : '') },
+        useValue: { need, topicName: (id: string) => (id === 'k1' ? 'Halves' : '') },
       },
       { provide: ClassroomContext, useValue: { classroomId: signal('c1') } },
       { provide: ActivatedRoute, useValue: { queryParamMap: of(convertToParamMap({ student })) } },
@@ -120,5 +125,23 @@ describe('performance states', () => {
     await page.settle();
     expect(page.text()).toContain('Analytics is unavailable.');
     expect(page.text()).not.toContain('No finalized assessment evidence');
+  });
+
+  it('shows the evidence by topic id when the curriculum cannot be read', async () => {
+    const metric = {
+      topic_id: 'k9',
+      attempted: 6,
+      correct: 2,
+      observed_accuracy: 2 / 6,
+      evidence_status: 'observed' as const,
+      weakness_indicator: true,
+    };
+    const page = render(Promise.resolve([ana]), Promise.resolve(evidence([metric])), 's1', () =>
+      Promise.reject(new Error('Curriculum is unavailable.')),
+    );
+    await page.settle();
+    expect(page.text()).toContain('k9');
+    expect(page.text()).toContain('Needs practice');
+    expect(page.text()).not.toContain('Curriculum is unavailable.');
   });
 });

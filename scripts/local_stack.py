@@ -18,12 +18,45 @@ if TYPE_CHECKING:
     import httpx
 
 ROOT = Path(__file__).resolve().parents[1]
-# The published ports, as docker-compose.yml reads them: the development stack's unless the environment names others
-# (scripts/stack_tests.py sets TEST_PORTS for the test stack).
-KONG_PORT = os.environ.get("KONG_PORT") or "8000"
-KEYCLOAK_PORT = os.environ.get("KEYCLOAK_PORT") or "8081"
-BASE = f"http://localhost:{KONG_PORT}/api"
-KEYCLOAK = f"http://localhost:{KEYCLOAK_PORT}"
+
+
+def read_env(path: Path = ROOT / ".env") -> dict[str, str]:
+    """The KEY=value lines of a .env file, read as Compose reads them: blank lines and comments skipped, an
+    `export ` prefix dropped, whitespace around the name and value stripped, and one pair of matching quotes around
+    the value removed. Lines without `=` are skipped."""
+    values: dict[str, str] = {}
+    for raw in path.read_text(encoding="utf-8").splitlines():
+        line = raw.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        name, value = line.split("=", 1)
+        name = name.strip().removeprefix("export ").strip()
+        value = value.strip()
+        if len(value) >= 2 and value[0] == value[-1] and value[0] in "'\"":
+            value = value[1:-1]
+        values[name] = value
+    return values
+
+
+def published_port(name: str, default: str) -> str:
+    """A published port as docker-compose.yml resolves it: the environment, then .env, then the development
+    default."""
+    if os.environ.get(name):
+        return os.environ[name]
+    try:
+        return read_env().get(name) or default
+    except FileNotFoundError:
+        return default
+
+
+# The published ports, as docker-compose.yml reads them: the development stack's unless the environment or .env
+# names others (scripts/stack_tests.py sets TEST_PORTS for the test stack). Compose publishes them on 127.0.0.1
+# only; naming it, not localhost, saves Windows a failed try on ::1 per connection. Tokens still carry the
+# localhost issuer, which Keycloak takes from KC_HOSTNAME, not from the address asked.
+KONG_PORT = published_port("KONG_PORT", "8000")
+KEYCLOAK_PORT = published_port("KEYCLOAK_PORT", "8081")
+BASE = f"http://127.0.0.1:{KONG_PORT}/api"
+KEYCLOAK = f"http://127.0.0.1:{KEYCLOAK_PORT}"
 TOKEN_URL = f"{KEYCLOAK}/realms/learning/protocol/openid-connect/token"
 ADMIN_TOKEN_URL = f"{KEYCLOAK}/realms/master/protocol/openid-connect/token"
 PSQL_TIMEOUT = 90  # seconds
@@ -33,12 +66,6 @@ PSQL_TIMEOUT = 90  # seconds
 DEV_PROJECT = "learning-foundation"
 TEST_PROJECT = "learning-test"
 TEST_PORTS = {"KONG_PORT": "18000", "KEYCLOAK_PORT": "18081", "WEB_PORT": "14200"}
-
-
-def read_env(path: Path = ROOT / ".env") -> dict[str, str]:
-    """The KEY=value lines of a .env file, skipping comments and lines without a value."""
-    lines = path.read_text(encoding="utf-8").splitlines()
-    return dict(line.split("=", 1) for line in lines if "=" in line and not line.startswith("#"))
 
 
 @cache
@@ -137,8 +164,8 @@ def ensure_person(  # noqa: PLR0913 - one local person's whole Keycloak record
     reset_password: bool = True,
 ) -> str:
     """Creates the person with `password`, or (with reset_password) gives an existing one that password, then the
-    realm role and the local organization. Returns their Keycloak id. org_id is an unmanaged attribute that the
-    admin API only keeps while the realm lets admins edit those, so that is allowed just long enough to set it."""
+    realm role and the local organization. Returns their Keycloak id. org_id is an unmanaged attribute, which the
+    admin API only keeps while the realm lets admins edit those (allow_admin_attributes)."""
     found = check(admin.get("/users", params={"username": username, "exact": "true"})).json()
     credential = {"type": "password", "value": password, "temporary": False}
     if found:
@@ -161,15 +188,20 @@ def ensure_person(  # noqa: PLR0913 - one local person's whole Keycloak record
         )
     realm_role = check(admin.get(f"/roles/{role}")).json()
     check(admin.post(f"/users/{user_id}/role-mappings/realm", json=[realm_role]))
-    profile = check(admin.get("/users/profile")).json()
-    check(admin.put("/users/profile", json={**profile, "unmanagedAttributePolicy": "ADMIN_EDIT"}))
-    try:
-        user = check(admin.get(f"/users/{user_id}")).json()
-        attributes = {**(user.get("attributes") or {}), "org_id": [ORG]}
-        check(admin.put(f"/users/{user_id}", json={**user, "attributes": attributes}))
-    finally:
-        check(admin.put("/users/profile", json=profile))
+    allow_admin_attributes(admin)
+    user = check(admin.get(f"/users/{user_id}")).json()
+    attributes = {**(user.get("attributes") or {}), "org_id": [ORG]}
+    check(admin.put(f"/users/{user_id}", json={**user, "attributes": attributes}))
     return user_id
+
+
+def allow_admin_attributes(admin: "httpx.Client") -> None:
+    """Lets the realm's admins (not its users) edit unmanaged attributes such as org_id, unless it already allows
+    that, and leaves it so. It is only ever turned on: switching it back after each person raced with scripts
+    creating people at the same time, whose org_id was then dropped."""
+    profile = check(admin.get("/users/profile")).json()
+    if profile.get("unmanagedAttributePolicy") not in {"ADMIN_EDIT", "ENABLED"}:
+        check(admin.put("/users/profile", json={**profile, "unmanagedAttributePolicy": "ADMIN_EDIT"}))
 
 
 def psql(

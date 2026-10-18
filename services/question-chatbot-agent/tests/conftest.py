@@ -36,6 +36,7 @@ class MemoryStore:
         self.threads: dict[str, dict[str, Any]] = {}
         self.rows: list[dict[str, Any]] = []
         self.purged: set[str] = set()
+        self.gone: set[str] = set()  # threads purged since a turn read them
 
     async def create_thread(self, org: str, user: str, role: str, classroom_id: str) -> dict[str, Any] | None:
         if classroom_id in self.purged:
@@ -64,7 +65,11 @@ class MemoryStore:
         keys = ("id", "role", "content", "outcome", "citations", "created_at")
         return [{k: r.get(k) for k in keys} for r in self.all(thread_id)][-limit:]
 
-    async def start_turn(self, thread_id: str, content: str, history_turns: int) -> list[dict[str, str]]:
+    async def start_turn(
+        self, thread_id: str, content: str, history_turns: int
+    ) -> list[dict[str, str]] | None:
+        if thread_id in self.gone:
+            return None
         history = [{"role": r["role"], "content": r["content"]} for r in self.all(thread_id)][-history_turns:]
         self.rows.append({"id": str(uuid4()), "thread_id": thread_id, "role": "user", "content": content,
                           "outcome": None, "citations": None, "created_at": datetime.now(UTC)})  # fmt: skip
@@ -72,7 +77,9 @@ class MemoryStore:
             self.threads[thread_id]["title"] = content[:80]
         return history
 
-    async def save_answer(self, thread_id: str, answer: dict[str, Any]) -> str:
+    async def save_answer(self, thread_id: str, answer: dict[str, Any]) -> str | None:
+        if thread_id in self.gone:
+            return None
         row = {"id": str(uuid4()), "thread_id": thread_id, "role": "assistant", "created_at": datetime.now(UTC),
                **answer}  # fmt: skip
         self.rows.append(row)

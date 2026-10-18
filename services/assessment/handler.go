@@ -37,6 +37,7 @@ func (s server) routes(mux *http.ServeMux) {
 	mux.HandleFunc("DELETE /v1/assessments/{id}", s.remove)
 	mux.HandleFunc("POST /v1/assessments/{id}/publish", s.publish)
 	mux.HandleFunc("POST /v1/assessments/{id}/submissions", s.submit)
+	mux.HandleFunc("GET /v1/assessments/{id}/submission", s.submission)
 	mux.HandleFunc("GET /v1/assessments/{id}/saved-answers", s.saved)
 	mux.HandleFunc("PUT /v1/assessments/{id}/saved-answers", s.save)
 }
@@ -56,6 +57,9 @@ func (s server) prepare(w http.ResponseWriter, r *http.Request, v *Assessment, b
 		return false
 	}
 	switch checkAll(r, s.topics, v.topicIDs()) {
+	case topicUnauthenticated:
+		platform.Unauthenticated(w, "The access token was not accepted.")
+		return false
 	case topicUnavailable:
 		platform.Unavailable(w, "Curriculum unavailable.")
 		return false
@@ -422,6 +426,20 @@ func assessmentChanged(w http.ResponseWriter) {
 
 func alreadySubmitted(w http.ResponseWriter) {
 	platform.Error(w, http.StatusConflict, "ALREADY_SUBMITTED", "This assessment has already been submitted.")
+}
+
+// submission is the calling student's own submitted answers to the assessment, with when they submitted and whether
+// it was late, so they can read them again; 404 when they have not submitted. Only the student who submitted reads
+// it: a teacher has the class's work in Grading. It holds what the student wrote and nothing of the answer keys.
+func (s server) submission(w http.ResponseWriter, r *http.Request) {
+	v, ok := s.forStudent(w, r)
+	if !ok {
+		return
+	}
+	result, err := s.store.findSubmission(r.Context(), v.ID, platform.Actor(r).Subject)
+	if platform.Found(w, err, "You have not submitted this assessment.") {
+		platform.JSON(w, http.StatusOK, result)
+	}
 }
 
 // saved is the calling student's unsubmitted work on the assessment; none once they have submitted.

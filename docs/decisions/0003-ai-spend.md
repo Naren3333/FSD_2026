@@ -27,6 +27,7 @@ Every chat turn, search and PDF index costs OpenAI and Voyage money. The only li
   - The prices are a table in `services/ai-core/spend.py`, in USD per million tokens. They come from third-party price listings checked on 2026-10-13; the provider's own price page is authoritative. `MODEL_PRICES` overrides the table.
   - A model missing from the table is charged at the most expensive known rate, never for free.
   - A stream that ends without OpenAI's usage numbers is charged by estimate (about four characters per token), and the row is marked `estimated`.
+  - Amended 2026-10-18 by the project owner: a call the provider does not answer in time is charged as if it ran to the end, its prompt tokens (counted with the committed cl100k_base tokenizer) plus all of `max_tokens`, and the row is marked `estimated`.
 - **No ledger, no call.** If the ledger cannot be read, ai-core answers `503 USAGE_LEDGER_UNAVAILABLE` and reports not ready.
 - **Showing it to users.**
   - The chatbot's `GET /v1/usage` (through Kong at `/api/chatbot/usage`) asks ai-core for the caller's spend today.

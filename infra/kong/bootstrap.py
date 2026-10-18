@@ -33,24 +33,28 @@ def business_service(name: str) -> dict[str, Any]:
     }
 
 
-# The chatbot streams its answers (server-sent events), so Kong must not buffer them.
+# The chatbot streams its answers (server-sent events), so Kong must not buffer them. Its read timeout is the
+# longest gap between two writes: before the first token the chatbot may wait for the query rewrite (40 s), the
+# search (15 s) and the answer's first words (90 s).
 CHATBOT = {
     "name": "question-chatbot-agent",
     "url": "http://question-chatbot-agent:8080/v1",
     "connect_timeout": 5000,
-    "read_timeout": 60000,
+    "read_timeout": 150_000,
     "write_timeout": TIMEOUT_MS,
     "routes": [
         {"name": "chatbot", "paths": ["/api/chatbot"], "strip_path": True, "response_buffering": False}
     ],
 }
 
-# Question generation makes one model call of up to a few thousand tokens after a search, so it may take a minute.
+# Question generation makes one model call of up to a few thousand tokens after a search, so it may take a couple of
+# minutes: the agent waits up to 135 s for ai-core (GENERATE_TIMEOUT) after its checks and search, and Kong a little
+# longer than all of that.
 QUESTION_GENERATION = {
     "name": "question-generation-agent",
     "url": "http://question-generation-agent:8080/v1",
     "connect_timeout": 5000,
-    "read_timeout": 120_000,
+    "read_timeout": 180_000,
     "write_timeout": TIMEOUT_MS,
     "routes": [{"name": "question-generation", "paths": ["/api/question-generation"], "strip_path": True}],
 }

@@ -21,7 +21,7 @@ type store interface {
 	studentsNamed(ctx context.Context, org, username string) ([]string, error)
 	insertEnrollment(ctx context.Context, classroom, student string) error
 	removeEnrollment(ctx context.Context, classroom, org, student string) (bool, error)
-	listStudents(ctx context.Context, classroom string) ([]Student, error)
+	listStudents(ctx context.Context, classroom string, offset, limit int) ([]Student, int, error)
 	listStudentIDs(ctx context.Context, classroom string) ([]string, error)
 	deleteClassroom(ctx context.Context, classroom, org string) error
 	listOrgStudents(ctx context.Context, org, search string, offset, limit int) ([]Student, int, error)
@@ -195,19 +195,25 @@ func (p pgStore) removeEnrollment(ctx context.Context, classroom, org, student s
 // rosterOrder orders a classroom's enrolled students by name, those without one last, by id.
 const rosterOrder = "ORDER BY lower(COALESCE(u.display_name,u.username)) NULLS LAST,u.id"
 
-// listStudents is the classroom's roster with names, in rosterOrder: the first 500, as the teacher's list shows.
-func (p pgStore) listStudents(ctx context.Context, classroom string) ([]Student, error) {
-	rows, err := p.db.Query(ctx, `SELECT u.id,COALESCE(u.username,''),COALESCE(u.display_name,'') FROM enrollments e JOIN users u ON u.id=e.student_id WHERE e.classroom_id=$1 `+rosterOrder+` LIMIT 500`, classroom)
-	if err != nil {
-		return nil, err
+// listStudents is one page of the classroom's roster with names, in rosterOrder, with how many are enrolled in all.
+func (p pgStore) listStudents(ctx context.Context, classroom string, offset, limit int) ([]Student, int, error) {
+	var total int
+	if err := p.db.QueryRow(ctx, "SELECT count(*) FROM enrollments e JOIN users u ON u.id=e.student_id WHERE e.classroom_id=$1", classroom).Scan(&total); err != nil {
+		return nil, 0, err
 	}
-	return pgx.CollectRows(rows, scanStudent)
+	rows, err := p.db.Query(ctx, `SELECT u.id,COALESCE(u.username,''),COALESCE(u.display_name,'') FROM enrollments e JOIN users u ON u.id=e.student_id WHERE e.classroom_id=$1 `+rosterOrder+` OFFSET $2 LIMIT $3`, classroom, offset, limit)
+	if err != nil {
+		return nil, 0, err
+	}
+	students, err := pgx.CollectRows(rows, scanStudent)
+	return students, total, err
 }
 
-// listStudentIDs is every enrolled student's id, in rosterOrder and without listStudents' cap: other services keep
-// a removed student's work out of the teacher's lists by it, so a student left off would vanish from them.
+// listStudentIDs is every enrolled student's id, by id and without listStudents' cap: other services keep a removed
+// student's work out of the teacher's lists by it, so a student left off would vanish from them. They only test
+// membership, so it is read from the enrollments' primary key alone, with no names to sort by.
 func (p pgStore) listStudentIDs(ctx context.Context, classroom string) ([]string, error) {
-	rows, err := p.db.Query(ctx, "SELECT u.id FROM enrollments e JOIN users u ON u.id=e.student_id WHERE e.classroom_id=$1 "+rosterOrder, classroom)
+	rows, err := p.db.Query(ctx, "SELECT student_id FROM enrollments WHERE classroom_id=$1 ORDER BY student_id", classroom)
 	if err != nil {
 		return nil, err
 	}

@@ -21,11 +21,11 @@ export function markingForm(evidence: readonly Evidence[], questions: readonly Q
         const rubric = questions.find((q) => q.id === e.question_id)?.rubric;
         const required = e.needs_marking ? [Validators.required] : [];
         const scores = new Map((e.criteria ?? []).map((c) => [c.criterion_id, c.points]));
+        // Assessment gives every criterion an id; one without could not be marked, so it gets no control.
         const criteria = Object.fromEntries(
-          (rubric?.criteria ?? []).map((c) => [
-            c.id!,
-            new FormControl<number | null>(scores.get(c.id!) ?? null, required),
-          ]),
+          (rubric?.criteria ?? []).flatMap((c) =>
+            c.id ? [[c.id, new FormControl<number | null>(scores.get(c.id) ?? null, required)]] : [],
+          ),
         );
         const marks: QuestionMarks = new FormGroup({
           awarded: new FormControl<number | null>(rubric || e.needs_marking ? null : e.awarded, [

@@ -96,16 +96,16 @@ class AgentClients:
         schema: dict[str, Any],
         name: str,
         correlation: str,
-        billed_to: dict[str, str],
+        payer: dict[str, str],
     ) -> str:
-        """One structured reply: the model's output as text, matching `schema`."""
+        """One structured reply: the model's output as text, matching `schema`, billed to `payer` (billed_to())."""
         body = {
             "operation": "generate",
             "messages": messages,
             "max_tokens": max_tokens,
             "response_schema": schema,
             "schema_name": name,
-            "billed_to": billed_to,
+            "billed_to": payer,
         }
         resp = await self.ai_core("POST", "/v1/inference", correlation, self.generate_timeout, json=body)
         try:

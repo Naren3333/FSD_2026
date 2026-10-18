@@ -67,7 +67,7 @@ def application(name: str, **kwargs: Any) -> FastAPI:
         try:
             response = await call_next(request)
         except Exception:
-            logger.error("request_failed", extra={**ids, "error_category": "internal_error"})
+            logger.exception("request_failed", extra={**ids, "error_category": "internal_error"})
             response = JSONResponse(
                 status_code=500,
                 content={

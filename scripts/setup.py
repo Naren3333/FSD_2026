@@ -25,7 +25,7 @@ PEOPLE = [
 ]
 ORG = "local-school"
 WEB_ORIGIN = "http://localhost:4200"
-# The disposable test stack's web app (scripts/stack_tests.py), which signs in through the same realm import.
+# The disposable test stack's web app (scripts/stack_tests.py). Only the test stack's own realm import allows it.
 TEST_WEB_ORIGIN = "http://localhost:14200"
 
 
@@ -133,17 +133,27 @@ SERVICE_MAPPERS = [
 ]
 
 
-def clients(values: dict[str, str]) -> list[dict[str, Any]]:
-    web = {
+# Sign out may return to any of the client's sign-in redirect URIs ("+"); without it Keycloak can refuse Sign
+# out's post_logout_redirect_uri as invalid.
+WEB_ATTRIBUTES = {"pkce.code.challenge.method": "S256", "post.logout.redirect.uris": "+"}
+
+
+def web_client(web_origin: str) -> dict[str, Any]:
+    """The browser app's public client, for the web app at `web_origin`."""
+    return {
         "clientId": "learning-web",
         "publicClient": True,
         "standardFlowEnabled": True,
         "directAccessGrantsEnabled": False,
-        "redirectUris": [f"{origin}/*" for origin in (WEB_ORIGIN, TEST_WEB_ORIGIN)],
-        "webOrigins": [WEB_ORIGIN, TEST_WEB_ORIGIN],
-        "attributes": {"pkce.code.challenge.method": "S256"},
+        "redirectUris": [f"{web_origin}/*"],
+        "webOrigins": [web_origin],
+        "attributes": dict(WEB_ATTRIBUTES),
         "protocolMappers": PERSON_MAPPERS,
     }
+
+
+def clients(values: dict[str, str], web_origin: str) -> list[dict[str, Any]]:
+    web = web_client(web_origin)
     # Password grant for the integration and browser tests only.
     e2e = {
         "clientId": "learning-e2e",
@@ -182,7 +192,8 @@ def service_client(client: str, secret: str) -> dict[str, Any]:
     }
 
 
-def realm(values: dict[str, str]) -> dict[str, Any]:
+def realm(values: dict[str, str], web_origin: str = WEB_ORIGIN) -> dict[str, Any]:
+    """The learning realm's import, for a stack whose web app is at `web_origin`."""
     users = [person(username, role, values[key]) for username, role, key in PEOPLE]
     users += [service_account(client) for client in AI_CLIENTS]
     owner, role = ACCOUNTS_ROLE
@@ -201,7 +212,7 @@ def realm(values: dict[str, str]) -> dict[str, Any]:
         "registrationAllowed": False,
         "roles": {"realm": [{"name": r} for r in ["teacher", "student", "ai-client"]]},
         "users": users,
-        "clients": clients(values),
+        "clients": clients(values, web_origin),
     }
 
 

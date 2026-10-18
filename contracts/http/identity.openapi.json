@@ -2380,6 +2380,27 @@
               "type": "string",
               "format": "uuid"
             }
+          },
+          {
+            "name": "offset",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 0,
+              "default": 0
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 500,
+              "default": 50
+            }
           }
         ],
         "responses": {
@@ -2388,30 +2409,44 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "array",
-                  "items": {
-                    "type": "object",
-                    "properties": {
-                      "id": {
-                        "type": "string",
-                        "minLength": 1
+                  "type": "object",
+                  "properties": {
+                    "students": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "id": {
+                            "type": "string",
+                            "minLength": 1
+                          },
+                          "username": {
+                            "type": "string"
+                          },
+                          "display_name": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "id",
+                          "username",
+                          "display_name"
+                        ],
+                        "additionalProperties": false
                       },
-                      "username": {
-                        "type": "string"
-                      },
-                      "display_name": {
-                        "type": "string"
-                      }
+                      "minItems": 0,
+                      "maxItems": 500
                     },
-                    "required": [
-                      "id",
-                      "username",
-                      "display_name"
-                    ],
-                    "additionalProperties": false
+                    "total": {
+                      "type": "integer",
+                      "minimum": 0
+                    }
                   },
-                  "minItems": 0,
-                  "maxItems": 500
+                  "required": [
+                    "students",
+                    "total"
+                  ],
+                  "additionalProperties": false
                 }
               }
             }
@@ -2946,7 +2981,8 @@
             "required": false,
             "schema": {
               "type": "integer",
-              "minimum": 0
+              "minimum": 0,
+              "default": 0
             }
           },
           {
@@ -2956,7 +2992,8 @@
             "schema": {
               "type": "integer",
               "minimum": 1,
-              "maximum": 50
+              "maximum": 50,
+              "default": 10
             }
           }
         ],

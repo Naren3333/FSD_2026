@@ -683,3 +683,23 @@ func TestADeletedAccountsWorkIsPurged(t *testing.T) {
 		t.Fatalf("a deletion without a role: %v", err)
 	}
 }
+
+func TestAStudentReadsTheirOwnSubmission(t *testing.T) {
+	p, ctx := testStore(t), context.Background()
+	v := stored(t, p, "org", statusPublished, nil)
+	if _, err := p.findSubmission(ctx, v.ID, "s"); !errors.Is(err, platform.ErrNotFound) {
+		t.Fatalf("before submitting: %v", err)
+	}
+	at := time.Now().UTC().Truncate(time.Microsecond)
+	answers := map[string]string{v.Questions[0].ID: "4"}
+	if _, _, err := p.insertSubmission(ctx, v, Submission{ID: uuid.NewString(), Org: "org", Student: "s", Answers: answers, SubmittedAt: at}); err != nil {
+		t.Fatal(err)
+	}
+	got, err := p.findSubmission(ctx, v.ID, "s")
+	if err != nil || got.Answers[v.Questions[0].ID] != "4" || len(got.Answers) != 1 || !got.SubmittedAt.Equal(at) || got.Late {
+		t.Fatalf("%+v %v", got, err)
+	}
+	if _, err = p.findSubmission(ctx, v.ID, "another"); !errors.Is(err, platform.ErrNotFound) {
+		t.Fatalf("another student's: %v", err)
+	}
+}

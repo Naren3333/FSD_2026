@@ -151,6 +151,13 @@ type Submission struct {
 	SubmittedAt      time.Time
 }
 
+// OwnSubmission is a student's submitted answers, as they see them again: only what they wrote, never the answer keys.
+type OwnSubmission struct {
+	Answers     map[string]string `json:"answers"`
+	SubmittedAt time.Time         `json:"submitted_at"`
+	Late        bool              `json:"late"`
+}
+
 // SavedAnswers is a student's unsubmitted work on an assessment.
 type SavedAnswers struct {
 	Answers map[string]string `json:"answers"`

@@ -60,6 +60,9 @@ type store interface {
 	// insertSubmission returns errAssessmentChanged when v's questions or marking settings are no longer the stored
 	// ones, and errClosed when the assessment no longer takes the submission. late is whether it was stored as late.
 	insertSubmission(ctx context.Context, v Assessment, sub Submission) (inserted, late bool, err error)
+	// findSubmission is the student's own submission of the assessment; platform.ErrNotFound when they have not
+	// submitted it.
+	findSubmission(ctx context.Context, assessment, student string) (OwnSubmission, error)
 	findSaved(ctx context.Context, assessment, student string) (SavedAnswers, error)
 	saveAnswers(ctx context.Context, assessment, student string, answers map[string]string) (time.Time, error)
 }
@@ -290,7 +293,7 @@ func (p pgStore) listAssessments(ctx context.Context, org, classroomID, student 
 // insertSubmission stores the submission, removes the student's saved work and emits the outbox event in one
 // transaction. It reports inserted=false (with a nil error) when the student has already submitted this
 // assessment, and with late whether the submission was stored as late.
-func (p pgStore) insertSubmission(ctx context.Context, v Assessment, sub Submission) (bool, bool, error) {
+func (p pgStore) insertSubmission(ctx context.Context, v Assessment, sub Submission) (inserted, late bool, err error) {
 	answers, err := json.Marshal(sub.Answers)
 	if err != nil {
 		return false, false, err
@@ -335,6 +338,16 @@ func (p pgStore) insertSubmission(ctx context.Context, v Assessment, sub Submiss
 		return false, false, err
 	}
 	return true, sub.Late, nil
+}
+
+func (p pgStore) findSubmission(ctx context.Context, assessment, student string) (OwnSubmission, error) {
+	var v OwnSubmission
+	var data []byte
+	err := p.db.QueryRow(ctx, "SELECT answers,created_at,late FROM submissions WHERE assessment_id=$1 AND student_id=$2", assessment, student).Scan(&data, &v.SubmittedAt, &v.Late)
+	if err == nil {
+		err = json.Unmarshal(data, &v.Answers)
+	}
+	return v, err
 }
 
 // findSaved is the student's saved work, or no answers when they have saved nothing.

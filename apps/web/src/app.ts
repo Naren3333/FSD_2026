@@ -58,7 +58,8 @@ export class AppComponent implements OnInit {
       .run(async () => {
         await this.session.ready();
         if (!this.session.profile()) return;
-        await this.context.refresh();
+        // Each section that needs a classroom shows this failure in place, with Try again.
+        await this.context.refresh().catch(() => undefined);
         // The route guards refused the address while the profile was missing; open it now that the role is known.
         if (retry) await this.router.navigateByUrl(location.pathname + location.search);
       })

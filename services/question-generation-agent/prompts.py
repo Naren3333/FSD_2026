@@ -7,6 +7,11 @@ from typing import Any
 
 from contracts import Generatable, GenerateRequest, TeacherMarked
 
+MAX_MESSAGE = 60000  # ai-core's longest message, in characters
+# What the passages may take of the task message: the rest holds the request's own fields (a question of up to 2,000
+# characters for guidance) and, for generation, as many of the editor's existing questions as fit.
+PASSAGES_BUDGET = 50000
+
 
 @dataclass(frozen=True)
 class Passage:
@@ -99,18 +104,51 @@ def _passages(passages: list[Passage]) -> list[dict[str, Any]]:
     return [{"number": p.number, "document": p.title, "page": p.page, "text": p.text} for p in passages]
 
 
+def _size(value: Any) -> int:
+    """Characters `value` takes in the task document."""
+    return len(json.dumps(value, ensure_ascii=False))
+
+
+def fitting(passages: list[Passage]) -> list[Passage]:
+    """The passages, best first, that fit in PASSAGES_BUDGET characters of the task document; always the best one
+    (Content's passages are at most 20,000 characters). Cut before the call, so the checks see only the passages
+    the model was shown."""
+    kept: list[Passage] = []
+    size = 0
+    for p in passages:
+        size += _size(_passages([p])) + 2
+        if kept and size > PASSAGES_BUDGET:
+            break
+        kept.append(p)
+    return kept
+
+
+def _recent(prompts: list[str], room: int) -> list[str]:
+    """The newest of the editor's prompts (the last ones) that fit in `room` characters, in the editor's order."""
+    kept: list[str] = []
+    for prompt in reversed(prompts):
+        room -= _size(prompt) + 2  # and the ", " between items
+        if room < 0:
+            break
+        kept.append(prompt)
+    return kept[::-1]
+
+
 def generation_messages(
     topic: str, request: GenerateRequest, passages: list[Passage]
 ) -> list[dict[str, str]]:
-    task = {
+    """The system and task messages. existing_questions get what room the rest of the task leaves in one ai-core
+    message, newest first: the older ones beyond it are left out rather than the call refused."""
+    task: dict[str, Any] = {
         "topic": topic,
         "focus": request.focus,
         "question_types": request.question_types,
         "difficulty": request.difficulty,
         "count": request.count,
-        "existing_questions": request.existing_prompts,
+        "existing_questions": [],
         "passages": _passages(passages),
     }
+    task["existing_questions"] = _recent(request.existing_prompts, MAX_MESSAGE - _size(task))
     return [
         {"role": "system", "content": GENERATION_INSTRUCTIONS},
         {"role": "user", "content": json.dumps(task, ensure_ascii=False)},

@@ -1,6 +1,6 @@
 """Kafka consumption for the Python services: one consumer group reading a few topics, committing each message only
 after it was processed or dead-lettered, and restarting itself with a backoff when a session stops. Import this
-module only from a service that has confluent-kafka installed."""
+module only from a service that has confluent-kafka and psycopg installed."""
 
 import logging
 import os
@@ -11,6 +11,7 @@ from typing import Any, Literal
 from uuid import UUID
 
 from confluent_kafka import Consumer, KafkaException, Message, Producer
+from psycopg import DataError, IntegrityError
 from pydantic import BaseModel, Field, ValidationError, field_validator, model_validator
 
 from learning_transport.errors import Contract
@@ -18,10 +19,16 @@ from learning_transport.errors import Contract
 RESTART_FIRST, RESTART_MAX = 5.0, 60.0  # seconds a stopped consumer waits before its next session
 PROCESS_ATTEMPTS = 5  # tries to process a message before the session stops uncommitted
 DEAD_LETTER_TIMEOUT = 12  # seconds to wait for the broker to confirm a dead-lettered message
+# Database errors that retrying the same message cannot fix: a value the schema refuses (DataError) or a broken
+# constraint (IntegrityError, CheckViolation among them). A message failing with one on every attempt is
+# dead-lettered instead of blocking its partition forever.
+PERMANENT_ERRORS: tuple[type[Exception], ...] = (DataError, IntegrityError)
 
 # handle(topic, value) processes one message durably. It returns False when the message does not match the topic's
 # contract, which sends it to <topic>.dlq, and raises when it cannot be processed now, which retries it.
 Handler = Callable[[str, bytes | None], bool]
+# What became of one message: processed, not matching its contract, failing permanently, or failing for now.
+Outcome = Literal["processed", "invalid", "poison", "failed"]
 
 log = logging.getLogger("learning_transport.kafka")
 
@@ -122,8 +129,9 @@ def consume(
             return
 
 
-def dead_letter(producer: Producer, msg: Message) -> None:
-    """Send an unreadable message to its topic's dead-letter topic, raising unless the broker confirmed it."""
+def dead_letter(producer: Producer, msg: Message, reason: str = "invalid_event") -> None:
+    """Send a message that cannot be processed to its topic's dead-letter topic, raising unless the broker confirmed
+    it."""
     delivery_errors: list[Any] = []
 
     def delivered(error: Any, _: Any) -> None:
@@ -133,20 +141,27 @@ def dead_letter(producer: Producer, msg: Message) -> None:
     producer.produce(msg.topic() + ".dlq", key=msg.key(), value=msg.value(), on_delivery=delivered)
     if producer.flush(DEAD_LETTER_TIMEOUT) or delivery_errors:
         raise RuntimeError("Dead-letter delivery failed")
-    log.error("invalid_event", extra={"topic": msg.topic(), "dead_lettered": True})
+    log.error(reason, extra={"topic": msg.topic(), "dead_lettered": True})
 
 
-def attempt(handle: Handler, topic: str, value: bytes | None, stop: threading.Event) -> bool | None:
-    """Process one message, retrying with a doubling wait: its validity, or None when every attempt failed or
-    shutdown began."""
+def attempt(handle: Handler, topic: str, value: bytes | None, stop: threading.Event) -> Outcome:
+    """Process one message, retrying with a doubling wait. `poison` when every one of PROCESS_ATTEMPTS attempts
+    failed with one of PERMANENT_ERRORS; `failed` when they failed otherwise (the database is down, say) or shutdown
+    began, so the message is tried again in a later session."""
+    permanent = True
     for n in range(PROCESS_ATTEMPTS):
         try:
-            return handle(topic, value)
-        except Exception:
-            log.error("consumer_retry", extra={"topic": topic, "attempt": n + 1})
-            if n == PROCESS_ATTEMPTS - 1 or stop.wait(2**n):
-                return None
-    return None
+            return "processed" if handle(topic, value) else "invalid"
+        except Exception as error:
+            permanent = permanent and isinstance(error, PERMANENT_ERRORS)
+            log.error(
+                "consumer_retry", extra={"topic": topic, "attempt": n + 1, "error": type(error).__name__}
+            )
+            if n == PROCESS_ATTEMPTS - 1:
+                return "poison" if permanent else "failed"
+            if stop.wait(2**n):
+                return "failed"
+    return "failed"
 
 
 def consume_session(
@@ -176,11 +191,14 @@ def consume_session(
                 continue
             if msg.error():
                 raise KafkaException(msg.error())
-            valid = attempt(handle, msg.topic(), msg.value(), stop)
-            if valid is None:
+            outcome = attempt(handle, msg.topic(), msg.value(), stop)
+            if outcome == "failed":
                 return progressed
-            if not valid:
+            if outcome == "invalid":
                 dead_letter(producer, msg)
+            elif outcome == "poison":
+                dead_letter(producer, msg, "unprocessable_event")
+            # Committed only once processed or confirmed in the dead-letter topic.
             consumer.commit(message=msg, asynchronous=False)
             progressed = True
     except Exception:

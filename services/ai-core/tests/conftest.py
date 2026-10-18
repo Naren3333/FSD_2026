@@ -403,10 +403,14 @@ def chat_response(
 
 
 def chat_stream(
-    deltas: list[str], *, usage: dict | None = USAGE, fail_after: int | None = None
+    deltas: list[str],
+    *,
+    usage: dict | None = USAGE,
+    fail_after: int | None = None,
+    failure: type[httpx2.TransportError] = httpx2.ReadError,
 ) -> httpx2.Response:
     """A streamed chat completion: one SSE chunk per delta, a final finish_reason chunk, the `choices: []`
-    usage chunk and [DONE]. `fail_after=n` breaks the connection after n deltas."""
+    usage chunk and [DONE]. `fail_after=n` breaks the connection after n deltas, with `failure`."""
 
     def event(choices: list[dict], **extra: Any) -> bytes:
         chunk = {
@@ -422,7 +426,7 @@ def chat_stream(
     async def body() -> AsyncIterator[bytes]:
         for i, text in enumerate(deltas):
             if i == fail_after:
-                raise httpx2.ReadError("connection reset (test)")
+                raise failure("connection reset (test)")
             yield event([{"index": 0, "delta": {"content": text}, "finish_reason": None}])
         yield event([{"index": 0, "delta": {}, "finish_reason": "stop"}])
         if usage is not None:

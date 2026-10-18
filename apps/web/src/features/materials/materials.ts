@@ -10,6 +10,7 @@ import { ConfirmDialogComponent } from '../../shared/confirm-dialog';
 import { messageOf } from '../../shared/errors';
 import { FieldComponent, FieldControlDirective } from '../../shared/field';
 import { isPdf } from '../../shared/files';
+import { NoClassroomComponent } from '../../shared/no-classroom';
 import { Section, rereadAfterDelete } from '../../shared/section';
 import { SectionStateComponent } from '../../shared/section-state';
 import { StatusComponent } from '../../shared/status';
@@ -67,6 +68,7 @@ export function describe(doc: DocumentRecord): { label: string; detail: string }
   selector: 'app-materials',
   standalone: true,
   imports: [
+    NoClassroomComponent,
     ReactiveFormsModule,
     FieldComponent,
     FieldControlDirective,
@@ -128,10 +130,14 @@ export class MaterialsComponent implements OnDestroy {
         .then((read) => (read ? this.schedule() : this.polling.set(false)));
     }, 5000);
   }
-  /** Re-reads the list after a change; it lands only while the user is still in that classroom. */
+  /** Re-reads the list after a change; it lands only while the user is still in that classroom. Indexing status keeps
+   * refreshing even when this re-read fails. */
   private async reread(classroomId: string): Promise<void> {
-    await this.documents.reload(() => this.content.documents(classroomId));
-    this.schedule();
+    try {
+      await this.documents.reload(() => this.content.documents(classroomId));
+    } finally {
+      this.schedule();
+    }
   }
   status(doc: DocumentRecord) {
     return describe(doc);
@@ -233,6 +239,8 @@ export class MaterialsComponent implements OnDestroy {
         this.state,
         { list: 'library', refresh: 'Refresh materials' },
       );
+      // Whether to keep polling, for the list on show now that it leaves the deleted document out.
+      this.schedule();
     });
   }
 }

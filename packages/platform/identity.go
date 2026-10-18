@@ -3,6 +3,7 @@ package platform
 import (
 	"encoding/json"
 	"io"
+	"log/slog"
 	"net/http"
 	"net/url"
 	"slices"
@@ -142,9 +143,29 @@ func (i *Identity) Roster(w http.ResponseWriter, r *http.Request, classroom stri
 		return nil, false
 	}
 	var ids []string
-	if json.NewDecoder(io.LimitReader(res.Body, maxRoster)).Decode(&ids) != nil || ids == nil || slices.Contains(ids, "") {
+	body := &countingReader{r: io.LimitReader(res.Body, maxRoster)}
+	if err = json.NewDecoder(body).Decode(&ids); err != nil || ids == nil || slices.Contains(ids, "") {
+		// A roster larger than maxRoster is cut off and fails to decode; say so, since its answer is a 503 like any
+		// other unreadable roster.
+		cause := "unreadable"
+		if body.n >= maxRoster {
+			cause = "over the size limit"
+		}
+		slog.Error("classroom_roster_rejected", "classroom", classroom, "cause", cause, "bytes_read", body.n, "limit_bytes", maxRoster, "content_length", res.ContentLength)
 		Unavailable(w, "The classroom's roster was not understood.")
 		return nil, false
 	}
 	return ids, true
+}
+
+// countingReader counts the bytes read through it.
+type countingReader struct {
+	r io.Reader
+	n int64
+}
+
+func (c *countingReader) Read(p []byte) (int, error) {
+	n, err := c.r.Read(p)
+	c.n += int64(n)
+	return n, err
 }

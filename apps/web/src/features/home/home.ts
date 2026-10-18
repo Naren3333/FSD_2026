@@ -9,6 +9,8 @@ import { Session } from '../../core/session';
 import { dueState } from '../../shared/due';
 import { dateTime } from '../../shared/format';
 import { MarksPipe } from '../../shared/marks';
+import { EvidenceNames } from '../../shared/names';
+import { NoClassroomComponent } from '../../shared/no-classroom';
 import { Section } from '../../shared/section';
 import { SectionStateComponent } from '../../shared/section-state';
 
@@ -17,7 +19,7 @@ import { SectionStateComponent } from '../../shared/section-state';
 @Component({
   selector: 'app-home',
   standalone: true,
-  imports: [RouterLink, PercentPipe, SectionStateComponent, MarksPipe],
+  imports: [NoClassroomComponent, RouterLink, PercentPipe, SectionStateComponent, MarksPipe],
   templateUrl: './home.html',
 })
 export class HomeComponent {
@@ -50,11 +52,22 @@ export class HomeComponent {
     return assessments.filter((a) => a.submitted && !graded.has(a.id)).length;
   });
   readonly recent = computed(() => this.results.value()?.slice(0, this.recentCount) ?? []);
+  /** What the to-do list says when it is empty: whether there was nothing, everything was submitted, or some closed
+   * before the student submitted them. */
+  readonly nothingToDo = computed(() => {
+    const assessments = this.assessments.value() ?? [];
+    if (!assessments.length) return 'No assessments in this classroom yet.';
+    const missed = assessments.filter((a) => !a.submitted).length;
+    if (!missed) return 'All caught up. You have submitted every assessment.';
+    return `Nothing left to submit. ${missed} ${missed === 1 ? 'assessment' : 'assessments'} closed before you submitted.`;
+  });
   readonly practise = computed(
     () => this.performance.value()?.topics.filter((s) => s.weakness_indicator) ?? [],
   );
-  private readonly titles = computed(
-    () => new Map((this.assessments.value() ?? []).map((a) => [a.id, a.title])),
+  private readonly byId = computed(() => new Map((this.assessments.value() ?? []).map((a) => [a.id, a])));
+  readonly names = new EvidenceNames(
+    () => this.byId(),
+    (id) => this.curriculum.topicName(id),
   );
 
   constructor() {
@@ -73,7 +86,8 @@ export class HomeComponent {
     void this.results.load(() => this.grading.mine(classroomId));
     void this.performance.load(async () => {
       const performance = await this.analytics.performance(studentId, classroomId);
-      await this.curriculum.need(performance.topics.map((s) => s.topic_id));
+      // Without the curriculum, topics show their ids.
+      await this.curriculum.need(performance.topics.map((s) => s.topic_id)).catch(() => undefined);
       return performance;
     });
   }
@@ -85,14 +99,5 @@ export class HomeComponent {
   }
   overdue(item: AssessmentSummary): boolean {
     return dueState(item.due_at, item.late_policy) === 'late';
-  }
-
-  title(result: Evaluation): string {
-    return this.titles().get(result.assessment_id) ?? 'Assessment';
-  }
-
-  /** The topic's name, or '' when the curriculum has none. */
-  topic(topicId: string): string {
-    return this.curriculum.topicName(topicId);
   }
 }

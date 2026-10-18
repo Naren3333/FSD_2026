@@ -421,7 +421,21 @@ def test_usage(api: TestClient, fakes: Fakes) -> None:
     assert request.url.params["user_id"] == "s1" and request.url.params["role"] == "student"
 
 
-@pytest.mark.parametrize("failure", [httpx.Response(503), httpx.Response(500), httpx.ConnectError("down")])
+@pytest.mark.parametrize(
+    "failure",
+    [
+        httpx.Response(503),
+        httpx.Response(500),
+        httpx.ConnectError("down"),
+        httpx.Response(200, text="not json"),
+        httpx.Response(200, json=[]),
+        httpx.Response(200, json={"spent_usd": 1.0}),
+        httpx.Response(
+            200, json={"spent_usd": "lots", "limit_usd": 5, "resets_at": "2026-10-19T00:00:00+08:00"}
+        ),
+    ],
+    ids=["503", "500", "unreachable", "not-json", "not-an-object", "missing-fields", "wrong-type"],
+)
 def test_usage_is_503_when_ai_core_cannot_answer(
     api: TestClient, fakes: Fakes, failure: httpx.Response | Exception
 ) -> None:
@@ -529,3 +543,61 @@ def test_results_that_do_not_fit_are_dropped_and_cannot_be_cited(
     assert answer["retrieved_chunk_ids"] == ids[:5]
     prompt = fakes.calls("/v1/inference")[1]["messages"][2]["content"]
     assert 'id="S5"' in prompt and 'id="S6"' not in prompt and len(prompt) <= MAX_DOCUMENTS_CHARS + 1000
+
+
+def purge_first(store: MemoryStore, step: str, tid: str) -> None:
+    """The thread is purged (its classroom or user deleted) just before the store's `step` runs."""
+    original = getattr(store, step)
+
+    async def purged(*args: Any) -> Any:
+        store.gone.add(tid)
+        return await original(*args)
+
+    setattr(store, step, purged)
+
+
+def test_a_thread_purged_before_the_turn_starts_is_not_found(
+    api: TestClient, fakes: Fakes, store: MemoryStore
+) -> None:
+    tid = thread(api)
+    purge_first(store, "start_turn", tid)
+    resp = api.post(f"/v1/threads/{tid}/messages", json={"content": "q"}, headers=as_user())
+    assert (resp.status_code, resp.json()["error"]["code"]) == (404, "NOT_FOUND")
+    assert store.all(tid) == [] and not fakes.calls("/v1/inference")
+
+
+def test_a_thread_purged_while_answering_ends_with_an_error_event(
+    api: TestClient, fakes: Fakes, store: MemoryStore
+) -> None:
+    fakes.results = RESULTS
+    fakes.replies += [rewrite("light"), chat_stream(["Light is absorbed [S1]."])]
+    tid = thread(api)
+    purge_first(store, "save_answer", tid)
+    events = post(api, tid, "how do plants get energy?")
+    assert events[-1] == ("error", {"code": "NOT_FOUND", "message": "This conversation was deleted."})
+    assert "done" not in [e for e, _ in events]
+
+
+def test_a_failing_turn_whose_thread_is_purged_says_so(
+    api: TestClient, fakes: Fakes, store: MemoryStore
+) -> None:
+    fakes.replies += [rewrite("light")]
+    fakes.search_status = 503
+    tid = thread(api)
+    purge_first(store, "save_answer", tid)
+    assert post(api, tid, "q")[-1][1]["code"] == "NOT_FOUND"
+
+
+def test_an_answer_that_cannot_be_saved_ends_with_an_error_event(
+    api: TestClient, fakes: Fakes, store: MemoryStore
+) -> None:
+    fakes.results = RESULTS
+    fakes.replies += [rewrite("light"), chat_stream(["Light is absorbed [S1]."])]
+    tid = thread(api)
+
+    async def broken(*_: Any) -> str:
+        raise ConnectionError("database down")
+
+    store.save_answer = broken  # type: ignore[method-assign]
+    events = post(api, tid, "how do plants get energy?")
+    assert events[-1] == ("error", {"code": "INTERNAL_ERROR", "message": "The answer could not be saved."})

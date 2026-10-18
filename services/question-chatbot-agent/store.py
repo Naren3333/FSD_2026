@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import Any, Protocol
 
 from learning_transport.db import LOCK_CLASSROOM, LOCK_USER, AsyncPooled, lock_async
+from psycopg import AsyncConnection
 from psycopg.types.json import Jsonb
 
 MIGRATIONS = Path(__file__).parent / "migrations"
@@ -29,12 +30,16 @@ class Store(Protocol):
         """The thread's latest `limit` messages, oldest first."""
         ...
 
-    async def start_turn(self, thread_id: str, content: str, history_turns: int) -> list[dict[str, str]]:
+    async def start_turn(
+        self, thread_id: str, content: str, history_turns: int
+    ) -> list[dict[str, str]] | None:
         """The last `history_turns` messages (oldest first), then saves the user's message and, for the first,
-        the thread's title."""
+        the thread's title. None, saving nothing, when the thread is gone (purged since it was read)."""
         ...
 
-    async def save_answer(self, thread_id: str, answer: dict[str, Any]) -> str: ...
+    async def save_answer(self, thread_id: str, answer: dict[str, Any]) -> str | None:
+        """The saved answer's id; None, saving nothing, when the thread is gone."""
+        ...
 
 
 class PostgresStore(AsyncPooled):
@@ -82,8 +87,12 @@ class PostgresStore(AsyncPooled):
             )
             return [dict(r) for r in await cur.fetchall()][::-1]
 
-    async def start_turn(self, thread_id: str, content: str, history_turns: int) -> list[dict[str, str]]:
+    async def start_turn(
+        self, thread_id: str, content: str, history_turns: int
+    ) -> list[dict[str, str]] | None:
         async with self.pool.connection() as conn, conn.transaction():
+            if not await _hold_thread(conn, thread_id):
+                return None
             cur = await conn.execute(
                 "SELECT role, content FROM messages WHERE thread_id=%s ORDER BY created_at DESC, id DESC LIMIT %s",
                 (thread_id, history_turns),
@@ -99,9 +108,11 @@ class PostgresStore(AsyncPooled):
             )
             return history
 
-    async def save_answer(self, thread_id: str, answer: dict[str, Any]) -> str:
+    async def save_answer(self, thread_id: str, answer: dict[str, Any]) -> str | None:
         citations = answer.get("citations")
         async with self.pool.connection() as conn, conn.transaction():
+            if not await _hold_thread(conn, thread_id):
+                return None
             if citations:
                 # A document deleted while the answer was written is cited as removed (purge.redact). The locks,
                 # taken in order, make a redaction either see this answer or come after this check.
@@ -141,3 +152,11 @@ class PostgresStore(AsyncPooled):
             await conn.execute("UPDATE threads SET last_message_at=now() WHERE id=%s", (thread_id,))
             assert row is not None
             return str(row["id"])
+
+
+async def _hold_thread(conn: AsyncConnection[Any], thread_id: str) -> bool:
+    """Whether the thread still exists, holding it until the transaction ends. A purge deleting it (purge.py) either
+    commits first, and then this sees it gone, or waits for this transaction: a message is never inserted for a
+    thread being deleted, which would break the foreign key."""
+    cur = await conn.execute("SELECT 1 FROM threads WHERE id=%s FOR KEY SHARE", (thread_id,))
+    return await cur.fetchone() is not None

@@ -3,7 +3,11 @@
     <p class="eyebrow">A teacher makes the final decision</p>
     <h2>Grading review</h2>
   </div>
-  <button class="secondary" (click)="load()" [disabled]="state.busy() || grades.loading() || !classroomId()">
+  <button
+    class="secondary"
+    (click)="refresh()"
+    [disabled]="state.busy() || grades.loading() || !classroomId()"
+  >
     Refresh grades
   </button>
 </div>
@@ -36,10 +40,15 @@
   </div>
   <app-section-state [section]="published" loading="Loading assessments…" />
   <p class="caption">
-    {{ assessmentId() ? 'Up to 500 grades, oldest submission first' : 'Up to 100 most recent evaluations' }}
+    {{
+      assessmentId() ? 'Every grade, oldest submission first' : 'Every grade in the classroom, newest first'
+    }}
+    · {{ pageSize }} a page
   </p>
   <app-section-state [section]="grades" loading="Loading grades…" />
-  @if (grades.ready()) {
+  @if (!classroomId()) {
+    <app-no-classroom><p class="empty">Select a classroom to review its grades.</p></app-no-classroom>
+  } @else if (grades.ready()) {
     @for (grade of grades.value()?.grades ?? []; track grade.id) {
       <article class="grade">
         <div>
@@ -86,7 +95,14 @@
                   Question
                   <span class="identifier">{{ evidence.question_id }}</span>
                 }
-                <span class="caption">Topic: {{ names.topic(evidence) || 'not in the curriculum' }}</span>
+                <span class="caption"
+                  >Topic:
+                  @if (names.topic(evidence); as topic) {
+                    {{ topic }}
+                  } @else {
+                    <span class="identifier">{{ evidence.topic_id }}</span>
+                  }
+                </span>
               </p>
             }
           </div>
@@ -171,35 +187,36 @@
                 @if (names.question(grade, evidence)?.rubric; as rubric) {
                   <div formGroupName="criteria">
                     @for (criterion of rubric.criteria; track criterion.id) {
-                      @let group = 'level-' + evidence.question_id + '-' + criterion.id;
-                      @let missing =
-                        !!marks.get([evidence.question_id, 'criteria', criterion.id!])?.touched &&
-                        !!marks.get([evidence.question_id, 'criteria', criterion.id!])?.invalid;
-                      <fieldset
-                        class="levels"
-                        role="radiogroup"
-                        [attr.aria-invalid]="missing || null"
-                        [attr.aria-describedby]="missing ? group + '-error' : null"
-                      >
-                        <legend>{{ criterion.title }}</legend>
-                        @for (level of criterion.levels; track level.points) {
-                          <label class="check">
-                            <!-- One name per criterion makes a real radio group: one Tab stop, arrow keys between levels. -->
-                            <input
-                              type="radio"
-                              [attr.name]="group"
-                              [formControlName]="criterion.id!"
-                              [value]="level.points"
-                            />
-                            <span
-                              ><strong>{{ level.points }}</strong> · {{ level.descriptor }}</span
-                            >
-                          </label>
-                        }
-                        @if (missing) {
-                          <small class="error" [id]="group + '-error'">Choose a level.</small>
-                        }
-                      </fieldset>
+                      @if (criterion.id; as criterionId) {
+                        @let group = 'level-' + evidence.question_id + '-' + criterionId;
+                        @let level = marks.get([evidence.question_id, 'criteria', criterionId]);
+                        @let missing = !!level?.touched && !!level?.invalid;
+                        <fieldset
+                          class="levels"
+                          role="radiogroup"
+                          [attr.aria-invalid]="missing || null"
+                          [attr.aria-describedby]="missing ? group + '-error' : null"
+                        >
+                          <legend>{{ criterion.title }}</legend>
+                          @for (level of criterion.levels; track level.points) {
+                            <label class="check">
+                              <!-- One name per criterion makes a real radio group: one Tab stop, arrow keys between levels. -->
+                              <input
+                                type="radio"
+                                [attr.name]="group"
+                                [formControlName]="criterionId"
+                                [value]="level.points"
+                              />
+                              <span
+                                ><strong>{{ level.points }}</strong> · {{ level.descriptor }}</span
+                              >
+                            </label>
+                          }
+                          @if (missing) {
+                            <small class="error" [id]="group + '-error'">Choose a level.</small>
+                          }
+                        </fieldset>
+                      }
                     }
                   </div>
                 } @else {
@@ -212,10 +229,7 @@
                         : 'Marked automatically. Change it only to override.'
                     "
                     [error]="'Give 0–' + evidence.possible + '.'"
-                    [invalid]="
-                      !!marks.get([evidence.question_id, 'awarded'])?.touched &&
-                      !!marks.get([evidence.question_id, 'awarded'])?.invalid
-                    "
+                    [control]="marks.get([evidence.question_id, 'awarded'])"
                   >
                     <input
                       appFieldControl
@@ -232,10 +246,7 @@
                   [label]="'Feedback on question ' + (n + 1) + ' (optional)'"
                   hint="The student sees this with their result."
                   error="Feedback is at most 2000 characters."
-                  [invalid]="
-                    !!marks.get([evidence.question_id, 'feedback'])?.touched &&
-                    !!marks.get([evidence.question_id, 'feedback'])?.invalid
-                  "
+                  [control]="marks.get([evidence.question_id, 'feedback'])"
                 >
                   <textarea
                     appFieldControl
@@ -266,6 +277,16 @@
       </p>
     }
   }
+  <!-- Not disabled while a page loads, so the button pressed keeps keyboard focus; only the newest page lands. -->
+  <app-pager
+    label="Grade pages"
+    noun="grades"
+    [(page)]="page"
+    [pageSize]="pageSize"
+    [total]="grades.value()?.total ?? 0"
+    [disabled]="state.busy() || marks.dirty"
+    (go)="showPage()"
+  />
 </section>
 @if (!finalizing() && !releasing()) {
   <app-status [state]="state" />

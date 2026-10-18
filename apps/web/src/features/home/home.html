@@ -6,9 +6,11 @@
   <button class="secondary" (click)="refresh()" [disabled]="!classroomId()">Refresh home</button>
 </div>
 @if (!classroomId()) {
-  <p class="empty">
-    You are not in a classroom yet. Ask your teacher to enroll you, then choose Refresh classrooms above.
-  </p>
+  <app-no-classroom>
+    <p class="empty">
+      You are not in a classroom yet. Ask your teacher to enroll you, then choose Refresh classrooms above.
+    </p>
+  </app-no-classroom>
 } @else {
   <section class="panel dashboard-panel" aria-labelledby="todo-title">
     <h3 id="todo-title">To do</h3>
@@ -27,13 +29,7 @@
           </a>
         </article>
       } @empty {
-        <p class="empty">
-          {{
-            assessments.value()?.length
-              ? 'All caught up. You have submitted every assessment.'
-              : 'No assessments in this classroom yet.'
-          }}
-        </p>
+        <p class="empty">{{ nothingToDo() }}</p>
       }
     }
   </section>
@@ -60,7 +56,7 @@
     @if (results.ready()) {
       @for (result of recent(); track result.id) {
         <article class="record roster-row">
-          <strong>{{ title(result) }}</strong>
+          <strong>{{ names.title(result) || 'Assessment' }}</strong>
           <span>{{ result.evidence | marks }} marks</span>
         </article>
       } @empty {
@@ -78,7 +74,7 @@
     @if (performance.ready()) {
       @for (metric of practise(); track metric.topic_id) {
         <article class="record roster-row">
-          @if (topic(metric.topic_id); as name) {
+          @if (names.topic(metric); as name) {
             <strong>{{ name }}</strong>
           } @else {
             <strong class="identifier">{{ metric.topic_id }}</strong>

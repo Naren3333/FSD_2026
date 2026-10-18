@@ -18,7 +18,7 @@ func (a answersByTopic) check(_ *http.Request, topic string) topicStatus {
 
 func TestCheckAllReportsTheWorstAnswer(t *testing.T) {
 	r := httptest.NewRequest(http.MethodPost, "/", nil)
-	answers := answersByTopic{"a": topicValid, "b": topicValid, "down": topicUnavailable}
+	answers := answersByTopic{"a": topicValid, "b": topicValid, "down": topicUnavailable, "expired": topicUnauthenticated}
 	cases := []struct {
 		ids  []string
 		want topicStatus
@@ -26,6 +26,7 @@ func TestCheckAllReportsTheWorstAnswer(t *testing.T) {
 		{[]string{"a", "b"}, topicValid},
 		{[]string{"a", "missing"}, topicInvalid},
 		{[]string{"missing", "down", "a"}, topicUnavailable},
+		{[]string{"down", "expired", "missing"}, topicUnauthenticated},
 		{nil, topicValid},
 	}
 	for _, tc := range cases {
@@ -52,7 +53,8 @@ func TestCheckMapsCurriculumAnswers(t *testing.T) {
 		{"a topic", http.StatusOK, `{"id":"s","name":"Fractions"}`, topicValid},
 		{"no topic in the answer", http.StatusOK, `{}`, topicUnavailable},
 		{"missing", http.StatusNotFound, `{"error":{}}`, topicInvalid},
-		{"refused", http.StatusForbidden, `{}`, topicInvalid},
+		{"token not accepted", http.StatusUnauthorized, `{}`, topicUnauthenticated},
+		{"refused", http.StatusForbidden, `{}`, topicUnavailable},
 		{"curriculum failing", http.StatusInternalServerError, `{}`, topicUnavailable},
 		{"curriculum unavailable", http.StatusServiceUnavailable, ``, topicUnavailable},
 		{"unreadable body", http.StatusOK, `<html>`, topicUnavailable},

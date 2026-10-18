@@ -15,6 +15,7 @@ const (
 	topicValid topicStatus = iota
 	topicInvalid
 	topicUnavailable
+	topicUnauthenticated
 )
 
 // topics checks that a topic exists in the caller's curriculum.
@@ -22,8 +23,9 @@ type topics interface {
 	check(r *http.Request, topic string) topicStatus
 }
 
-// checkAll checks every topic at once and reports the worst answer: unavailable if Curriculum couldn't answer for
-// any of them, otherwise invalid if any is not a topic.
+// checkAll checks every topic at once and reports the worst answer: unauthenticated if Curriculum refused the
+// caller's token for any of them, otherwise unavailable if it couldn't answer for any, otherwise invalid if any is not
+// a topic.
 func checkAll(r *http.Request, s topics, ids []string) topicStatus {
 	statuses := make([]topicStatus, len(ids))
 	var wg sync.WaitGroup
@@ -45,8 +47,9 @@ type curriculum struct {
 }
 
 // check asks the curriculum service whether the topic exists in the caller's curriculum: a 200 with the topic is
-// valid. A topic Curriculum says is missing or refuses (4xx) is invalid; Curriculum failing (5xx) or answering with
-// a body it cannot read is unavailable, so an outage is never reported to the teacher as an invalid topic.
+// valid. A topic Curriculum says is missing (any other 4xx) is invalid. A token it does not accept (401) is
+// unauthenticated, so the teacher signs in again; a refusal (403), Curriculum failing (5xx) or a body it cannot read
+// is unavailable. Neither an expired token nor an outage is ever reported to the teacher as an invalid topic.
 func (c curriculum) check(r *http.Request, topic string) topicStatus {
 	req, err := platform.Forward(r, http.MethodGet, c.base+"/v1/topics/"+topic)
 	if err != nil {
@@ -60,6 +63,13 @@ func (c curriculum) check(r *http.Request, topic string) topicStatus {
 	defer res.Body.Close()
 	switch {
 	case res.StatusCode >= http.StatusInternalServerError:
+		return topicUnavailable
+	case res.StatusCode == http.StatusUnauthorized:
+		return topicUnauthenticated
+	case res.StatusCode == http.StatusForbidden:
+		// Assessment has already checked the caller teaches the classroom, so Curriculum refusing them is a
+		// misconfiguration to fix, not a topic the teacher picked wrongly.
+		slog.Warn("curriculum_refused_topic_check", "topic", topic)
 		return topicUnavailable
 	case res.StatusCode != http.StatusOK:
 		return topicInvalid

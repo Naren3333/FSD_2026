@@ -54,10 +54,16 @@ def refused(e: UpstreamError) -> HTTPException:
 
 
 def _local_time(iso: str | None) -> str:
+    """ai-core's reset time in its own zone (SPEND_TIMEZONE), with the zone's offset, e.g. "00:00 on 19 Oct
+    (UTC+08:00)": the teacher's browser may be elsewhere."""
     try:
-        return datetime.fromisoformat(iso).strftime("%H:%M on %d %b") if iso else ""
+        at = datetime.fromisoformat(iso) if iso else None
     except ValueError:
         return ""
+    if at is None:
+        return ""
+    zone = at.strftime(" (%Z)") if at.tzinfo is not None else ""
+    return at.strftime("%H:%M on %d %b") + zone
 
 
 def passages_of(results: list[dict[str, Any]], floor: float) -> list[Passage]:
@@ -175,4 +181,4 @@ class Pipeline:
                 "INSUFFICIENT_SOURCE",
                 "The chosen documents say too little about this. Choose other documents or change the focus.",
             )
-        return passages
+        return prompts.fitting(passages)

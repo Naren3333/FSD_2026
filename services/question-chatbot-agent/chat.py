@@ -4,7 +4,8 @@ user's own token, and stream a cited answer from ai-core.
 Everything that can fail with a plain HTTP status (the user, the body, the thread's owner, the database) happens
 before the stream starts, and the user's message is saved then. After that, failures arrive as an `error` event,
 and the assistant message is saved whatever happens: `answered`, `no_results` (the fixed refusal), `error` with
-the partial text, or `interrupted` when the client goes away.
+the partial text, or `interrupted` when the client goes away. Only a thread purged meanwhile (its classroom or its
+user deleted) keeps nothing more; the stream then ends with a NOT_FOUND `error` event.
 """
 
 import asyncio
@@ -42,6 +43,8 @@ CITATION_FIELDS = (
     "content",
     "image",
 )
+# The thread was deleted (its classroom or its user purged) while the answer was written: nothing more is saved.
+THREAD_GONE = ("NOT_FOUND", "This conversation was deleted.")
 MAX_DOCUMENTS_CHARS = 55000  # ai-core takes messages of up to 60000 characters
 PASSAGE_OVERHEAD = 200  # characters each passage adds to the prompt besides its content: tag, title, pages
 
@@ -161,16 +164,28 @@ class Turn:
             error = ("INTERNAL_ERROR", "The answer failed.")
         # Saved before the last events, so a disconnect while they are sent can't lose the row, and shielded, so a
         # disconnect during the save can't either: the save carries on and the lifespan waits for it.
+        # A save that fails, or finds the thread purged meanwhile, still ends the stream with an `error` event.
         if error is None:
-            message_id = await asyncio.shield(self._save_detached(self.outcome))
-            yield sse_event("citations", {"citations": self._citations()})
-            yield sse_event("done", {"message_id": message_id, "outcome": self.outcome})
-        else:
-            await asyncio.shield(self._save_detached("error"))
-            data: dict[str, Any] = {"code": error[0], "message": error[1]}
-            if resets_at:
-                data["resets_at"] = resets_at
-            yield sse_event("error", data)
+            saved = await self._saved(self.outcome)
+            if isinstance(saved, str):
+                yield sse_event("citations", {"citations": self._citations()})
+                yield sse_event("done", {"message_id": saved, "outcome": self.outcome})
+                return
+            error = saved
+        elif await self._saved("error") == THREAD_GONE:
+            error, resets_at = THREAD_GONE, None
+        data: dict[str, Any] = {"code": error[0], "message": error[1]}
+        if resets_at:
+            data["resets_at"] = resets_at
+        yield sse_event("error", data)
+
+    async def _saved(self, outcome: str) -> str | tuple[str, str]:
+        """The saved answer's id, or the `error` event's code and message when it could not be saved."""
+        try:
+            message_id = await asyncio.shield(self._save_detached(outcome))
+        except Exception:  # logged by _log_failure
+            return ("INTERNAL_ERROR", "The answer could not be saved.")
+        return THREAD_GONE if message_id is None else message_id
 
     async def _answer(self) -> AsyncIterator[str]:
         """Small talk gets a short reply without documents; an off-topic message, no results, or a top score under
@@ -269,7 +284,7 @@ class Turn:
         by_id = {str(r["chunk_id"]): r for r in self.results}
         return [{k: by_id[cid].get(k) for k in CITATION_FIELDS} for cid in self.rewriter.cited]
 
-    async def _save(self, outcome: str) -> str:
+    async def _save(self, outcome: str) -> str | None:
         if self.rewriter is not None and (held := self.rewriter.flush()):
             self.parts.append(held)  # an error or disconnect mid-tag: keep the text as written
         decided = self.searched or self.version is not None or outcome == "no_results"
@@ -286,6 +301,9 @@ class Turn:
             "latency_ms": round((time.perf_counter() - self.started) * 1000),
         }
         message_id = await self.store.save_answer(str(self.thread["id"]), answer)
+        if message_id is None:
+            log.info("chat_thread_gone", extra={"thread_id": str(self.thread["id"]), "outcome": outcome})
+            return None
         log.info(
             "chat_turn",
             extra={
@@ -301,7 +319,7 @@ class Turn:
         )
         return message_id
 
-    def _save_detached(self, outcome: str) -> asyncio.Task[str]:
+    def _save_detached(self, outcome: str) -> asyncio.Task[str | None]:
         """Save in a task of its own, which a cancelled request does not cancel."""
         task = asyncio.get_running_loop().create_task(self._save(outcome))
         self.pending.add(task)  # a strong reference until it finishes; the lifespan waits for these

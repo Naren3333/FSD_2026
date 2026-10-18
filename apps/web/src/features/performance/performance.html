@@ -31,6 +31,9 @@
     </button>
   </form>
   <app-status [state]="state" />
+  @if (!classroomId()) {
+    <app-no-classroom><p class="empty">Select a classroom to view performance.</p></app-no-classroom>
+  }
   <app-section-state [section]="result" loading="Loading performance…" />
   @if (result.ready()) {
     @if (result.value(); as data) {

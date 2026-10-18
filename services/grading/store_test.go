@@ -6,6 +6,7 @@ import (
 	"errors"
 	"learning/platform"
 	"learning/platform/platformtest"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -92,6 +93,9 @@ func audits(t *testing.T, db *pgxpool.Pool, id string) int {
 	return count(t, db, "SELECT count(*) FROM audit WHERE evaluation_id=$1", id)
 }
 
+// everyone is the roster of every student the tests submit as.
+var everyone = []string{"student-a", "student-b", "student-c"}
+
 func TestAManualReleaseShowsOnlyWhatWasFinalizedBeforeIt(t *testing.T) {
 	db := testDB(t)
 	ctx, s := t.Context(), pgStore{db}
@@ -104,7 +108,7 @@ func TestAManualReleaseShowsOnlyWhatWasFinalizedBeforeIt(t *testing.T) {
 	if events(t, db, submissionA) != 0 || load(t, db, submissionA).released != nil {
 		t.Fatal("a manual-release grade went out at finalization")
 	}
-	if n, err := s.release(ctx, "org", submissionID, "teacher-1"); err != nil || n != 1 {
+	if n, err := s.release(ctx, "org", submissionID, "teacher-1", everyone); err != nil || n != 1 {
 		t.Fatalf("first release: %d %v", n, err)
 	}
 	if _, err := s.finalizeEvaluation(ctx, "org", submissionB, "teacher-1", "Checked", nil); err != nil {
@@ -119,7 +123,7 @@ func TestAManualReleaseShowsOnlyWhatWasFinalizedBeforeIt(t *testing.T) {
 	if mine, err := s.listReleased(ctx, "org", submissionID, "student-a"); err != nil || len(mine) != 1 {
 		t.Fatalf("student-a lost their released grade: %+v %v", mine, err)
 	}
-	if n, err := s.release(ctx, "org", submissionID, "teacher-1"); err != nil || n != 1 {
+	if n, err := s.release(ctx, "org", submissionID, "teacher-1", everyone); err != nil || n != 1 {
 		t.Fatalf("second release: %d %v", n, err)
 	}
 	if events(t, db, submissionA) != 1 || events(t, db, submissionB) != 1 || load(t, db, submissionB).released == nil {
@@ -128,7 +132,7 @@ func TestAManualReleaseShowsOnlyWhatWasFinalizedBeforeIt(t *testing.T) {
 	if c := load(t, db, submissionC); c.status != statusDraft || c.released != nil || events(t, db, submissionC) != 0 {
 		t.Fatalf("a release touched a draft: %+v", c)
 	}
-	if n, err := s.release(ctx, "org", submissionID, "teacher-1"); err != nil || n != 0 {
+	if n, err := s.release(ctx, "org", submissionID, "teacher-1", everyone); err != nil || n != 0 {
 		t.Fatalf("a repeated release: %d %v", n, err)
 	}
 }
@@ -642,14 +646,14 @@ func TestARemovedStudentsWorkIsKeptButNotMarked(t *testing.T) {
 	if e := load(t, db, submissionA).evidence[0]; ai.calls != 0 || e.Suggestion == nil || e.Suggestion.Status != suggestionFailed || e.Suggestion.Reason != "STUDENT_REMOVED" {
 		t.Fatalf("calls %d, suggestion %+v", ai.calls, e.Suggestion)
 	}
-	listed, err := s.listEvaluations(ctx, "org", submissionID, "", []string{"student-b"})
-	if err != nil || len(listed) != 1 || listed[0].Student != "student-b" {
-		t.Fatalf("listed %+v, %v", listed, err)
+	listed, total, err := s.listEvaluations(ctx, "org", submissionID, "", []string{"student-b"}, 0, 20)
+	if err != nil || total != 1 || len(listed) != 1 || listed[0].Student != "student-b" {
+		t.Fatalf("listed %+v of %d, %v", listed, total, err)
 	}
-	if c, err := s.countEvaluations(ctx, "org", submissionID, []string{"student-b"}); err != nil || c.Drafts != 1 {
+	if c, err := s.countEvaluations(ctx, "org", submissionID, "", []string{"student-b"}); err != nil || c.Drafts != 1 {
 		t.Fatalf("counts %+v, %v", c, err)
 	}
-	if c, err := s.countEvaluations(ctx, "org", submissionID, []string{"student-a", "student-b"}); err != nil || c.Drafts != 2 {
+	if c, err := s.countEvaluations(ctx, "org", submissionID, "", []string{"student-a", "student-b"}); err != nil || c.Drafts != 2 {
 		t.Fatalf("counts once enrolled again %+v, %v", c, err)
 	}
 	submit(t, db, submissionC, "student-a", map[string]any{"submitted_at": submitted.Add(2 * time.Hour)})
@@ -768,5 +772,75 @@ func TestADeletedAccountLeavesNoGrades(t *testing.T) {
 	submit(t, db, late, gone, map[string]any{"assessment_id": late})
 	if n := count(t, db, "SELECT count(*) FROM evaluations WHERE id=$1", late); n != 0 {
 		t.Fatal("a late submission event graded the deleted account")
+	}
+}
+
+func TestAReleaseShowsOnlyEnrolledStudentsGrades(t *testing.T) {
+	db := testDB(t)
+	ctx, s := t.Context(), pgStore{db}
+	submit(t, db, submissionA, "student-a", autoMarked)
+	submit(t, db, submissionB, "student-b", autoMarked)
+	for _, id := range []string{submissionA, submissionB} {
+		if _, err := s.finalizeEvaluation(ctx, "org", id, "teacher-1", "Checked", nil); err != nil {
+			t.Fatal(err)
+		}
+	}
+	// student-a has been removed from the classroom: their grade is not counted, so it is not released either.
+	enrolled := []string{"student-b"}
+	if c, err := s.countEvaluations(ctx, "org", submissionID, submissionID, enrolled); err != nil || c.Unreleased != 1 {
+		t.Fatalf("counts %+v, %v", c, err)
+	}
+	if n, err := s.release(ctx, "org", submissionID, "teacher-1", enrolled); err != nil || n != 1 {
+		t.Fatalf("release: %d %v", n, err)
+	}
+	if a := load(t, db, submissionA); a.status != statusFinalized || a.released != nil || events(t, db, submissionA) != 0 {
+		t.Fatalf("a removed student's grade was released: %+v", a)
+	}
+	if load(t, db, submissionB).released == nil || events(t, db, submissionB) != 1 {
+		t.Fatal("the enrolled student's grade was not released")
+	}
+	// Enrolled again, their kept grade is released at the next release.
+	if n, err := s.release(ctx, "org", submissionID, "teacher-1", everyone); err != nil || n != 1 || load(t, db, submissionA).released == nil {
+		t.Fatalf("release once enrolled again: %d %v", n, err)
+	}
+}
+
+func TestTheTeachersListComesInPagesThatNeverOverlap(t *testing.T) {
+	db := testDB(t)
+	ctx, s := t.Context(), pgStore{db}
+	at := time.Date(2026, 10, 1, 9, 0, 0, 0, time.UTC)
+	for i, id := range []string{submissionA, submissionB, submissionC} {
+		submit(t, db, id, everyone[i], map[string]any{"submitted_at": at})
+	}
+	// The same creation time for every one: the id orders them.
+	if _, err := db.Exec(ctx, "UPDATE evaluations SET created_at=$1", at); err != nil {
+		t.Fatal(err)
+	}
+	read := func(assessment string, offset int) []string {
+		t.Helper()
+		page, total, err := s.listEvaluations(ctx, "org", submissionID, assessment, everyone, offset, 2)
+		if err != nil || total != 3 {
+			t.Fatalf("%q at %d: %d in all, %v", assessment, offset, total, err)
+		}
+		ids := []string{}
+		for _, v := range page {
+			ids = append(ids, v.ID)
+		}
+		return ids
+	}
+	if got := append(read(submissionID, 0), read(submissionID, 2)...); strings.Join(got, ",") != strings.Join([]string{submissionA, submissionB, submissionC}, ",") {
+		t.Fatalf("one assessment's pages, oldest first: %v", got)
+	}
+	if got := append(read("", 0), read("", 2)...); strings.Join(got, ",") != strings.Join([]string{submissionC, submissionB, submissionA}, ",") {
+		t.Fatalf("the classroom's pages, newest first: %v", got)
+	}
+	if page, total, err := s.listEvaluations(ctx, "org", submissionID, submissionC, everyone, 0, 2); err != nil || total != 0 || len(page) != 0 {
+		t.Fatalf("another assessment: %v of %d, %v", page, total, err)
+	}
+	if v, err := s.findEvaluation(ctx, "org", submissionB); err != nil || v.Student != "student-b" {
+		t.Fatalf("find: %+v %v", v, err)
+	}
+	if _, err := s.findEvaluation(ctx, "another-org", submissionB); !errors.Is(err, platform.ErrNotFound) {
+		t.Fatalf("found in another organization: %v", err)
 	}
 }

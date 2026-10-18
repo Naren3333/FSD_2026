@@ -34,10 +34,12 @@ GO_SUITES = [
 
 
 def scratch_database(name: str, owner: str, *extensions: str) -> str:
-    """Creates `<name>_test` owned by the owner's role if missing; returns its URL on the Compose network."""
+    """Creates `<name>_test` owned by the owner's role if missing; returns its URL on the Compose network. As with
+    the services' own databases, no other role may connect to it (a database left by an older run is closed too)."""
     database = f"{name}_test"
     if psql_value(f"SELECT count(*) FROM pg_database WHERE datname='{database}'") == "0":
         psql_value(f"CREATE DATABASE {database} OWNER {owner}")
+    psql_value(f"REVOKE ALL ON DATABASE {database} FROM PUBLIC")
     for extension in extensions:
         psql_value(f"CREATE EXTENSION IF NOT EXISTS {extension}", database=database)
     password = env()[password_key(owner)]

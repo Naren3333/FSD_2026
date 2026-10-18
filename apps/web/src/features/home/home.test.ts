@@ -54,6 +54,7 @@ function render(
   assessments: Promise<AssessmentSummary[]>,
   results: Promise<Evaluation[]>,
   performance: Promise<Performance> = Promise.resolve(noEvidence),
+  need: () => Promise<void> = () => Promise.resolve(),
 ) {
   TestBed.resetTestingModule();
   TestBed.configureTestingModule({
@@ -63,7 +64,7 @@ function render(
       { provide: AssessmentApi, useValue: { list: () => assessments } },
       { provide: GradingApi, useValue: { mine: () => results } },
       { provide: AnalyticsApi, useValue: { performance: () => performance } },
-      { provide: CurriculumNames, useValue: { need: () => Promise.resolve(), topicName: () => '' } },
+      { provide: CurriculumNames, useValue: { need, topicName: () => '' } },
       { provide: ClassroomContext, useValue: { classroomId: signal('c1'), classroomName: signal('3A') } },
     ],
   });
@@ -140,5 +141,49 @@ describe('home empty states', () => {
     expect(page.panel('Waiting for your teacher')).toContain('Nothing waiting.');
     expect(page.panel('Recent results')).toContain('No finalized results yet.');
     expect(page.panel('Topics to practise')).toContain('No finalized grades yet');
+  });
+
+  it('says when everything is submitted, and when one closed before the student submitted it', async () => {
+    const closed: AssessmentSummary = {
+      ...assessment('q2', false),
+      due_at: '2026-01-01T00:00:00Z',
+      late_policy: 'reject',
+    };
+    const done = render(Promise.resolve([assessment('q1', true)]), Promise.resolve([]));
+    await done.settle();
+    expect(done.panel('To do')).toContain('All caught up. You have submitted every assessment.');
+
+    const missed = render(Promise.resolve([assessment('q1', true), closed]), Promise.resolve([]));
+    await missed.settle();
+    expect(missed.panel('To do')).toContain(
+      'Nothing left to submit. 1 assessment closed before you submitted.',
+    );
+    expect(missed.panel('To do')).not.toContain('submitted every assessment');
+  });
+});
+
+describe('topics to practise without the curriculum', () => {
+  it('shows the topic ids instead of failing', async () => {
+    const weak: Performance = {
+      ...noEvidence,
+      evidence_status: 'available',
+      topics: [
+        {
+          topic_id: 'k1',
+          attempted: 5,
+          correct: 1,
+          observed_accuracy: 0.2,
+          evidence_status: 'observed',
+          weakness_indicator: true,
+        },
+      ],
+    };
+    const page = render(Promise.resolve([]), Promise.resolve([]), Promise.resolve(weak), () =>
+      Promise.reject(new Error('Curriculum is unavailable.')),
+    );
+    await page.settle();
+    expect(page.panel('Topics to practise')).toContain('k1');
+    expect(page.panel('Topics to practise')).toContain('1 of 5 correct');
+    expect(page.panel('Topics to practise')).not.toContain('Curriculum is unavailable.');
   });
 });

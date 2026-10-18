@@ -12,6 +12,7 @@ import type {
   DocumentRecord,
   Enrollment,
   Evaluation,
+  EvaluationPage,
   GenerateRequest,
   GenerateResult,
   GradingCounts,
@@ -19,11 +20,13 @@ import type {
   GuidanceRequest,
   Mark,
   NewAssessment,
+  OwnSubmission,
   Performance,
   Profile,
   SavedAnswers,
   StreamEvent,
   Student,
+  StudentPage,
   Submission,
   Thread,
   Topic,
@@ -33,6 +36,9 @@ import type {
 /** One typed client per backend. Components call these, never the gateway with hand-built paths. */
 
 const id = encodeURIComponent;
+
+/** The most students one page of a classroom's roster holds. */
+const ROSTER_PAGE = 500;
 
 @Injectable({ providedIn: 'root' })
 export class IdentityApi {
@@ -69,13 +75,27 @@ export class IdentityApi {
     });
   }
   /** One page of the students in the teacher's organization who have signed in, by name, and how many match. */
-  students(search: string, offset: number, limit: number): Promise<{ students: Student[]; total: number }> {
+  students(search: string, offset: number, limit: number): Promise<StudentPage> {
     const query = new URLSearchParams({ search, offset: String(offset), limit: String(limit) });
     return this.gateway.request('identity', `/students?${query}`);
   }
-  /** The classroom's students, for its teacher only; up to 500. */
-  roster(classroomId: string): Promise<Student[]> {
-    return this.gateway.request('identity', `/classrooms/${id(classroomId)}/students`);
+  /** One page of the classroom's students by name, for its teacher only, and how many are enrolled. */
+  rosterPage(classroomId: string, offset: number, limit: number): Promise<StudentPage> {
+    const query = new URLSearchParams({ offset: String(offset), limit: String(limit) });
+    return this.gateway.request('identity', `/classrooms/${id(classroomId)}/students?${query}`);
+  }
+  /** Every student of the classroom by name, for its teacher only, read a page of 500 at a time. */
+  async roster(classroomId: string): Promise<Student[]> {
+    const students: Student[] = [];
+    for (;;) {
+      const page = await this.rosterPage(classroomId, students.length, ROSTER_PAGE);
+      students.push(...page.students);
+      if (!page.students.length || students.length >= page.total) return students;
+    }
+  }
+  /** The ids of every student enrolled in the classroom, for its teacher only. */
+  rosterIds(classroomId: string): Promise<string[]> {
+    return this.gateway.request('identity', `/classrooms/${id(classroomId)}/student-ids`);
   }
 }
 
@@ -191,6 +211,10 @@ export class AssessmentApi {
       method: 'DELETE',
     });
   }
+  /** The signed-in student's own submitted answers; a 404 until they submit. */
+  submission(assessmentId: string): Promise<OwnSubmission> {
+    return this.gateway.request('assessment', `/assessments/${id(assessmentId)}/submission`);
+  }
   /** The signed-in student's unsubmitted work. */
   saved(assessmentId: string): Promise<SavedAnswers> {
     return this.gateway.request('assessment', `/assessments/${id(assessmentId)}/saved-answers`);
@@ -214,15 +238,32 @@ export class AssessmentApi {
 export class GradingApi {
   private readonly gateway = inject(Gateway);
 
-  /** The classroom's 100 newest evaluations, or all (up to 500) of one assessment's, with students' answers. */
-  evaluations(classroomId: string, assessmentId = ''): Promise<Evaluation[]> {
-    const query = new URLSearchParams({ classroom_id: classroomId });
+  /** One page (at most 100) of the classroom's evaluations with students' answers, newest first, or of one
+   * assessment's, oldest first, and how many there are. */
+  evaluations(
+    classroomId: string,
+    assessmentId: string,
+    offset: number,
+    limit: number,
+  ): Promise<EvaluationPage> {
+    const query = new URLSearchParams({
+      classroom_id: classroomId,
+      offset: String(offset),
+      limit: String(limit),
+    });
     if (assessmentId) query.set('assessment_id', assessmentId);
     return this.gateway.request('grading', `/evaluations?${query}`);
   }
-  /** For the classroom's teacher: how many grades are drafts waiting for review, and how many are final. */
-  counts(classroomId: string): Promise<GradingCounts> {
-    return this.gateway.request('grading', `/evaluations/counts?classroom_id=${id(classroomId)}`);
+  /** One evaluation with its student's answers, for the classroom's teacher. */
+  evaluation(evaluationId: string): Promise<Evaluation> {
+    return this.gateway.request('grading', `/evaluations/${id(evaluationId)}`);
+  }
+  /** For the classroom's teacher: how many grades are drafts waiting for review, how many are final and how many of
+   * those are not released, in the classroom or in one assessment. */
+  counts(classroomId: string, assessmentId = ''): Promise<GradingCounts> {
+    const query = new URLSearchParams({ classroom_id: classroomId });
+    if (assessmentId) query.set('assessment_id', assessmentId);
+    return this.gateway.request('grading', `/evaluations/counts?${query}`);
   }
   /** The signed-in student's released results in the classroom; drafts are never returned. */
   mine(classroomId: string): Promise<Evaluation[]> {
@@ -242,7 +283,7 @@ export class GradingApi {
       body: { reason, marks },
     });
   }
-  /** Shows an assessment's finalized grades to its students. */
+  /** Shows an assessment's finalized grades to its enrolled students; a removed student's stay hidden. */
   release(assessmentId: string): Promise<{ assessment_id: string; released: number }> {
     return this.gateway.request('grading', '/evaluations/release', {
       method: 'POST',
@@ -300,9 +341,9 @@ export class ChatApi {
   }
 }
 
-/** Generation reads the documents and waits for the model; Kong allows it two minutes. The browser waits a little
+/** Generation reads the documents and waits for the model; Kong allows it three minutes. The browser waits a little
  * longer, so Kong's own timeout (a 504, which says so) arrives first. */
-const GENERATION_TIMEOUT = 2 * 60 * 1000 + 10 * 1000;
+const GENERATION_TIMEOUT = 3 * 60 * 1000 + 10 * 1000;
 
 /** Drafts from the classroom's documents for its teacher (ADR 0006). Nothing is saved until the teacher saves the
  * assessment. */

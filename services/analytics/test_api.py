@@ -211,3 +211,51 @@ def test_ready_needs_the_database(serve):
 
     assert serve(FakeIdentity(None), FakePool()).get("/health/ready").json() == {"status": "ready"}
     assert serve(FakeIdentity(None), Down()).get("/health/ready").status_code == 503
+
+
+def test_shutdown_waits_for_the_consumer_without_blocking_the_event_loop(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import asyncio
+    import threading
+    import time
+    from types import SimpleNamespace
+
+    import main
+
+    for name in (
+        "OIDC_ISSUER",
+        "OIDC_AUDIENCE",
+        "OIDC_JWKS_URL",
+        "IDENTITY_URL",
+        "KAFKA_BROKERS",
+        "DATABASE_URL",
+    ):
+        monkeypatch.setenv(name, "http://test")
+    closed: list[bool] = []
+    pool = SimpleNamespace(close=lambda: closed.append(True))
+    monkeypatch.setattr(main, "open_pool", lambda url, migrations: pool)
+
+    def consumer(_: Any, stop: threading.Event, connected: threading.Event) -> None:
+        stop.wait()
+        time.sleep(0.3)  # finishing the message in hand
+
+    monkeypatch.setattr(main, "run", consumer)
+
+    async def scenario() -> int:
+        ticks = 0
+
+        async def tick() -> None:
+            nonlocal ticks
+            while True:
+                await asyncio.sleep(0.01)
+                ticks += 1
+
+        ticking = asyncio.create_task(tick())
+        async with main.lifespan(SimpleNamespace(state=SimpleNamespace())):
+            pass
+        ticking.cancel()
+        return ticks
+
+    assert asyncio.run(scenario()) >= 10  # the loop kept running while the consumer finished
+    assert closed == [True]  # and the pool closed only after it

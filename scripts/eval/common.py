@@ -49,7 +49,7 @@ def password(user: str, state: dict) -> str:
 
 class Session:
     """Gateway calls as a local test user (the learning-e2e client, as scripts/integration.py does). Access tokens
-    are short-lived, so a 401 signs in again once. Kong allows each signed-in session (bearer token) 120 requests a
+    are short-lived, so a 401 signs in again, once per expiry. Kong allows each signed-in session (bearer token) 120 requests a
     minute, which a long run of queries can reach, so a 429 waits and retries."""
 
     def __init__(self, user: str, state: dict) -> None:
@@ -61,13 +61,18 @@ class Session:
         self.http.headers["Authorization"] = "Bearer " + password_token(self.user, self.secret)
 
     def send(self, method: str, path: str, *, stream: bool = False, **kwargs) -> httpx.Response:
-        """The response, after signing in again on a first 401 and waiting out 429s. With `stream`, the body is
-        not read yet: close the response when done with it."""
+        """The response, after signing in again on a 401 and waiting out 429s. With `stream`, the body is not read
+        yet: close the response when done with it. The token can expire during a long run of 429 waits, so a 401
+        signs in again at any attempt; a second 401 straight after signing in is the answer."""
+        signed_in = False
         for attempt in range(ATTEMPTS):
             res = self.http.send(self.http.build_request(method, path, **kwargs), stream=stream)
-            if res.status_code == 401 and attempt == 0:
+            last = attempt == ATTEMPTS - 1
+            if res.status_code == 401 and not signed_in and not last:
                 self.sign_in()
-            elif res.status_code == 429 and attempt < ATTEMPTS - 1:
+                signed_in = True
+            elif res.status_code == 429 and not last:
+                signed_in = False
                 time.sleep(5)
             else:
                 return res

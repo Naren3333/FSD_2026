@@ -189,6 +189,48 @@ def test_a_refused_token_request_is_an_upstream_error() -> None:
     assert error.value.code == "TOKEN_UNAVAILABLE"
 
 
+def test_calls_queued_behind_a_failed_token_fetch_fail_at_once(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Keycloak hanging: the first call waits out the fetch, the ones queued behind it fail without asking again,
+    and after FAILURE_TTL the next call tries Keycloak again."""
+    clock = [100.0]
+    monkeypatch.setattr("learning_transport.tokens._now", lambda: clock[0])
+    calls = 0
+
+    async def answer(request: httpx.Request) -> httpx.Response:
+        nonlocal calls
+        calls += 1
+        if calls == 1:
+            await asyncio.sleep(0.05)
+            clock[0] += 10  # the fetch timed out
+            raise httpx.ReadTimeout("hung", request=request)
+        return httpx.Response(200, json={"access_token": "fresh", "expires_in": 300})
+
+    async def scenario() -> tuple[list[Any], str]:
+        async with httpx.AsyncClient(transport=httpx.MockTransport(answer)) as http:
+            token = ServiceToken(http, "http://kc/token", "id", "secret")
+            failed = await asyncio.gather(*(token.get() for _ in range(5)), return_exceptions=True)
+            clock[0] += 6  # past FAILURE_TTL
+            return failed, await token.get()
+
+    failed, fresh = run(scenario())
+    assert all(isinstance(f, UpstreamError) and f.code == "TOKEN_UNAVAILABLE" for f in failed)
+    assert calls == 2 and fresh == "fresh"
+
+
+def test_a_request_that_crashes_is_logged_with_its_traceback(caplog: pytest.LogCaptureFixture) -> None:
+    app = application("crash-app")
+
+    @app.get("/boom")
+    def boom() -> None:
+        raise RuntimeError("kaboom")
+
+    with caplog.at_level(logging.ERROR, logger="crash-app"):
+        resp = TestClient(app, raise_server_exceptions=False).get("/boom")
+    assert resp.status_code == 500 and resp.json()["error"]["code"] == "INTERNAL_ERROR"
+    [record] = [r for r in caplog.records if r.getMessage() == "request_failed"]
+    assert record.exc_info is not None and "kaboom" in JsonFormatter("crash-app").format(record)
+
+
 def test_events_read_back_as_written() -> None:
     frames = sse_event("delta", {"text": "Hi"}) + sse_event("done", {"usage_tokens": 3})
 

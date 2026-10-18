@@ -4,7 +4,9 @@ charge after it, priced from the provider's token counts or, when those are miss
 import asyncio
 import logging
 from collections import defaultdict
+from collections.abc import Coroutine, Sequence
 from dataclasses import dataclass
+from typing import Any
 
 from fastapi import HTTPException
 from learning_transport import failure
@@ -12,7 +14,10 @@ from learning_transport import failure
 import openai_client
 import spend
 from ingest import costs
+from ingest.chunker import encoding
 from settings import get_settings
+
+MESSAGE_OVERHEAD = 4  # tokens OpenAI's chat format adds around each message
 
 log = logging.getLogger("ai-core.billing")
 
@@ -89,7 +94,30 @@ class Billing:
                 except Exception:
                     log.error("ledger_write_failed", extra={"operation": c.operation, "cost_usd": c.cost_usd})
 
-        task = asyncio.ensure_future(write())
+        await self._unless_cancelled(write())
+
+    async def charge_timeout(
+        self,
+        billed: spend.Billed,
+        correlation: str,
+        operation: str,
+        model: str,
+        messages: Sequence[dict[str, Any]],
+        max_tokens: int,
+    ) -> None:
+        """Record timeout_charge for a call the provider did not answer in time. Counting the prompt's tokens
+        runs in a thread, and like the write it survives the caller hanging up."""
+
+        async def count_then_charge() -> None:
+            await self.charge(
+                billed, correlation, await timeout_charge(operation, model, messages, max_tokens)
+            )
+
+        await self._unless_cancelled(count_then_charge())
+
+    async def _unless_cancelled(self, work: Coroutine[Any, Any, None]) -> None:
+        """Run `work` as its own task, which drain() waits for, so cancelling the caller cannot cancel it."""
+        task = asyncio.ensure_future(work)
         self._writes.add(task)
         task.add_done_callback(self._writes.discard)
         await asyncio.shield(task)
@@ -136,6 +164,24 @@ def reply_charge(
     )
 
 
+def prompt_tokens(messages: Sequence[dict[str, Any]]) -> int:
+    """The prompt's tokens by the committed cl100k_base tokenizer, with each message's framing. Blocking: run it in
+    a thread."""
+    enc = encoding()
+    return sum(
+        len(enc.encode(str(m.get("content", "")), disallowed_special=())) + MESSAGE_OVERHEAD for m in messages
+    )
+
+
+async def timeout_charge(
+    operation: str, model: str, messages: Sequence[dict[str, Any]], max_tokens: int
+) -> spend.Charge:
+    """A call the provider did not answer in time. OpenAI may still have run it to the end and billed it, so it is
+    charged as if it had: the prompt's tokens and the whole `max_tokens` of output, marked estimated (ADR 0003)."""
+    tokens_in = await asyncio.to_thread(prompt_tokens, messages)
+    return priced(operation, model, tokens_in, max_tokens, estimated=True)
+
+
 @dataclass
 class _ModelTokens:
     prompt: int = 0
@@ -165,13 +211,21 @@ class StreamBill:
     """Charges a streamed reply once, however it ends: with OpenAI's counts when the usage chunk arrived, or an
     estimate from the text when the stream broke or the caller hung up first. The estimate can only count the text
     relayed: reasoning tokens never appear in the stream, so with CHAT_REASONING_EFFORT above "none" (the default)
-    a cut-off stream is under-charged by the reasoning the model did."""
+    a cut-off stream is under-charged by the reasoning the model did. A stream the provider stopped feeding (a read
+    timeout) is charged as timeout_charge does instead, at the request's `max_tokens`."""
 
     def __init__(
-        self, billing: Billing, billed: spend.Billed, correlation: str, model: str, prompt: str
+        self,
+        billing: Billing,
+        billed: spend.Billed,
+        correlation: str,
+        model: str,
+        messages: Sequence[dict[str, Any]],
+        max_tokens: int,
     ) -> None:
         self.billing, self.billed, self.correlation = billing, billed, correlation
-        self.model, self.prompt = model, prompt
+        self.model, self.messages, self.max_tokens = model, messages, max_tokens
+        self.prompt = "".join(str(m.get("content", "")) for m in self.messages)
         self.text: list[str] = []
         self.done = False
 
@@ -181,3 +235,11 @@ class StreamBill:
         self.done = True
         charge = reply_charge("stream", self.model, self.prompt, "".join(self.text), usage)
         await self.billing.charge(self.billed, self.correlation, charge)
+
+    async def timed_out(self) -> None:
+        if self.done:
+            return
+        self.done = True
+        await self.billing.charge_timeout(
+            self.billed, self.correlation, "stream", self.model, self.messages, self.max_tokens
+        )

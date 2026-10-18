@@ -1,5 +1,6 @@
 """Learning Analytics: per-student topic accuracy from finalized grades only."""
 
+import asyncio
 import os
 import threading
 from collections.abc import AsyncIterator
@@ -44,14 +45,19 @@ async def lifespan(app: Any) -> AsyncIterator[None]:
     pool = open_pool(os.environ["DATABASE_URL"], MIGRATIONS)
     stop, connected = threading.Event(), threading.Event()
     thread = threading.Thread(target=run, args=(pool, stop, connected), daemon=True)
-    async with httpx.AsyncClient() as http:
-        app.state.pool = pool
-        app.state.identity = IdentityClient(os.environ["IDENTITY_URL"], http)
-        thread.start()
-        yield
-        stop.set()
-        thread.join(timeout=CONSUMER_STOP_GRACE)
-    pool.close()
+    try:
+        async with httpx.AsyncClient() as http:
+            app.state.pool = pool
+            app.state.identity = IdentityClient(os.environ["IDENTITY_URL"], http)
+            thread.start()
+            try:
+                yield
+            finally:
+                stop.set()
+                # Waited for in a worker thread: the event loop keeps serving requests still finishing meanwhile.
+                await asyncio.to_thread(thread.join, CONSUMER_STOP_GRACE)
+    finally:
+        pool.close()
 
 
 app = application("analytics", lifespan=lifespan)

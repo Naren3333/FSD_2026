@@ -12,14 +12,15 @@ import type {
 import { ClassroomContext, onClassroomChange } from '../../core/classroom-context';
 import { CurriculumNames } from '../../core/curriculum-names';
 import { studentNames } from '../../shared/names';
-import { PagerComponent } from '../../shared/pager';
+import { PagerComponent, pageCount } from '../../shared/pager';
+import { NoClassroomComponent } from '../../shared/no-classroom';
 import { Section } from '../../shared/section';
 import { SectionStateComponent } from '../../shared/section-state';
 
 @Component({
   selector: 'app-dashboard',
   standalone: true,
-  imports: [RouterLink, PercentPipe, SectionStateComponent, PagerComponent],
+  imports: [NoClassroomComponent, RouterLink, PercentPipe, SectionStateComponent, PagerComponent],
   templateUrl: './dashboard.html',
 })
 export class DashboardComponent {
@@ -39,11 +40,13 @@ export class DashboardComponent {
   /** The class topics table shows this many students at a time. */
   readonly pageSize = 20;
   readonly page = signal(0);
-  /** The topics any student on this page has evidence for, by name (or id, for a topic with none). */
+  /** The topics any student on this page has evidence for, sorted by name (or id, for a topic with none); `name` is
+   * '' when the curriculum has none. */
   readonly topicRows = computed(() => {
     const ids = new Set(this.performance.value()?.students.flatMap((s) => s.topics.map((m) => m.topic_id)));
-    const label = (id: string) => this.topic(id) || id;
-    return [...ids].sort((a, b) => label(a).localeCompare(label(b)));
+    return [...ids]
+      .map((id) => ({ id, name: this.curriculum.topicName(id) }))
+      .sort((a, b) => (a.name || a.id).localeCompare(b.name || b.id));
   });
   /** The summary tiles, each linking to where the teacher acts on it. The submissions panel below shows why the
    * assessments failed to load, so that tile repeats no error. */
@@ -108,26 +111,29 @@ export class DashboardComponent {
     void this.loadPerformance(classroomId);
   }
 
-  /** Loads the class topics page on show. */
+  /** Loads the class topics page on show; a page past the end, after students leave, falls back to the last one. */
   loadPerformance(classroomId = this.classroomId()): Promise<void> {
-    return this.performance.load(async () => {
-      const page = await this.analytics.classPerformance(
+    return this.performance.load(async (current) => {
+      let page = await this.analytics.classPerformance(
         classroomId,
         this.page() * this.pageSize,
         this.pageSize,
       );
-      await this.curriculum.need(page.students.flatMap((s) => s.topics.map((m) => m.topic_id)));
+      if (!page.students.length && page.total && this.page() > 0) {
+        const last = pageCount(page.total, this.pageSize) - 1;
+        page = await this.analytics.classPerformance(classroomId, last * this.pageSize, this.pageSize);
+        if (current()) this.page.set(last);
+      }
+      // Without the curriculum, topics show their ids.
+      await this.curriculum
+        .need(page.students.flatMap((s) => s.topics.map((m) => m.topic_id)))
+        .catch(() => undefined);
       return page;
     });
   }
 
   studentName(studentId: string): string {
     return this.names().get(studentId) ?? studentId;
-  }
-
-  /** The topic's name, or '' when the curriculum has none. */
-  topic(topicId: string): string {
-    return this.curriculum.topicName(topicId);
   }
 
   metric(studentId: string, topicId: string): TopicMetric | undefined {

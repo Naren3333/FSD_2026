@@ -4,6 +4,7 @@ from collections.abc import Callable
 from typing import Any
 from uuid import uuid4
 
+import psycopg
 import pytest
 
 from learning_transport import kafka
@@ -131,6 +132,68 @@ def test_a_handler_that_recovers_is_committed_once(monkeypatch: Any) -> None:
     progressed, broker, _ = session(monkeypatch, handle, [b"first"])
     assert progressed
     assert broker.log == ["commit first"]
+
+
+@pytest.mark.parametrize(
+    "error",
+    [psycopg.errors.CheckViolation("check"), psycopg.errors.DataError("bad value")],
+    ids=["check-violation", "data-error"],
+)
+def test_a_message_failing_permanently_is_dead_lettered_then_committed(
+    monkeypatch: Any, error: Exception
+) -> None:
+    """A constraint the message breaks on every attempt would block its partition forever: after PROCESS_ATTEMPTS
+    it goes to the dead-letter topic, and is committed only once the broker confirmed it there."""
+    calls: list[bytes | None] = []
+
+    def handle(_: str, value: bytes | None) -> bool:
+        calls.append(value)
+        if value == b"poison":
+            raise error
+        return True
+
+    progressed, broker, _ = session(monkeypatch, handle, [b"poison", b"next"])
+    assert progressed
+    assert calls == [b"poison"] * kafka.PROCESS_ATTEMPTS + [b"next"]
+    assert broker.log == ["produce test.happened.dlq poison", "commit poison", "commit next"]
+
+
+def test_a_permanent_failure_is_not_committed_when_dead_lettering_fails(monkeypatch: Any) -> None:
+    def handle(_: str, value: bytes | None) -> bool:
+        raise psycopg.errors.CheckViolation("check")
+
+    progressed, broker, _ = session(monkeypatch, handle, [b"poison"], dlq="refused")
+    assert not progressed and broker.log == ["produce test.happened.dlq poison"]
+
+
+def test_a_message_failing_for_any_other_reason_too_is_retried_later(monkeypatch: Any) -> None:
+    """One attempt failing for a passing reason (the database restarting) means the message may yet succeed."""
+    errors: list[Exception] = [psycopg.errors.CheckViolation("check")] * 4 + [
+        psycopg.OperationalError("down")
+    ]
+
+    def handle(_: str, value: bytes | None) -> bool:
+        raise errors.pop()
+
+    progressed, broker, _ = session(monkeypatch, handle, [b"first"])
+    assert not progressed and broker.log == []
+
+
+def test_a_duplicate_event_is_processed_and_committed_like_the_first(monkeypatch: Any) -> None:
+    """Handlers are idempotent (an inbox of event ids): a redelivered event is a no-op that is committed, never
+    dead-lettered."""
+    seen: set[bytes | None] = set()
+    applied: list[bytes | None] = []
+
+    def handle(_: str, value: bytes | None) -> bool:
+        if value not in seen:
+            seen.add(value)
+            applied.append(value)
+        return True
+
+    progressed, broker, _ = session(monkeypatch, handle, [b"e1", b"e1", b"e2"])
+    assert progressed and applied == [b"e1", b"e2"]
+    assert broker.log == ["commit e1", "commit e1", "commit e2"]
 
 
 def identity_event(event_type: str, resource: str, data: dict[str, Any]) -> bytes:

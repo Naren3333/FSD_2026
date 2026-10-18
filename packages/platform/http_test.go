@@ -1,8 +1,11 @@
 package platform
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"slices"
@@ -27,6 +30,28 @@ func TestOversizedJSONIsTooLarge(t *testing.T) {
 	var value struct{ Name string }
 	if Decode(w, r, &value) || w.Code != http.StatusRequestEntityTooLarge {
 		t.Fatalf("status %d", w.Code)
+	}
+}
+
+func TestPageReadsOffsetAndLimit(t *testing.T) {
+	cases := []struct {
+		query         string
+		offset, limit int
+		ok            bool
+	}{
+		{"", 0, 20, true},
+		{"?offset=40&limit=100", 40, 100, true},
+		{"?limit=0", 0, 0, false},
+		{"?limit=101", 0, 0, false},
+		{"?offset=-1", 0, 0, false},
+		{"?offset=a", 0, 0, false},
+	}
+	for _, tc := range cases {
+		w := httptest.NewRecorder()
+		offset, limit, ok := Page(w, httptest.NewRequest(http.MethodGet, "/"+tc.query, nil), 20, 100)
+		if offset != tc.offset || limit != tc.limit || ok != tc.ok || (!ok && w.Code != http.StatusUnprocessableEntity) {
+			t.Errorf("%q: %d %d %v (%d)", tc.query, offset, limit, ok, w.Code)
+		}
 	}
 }
 
@@ -110,6 +135,29 @@ func TestRosterReadsTheEnrolledStudents(t *testing.T) {
 		got, ok := identityStub(t, tc.status, tc.body).Roster(w, asTeacher(httptest.NewRequest(http.MethodGet, "/", nil)), classroom)
 		if ok != (tc.want != nil) || !slices.Equal(got, tc.want) || (!ok && w.Code != tc.code) {
 			t.Errorf("%d %s: got %v %v, status %d", tc.status, tc.body, got, ok, w.Code)
+		}
+	}
+}
+
+// A roster over maxRoster is refused like an unreadable one, and the log says it was the size, for which classroom.
+func TestAnOversizedRosterIsLoggedAsOverTheLimit(t *testing.T) {
+	var logged bytes.Buffer
+	previous := slog.Default()
+	slog.SetDefault(slog.New(slog.NewJSONHandler(&logged, nil)))
+	t.Cleanup(func() { slog.SetDefault(previous) })
+	cases := []struct{ body, cause string }{
+		{`["` + strings.Repeat("s", maxRoster) + `"]`, "over the size limit"},
+		{`not json`, "unreadable"},
+	}
+	for _, tc := range cases {
+		logged.Reset()
+		w := httptest.NewRecorder()
+		if _, ok := identityStub(t, 200, tc.body).Roster(w, asTeacher(httptest.NewRequest(http.MethodGet, "/", nil)), classroom); ok || w.Code != http.StatusServiceUnavailable {
+			t.Fatalf("%s: accepted or status %d", tc.cause, w.Code)
+		}
+		var entry struct{ Msg, Classroom, Cause string }
+		if err := json.Unmarshal(logged.Bytes(), &entry); err != nil || entry.Msg != "classroom_roster_rejected" || entry.Classroom != classroom || entry.Cause != tc.cause {
+			t.Errorf("%s: logged %s (%v)", tc.cause, logged.String(), err)
 		}
 	}
 }

@@ -18,10 +18,12 @@ export function topicNames(topics: readonly Topic[]): Map<string, string> {
 }
 
 /** The names in evaluations' evidence, from the assessments they belong to and the curriculum: '' for whatever is
- * unknown. */
+ * unknown. Questions are named only from assessments read with them, not from summaries. */
 export class EvidenceNames {
   constructor(
-    private readonly assessments: () => ReadonlyMap<string, Assessment> | undefined,
+    private readonly assessments: () =>
+      | ReadonlyMap<string, Pick<Assessment, 'title'> & Partial<Pick<Assessment, 'questions'>>>
+      | undefined,
     private readonly topicName: (topicId: string) => string,
   ) {}
 
@@ -31,13 +33,14 @@ export class EvidenceNames {
   question(evaluation: Evaluation, evidence: Evidence): Question | undefined {
     return this.assessments()
       ?.get(evaluation.assessment_id)
-      ?.questions.find((q) => q.id === evidence.question_id);
+      ?.questions?.find((q) => q.id === evidence.question_id);
   }
   prompt(evaluation: Evaluation, evidence: Evidence): string {
     return this.question(evaluation, evidence)?.prompt ?? '';
   }
-  topic(evidence: Evidence): string {
-    return this.topicName(evidence.topic_id);
+  /** The name of the topic of a piece of evidence, or of a topic's metric. */
+  topic(item: Pick<Evidence, 'topic_id'>): string {
+    return this.topicName(item.topic_id);
   }
 }
 

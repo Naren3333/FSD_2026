@@ -11,6 +11,7 @@ import { Session } from '../../core/session';
 import { ActionState } from '../../shared/action-state';
 import { FieldComponent, FieldControlDirective } from '../../shared/field';
 import { studentName } from '../../shared/names';
+import { NoClassroomComponent } from '../../shared/no-classroom';
 import { Section } from '../../shared/section';
 import { SectionStateComponent } from '../../shared/section-state';
 import { StatusComponent } from '../../shared/status';
@@ -19,6 +20,7 @@ import { StatusComponent } from '../../shared/status';
   selector: 'app-performance',
   standalone: true,
   imports: [
+    NoClassroomComponent,
     ReactiveFormsModule,
     FieldComponent,
     FieldControlDirective,
@@ -97,7 +99,8 @@ export class PerformanceComponent {
     this.result.clear();
     void this.result.load(async () => {
       const performance = await this.analytics.performance(studentId, classroomId);
-      await this.curriculum.need(performance.topics.map((s) => s.topic_id));
+      // Without the curriculum, topics show their ids.
+      await this.curriculum.need(performance.topics.map((s) => s.topic_id)).catch(() => undefined);
       this.form.markAsPristine();
       return performance;
     });

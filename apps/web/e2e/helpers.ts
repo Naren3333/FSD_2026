@@ -2,15 +2,24 @@ import { expect, test, Page } from '@playwright/test';
 import { execFileSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
 
-/** The local stack's settings, such as the seeded users' passwords, from the repository's .env. */
+/** The local stack's settings, such as the seeded users' passwords, from the repository's .env, read as Compose
+ * and scripts/local_stack.py read_env read it: an `export ` prefix, surrounding whitespace and one pair of matching
+ * quotes around the value are dropped. */
 export const env: Record<string, string> = Object.fromEntries(
   readFileSync('../../.env', 'utf8')
     .split(/\r?\n/)
-    .filter((l: string) => l && !l.startsWith('#'))
+    .map((l: string) => l.trim())
+    .filter((l: string) => l && !l.startsWith('#') && l.includes('='))
     // Only the first '=' separates the name; a value such as a password may contain more.
     .map((l: string) => {
       const at = l.indexOf('=');
-      return at < 0 ? [l, ''] : [l.slice(0, at), l.slice(at + 1)];
+      const name = l
+        .slice(0, at)
+        .trim()
+        .replace(/^export\s+/, '');
+      const value = l.slice(at + 1).trim();
+      const quoted = value.length >= 2 && (value[0] === '"' || value[0] === "'") && value.at(-1) === value[0];
+      return [name, quoted ? value.slice(1, -1) : value];
     }),
 );
 
@@ -105,10 +114,11 @@ export function deleteTestTopic(name: string): void {
   );
 }
 
-/** The stack's Kong gateway and Keycloak, on the ports scripts/local_stack.py reads (stack_tests.py sets the test
- * stack's). Node resolves localhost to ::1 first on Windows, but Compose publishes on 127.0.0.1 only. */
-const GATEWAY = `http://127.0.0.1:${process.env['KONG_PORT'] || '8000'}/api`;
-const KEYCLOAK = `http://127.0.0.1:${process.env['KEYCLOAK_PORT'] || '8081'}`;
+/** The stack's Kong gateway and Keycloak, on the ports scripts/local_stack.py reads: the environment's
+ * (stack_tests.py sets the test stack's), else .env's, else the development defaults. Node resolves localhost to ::1
+ * first on Windows, but Compose publishes on 127.0.0.1 only. */
+const GATEWAY = `http://127.0.0.1:${process.env['KONG_PORT'] || env['KONG_PORT'] || '8000'}/api`;
+const KEYCLOAK = `http://127.0.0.1:${process.env['KEYCLOAK_PORT'] || env['KEYCLOAK_PORT'] || '8081'}`;
 
 /** Deletes a classroom a test created through Identity's API, as the seeded teacher who created it, so every
  * service purges its data for it as for a teacher's deletion and test classrooms never pile up. A classroom that is

@@ -458,23 +458,39 @@ topic_list[2]["parameters"] = [
     {"name": "archived", "in": "query", "required": False, "schema": {"type": "boolean", "default": False}}
 ]
 
+COUNT = {"type": "integer", "minimum": 0}
+
+
+def paged(op, most, fallback):
+    """The operation with the ?offset= and ?limit= of a list the server pages (platform.Page)."""
+    op[2]["parameters"] += [
+        {
+            "name": "offset",
+            "in": "query",
+            "required": False,
+            "schema": {"type": "integer", "minimum": 0, "default": 0},
+        },
+        {
+            "name": "limit",
+            "in": "query",
+            "required": False,
+            "schema": {"type": "integer", "minimum": 1, "maximum": most, "default": fallback},
+        },
+    ]
+    return op
+
+
 # One page of the teacher's school's students, narrowed by an optional search.
 school_students = operation(
     "GET",
     "/v1/students",
     None,
-    obj({"students": array(student, maximum=50), "total": {"type": "integer", "minimum": 0}}),
+    obj({"students": array(student, maximum=50), "total": COUNT}),
 )
 school_students[2]["parameters"] = [
     {"name": "search", "in": "query", "required": False, "schema": {"type": "string", "maxLength": 120}},
-    {"name": "offset", "in": "query", "required": False, "schema": {"type": "integer", "minimum": 0}},
-    {
-        "name": "limit",
-        "in": "query",
-        "required": False,
-        "schema": {"type": "integer", "minimum": 1, "maximum": 50},
-    },
 ]
+paged(school_students, 50, 10)
 
 operations = {
     "identity": [
@@ -521,8 +537,18 @@ operations = {
             None,
             obj({"student_id": TEXT, "classroom_id": UUID}),
         ),
-        operation("GET", "/v1/classrooms/{id}/students", None, array(student, maximum=500)),
-        # Every enrolled student's id, in the same order and without the cap, for the services that keep removed
+        # One page of the roster by name, and how many are enrolled.
+        paged(
+            operation(
+                "GET",
+                "/v1/classrooms/{id}/students",
+                None,
+                obj({"students": array(student, maximum=500), "total": COUNT}),
+            ),
+            500,
+            50,
+        ),
+        # Every enrolled student's id, in the same order and not paged, for the services that keep removed
         # students' work out of the teacher's lists (platform.Identity.Roster).
         operation("GET", "/v1/classrooms/{id}/student-ids", None, {"type": "array", "items": TEXT}),
         school_students,
@@ -597,17 +623,36 @@ operations = {
             obj({"id": UUID, "status": {"const": "submitted"}, "late": {"type": "boolean"}}),
             201,
         ),
+        # The calling student's own submitted answers; 404 before they submit. Never the answer keys.
+        operation(
+            "GET",
+            "/v1/assessments/{id}/submission",
+            None,
+            obj(
+                {
+                    "answers": ANSWERS,
+                    "submitted_at": {"type": "string", "format": "date-time"},
+                    "late": {"type": "boolean"},
+                }
+            ),
+        ),
         operation("GET", "/v1/assessments/{id}/saved-answers", None, saved_answers),
         operation("PUT", "/v1/assessments/{id}/saved-answers", obj({"answers": ANSWERS}), saved_answers),
     ],
     "grading": [
-        operation(
-            "GET",
-            "/v1/evaluations",
-            None,
-            array(evaluation, maximum=500),
-            query=["classroom_id", "assessment_id"],
+        # One page of the enrolled students' evaluations, newest first, or of one assessment's, oldest first.
+        paged(
+            operation(
+                "GET",
+                "/v1/evaluations",
+                None,
+                obj({"evaluations": array(evaluation, maximum=100), "total": COUNT}),
+                query=["classroom_id", "assessment_id"],
+            ),
+            100,
+            20,
         ),
+        operation("GET", "/v1/evaluations/{id}", None, evaluation),
         operation("GET", "/v1/evaluations/mine", None, array(own_result), query=["classroom_id"]),
         operation(
             "GET",
@@ -620,7 +665,7 @@ operations = {
                     "unreleased": {"type": "integer", "minimum": 0},
                 }
             ),
-            query=["classroom_id"],
+            query=["classroom_id", "assessment_id"],
         ),
         operation(
             "POST",
@@ -937,6 +982,7 @@ for name in [
         cwd=ROOT / "services" / name,
         env=env,
         text=True,
+        encoding="utf-8",
     )
     save(f"contracts/http/{name}.openapi.json", json.loads(data))
 if CHECK and stale:

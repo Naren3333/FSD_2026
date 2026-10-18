@@ -10,10 +10,14 @@ import httpx
 from learning_transport import STUDENT, Claims, UpstreamError, read_events
 from learning_transport.agents import AgentClients, billed_to
 
+from contracts import Usage
+
 SEARCH_TOP_K = 8
 SEARCH_TIMEOUT = 15.0
-GENERATE_TIMEOUT = 30.0
-STREAM_TIMEOUT = httpx.Timeout(60, connect=5)
+# Above ai-core's worst cases, retries included (openai_client): 30 s for the 300-token query rewrite; and for the
+# stream, which is read with a per-read timeout, 45 s to open plus 30 s for a chunk.
+GENERATE_TIMEOUT = 40.0
+STREAM_TIMEOUT = httpx.Timeout(90, connect=5)
 USAGE_TIMEOUT = 5.0
 
 
@@ -47,15 +51,16 @@ class Services(AgentClients):
     # ---- ai-core, as this agent
 
     async def stream(
-        self, messages: list[dict[str, str]], max_tokens: int, correlation: str, billed_to: dict[str, str]
+        self, messages: list[dict[str, str]], max_tokens: int, correlation: str, payer: dict[str, str]
     ) -> AsyncIterator[str | Done]:
-        """The reply's text as it arrives, then Done. A failure before the first word or mid-stream raises."""
+        """The reply's text as it arrives, then Done, billed to `payer` (billed()). A failure before the first word
+        or mid-stream raises."""
         body = {
             "operation": "generate",
             "messages": messages,
             "max_tokens": max_tokens,
             "stream": True,
-            "billed_to": billed_to,
+            "billed_to": payer,
         }
         headers = await self.ai_core_headers(correlation)
         try:
@@ -81,8 +86,12 @@ class Services(AgentClients):
             raise UpstreamError("ai-core", 0) from None
         raise UpstreamError("ai-core", 502, "STREAM_ENDED_EARLY")
 
-    async def usage(self, billed_to: dict[str, str], correlation: str) -> dict[str, Any]:
-        """The user's AI spend today, their daily limit and when it resets, from ai-core's ledger."""
-        resp = await self.ai_core("GET", "/v1/usage", correlation, USAGE_TIMEOUT, params=billed_to)
-        data: dict[str, Any] = resp.json()
-        return data
+    async def usage(self, payer: dict[str, str], correlation: str) -> Usage:
+        """The user's AI spend today, their daily limit and when it resets, from ai-core's ledger. A reply without
+        them is a 502 UpstreamError."""
+        resp = await self.ai_core("GET", "/v1/usage", correlation, USAGE_TIMEOUT, params=payer)
+        try:
+            data = resp.json()
+            return Usage.model_validate({k: data[k] for k in ("spent_usd", "limit_usd", "resets_at")})
+        except (ValueError, KeyError, TypeError):  # ValidationError is a ValueError
+            raise UpstreamError("ai-core", 502) from None

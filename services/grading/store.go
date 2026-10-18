@@ -15,15 +15,20 @@ var errAlreadyFinalized = errors.New("evaluation already finalized")
 
 // store is a classroom's draft and finalized evaluations, with their audit trail.
 type store interface {
-	// listEvaluations is the classroom's evaluations of the given students, or one assessment's when assessment is set.
-	listEvaluations(ctx context.Context, org, classroom, assessment string, students []string) ([]Evaluation, error)
+	// listEvaluations is one page of the classroom's evaluations of the given students, or of one assessment's when
+	// assessment is set, with how many there are in all.
+	listEvaluations(ctx context.Context, org, classroom, assessment string, students []string, offset, limit int) ([]Evaluation, int, error)
 	listReleased(ctx context.Context, org, classroom, student string) ([]Evaluation, error)
-	countEvaluations(ctx context.Context, org, classroom string, students []string) (Counts, error)
+	// countEvaluations counts the classroom's evaluations of the given students, or one assessment's when assessment
+	// is set.
+	countEvaluations(ctx context.Context, org, classroom, assessment string, students []string) (Counts, error)
+	findEvaluation(ctx context.Context, org, id string) (Evaluation, error)
 	findClassroom(ctx context.Context, org, id string) (string, error)
 	assessmentClassroom(ctx context.Context, org, assessment string) (string, error)
 	saveMarks(ctx context.Context, org, id, actor string, marks map[string]Mark) (Evaluation, error)
 	finalizeEvaluation(ctx context.Context, org, id, actor, reason string, marks map[string]Mark) (Evaluation, error)
-	release(ctx context.Context, org, assessment, actor string) (int, error)
+	// release releases the assessment's finalized grades of the given students.
+	release(ctx context.Context, org, assessment, actor string, students []string) (int, error)
 }
 
 // pgStore is the store in the service's own Postgres database.
@@ -37,10 +42,18 @@ type Counts struct {
 	Unreleased int `json:"unreleased"`
 }
 
-func (p pgStore) countEvaluations(ctx context.Context, org, classroom string, students []string) (Counts, error) {
+func (p pgStore) countEvaluations(ctx context.Context, org, classroom, assessment string, students []string) (Counts, error) {
 	var c Counts
-	err := p.db.QueryRow(ctx, "SELECT count(*) FILTER (WHERE status='draft'),count(*) FILTER (WHERE status='finalized'),count(*) FILTER (WHERE status='finalized' AND released_at IS NULL) FROM evaluations WHERE classroom_id=$1 AND org_id=$2 AND student_id=ANY($3::text[])", classroom, org, students).Scan(&c.Drafts, &c.Finalized, &c.Unreleased)
+	err := p.db.QueryRow(ctx, "SELECT count(*) FILTER (WHERE status='draft'),count(*) FILTER (WHERE status='finalized'),count(*) FILTER (WHERE status='finalized' AND released_at IS NULL) FROM evaluations WHERE classroom_id=$1 AND org_id=$2 AND student_id=ANY($3::text[]) AND ($4::uuid IS NULL OR assessment_id=$4::uuid)", classroom, org, students, optional(assessment)).Scan(&c.Drafts, &c.Finalized, &c.Unreleased)
 	return c, err
+}
+
+// optional is an assessment id for a query, or NULL (every assessment) for none.
+func optional(assessment string) *string {
+	if assessment == "" {
+		return nil
+	}
+	return &assessment
 }
 
 // insertEvaluation runs inside the event consumer's transaction. A repeated submission changes nothing, and nor
@@ -120,13 +133,26 @@ func (p pgStore) collect(rows pgx.Rows, err error) ([]Evaluation, error) {
 	})
 }
 
-// listEvaluations is the classroom's 100 newest evaluations of the given students, or up to 500 of one assessment's,
-// oldest first.
-func (p pgStore) listEvaluations(ctx context.Context, org, classroom, assessment string, students []string) ([]Evaluation, error) {
+// listEvaluations is one page of the classroom's evaluations of the given students, newest first, or of one
+// assessment's, oldest first, with how many there are in all. The id breaks ties, so pages never overlap.
+func (p pgStore) listEvaluations(ctx context.Context, org, classroom, assessment string, students []string, offset, limit int) ([]Evaluation, int, error) {
+	const match = " FROM evaluations WHERE classroom_id=$1 AND org_id=$2 AND student_id=ANY($3::text[]) AND ($4::uuid IS NULL OR assessment_id=$4::uuid)"
+	order := " ORDER BY created_at DESC,id DESC"
 	if assessment != "" {
-		return p.collect(p.db.Query(ctx, "SELECT "+evaluationColumns+" FROM evaluations WHERE classroom_id=$1 AND org_id=$2 AND student_id=ANY($3::text[]) AND assessment_id=$4 ORDER BY created_at LIMIT 500", classroom, org, students, assessment))
+		order = " ORDER BY created_at,id"
 	}
-	return p.collect(p.db.Query(ctx, "SELECT "+evaluationColumns+" FROM evaluations WHERE classroom_id=$1 AND org_id=$2 AND student_id=ANY($3::text[]) ORDER BY created_at DESC LIMIT 100", classroom, org, students))
+	var total int
+	if err := p.db.QueryRow(ctx, "SELECT count(*)"+match, classroom, org, students, optional(assessment)).Scan(&total); err != nil {
+		return nil, 0, err
+	}
+	list, err := p.collect(p.db.Query(ctx, "SELECT "+evaluationColumns+match+order+" OFFSET $5 LIMIT $6", classroom, org, students, optional(assessment), offset, limit))
+	return list, total, err
+}
+
+// findEvaluation is one evaluation with its students' answers; platform.ErrNotFound when there is none.
+func (p pgStore) findEvaluation(ctx context.Context, org, id string) (Evaluation, error) {
+	v, _, err := scanEvaluation(p.db.QueryRow(ctx, "SELECT "+evaluationColumns+" FROM evaluations WHERE id=$1 AND org_id=$2", id, org))
+	return v, err
 }
 
 // listReleased is one student's released results in a classroom, newest first. Drafts and unreleased grades never
@@ -244,15 +270,17 @@ func emitFinalized(ctx context.Context, tx pgx.Tx, org string, v Evaluation) err
 }
 
 // release shows the assessment's finalized, unreleased grades to their students, with an audit entry and a
-// grading.finalized.v3 event each, and returns how many it released. Drafts stay drafts: finalizing one later
-// releases it only if its assessment releases on finalization, or at the next release.
-func (p pgStore) release(ctx context.Context, org, assessment, actor string) (int, error) {
+// grading.finalized.v3 event each, and returns how many it released. Only the given students' grades are released,
+// the classroom's enrolled ones: a removed student's stay unreleased and kept, and a later release after they are
+// enrolled again releases them. Drafts stay drafts: finalizing one later releases it only if its assessment releases
+// on finalization, or at the next release.
+func (p pgStore) release(ctx context.Context, org, assessment, actor string, students []string) (int, error) {
 	tx, err := p.db.Begin(ctx)
 	if err != nil {
 		return 0, err
 	}
 	defer tx.Rollback(ctx)
-	rows, err := tx.Query(ctx, "UPDATE evaluations SET released_at=now() WHERE assessment_id=$1 AND org_id=$2 AND status='finalized' AND released_at IS NULL RETURNING "+evaluationColumns, assessment, org)
+	rows, err := tx.Query(ctx, "UPDATE evaluations SET released_at=now() WHERE assessment_id=$1 AND org_id=$2 AND student_id=ANY($3::text[]) AND status='finalized' AND released_at IS NULL RETURNING "+evaluationColumns, assessment, org, students)
 	if err != nil {
 		return 0, err
 	}

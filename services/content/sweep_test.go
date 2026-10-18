@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"slices"
 	"testing"
 	"time"
@@ -120,5 +121,67 @@ func TestTheSweeperKeepsACropStoredAgainMeanwhile(t *testing.T) {
 	removed, err := sweeper{f.db, b}.sweep(ctx, time.Now().Add(-sweepGrace))
 	if err != nil || removed != 1 || !slices.Contains(f.keys(), crop) || slices.Contains(f.keys(), gone) {
 		t.Fatalf("removed %d, %v; left %v", removed, err, f.keys())
+	}
+}
+
+// A reindex queued after the sweep read the rows, before it removes anything, keeps every object of the document:
+// the rows are read again under the document's lock.
+func TestTheSweeperJudgesAgainUnderTheDocumentsLock(t *testing.T) {
+	f := newFixture(t)
+	ctx := context.Background()
+	indexed := f.upload("teaching_material")
+	f.runAll()
+	crop := f.org + "/" + indexed + "/figures/aaaaaaaaaaaaaaaa.png"
+	f.store.put(ctx, crop, []byte("x"), mimePNG)
+	s := sweeper{f.db, agedBucket{f.store, map[string]time.Time{}}}
+	stale, err := readOwners(ctx, f.db, []string{indexed})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if queued, err := f.s.store.queueIndex(ctx, f.org, indexed); err != nil || !queued {
+		t.Fatalf("reindex: %v %v", queued, err)
+	}
+	removed, err := s.removeUnowned(ctx, map[string][]string{indexed: {crop}}, stale, time.Now().Add(-sweepGrace))
+	if err != nil || removed != 0 || !slices.Contains(f.keys(), crop) {
+		t.Fatalf("removed %d, %v; left %v", removed, err, f.keys())
+	}
+}
+
+// lockCheckingBucket is an agedBucket that, as each object is removed, tries to queue a reindex of its document and
+// records whether that had to wait.
+type lockCheckingBucket struct {
+	agedBucket
+	queue   func(ctx context.Context) error
+	blocked *bool
+}
+
+func (b lockCheckingBucket) remove(ctx context.Context, key string) error {
+	try, cancel := context.WithTimeout(ctx, 200*time.Millisecond)
+	defer cancel()
+	*b.blocked = errors.Is(b.queue(try), context.DeadlineExceeded)
+	return b.agedBucket.remove(ctx, key)
+}
+
+// A reindex cannot be queued while the sweeper removes a document's objects, so no run can store a crop again until
+// the removal is done; it is queued once the sweep has finished.
+func TestAReindexWaitsForTheSweepersRemovals(t *testing.T) {
+	f := newFixture(t)
+	ctx := context.Background()
+	indexed := f.upload("teaching_material")
+	f.runAll()
+	crop := f.org + "/" + indexed + "/figures/aaaaaaaaaaaaaaaa.png"
+	f.store.put(ctx, crop, []byte("x"), mimePNG)
+	blocked := false
+	queue := func(ctx context.Context) error {
+		_, err := f.s.store.queueIndex(ctx, f.org, indexed)
+		return err
+	}
+	b := lockCheckingBucket{agedBucket{f.store, map[string]time.Time{}}, queue, &blocked}
+	removed, err := sweeper{f.db, b}.sweep(ctx, time.Now().Add(-sweepGrace))
+	if err != nil || removed != 1 || slices.Contains(f.keys(), crop) || !blocked {
+		t.Fatalf("removed %d, %v, reindex waited %v; left %v", removed, err, blocked, f.keys())
+	}
+	if queued, err := f.s.store.queueIndex(ctx, f.org, indexed); err != nil || !queued {
+		t.Fatalf("reindex after the sweep: %v %v", queued, err)
 	}
 }

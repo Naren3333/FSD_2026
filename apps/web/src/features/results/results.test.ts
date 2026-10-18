@@ -5,7 +5,7 @@ import { BrowserTestingModule, platformBrowserTesting } from '@angular/platform-
 import { readFileSync } from 'node:fs';
 import { beforeAll, describe, expect, it } from 'vitest';
 import { AssessmentApi, GradingApi } from '../../api/clients';
-import type { Evaluation } from '../../api/models';
+import type { Assessment, Evaluation } from '../../api/models';
 import { ClassroomContext } from '../../core/classroom-context';
 import { CurriculumNames } from '../../core/curriculum-names';
 import { SectionStateComponent } from '../../shared/section-state';
@@ -18,13 +18,17 @@ beforeAll(() => {
 });
 
 /** The results page for a classroom whose results load as `results` says. */
-async function render(results: Promise<Evaluation[]>) {
+async function render(
+  results: Promise<Evaluation[]>,
+  need: () => Promise<void> = () => Promise.resolve(),
+  assessment: (id: string) => Promise<Assessment> = () => Promise.reject(new Error('unused')),
+) {
   TestBed.resetTestingModule();
   TestBed.configureTestingModule({
     providers: [
       { provide: GradingApi, useValue: { mine: () => results } },
-      { provide: AssessmentApi, useValue: { get: () => Promise.reject(new Error('unused')) } },
-      { provide: CurriculumNames, useValue: { need: () => Promise.resolve(), topicName: () => '' } },
+      { provide: AssessmentApi, useValue: { get: assessment } },
+      { provide: CurriculumNames, useValue: { need, topicName: () => '' } },
       { provide: ClassroomContext, useValue: { classroomId: signal('c1') } },
     ],
   });
@@ -60,5 +64,35 @@ describe('results list states', () => {
     await page.settle();
     expect(page.text()).toContain('Grading is unavailable.');
     expect(page.text()).not.toContain('No finalized results yet');
+  });
+
+  it('shows each result, with topic ids, when the curriculum cannot be read', async () => {
+    const result: Evaluation = {
+      id: 'e1',
+      assessment_id: 'a1',
+      classroom_id: 'c1',
+      student_id: 'u1',
+      status: 'finalized',
+      evidence: [{ question_id: 'q1', topic_id: 'k9', correct: true, awarded: 1, possible: 1 }],
+      answers: {},
+      late: false,
+      finalized_at: '2026-10-16T00:00:00Z',
+      released_at: '2026-10-16T00:00:00Z',
+    };
+    const quiz: Assessment = {
+      id: 'a1',
+      classroom_id: 'c1',
+      title: 'Fractions quiz',
+      questions: [],
+    };
+    const page = await render(
+      Promise.resolve([result]),
+      () => Promise.reject(new Error('Curriculum is unavailable.')),
+      () => Promise.resolve(quiz),
+    );
+    await page.settle();
+    expect(page.text()).toContain('Fractions quiz');
+    expect(page.text()).toContain('k9');
+    expect(page.text()).not.toContain('Curriculum is unavailable.');
   });
 });

@@ -5,7 +5,8 @@ the running Compose PostgreSQL (for example `chatbot`, added in ADR 0002 stage 4
 ledger from ADR 0003), and creates missing AI service-account clients in the running Keycloak (for example
 `grading-marker`, ADR 0004) and Identity's `identity-accounts` client (ADR 0011). Existing clients, users and
 databases are left as they are, but every service account still gets its role, so a run that stopped half-way is
-finished by the next. Safe to run again.
+finished by the next, and the existing `learning-web` client gets its sign-out redirect setting and loses the test
+stack's web origin, which older realm imports listed. Safe to run again.
 It also rewrites the generated realm import from .env, for the next fresh Keycloak volume. Other realm changes to
 a running Keycloak still need a fresh volume (see operations.md).
 """
@@ -15,13 +16,15 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-from local_stack import ROOT, admin_client, check, psql, psql_value, read_env
+from local_stack import KEYCLOAK_PORT, ROOT, TEST_PORTS, admin_client, check, psql, psql_value, read_env
 from setup import (
     ACCOUNTS_CLIENT,
     ACCOUNTS_ROLE,
     AI_CLIENTS,
     PEOPLE,
     SERVICES,
+    TEST_WEB_ORIGIN,
+    WEB_ATTRIBUTES,
     accounts_client,
     client_secret_key,
     generate_secrets,
@@ -104,6 +107,34 @@ def add_missing_accounts_client(env: dict[str, str]) -> None:
             print(f"Created Keycloak client {ACCOUNTS_CLIENT}")
 
 
+def update_web_client() -> None:
+    """Gives the existing learning-web client the attributes setup.py now sets (such as where Sign out may
+    return to) and, in the development stack, drops the test stack's web origin that older realm imports added; the
+    test stack has its own realm. Changes nothing when the client already matches."""
+    with admin_client() as admin:
+        found = check(admin.get("/clients", params={"clientId": "learning-web"})).json()
+        if not found:
+            return
+        client = found[0]
+        changed = updated_web_client(client, development=TEST_PORTS["KEYCLOAK_PORT"] != KEYCLOAK_PORT)
+        if changed != client:
+            check(admin.put(f"/clients/{client['id']}", json=changed))
+            print("Updated Keycloak client learning-web")
+
+
+def updated_web_client(client: dict[str, Any], *, development: bool) -> dict[str, Any]:
+    """The learning-web client with setup.py's attributes and, for the development stack, without the test stack's
+    web origin. Other settings are kept as they are."""
+    updated = {**client, "attributes": {**(client.get("attributes") or {}), **WEB_ATTRIBUTES}}
+    if development:
+        test_uri = f"{TEST_WEB_ORIGIN}/*"
+        updated["redirectUris"] = [uri for uri in client.get("redirectUris") or [] if uri != test_uri]
+        updated["webOrigins"] = [
+            origin for origin in client.get("webOrigins") or [] if origin != TEST_WEB_ORIGIN
+        ]
+    return updated
+
+
 def ensure_client(admin: "httpx.Client", client: str, representation: Callable[[], dict[str, Any]]) -> bool:
     """Creates the client unless Keycloak has it; True when it was created."""
     if check(admin.get("/clients", params={"clientId": client})).json():
@@ -134,6 +165,7 @@ def main() -> None:
     add_missing_databases(env)
     add_missing_clients(env)
     add_missing_accounts_client(env)
+    update_web_client()
     print("Local setup is up to date. Run: docker compose up -d --build")
 
 

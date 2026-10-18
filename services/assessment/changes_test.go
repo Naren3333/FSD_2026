@@ -18,7 +18,7 @@ type racingStore struct {
 	meanwhile func()
 }
 
-func (r racingStore) insertSubmission(ctx context.Context, v Assessment, sub Submission) (bool, bool, error) {
+func (r racingStore) insertSubmission(ctx context.Context, v Assessment, sub Submission) (inserted, late bool, err error) {
 	r.meanwhile()
 	return r.memoryStore.insertSubmission(ctx, v, sub)
 }

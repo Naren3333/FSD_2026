@@ -228,6 +228,47 @@ def test_at_most_five_sources_each_cut_to_assessments_limit():
     assert len(sources) == 5 and all(len(s.text) <= 2000 for s in sources)
 
 
+def test_evidence_late_in_a_long_passage_is_stored_with_it():
+    """The excerpt kept is the window around the evidence, so what the teacher sees holds the quote."""
+    text = "Filler words. " * 300 + "\n" + UNIT_TESTS + " Trailing text." * 100
+    kept, dropped = checks.questions(
+        json.dumps({"questions": [choice()]}), request(), [Passage(1, CHUNK_1, DOC, "Slides", 1, text)]
+    )
+    assert not dropped
+    [source] = kept[0].question.sources
+    assert len(source.text) == 2000 and "checks a single function or class in isolation" in source.text
+
+
+def test_evidence_only_in_a_passage_beyond_the_fifth_keeps_that_passage():
+    others = [Passage(n, CHUNK_2, DOC, "Slides", n, BOUNDARIES) for n in range(1, 7)]
+    holding = Passage(7, CHUNK_1, DOC, "Slides", 9, UNIT_TESTS)
+    kept, dropped = checks.questions(
+        json.dumps({"questions": [choice(source_passages=[1, 2, 3, 4, 5, 6, 7])]}),
+        request(),
+        [*others, holding],
+    )
+    assert not dropped
+    sources = kept[0].question.sources
+    assert len(sources) == 5 and sources[0].chunk_id == UUID(CHUNK_1) and sources[0].page == 9
+
+
+def test_evidence_longer_than_an_excerpt_is_not_found():
+    text = "word " * 1000
+    item = choice(evidence=text.strip())
+    kept, dropped = checks.questions(
+        json.dumps({"questions": [item]}), request(), [Passage(1, CHUNK_1, DOC, "Slides", 1, text)]
+    )
+    assert not kept and dropped == {"EVIDENCE_NOT_FOUND": 1}
+
+
+@pytest.mark.parametrize(
+    "text", ["  Mixed\tCASE “quotes”\n\nand  ẞpaces ", "plain", "", " ", "a b"], ids=repr
+)
+def test_normalized_positions_match_normalize(text):
+    folded, positions = checks._normalized_positions(text)
+    assert folded == checks.normalize(text) and len(positions) == len(folded)
+
+
 def guidance_request(kind: str) -> GuidanceRequest:
     return GuidanceRequest.model_validate(
         {"classroom_id": ROOM, "document_ids": [DOC], "prompt": "Which ages would you test?", "type": kind}

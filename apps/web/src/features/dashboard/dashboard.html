@@ -6,9 +6,11 @@
   <button class="secondary" (click)="refresh()" [disabled]="!classroomId()">Refresh dashboard</button>
 </div>
 @if (!classroomId()) {
-  <p class="empty">
-    No classroom selected. Create one under <a routerLink="/classrooms">Classrooms</a>, or choose one above.
-  </p>
+  <app-no-classroom>
+    <p class="empty">
+      No classroom selected. Create one under <a routerLink="/classrooms">Classrooms</a>, or choose one above.
+    </p>
+  </app-no-classroom>
 } @else {
   <ul class="stats" aria-label="Class summary">
     @for (tile of stats(); track tile.label) {
@@ -80,18 +82,18 @@
               </tr>
             </thead>
             <tbody>
-              @for (topicId of topicRows(); track topicId) {
+              @for (row of topicRows(); track row.id) {
                 <tr>
                   <th scope="row">
-                    @if (topic(topicId); as name) {
-                      {{ name }}
+                    @if (row.name) {
+                      {{ row.name }}
                     } @else {
-                      <span class="identifier">{{ topicId }}</span>
+                      <span class="identifier">{{ row.id }}</span>
                     }
                   </th>
                   @for (student of data.students; track student.student_id) {
                     <td>
-                      @if (metric(student.student_id, topicId); as m) {
+                      @if (metric(student.student_id, row.id); as m) {
                         <span class="cell-value">{{ m.observed_accuracy | percent: '1.0-0' }}</span>
                         <span class="caption">{{ m.correct }} of {{ m.attempted }} correct</span>
                         @if (m.weakness_indicator) {
@@ -114,13 +116,15 @@
           correct. These are reporting thresholds, not a mastery measure.
         </p>
       }
-      <app-pager
-        label="Class topics pages"
-        [(page)]="page"
-        [pageSize]="pageSize"
-        [total]="data.total"
-        (go)="loadPerformance()"
-      />
     }
+    <!-- Outside the ready block, so the button the teacher chose keeps focus while the next page loads. -->
+    <app-pager
+      label="Class topics pages"
+      [(page)]="page"
+      [pageSize]="pageSize"
+      [total]="performance.value()?.total ?? 0"
+      [disabled]="performance.loading()"
+      (go)="loadPerformance()"
+    />
   </section>
 }

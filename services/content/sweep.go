@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
@@ -81,7 +82,7 @@ func (s sweeper) sweep(ctx context.Context, cutoff time.Time) (int, error) {
 	for id := range old {
 		ids = append(ids, id)
 	}
-	owners, err := s.owners(ctx, ids)
+	owners, err := readOwners(ctx, s.db, ids)
 	if err != nil {
 		return 0, err
 	}
@@ -89,31 +90,64 @@ func (s sweeper) sweep(ctx context.Context, cutoff time.Time) (int, error) {
 }
 
 // removeUnowned removes the keys, grouped by document id, that their document's row does not keep, and reports how
-// many it removed before any failure. Each is looked at again just before it goes: a reindex that started after the
-// rows were read may have stored the same crop again (a crop's key is its content's hash), and one written since
-// cutoff is left for a later sweep to judge.
+// many it removed before any failure. owners, read for the whole sweep, only picks the candidates: each document's
+// are judged again under its row's lock (removeLocked) before any goes.
 func (s sweeper) removeUnowned(ctx context.Context, old map[string][]string, owners map[string]owner, cutoff time.Time) (int, error) {
 	removed := 0
 	for id, keys := range old {
 		o, owned := owners[id]
-		for _, key := range keys {
-			if owned && o.keeps(key) {
-				continue
-			}
-			at, exists, err := s.files.modified(ctx, key)
-			if err != nil {
-				return removed, err
-			}
-			if !exists || !at.Before(cutoff) {
-				continue
-			}
-			if err := s.files.remove(ctx, key); err != nil {
-				return removed, err
-			}
-			removed++
+		candidates := slices.DeleteFunc(slices.Clone(keys), func(key string) bool { return owned && o.keeps(key) })
+		if len(candidates) == 0 {
+			continue
+		}
+		n, err := s.removeLocked(ctx, id, candidates, cutoff)
+		removed += n
+		if err != nil {
+			return removed, err
 		}
 	}
 	return removed, nil
+}
+
+// removeLocked removes the document's keys its row does not keep, holding the row FOR SHARE from reading it until the
+// last removal, and reports how many it removed. The lock closes the race with a reindex: only an indexing run stores
+// crops, and a run starts only after queueIndex has marked the row indexing, an UPDATE that waits for this lock. So
+// either the reindex was queued before the row is read here, and everything of the document is kept, or every crop
+// it stores (a crop's key is its content's hash, so possibly one removed here) is stored after these removals. Each
+// key is also looked at again just before it goes, so one written since cutoff, such as the original of an upload
+// whose row is still committing, is left for a later sweep to judge.
+func (s sweeper) removeLocked(ctx context.Context, id string, keys []string, cutoff time.Time) (int, error) {
+	tx, err := s.db.Begin(ctx)
+	if err != nil {
+		return 0, err
+	}
+	defer tx.Rollback(ctx)
+	if _, err = tx.Exec(ctx, "SELECT 1 FROM documents WHERE id=$1 FOR SHARE", id); err != nil {
+		return 0, err
+	}
+	owners, err := readOwners(ctx, tx, []string{id})
+	if err != nil {
+		return 0, err
+	}
+	o, owned := owners[id]
+	removed := 0
+	for _, key := range keys {
+		if owned && o.keeps(key) {
+			continue
+		}
+		at, exists, err := s.files.modified(ctx, key)
+		if err != nil {
+			return removed, err
+		}
+		if !exists || !at.Before(cutoff) {
+			continue
+		}
+		if err := s.files.remove(ctx, key); err != nil {
+			return removed, err
+		}
+		removed++
+	}
+	return removed, tx.Commit(ctx)
 }
 
 // writtenBefore groups the keys of objects written before cutoff by the document id in their path.
@@ -134,10 +168,15 @@ func (o owner) keeps(key string) bool {
 	return o.indexing || key == o.original || slices.Contains(o.figures, key)
 }
 
-// owners reads the rows of the documents named, keyed by id: each one's original and the figure crops its chunks
+// querier is a pool or a transaction.
+type querier interface {
+	Query(ctx context.Context, sql string, args ...any) (pgx.Rows, error)
+}
+
+// readOwners reads the rows of the documents named, keyed by id: each one's original and the figure crops its chunks
 // cite, as object keys.
-func (s sweeper) owners(ctx context.Context, ids []string) (map[string]owner, error) {
-	rows, err := s.db.Query(ctx, `SELECT d.id::text,d.object_key,d.status='indexing',
+func readOwners(ctx context.Context, db querier, ids []string) (map[string]owner, error) {
+	rows, err := db.Query(ctx, `SELECT d.id::text,d.object_key,d.status='indexing',
 		coalesce(array_agg(d.org_id||'/'||d.id||'/figures/'||c.image) FILTER (WHERE c.image IS NOT NULL),'{}')
 		FROM documents d LEFT JOIN document_chunks c ON c.document_id=d.id WHERE d.id=ANY($1::uuid[]) GROUP BY d.id`, ids)
 	if err != nil {

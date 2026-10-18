@@ -19,20 +19,32 @@ export class ClassroomContext {
     () => this.classrooms().find((room) => room.id === this.classroomId())?.name ?? '',
   );
 
-  /** Reloads the list, keeping the current classroom when it is still there. */
-  async refresh(): Promise<void> {
+  private request = 0;
+  private latest: Promise<void> = Promise.resolve();
+
+  /** Reloads the list, keeping the current classroom when it is still there. Only the newest reload lands: an older
+   * one that answers later (say, from before a classroom was deleted) waits for the newest and reports its outcome. */
+  refresh(): Promise<void> {
+    const read = this.read(++this.request);
+    this.latest = read;
+    return read;
+  }
+
+  private async read(request: number): Promise<void> {
     this.loading.set(true);
     try {
       const rooms = await this.identity.classrooms();
+      if (request !== this.request) return this.latest;
       this.classrooms.set(rooms);
       this.known.set(true);
       this.error.set('');
       if (!rooms.some((room) => room.id === this.classroomId())) this.classroomId.set(rooms[0]?.id || '');
     } catch (error) {
+      if (request !== this.request) return this.latest;
       this.error.set(messageOf(error, 'Your classrooms could not be loaded.'));
       throw error;
     } finally {
-      this.loading.set(false);
+      if (request === this.request) this.loading.set(false);
     }
   }
 

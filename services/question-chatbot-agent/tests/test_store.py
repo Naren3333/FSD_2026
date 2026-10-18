@@ -1,6 +1,7 @@
 """PostgresStore against a real PostgreSQL. Needs CHATBOT_TEST_DATABASE_URL, a scratch database (the tests add
 rows under unique users and leave them); skipped without it. See docs/development/operations.md."""
 
+import asyncio
 import json
 import os
 from collections.abc import AsyncIterator
@@ -11,7 +12,7 @@ import pytest
 from learning_transport.db import open_pool
 
 from purge import purge_user, redact
-from store import MIGRATIONS, PostgresStore
+from store import MIGRATIONS, PostgresStore, _hold_thread
 
 pytestmark = pytest.mark.anyio
 URL = os.environ.get("CHATBOT_TEST_DATABASE_URL")
@@ -84,6 +85,46 @@ async def test_latest_messages_oldest_first(store: PostgresStore) -> None:
     for n in range(3):
         await store.start_turn(tid, f"q{n}", 6)
     assert [m["content"] for m in await store.messages(tid, 2)] == ["q1", "q2"]
+
+
+async def test_a_purged_thread_takes_no_more_messages(store: PostgresStore) -> None:
+    tid = str((await store.create_thread("org", str(uuid4()), "student", ROOM))["id"])
+    async with store.pool.connection() as conn:
+        await conn.execute("DELETE FROM threads WHERE id=%s", (tid,))
+    assert await store.start_turn(tid, "q", 6) is None
+    assert await store.save_answer(tid, {"content": "A.", "outcome": "answered"}) is None
+    assert await store.messages(tid, 200) == []
+
+
+async def test_a_turn_racing_a_purge_waits_for_it_instead_of_breaking_the_foreign_key(
+    store: PostgresStore,
+) -> None:
+    """The purge has deleted the thread but not committed: the turn waits, then sees the thread gone."""
+    tid = str((await store.create_thread("org", str(uuid4()), "student", ROOM))["id"])
+    await store.start_turn(tid, "q", 6)
+    async with store.pool.connection() as purge, purge.transaction():
+        await purge.execute("DELETE FROM threads WHERE id=%s", (tid,))
+        turn = asyncio.ensure_future(store.start_turn(tid, "again", 6))
+        answer = asyncio.ensure_future(store.save_answer(tid, {"content": "A.", "outcome": "answered"}))
+        await asyncio.sleep(0.3)
+        assert not turn.done() and not answer.done()  # held behind the purge's delete
+    assert await turn is None and await answer is None
+
+
+async def test_a_purge_waits_for_a_turn_already_saving(store: PostgresStore) -> None:
+    tid = str((await store.create_thread("org", str(uuid4()), "student", ROOM))["id"])
+    async with store.pool.connection() as turn, store.pool.connection() as purge:
+        async with turn.transaction():
+            assert await _hold_thread(turn, tid)
+            deleting = asyncio.ensure_future(purge.execute("DELETE FROM threads WHERE id=%s", (tid,)))
+            await asyncio.sleep(0.3)
+            assert not deleting.done()  # the purge waits for the turn
+            await turn.execute(
+                "INSERT INTO messages (thread_id, role, content) VALUES (%s, 'user', 'q')", (tid,)
+            )
+        await deleting
+        await purge.commit()
+    assert await store.messages(tid, 200) == []  # the purge then took the message with the thread
 
 
 async def test_no_thread_in_a_purged_classroom(store: PostgresStore) -> None:

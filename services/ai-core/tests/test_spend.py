@@ -123,6 +123,66 @@ def test_a_stream_is_charged_once(api: TestClient, openai_fake: FakeOpenAI, ledg
     assert charge.operation == "stream" and charge.tokens_out > 0
 
 
+def hang(request: httpx2.Request) -> httpx2.Response:
+    raise httpx2.ReadTimeout("timed out (test)", request=request)
+
+
+PROMPT = [{"role": "user", "content": "Say hello"}]
+
+
+@pytest.mark.parametrize("stream", [False, True], ids=["reply", "stream-before-first-token"])
+def test_a_timed_out_reply_is_charged_its_prompt_and_whole_output(
+    api: TestClient,
+    openai_fake: FakeOpenAI,
+    ledger: MemoryLedger,
+    test_settings: settings.Settings,
+    stream: bool,
+) -> None:
+    """OpenAI may still run, and bill, a reply nobody waited for: it is charged as if it used all of max_tokens."""
+    openai_fake.replies.append(hang)
+    resp = api.post("/v1/inference", json={**GENERATE, "max_tokens": 6000, "stream": stream})
+    assert (resp.status_code, resp.json()["error"]["code"]) == (502, "AI_PROVIDER_FAILED")
+    settle(ledger, 1)
+    billed, charge = ledger.charges[0]
+    assert billed.user_id == "student-1" and charge.estimated
+    assert (charge.operation, charge.tokens_in, charge.tokens_out) == (
+        "stream" if stream else "generate",
+        billing.prompt_tokens(PROMPT),
+        6000,
+    )
+    assert charge.cost_usd == pytest.approx(spend.cost(test_settings.chat_model, charge.tokens_in, 6000))
+
+
+def test_a_stream_that_times_out_midway_is_charged_its_whole_output(
+    api: TestClient, openai_fake: FakeOpenAI, ledger: MemoryLedger
+) -> None:
+    openai_fake.replies.append(chat_stream(["one", "two"], fail_after=1, failure=httpx2.ReadTimeout))
+    resp = api.post("/v1/inference", json={**GENERATE, "max_tokens": 500, "stream": True})
+    assert "event: error" in resp.text
+    settle(ledger, 1)
+    charge = ledger.charges[0][1]
+    assert charge.operation == "stream" and charge.estimated
+    assert (charge.tokens_in, charge.tokens_out) == (billing.prompt_tokens(PROMPT), 500)
+
+
+def test_a_timed_out_embedding_is_charged_its_input(
+    api: TestClient, openai_fake: FakeOpenAI, ledger: MemoryLedger
+) -> None:
+    openai_fake.replies.append(hang)
+    assert api.post("/v1/inference", json=EMBED).status_code == 502
+    settle(ledger, 1)
+    charge = ledger.charges[0][1]
+    assert (charge.operation, charge.tokens_out, charge.estimated) == ("embed", 0, True)
+    assert charge.tokens_in == billing.prompt_tokens([{"content": EMBED["input"]}])
+
+
+def test_prompt_tokens_count_with_the_tokenizer() -> None:
+    # Counted by cl100k_base, plus each message's framing; special-token text is just text.
+    one = billing.prompt_tokens([{"role": "user", "content": "hello world"}])
+    assert one == 2 + billing.MESSAGE_OVERHEAD
+    assert billing.prompt_tokens([{"role": "user", "content": "<|endoftext|>"}]) > billing.MESSAGE_OVERHEAD
+
+
 def test_rerank_is_charged(api: TestClient, reranker_fake: FakeReranker, ledger: MemoryLedger) -> None:
     reranker_fake.handler = lambda r: httpx2.Response(
         200,
@@ -272,7 +332,7 @@ def test_a_stream_the_caller_leaves_before_it_starts_is_charged_and_closed(
         bills = billing.Billing(ledger)
         stream = openai_client.stream_chat([{"role": "user", "content": "Say hello"}], 20)
         first = await anext(stream)
-        bill = billing.StreamBill(bills, billed, "corr", "gpt-test", "Say hello")
+        bill = billing.StreamBill(bills, billed, "corr", "gpt-test", PROMPT, 20)
 
         async def finish() -> None:
             await bill.close()

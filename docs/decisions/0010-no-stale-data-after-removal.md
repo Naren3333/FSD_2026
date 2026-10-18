@@ -28,3 +28,4 @@ An audit of the delete and archive flows found data that outlived the action tha
 - An Analytics rebuild from Kafka (operations.md) now reaches back 7 days, not 30.
 - Removals made before this change were never announced. Their students' work leaves teacher lists at once, since lists follow the roster, but marking jobs already queued for them are not stopped.
 - Not changed: there is still no account deletion (since added by ADR 0011). Test-only topic cleanup (`scripts/local_stack.py`) still deletes topics directly.
+- Amended 2026-10-18: a release applies only to currently enrolled students; removed students' finalized grades stay unreleased (and kept) until they are enrolled again.

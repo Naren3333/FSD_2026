@@ -6,6 +6,7 @@ import { CurriculumNames } from '../../core/curriculum-names';
 import { date } from '../../shared/format';
 import { MarksPipe } from '../../shared/marks';
 import { EvidenceNames, assessmentsOf } from '../../shared/names';
+import { NoClassroomComponent } from '../../shared/no-classroom';
 import { Section } from '../../shared/section';
 import { SectionStateComponent } from '../../shared/section-state';
 
@@ -20,7 +21,7 @@ interface Results {
 @Component({
   selector: 'app-results',
   standalone: true,
-  imports: [SectionStateComponent, MarksPipe],
+  imports: [NoClassroomComponent, SectionStateComponent, MarksPipe],
   templateUrl: './results.html',
 })
 export class ResultsComponent {
@@ -47,7 +48,10 @@ export class ResultsComponent {
       // The student's copy of each assessment: prompts and options, never the answer key.
       const [assessments] = await Promise.all([
         assessmentsOf(results, (id) => this.assessmentApi.get(id)),
-        this.curriculum.need(results.flatMap((r) => r.evidence.map((e) => e.topic_id))),
+        // Without the curriculum, topics show their ids.
+        this.curriculum
+          .need(results.flatMap((r) => r.evidence.map((e) => e.topic_id)))
+          .catch(() => undefined),
       ]);
       return { results, assessments };
     });

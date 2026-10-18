@@ -191,9 +191,9 @@ function applyType(form: QuestionForm): void {
   c.options.setValidators(uses['options'] ? [optionsValidator] : []);
   c.accepted.setValidators(uses['accepted'] ? [acceptedValidator] : []);
   for (const [name, used] of Object.entries(uses)) {
-    const control = form.get(name)!;
-    if (used) control.enable({ emitEvent: false });
-    else control.disable({ emitEvent: false });
+    const control = form.get(name);
+    if (used) control?.enable({ emitEvent: false });
+    else control?.disable({ emitEvent: false });
   }
   c.answer.updateValueAndValidity({ emitEvent: false });
   c.options.updateValueAndValidity({ emitEvent: false });

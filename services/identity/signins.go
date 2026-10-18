@@ -90,30 +90,52 @@ func (s signInCleanup) run(ctx context.Context) {
 	}
 }
 
-// removePending removes up to 20 pending sign-in accounts and marks each one removed, reporting how many it removed.
-// One that fails is left for the next round to retry and does not stop the others; the error says how many failed.
+// maxSigninBackoff is the longest a failing sign-in removal waits before it is tried again.
+const maxSigninBackoff = time.Hour
+
+// signinBackoff is the wait after the nth failed removal of one account: 30 s, 1, 2, 4 minutes and so on, at most
+// maxSigninBackoff.
+func signinBackoff(failures int) time.Duration {
+	return min(signinEvery<<max(1, min(failures, 10)), maxSigninBackoff)
+}
+
+// removePending removes up to 20 sign-in accounts that are due and marks each one removed, reporting how many it
+// removed. Due ones never tried come first, then the longest waiting. One that fails does not stop the others: it is
+// put off by signinBackoff, so accounts Keycloak keeps refusing never fill every batch and hold back the rest. The
+// error says how many failed.
 func (s signInCleanup) removePending(ctx context.Context) (int, error) {
-	rows, err := s.db.Query(ctx, "SELECT id FROM users WHERE deleted_at IS NOT NULL AND signin_removed_at IS NULL ORDER BY deleted_at LIMIT 20")
+	rows, err := s.db.Query(ctx, `SELECT id,signin_attempts FROM users WHERE deleted_at IS NOT NULL AND signin_removed_at IS NULL
+		AND (signin_next_attempt IS NULL OR signin_next_attempt<=now()) ORDER BY signin_next_attempt NULLS FIRST,deleted_at LIMIT 20`)
 	if err != nil {
 		return 0, err
 	}
-	ids, err := pgx.CollectRows(rows, pgx.RowTo[string])
+	type pending struct {
+		id       string
+		attempts int
+	}
+	due, err := pgx.CollectRows(rows, func(row pgx.CollectableRow) (pending, error) {
+		var p pending
+		return p, row.Scan(&p.id, &p.attempts)
+	})
 	if err != nil {
 		return 0, err
 	}
 	removed, failures := 0, []error{}
-	for _, id := range ids {
-		if err = s.keycloak.remove(ctx, id); err == nil {
-			_, err = s.db.Exec(ctx, "UPDATE users SET signin_removed_at=now() WHERE id=$1", id)
+	for _, p := range due {
+		if err = s.keycloak.remove(ctx, p.id); err == nil {
+			_, err = s.db.Exec(ctx, "UPDATE users SET signin_removed_at=now() WHERE id=$1", p.id)
 		}
 		if err != nil {
-			failures = append(failures, err)
+			wait := signinBackoff(p.attempts + 1)
+			slog.Warn("signin_removal_retry_later", "attempts", p.attempts+1, "retry_in", wait.String(), "error", err.Error())
+			_, putOff := s.db.Exec(ctx, "UPDATE users SET signin_attempts=signin_attempts+1,signin_next_attempt=now()+make_interval(secs=>$2) WHERE id=$1", p.id, wait.Seconds())
+			failures = append(failures, errors.Join(err, putOff))
 			continue
 		}
 		removed++
 	}
 	if len(failures) > 0 {
-		return removed, fmt.Errorf("%d of %d sign-in removals failed: %w", len(failures), len(ids), errors.Join(failures...))
+		return removed, fmt.Errorf("%d of %d sign-in removals failed: %w", len(failures), len(due), errors.Join(failures...))
 	}
 	return removed, nil
 }

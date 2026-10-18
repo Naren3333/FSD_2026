@@ -20,7 +20,7 @@ import time
 from pathlib import Path
 
 from local_stack import ROOT, TEST_PORTS, TEST_PROJECT, env
-from setup import postgres_init, realm
+from setup import TEST_WEB_ORIGIN, postgres_init, realm
 
 # Each suite's command and working directory, in the order they run.
 NPM = "npm.cmd" if os.name == "nt" else "npm"
@@ -30,10 +30,18 @@ SUITES: dict[str, tuple[list[str], Path]] = {
     "e2e": ([NPM, "run", "test:e2e"], ROOT / "apps/web"),
 }
 READY_TIMEOUT = 600  # seconds: a fresh stack imports the realm and runs every migration before it answers
+# The test stack's PostgreSQL init script and realm import, beside the development stack's in .local (relative to
+# the repository, as docker-compose.yml's LOCAL_CONFIG_DIR reads it).
+TEST_LOCAL_CONFIG_DIR = ".local/test-stack"
 # Every `docker compose` command here and in the test scripts acts on the project this names (Compose reads it before
-# the file's `name:`) and publishes the test ports; integration.py and the browser tests refuse to run without it,
-# and reach the stack on those ports.
-TEST_ENV = {**os.environ, "COMPOSE_PROJECT_NAME": TEST_PROJECT, **TEST_PORTS}
+# the file's `name:`), publishes the test ports and mounts the test stack's first-start files; integration.py and the
+# browser tests refuse to run without it, and reach the stack on those ports.
+TEST_ENV = {
+    **os.environ,
+    "COMPOSE_PROJECT_NAME": TEST_PROJECT,
+    **TEST_PORTS,
+    "LOCAL_CONFIG_DIR": f"./{TEST_LOCAL_CONFIG_DIR}",
+}
 
 
 def compose(*args: str, check: bool = True) -> subprocess.CompletedProcess[str]:
@@ -42,19 +50,19 @@ def compose(*args: str, check: bool = True) -> subprocess.CompletedProcess[str]:
 
 
 def refresh_local_files() -> None:
-    """Writes .local's PostgreSQL init script and realm import from .env again, as scripts/setup.py made them.
-    Both are read only when a volume is created, so the development stack is unchanged, but the fresh test volumes
-    get every current database and client even when the files predate them (upgrade_local.py adds those to a running
-    stack and rewrites only the realm)."""
+    """Writes the test stack's PostgreSQL init script and realm import from .env, as scripts/setup.py writes the
+    development stack's, into TEST_LOCAL_CONFIG_DIR. The realm allows the test stack's web origin only, so the
+    development stack's import never lists it. The fresh test volumes get every current database and client even
+    when the development stack's files predate them (upgrade_local.py adds those to a running stack)."""
     try:
         values = env()
-        sql, import_ = postgres_init(values), realm(values)
+        sql, import_ = postgres_init(values), realm(values, TEST_WEB_ORIGIN)
     except FileNotFoundError:
         raise SystemExit("No .env: run python scripts/setup.py first.") from None
     except KeyError as missing:
         raise SystemExit(f".env lacks {missing}: run python scripts/upgrade_local.py.") from None
-    local = ROOT / ".local"
-    local.mkdir(exist_ok=True)
+    local = ROOT / TEST_LOCAL_CONFIG_DIR
+    local.mkdir(parents=True, exist_ok=True)
     (local / "postgres-init.sql").write_text(sql, encoding="utf-8")
     (local / "learning-realm.json").write_text(json.dumps(import_, indent=2), encoding="utf-8")
 
@@ -103,7 +111,7 @@ def main() -> None:
         failed = [name for name in suites if not run_suite(name, args.live_ai)]
     finally:
         if args.keep:
-            web = f"http://localhost:{TEST_PORTS['WEB_PORT']}"
+            web = TEST_WEB_ORIGIN
             print(
                 f"\nThe test stack is still running at {web}. Remove it with: docker compose -p {TEST_PROJECT} down -v"
             )

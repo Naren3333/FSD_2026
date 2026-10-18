@@ -29,6 +29,15 @@ def test_project_names_match_compose_and_the_browser_tests() -> None:
     assert local_stack.TEST_PROJECT != local_stack.DEV_PROJECT
 
 
+def test_the_browser_tests_require_the_test_ports() -> None:
+    """The browser tests' guard names the same test ports as local_stack, so the project name alone is not enough."""
+    playwright = (ROOT / "apps/web/playwright.config.ts").read_text(encoding="utf-8")
+    ports = re.search(r"const TEST_PORTS: Record<string, string> = \{(.*)\};", playwright)
+    assert ports, "playwright.config.ts lost its TEST_PORTS"
+    assert dict(re.findall(r"(\w+): '(\d+)'", ports[1])) == local_stack.TEST_PORTS
+    assert "process.env[name] !== TEST_PORTS[name]" in playwright
+
+
 def test_data_writing_scripts_refuse_the_development_stack(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.delenv("COMPOSE_PROJECT_NAME", raising=False)
     with pytest.raises(SystemExit, match="stack_tests.py"):
@@ -76,8 +85,20 @@ def test_the_test_stack_publishes_its_own_ports() -> None:
     assert local_stack.TEST_PORTS.keys() == defaults.keys()
     assert set(local_stack.TEST_PORTS.values()).isdisjoint(defaults.values())
     assert f"http://localhost:{local_stack.TEST_PORTS['WEB_PORT']}" == setup.TEST_WEB_ORIGIN
-    web = setup.realm(setup.generate_secrets())["clients"][0]
-    assert web["webOrigins"] == [setup.WEB_ORIGIN, setup.TEST_WEB_ORIGIN]
+
+
+def test_each_stack_realm_allows_only_its_own_web_origin() -> None:
+    values = setup.generate_secrets()
+    for web_origin, realm in [
+        (setup.WEB_ORIGIN, setup.realm(values)),
+        (setup.TEST_WEB_ORIGIN, setup.realm(values, setup.TEST_WEB_ORIGIN)),
+    ]:
+        web = realm["clients"][0]
+        assert web["clientId"] == "learning-web"
+        assert web["webOrigins"] == [web_origin]
+        assert web["redirectUris"] == [f"{web_origin}/*"]
+        # Sign out returns to a sign-in redirect URI.
+        assert web["attributes"]["post.logout.redirect.uris"] == "+"
 
 
 def test_scripts_follow_the_port_variables(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -85,8 +106,8 @@ def test_scripts_follow_the_port_variables(monkeypatch: pytest.MonkeyPatch) -> N
         monkeypatch.setenv(name, port)
     stack = importlib.reload(local_stack)
     try:
-        assert stack.BASE == "http://localhost:18000/api"
-        assert stack.TOKEN_URL.startswith("http://localhost:18081/realms/learning/")
+        assert stack.BASE == "http://127.0.0.1:18000/api"
+        assert stack.TOKEN_URL.startswith("http://127.0.0.1:18081/realms/learning/")
         ready = importlib.reload(wait_ready)
         assert [url for url, _ in ready.PUBLIC.values()] == [
             "http://127.0.0.1:18000/api/identity/classrooms",
@@ -98,15 +119,40 @@ def test_scripts_follow_the_port_variables(monkeypatch: pytest.MonkeyPatch) -> N
         importlib.reload(wait_ready)
 
 
+def test_scripts_read_ports_from_env_file(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    """As Compose does: the environment first, then .env, then the development default."""
+    dotenv = tmp_path / ".env"
+    dotenv.write_text("KONG_PORT=9000\n", encoding="utf-8")
+    read = local_stack.read_env
+    monkeypatch.setattr(local_stack, "read_env", lambda: read(dotenv))
+    monkeypatch.delenv("KONG_PORT", raising=False)
+    monkeypatch.delenv("KEYCLOAK_PORT", raising=False)
+    assert local_stack.published_port("KONG_PORT", "8000") == "9000"
+    assert local_stack.published_port("KEYCLOAK_PORT", "8081") == "8081"
+    monkeypatch.setenv("KONG_PORT", "18000")
+    assert local_stack.published_port("KONG_PORT", "8000") == "18000"
+    dotenv.unlink()
+    monkeypatch.delenv("KONG_PORT")
+    assert local_stack.published_port("KONG_PORT", "8000") == "8000"
+
+
 def test_fresh_volumes_get_every_database_and_client(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    """The test stack's first-start files go to their own directory, which docker-compose.yml mounts for it, so the
+    development stack's realm import never names the test origin."""
     values = setup.generate_secrets()
     monkeypatch.setattr(stack_tests, "ROOT", tmp_path)
     monkeypatch.setattr(stack_tests, "env", lambda: values)
     stack_tests.refresh_local_files()
-    sql = (tmp_path / ".local/postgres-init.sql").read_text(encoding="utf-8")
+    local = tmp_path / stack_tests.TEST_LOCAL_CONFIG_DIR
+    sql = (local / "postgres-init.sql").read_text(encoding="utf-8")
     assert all(f"CREATE DATABASE {name} OWNER {name};" in sql for name in setup.SERVICES)
-    realm = json.loads((tmp_path / ".local/learning-realm.json").read_text(encoding="utf-8"))
-    assert realm == setup.realm(values)
+    realm = json.loads((local / "learning-realm.json").read_text(encoding="utf-8"))
+    assert realm == setup.realm(values, setup.TEST_WEB_ORIGIN)
+    assert not (tmp_path / ".local/learning-realm.json").exists()
+    assert stack_tests.TEST_ENV["LOCAL_CONFIG_DIR"] == f"./{stack_tests.TEST_LOCAL_CONFIG_DIR}"
+    compose = (ROOT / "docker-compose.yml").read_text(encoding="utf-8")
+    assert "${LOCAL_CONFIG_DIR:-./.local}/postgres-init.sql:" in compose
+    assert "${LOCAL_CONFIG_DIR:-./.local}/learning-realm.json:" in compose
 
 
 def test_an_old_env_is_sent_to_upgrade_local(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:

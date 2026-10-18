@@ -6,12 +6,20 @@ errors, twice, with full-jitter backoff; Retry-After is honoured up to 10s and a
 once. Not retried: timeouts (a retry would outlast the caller, and the call may still be billed) and 429
 insufficient_quota (billing, not load). Errors are raised as the SDK's own exceptions. A stream is retried
 only around create(), before the first token: a retry after it would repeat text the caller already relayed.
+
+Time limits. A non-streamed reply sends nothing until it is complete, so its read timeout bounds the whole
+generation: generate() gets generation_budget(max_tokens) seconds in all, retries included (each attempt gets what
+is left, and no retry starts with less than MIN_ATTEMPT left). A stream gets TIMEOUT per read, and a retry of its
+opening starts only while a whole attempt still fits in STREAM_OPEN_BUDGET. Callers wait longer than these worst
+cases: the question-generation agent's and the chatbot's GENERATE_TIMEOUT, the chatbot's STREAM_TIMEOUT and
+Grading's markingCall.
 """
 
 import asyncio
 import functools
 import logging
 import random
+import time
 from collections.abc import AsyncGenerator, Awaitable, Callable
 from dataclasses import dataclass
 from typing import Any, cast
@@ -23,7 +31,12 @@ from settings import get_settings
 
 log = logging.getLogger("ai-core.openai_client")
 
-TIMEOUT = 30.0  # per call; httpx applies it per read
+TIMEOUT = 30.0  # per read: embeddings and a stream's chunks; also the shortest generation budget
+# A non-streamed reply's budget: GENERATE_BASE seconds plus GENERATE_RATE output tokens a second, between TIMEOUT
+# and GENERATE_CAP. 6000 tokens (question generation) get 120 s, 1500 (Grading's marking) 45 s.
+GENERATE_BASE, GENERATE_RATE, GENERATE_CAP = 20.0, 60.0, 150.0
+MIN_ATTEMPT = 10.0  # a generation retry starts only with at least this many seconds of its budget left
+STREAM_OPEN_BUDGET = 45.0  # seconds by which a stream has opened or failed, retries included
 EMBED_BATCH = 128  # inputs per request; OpenAI also caps a request at 300k tokens in total
 
 MAX_ATTEMPTS = 3  # first try + 2 retries
@@ -31,6 +44,7 @@ MAX_DELAY = 10.0  # a longer Retry-After fails at once instead of spending the c
 BASE_DELAY, BACKOFF_CAP = 0.5, 8.0
 
 _sleep = asyncio.sleep  # tests patch this
+_now = time.monotonic  # and this
 _client: AsyncOpenAI | None = None
 
 
@@ -130,7 +144,9 @@ async def stream_chat(messages: list[Any], max_tokens: int) -> AsyncGenerator[st
             max_completion_tokens=max_tokens,
             reasoning_effort=cast(Any, settings.chat_reasoning_effort),
             timeout=TIMEOUT,
-        )
+        ),
+        deadline=_now() + STREAM_OPEN_BUDGET,
+        min_attempt=TIMEOUT,
     )
     usage, finish_reason = None, None
     try:
@@ -162,6 +178,11 @@ async def stream_chat(messages: list[Any], max_tokens: int) -> AsyncGenerator[st
     yield counts
 
 
+def generation_budget(max_tokens: int) -> float:
+    """Seconds a non-streamed reply of up to `max_tokens` may take in all, retries included."""
+    return min(max(GENERATE_BASE + max_tokens / GENERATE_RATE, TIMEOUT), GENERATE_CAP)
+
+
 @dataclass(frozen=True)
 class Completion:
     text: str
@@ -182,15 +203,17 @@ async def generate(
             "type": "json_schema",
             "json_schema": {"name": (name or "reply").replace(".", "_"), "strict": True, "schema": schema},
         }
+    deadline = _now() + generation_budget(max_tokens)
     result = await call(
         lambda: client.chat.completions.create(
             model=settings.chat_model,
             messages=messages,
             max_completion_tokens=max_tokens,
             reasoning_effort=cast(Any, settings.chat_reasoning_effort),
-            timeout=TIMEOUT,
+            timeout=max(deadline - _now(), 1.0),
             **extra,
-        )
+        ),
+        deadline=deadline,
     )
     choice = result.choices[0]
     usage = usage_of(result.usage)
@@ -226,10 +249,14 @@ async def call[T](
     *,
     delay: Callable[[openai.OpenAIError, int], float | None] | None = None,
     attempts: Attempts | None = None,
+    deadline: float | None = None,
+    min_attempt: float = MIN_ATTEMPT,
 ) -> T:
     """Run one SDK call with retries. `delay` gives the seconds to wait after a failed attempt (numbered from 1)
     before the next, or None to raise the error; the default is this module's policy (see the module docstring).
-    Errors that aren't OpenAI's are never retried. `attempts`, when given, counts the attempts made."""
+    Errors that aren't OpenAI's are never retried. `attempts`, when given, counts the attempts made. With
+    `deadline` (on the _now() clock) the error is raised instead of a retry that would start with less than
+    `min_attempt` seconds left."""
     wait = delay or default_delay
     if attempts is None:
         attempts = Attempts()
@@ -239,7 +266,7 @@ async def call[T](
             return await fn()
         except openai.OpenAIError as exc:
             seconds = wait(exc, attempts.count)
-            if seconds is None:
+            if seconds is None or (deadline is not None and deadline - _now() - seconds < min_attempt):
                 raise
             log.warning(
                 "openai_call_retrying",

@@ -1,0 +1,126 @@
+@if (selected(); as assessment) {
+  <div class="separated">
+    <h3>{{ assessment.title }}</h3>
+    @if (schedule(assessment); as when) {
+      <p class="caption">
+        {{ when }}.
+        {{
+          assessment.late_policy === 'reject'
+            ? 'Late work is not accepted.'
+            : 'Late work is accepted and marked as late.'
+        }}
+      </p>
+    }
+    <form id="answer-form" novalidate [formGroup]="answers" (ngSubmit)="submit()">
+      @for (question of assessment.questions; track question.id) {
+        <app-field
+          [controlId]="'answer-' + question.id"
+          [label]="question.prompt"
+          [hint]="answerHint(question)"
+          [control]="answers.get(question.id)"
+          [error]="
+            question.type === 'free_response'
+              ? 'Write an answer of at most ' + (question.max_length ?? 5000) + ' characters.'
+              : 'This field is required.'
+          "
+        >
+          @switch (question.type) {
+            @case ('numerical') {
+              <input
+                appFieldControl
+                [id]="'answer-' + question.id"
+                [formControlName]="question.id"
+                inputmode="decimal"
+              />
+            }
+            @case ('multiple_choice') {
+              <select appFieldControl [id]="'answer-' + question.id" [formControlName]="question.id">
+                <option value="">Choose an answer</option>
+                @for (option of question.options ?? []; track option) {
+                  <option [value]="option">{{ option }}</option>
+                }
+              </select>
+            }
+            @case ('short_answer') {
+              <input
+                appFieldControl
+                [id]="'answer-' + question.id"
+                [formControlName]="question.id"
+                maxlength="500"
+              />
+            }
+            @case ('free_response') {
+              <textarea
+                appFieldControl
+                [id]="'answer-' + question.id"
+                [formControlName]="question.id"
+                rows="8"
+                class="answer-box"
+                [attr.maxlength]="question.max_length ?? 5000"
+              ></textarea>
+            }
+          }
+        </app-field>
+      }
+      @if (session.isStudent()) {
+        <p class="caption" aria-live="polite">{{ saveNote() }}</p>
+        <p class="caption">
+          @if (submitted()) {
+            @if (submission(); as own) {
+              Submitted on {{ dateTime(own.submitted_at) }}{{ own.late ? ', after the due date' : '' }}. These
+              are your submitted answers; your teacher will review the grade.
+            } @else {
+              You have submitted this assessment. Your teacher will review the grade.
+            }
+          } @else if (due() === 'closed') {
+            This assessment is past its due date and no longer takes submissions.
+          } @else if (due() === 'late') {
+            The due date has passed. You can still submit; your teacher will see it was late.
+          } @else {
+            Submission is final. Check your answers before submitting.
+          }
+        </p>
+        <button
+          [disabled]="state.busy() || clearState.busy() || submitted() || changed() || due() === 'closed'"
+        >
+          {{ submitted() ? 'Submitted' : 'Submit answers' }}
+        </button>
+        @if (changed()) {
+          <button type="button" id="reopen-assessment" (click)="reopen()" [disabled]="state.busy()">
+            Open it again
+          </button>
+        }
+      } @else {
+        <p class="caption">
+          Teacher preview. Students see the questions without answer keys, accepted answers, rubrics or
+          marking points.
+        </p>
+        <button type="button" class="secondary" (click)="closePreview(true)">Close preview</button>
+      }
+      @if (!submitted() && due() !== 'closed') {
+        <!-- Not a reset button: a student's Clear form also clears their saved work, so it asks first. -->
+        <button
+          type="button"
+          class="secondary clear-form"
+          (click)="confirmClear()"
+          [disabled]="state.busy() || clearState.busy()"
+        >
+          Clear form
+        </button>
+      }
+    </form>
+  </div>
+}
+<app-confirm-dialog
+  #clearDialog
+  dialogId="clear-answers"
+  heading="Clear your answers?"
+  confirmLabel="Clear answers"
+  [state]="clearState"
+  (confirm)="clearAnswers()"
+>
+  <p>
+    Every answer on this assessment will be emptied, including the answers saved so far. This cannot be
+    undone.
+  </p>
+</app-confirm-dialog>

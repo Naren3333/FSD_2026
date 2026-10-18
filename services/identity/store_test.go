@@ -7,6 +7,7 @@ import (
 	"learning/platform/platformtest"
 	"slices"
 	"testing"
+	"time"
 
 	"github.com/google/uuid"
 )
@@ -181,7 +182,7 @@ func TestADeletedClassroomIsGoneAndAnnounced(t *testing.T) {
 	}
 }
 
-// The named roster stops at 500, as the teacher's list does; the ids other services filter by do not.
+// The named roster comes in pages that together hold every student, in the order of the ids other services filter by.
 func TestTheRosterOfIDsHasEveryStudent(t *testing.T) {
 	ctx, s := context.Background(), testStore(t)
 	register(t, s, "org-a", "teacher-a", "teacher", "a")
@@ -192,10 +193,14 @@ func TestTheRosterOfIDsHasEveryStudent(t *testing.T) {
 	if _, err := s.db.Exec(ctx, "INSERT INTO enrollments(classroom_id,student_id) SELECT $1,id FROM users WHERE role='student'", id); err != nil {
 		t.Fatal(err)
 	}
-	roster, err := s.listStudents(ctx, id)
+	roster, total, err := s.listStudents(ctx, id, 0, 500)
 	ids, err2 := s.listStudentIDs(ctx, id)
-	if err != nil || err2 != nil || len(roster) != 500 || len(ids) != 501 || ids[0] != roster[0].ID || ids[500] != "student-501" {
-		t.Fatalf("%d named, %d ids (%v %v)", len(roster), len(ids), err, err2)
+	if err != nil || err2 != nil || len(roster) != 500 || total != 501 || len(ids) != 501 || ids[0] != roster[0].ID || ids[500] != "student-501" {
+		t.Fatalf("%d named of %d, %d ids (%v %v)", len(roster), total, len(ids), err, err2)
+	}
+	last, total, err := s.listStudents(ctx, id, 500, 500)
+	if err != nil || total != 501 || len(last) != 1 || last[0].ID != "student-501" {
+		t.Fatalf("the last page: %v of %d, %v", last, total, err)
 	}
 }
 
@@ -218,9 +223,12 @@ func TestRostersAndRemoval(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	roster, err := s.listStudents(ctx, id)
-	if err != nil || len(roster) != 2 || roster[0].ID != "student-a" || roster[1].Name != "bea" {
-		t.Fatalf("roster = %v, %v", roster, err)
+	roster, total, err := s.listStudents(ctx, id, 0, 50)
+	if err != nil || total != 2 || len(roster) != 2 || roster[0].ID != "student-a" || roster[1].Name != "bea" {
+		t.Fatalf("roster = %v of %d, %v", roster, total, err)
+	}
+	if page, total, err := s.listStudents(ctx, id, 1, 1); err != nil || total != 2 || len(page) != 1 || page[0].ID != "student-b" {
+		t.Fatalf("second page = %v of %d, %v", page, total, err)
 	}
 	if ids, err := s.listStudentIDs(ctx, id); err != nil || !slices.Equal(ids, []string{"student-a", "student-b"}) {
 		t.Fatalf("roster ids = %v, %v", ids, err)
@@ -323,13 +331,22 @@ func TestDeletedAccountsLoseTheirSignInOnce(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	// The oldest one failing does not hold back the next; it is retried in the next round.
+	// The oldest one failing does not hold back the next; it is put off and retried once it is due.
 	keycloak := &fakeKeycloak{fail: map[string]bool{first: true}}
 	remover := signInCleanup{s.db, keycloak}
 	if n, err := remover.removePending(ctx); err == nil || n != 1 {
 		t.Fatalf("removed %d, %v", n, err)
 	}
+	var attempts int
+	var putOff bool
+	if err := s.db.QueryRow(ctx, "SELECT signin_attempts,signin_next_attempt>now() FROM users WHERE id=$1", first).Scan(&attempts, &putOff); err != nil || attempts != 1 || !putOff {
+		t.Fatalf("after a failure: %d attempts, put off %v (%v)", attempts, putOff, err)
+	}
 	keycloak.fail = nil
+	if n, err := remover.removePending(ctx); err != nil || n != 0 {
+		t.Fatalf("an account not yet due was retried: %d, %v", n, err)
+	}
+	dueNow(t, s, first)
 	for range 2 {
 		if _, err := remover.removePending(ctx); err != nil {
 			t.Fatal(err)
@@ -337,5 +354,60 @@ func TestDeletedAccountsLoseTheirSignInOnce(t *testing.T) {
 	}
 	if len(keycloak.removed) != 2 || keycloak.removed[0] != second || keycloak.removed[1] != first {
 		t.Fatalf("removed %v", keycloak.removed)
+	}
+}
+
+// dueNow makes the users' put-off sign-in removals due, as if their wait had passed.
+func dueNow(t *testing.T, s pgStore, ids ...string) {
+	t.Helper()
+	if _, err := s.db.Exec(context.Background(), "UPDATE users SET signin_next_attempt=now()-interval '1 second' WHERE id=ANY($1)", ids); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// Accounts Keycloak keeps refusing to remove never fill every batch: a full batch of them failing does not stop
+// the one deleted after them from losing its sign-in, and each failure waits longer before it is tried again.
+func TestFailingSignInRemovalsDoNotHoldBackTheRest(t *testing.T) {
+	ctx, s := context.Background(), testStore(t)
+	keycloak := &fakeKeycloak{fail: map[string]bool{}}
+	var failing []string
+	for range 20 {
+		id := uuid.NewString()
+		register(t, s, "org-a", id, "student", "s")
+		if err := s.deleteAccount(ctx, "org-a", id); err != nil {
+			t.Fatal(err)
+		}
+		keycloak.fail[id] = true
+		failing = append(failing, id)
+	}
+	last := uuid.NewString()
+	register(t, s, "org-a", last, "student", "s")
+	if err := s.deleteAccount(ctx, "org-a", last); err != nil {
+		t.Fatal(err)
+	}
+	remover := signInCleanup{s.db, keycloak}
+	if n, err := remover.removePending(ctx); err == nil || n != 0 {
+		t.Fatalf("first round removed %d, %v", n, err)
+	}
+	if n, err := remover.removePending(ctx); err != nil || n != 1 || !slices.Equal(keycloak.removed, []string{last}) {
+		t.Fatalf("second round removed %d (%v), %v", n, keycloak.removed, err)
+	}
+	// Due again, the failing ones are tried again and put off for longer.
+	dueNow(t, s, failing...)
+	if n, err := remover.removePending(ctx); err == nil || n != 0 {
+		t.Fatalf("retry round removed %d, %v", n, err)
+	}
+	var attempts int
+	var wait float64
+	if err := s.db.QueryRow(ctx, "SELECT signin_attempts,extract(epoch FROM signin_next_attempt-now()) FROM users WHERE id=$1", failing[0]).Scan(&attempts, &wait); err != nil || attempts != 2 || wait < 50 || wait > 60 {
+		t.Fatalf("after two failures: %d attempts, next in %.0f s (%v)", attempts, wait, err)
+	}
+}
+
+func TestSignInBackoffGrowsToItsCap(t *testing.T) {
+	for failures, want := range map[int]time.Duration{1: 30 * time.Second, 2: time.Minute, 3: 2 * time.Minute, 8: time.Hour, 50: time.Hour} {
+		if got := signinBackoff(failures); got != want {
+			t.Errorf("after %d failures: %v, want %v", failures, got, want)
+		}
 	}
 }

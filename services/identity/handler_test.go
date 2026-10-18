@@ -108,12 +108,13 @@ func (m *memoryStore) removeEnrollment(_ context.Context, classroom, _, student 
 	return removed, nil
 }
 
-func (m *memoryStore) listStudents(_ context.Context, classroom string) ([]Student, error) {
+func (m *memoryStore) listStudents(_ context.Context, classroom string, offset, limit int) ([]Student, int, error) {
 	result := []Student{}
-	for _, id := range m.enrolled[classroom] {
+	enrolled := m.enrolled[classroom]
+	for _, id := range enrolled[min(offset, len(enrolled)):min(offset+limit, len(enrolled))] {
 		result = append(result, Student{ID: id, Username: m.usernames[id], Name: m.usernames[id]})
 	}
-	return result, nil
+	return result, len(enrolled), nil
 }
 
 func (m *memoryStore) listStudentIDs(_ context.Context, classroom string) ([]string, error) {
@@ -304,6 +305,10 @@ func TestOnlyTheOwnerSeesTheRosterAndRemovesStudents(t *testing.T) {
 		step{"a student read the roster", http.MethodGet, roster, "", "student-1", "student", http.StatusForbidden, ""},
 		step{"another teacher read the roster", http.MethodGet, roster, "", "teacher-2", "teacher", http.StatusForbidden, ""},
 		step{"roster", http.MethodGet, roster, "", "teacher-1", "teacher", http.StatusOK, `"username":"ada"`},
+		step{"a roster page", http.MethodGet, roster + "?offset=0&limit=500", "", "teacher-1", "teacher", http.StatusOK, `"total":1`},
+		step{"past the roster's end", http.MethodGet, roster + "?offset=1", "", "teacher-1", "teacher", http.StatusOK, `{"students":[],"total":1}`},
+		step{"a roster page too long", http.MethodGet, roster + "?limit=501", "", "teacher-1", "teacher", http.StatusUnprocessableEntity, ""},
+		step{"a roster page before the start", http.MethodGet, roster + "?offset=-1", "", "teacher-1", "teacher", http.StatusUnprocessableEntity, ""},
 		step{"a student read the roster's ids", http.MethodGet, ids, "", "student-1", "student", http.StatusForbidden, ""},
 		step{"another teacher read the roster's ids", http.MethodGet, ids, "", "teacher-2", "teacher", http.StatusForbidden, ""},
 		step{"roster ids", http.MethodGet, ids, "", "teacher-1", "teacher", http.StatusOK, `["student-1"]`},

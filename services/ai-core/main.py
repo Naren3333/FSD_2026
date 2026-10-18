@@ -176,7 +176,7 @@ async def infer(request: RequestContract, http: Request, slot: Slot) -> Any:
             # Opened before the response starts, so a provider failure is still a plain error status.
             stream = openai_client.stream_chat(messages, request.max_tokens)
             first = await anext(stream)
-            bill = StreamBill(billing, billed, correlation, settings.chat_model, message_text(messages))
+            bill = StreamBill(billing, billed, correlation, settings.chat_model, messages, request.max_tokens)
 
             async def finish() -> None:
                 try:
@@ -199,6 +199,17 @@ async def infer(request: RequestContract, http: Request, slot: Slot) -> Any:
             correlation,
             reply_charge("generate", settings.chat_model, prompt, error.text, error.usage),
         )
+        provider_error(error)
+    except openai.APITimeoutError as error:
+        # OpenAI may still finish, and bill, a reply nobody waited for: charge what it could cost (ADR 0003).
+        if request.operation == "embed":
+            embedded = [{"content": request.input}]
+            await billing.charge_timeout(billed, correlation, "embed", settings.embedding_model, embedded, 0)
+        else:
+            operation = "stream" if request.stream else "generate"
+            await billing.charge_timeout(
+                billed, correlation, operation, settings.chat_model, messages, request.max_tokens
+            )
         provider_error(error)
     except PROVIDER_ERRORS as error:
         provider_error(error)
@@ -249,6 +260,8 @@ async def events(
             item = await anext(stream, None)
     except openai.OpenAIError as error:
         log.warning("provider_failed", extra={"error": type(error).__name__})
+        if bill and isinstance(error, openai.APITimeoutError):
+            await bill.timed_out()  # charged as a non-streamed timeout is
         yield sse_event(
             "error", {"code": "AI_PROVIDER_FAILED", "message": "The AI provider stopped responding."}
         )

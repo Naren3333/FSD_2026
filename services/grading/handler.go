@@ -20,46 +20,72 @@ func (s server) routes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /v1/evaluations/mine", s.mine)
 	mux.HandleFunc("GET /v1/evaluations/counts", s.counts)
 	mux.HandleFunc("POST /v1/evaluations/release", s.release)
+	mux.HandleFunc("GET /v1/evaluations/{id}", s.get)
 	mux.HandleFunc("POST /v1/evaluations/{id}/marks", s.mark)
 	mux.HandleFunc("POST /v1/evaluations/{id}/finalize", s.finalize)
 }
 
-// list is, for the classroom's teacher only, its evaluations with the students' answers, or one assessment's. Only
-// enrolled students' are listed: a removed student's evaluations are kept, and come back if they are enrolled again.
+// maxPage is the most evaluations one page of a teacher's list holds; each carries its student's answers.
+const maxPage = 100
+
+// list is, for the classroom's teacher only, one page of its evaluations with the students' answers, newest first, or
+// of one assessment's, oldest first: ?offset= and ?limit= (default 20, at most 100) choose the page, and total says
+// how many there are. Only enrolled students' are listed: a removed student's evaluations are kept, and come back if
+// they are enrolled again.
 func (s server) list(w http.ResponseWriter, r *http.Request) {
-	classroom := r.URL.Query().Get("classroom_id")
-	assessment := r.URL.Query().Get("assessment_id")
-	if assessment != "" && !platform.ID(assessment) {
-		platform.Invalid(w, "assessment_id must be an assessment identifier.")
-		return
-	}
-	if !platform.TeacherOf(s.access, w, r, classroom) {
-		return
-	}
-	students, ok := s.roster.Roster(w, r, classroom)
+	classroom, assessment, students, ok := s.enrolledWork(w, r)
 	if !ok {
 		return
 	}
-	result, err := s.store.listEvaluations(r.Context(), platform.Actor(r).Org, classroom, assessment, students)
+	offset, limit, ok := platform.Page(w, r, 20, maxPage)
+	if !ok {
+		return
+	}
+	result, total, err := s.store.listEvaluations(r.Context(), platform.Actor(r).Org, classroom, assessment, students, offset, limit)
 	if err != nil {
 		platform.Fail(w, err)
 		return
 	}
-	platform.JSON(w, http.StatusOK, result)
+	platform.JSON(w, http.StatusOK, map[string]any{"evaluations": result, "total": total})
+}
+
+// enrolledWork checks the caller is the teacher of the classroom ?classroom_id= names, and reads the optional
+// ?assessment_id= and the classroom's enrolled students, whose work alone a teacher's lists and counts hold. On
+// failure the response is written.
+func (s server) enrolledWork(w http.ResponseWriter, r *http.Request) (classroom, assessment string, students []string, ok bool) {
+	classroom = r.URL.Query().Get("classroom_id")
+	assessment = r.URL.Query().Get("assessment_id")
+	if assessment != "" && !platform.ID(assessment) {
+		platform.Invalid(w, "assessment_id must be an assessment identifier.")
+		return "", "", nil, false
+	}
+	if !platform.TeacherOf(s.access, w, r, classroom) {
+		return "", "", nil, false
+	}
+	students, ok = s.roster.Roster(w, r, classroom)
+	return classroom, assessment, students, ok
+}
+
+// get is one evaluation with its student's answers, for the classroom's teacher only, so an open grade can be read
+// again (for AI suggestions still being prepared) wherever it is in the list.
+func (s server) get(w http.ResponseWriter, r *http.Request) {
+	if !s.teacherOfEvaluation(w, r) {
+		return
+	}
+	v, err := s.store.findEvaluation(r.Context(), platform.Actor(r).Org, r.PathValue("id"))
+	if platform.Found(w, err, "Evaluation not found.") {
+		platform.JSON(w, http.StatusOK, v)
+	}
 }
 
 // counts is, for the classroom's teacher only, how many of its enrolled students' evaluations need grading and how
-// many are final.
+// many are final, in the classroom or, with ?assessment_id=, in one assessment: the same evaluations its list holds.
 func (s server) counts(w http.ResponseWriter, r *http.Request) {
-	classroom := r.URL.Query().Get("classroom_id")
-	if !platform.TeacherOf(s.access, w, r, classroom) {
-		return
-	}
-	students, ok := s.roster.Roster(w, r, classroom)
+	classroom, assessment, students, ok := s.enrolledWork(w, r)
 	if !ok {
 		return
 	}
-	result, err := s.store.countEvaluations(r.Context(), platform.Actor(r).Org, classroom, students)
+	result, err := s.store.countEvaluations(r.Context(), platform.Actor(r).Org, classroom, assessment, students)
 	if err != nil {
 		platform.Fail(w, err)
 		return
@@ -173,7 +199,8 @@ func writeMarkingError(w http.ResponseWriter, err error) bool {
 	return false
 }
 
-// release shows an assessment's finalized grades to its students, for the classroom's teacher only.
+// release shows an assessment's finalized grades to its enrolled students, for the classroom's teacher only: the ones
+// its counts report as unreleased. A removed student's grades stay unreleased.
 func (s server) release(w http.ResponseWriter, r *http.Request) {
 	if !platform.Teacher(w, r) {
 		return
@@ -193,7 +220,11 @@ func (s server) release(w http.ResponseWriter, r *http.Request) {
 	if !platform.Found(w, err, "No grades for this assessment.") || !platform.TeacherOf(s.access, w, r, classroom) {
 		return
 	}
-	n, err := s.store.release(r.Context(), org, input.Assessment, platform.Actor(r).Subject)
+	students, ok := s.roster.Roster(w, r, classroom)
+	if !ok {
+		return
+	}
+	n, err := s.store.release(r.Context(), org, input.Assessment, platform.Actor(r).Subject, students)
 	if err != nil {
 		platform.Fail(w, err)
 		return

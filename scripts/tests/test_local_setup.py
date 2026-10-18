@@ -41,7 +41,40 @@ def test_no_unguarded_secret_in_compose() -> None:
         "VOYAGE_API_KEY",
         "ANALYTICS_KAFKA_GROUP",
         *("KONG_PORT", "KEYCLOAK_PORT", "WEB_PORT"),  # the published ports, which the test stack moves
+        "LOCAL_CONFIG_DIR",  # the test stack's own first-start files
     }
+
+
+def test_read_env_reads_values_as_compose_does(tmp_path: Path) -> None:
+    path = tmp_path / ".env"
+    path.write_text(
+        '# comment\n\n  KONG_PORT = 9000 \nexport TEACHER_PASSWORD=a=b\nQUOTED="x y"\nSINGLE=\'z\'\nODD="q\n'
+        "EMPTY=\nnot a pair\n",
+        encoding="utf-8",
+    )
+    assert local_stack.read_env(path) == {
+        "KONG_PORT": "9000",
+        "TEACHER_PASSWORD": "a=b",
+        "QUOTED": "x y",
+        "SINGLE": "z",
+        "ODD": '"q',
+        "EMPTY": "",
+    }
+
+
+def test_every_application_has_a_healthcheck() -> None:
+    """The Go images are distroless, so their binary checks itself; the Python images ask with Python."""
+    go = {"identity", "curriculum", "content", "assessment", "grading"}
+    for name in wait_ready.SERVICES:
+        block = re.search(
+            rf"^  {re.escape(name)}:\n((?:    .*\n|      .*\n|        .*\n)*)", COMPOSE, re.MULTILINE
+        )
+        assert block, name
+        expected = "*go-healthcheck" if name in go else "*python-healthcheck"
+        assert f"    healthcheck: {expected}\n" in block[1], name
+    assert "  - -healthcheck\n" in COMPOSE
+    platform = (ROOT / "packages/platform/health.go").read_text(encoding="utf-8")
+    assert 'HealthcheckFlag = "-healthcheck"' in platform
 
 
 def test_upgrade_adds_only_what_env_lacks(tmp_path: Path) -> None:
@@ -108,6 +141,51 @@ def test_psql_json_keeps_tabs_and_line_breaks(monkeypatch: pytest.MonkeyPatch) -
     rows = local_stack.psql_json("SELECT title FROM documents")
     assert rows == [{"title": "Week 1\tintro\nPart 2", "ids": ["a", "b"], "tokens": None}]
     assert seen == ["SELECT coalesce(json_agg(r), '[]') FROM (SELECT title FROM documents) r"]
+
+
+def test_people_leave_the_attribute_policy_on(monkeypatch: pytest.MonkeyPatch) -> None:
+    """ensure_person turns on admin-editable unmanaged attributes once and never back off, so people created by two
+    scripts at once both keep their org_id."""
+    profiles: list[dict[str, object]] = []
+    profile: dict[str, object] = {"attributes": []}
+
+    def handle(request: httpx.Request) -> httpx.Response:
+        path, method = request.url.path, request.method
+        if path == "/users/profile":
+            if method == "PUT":
+                profiles.append(json.loads(request.content))
+                profile.update(profiles[-1])
+            return httpx.Response(200 if method == "GET" else 204, json=profile if method == "GET" else None)
+        if path == "/users" and method == "GET":
+            return httpx.Response(200, json=[{"id": "u1"}])
+        if path.startswith("/roles/"):
+            return httpx.Response(200, json={"name": "student"})
+        if path == "/users/u1" and method == "GET":
+            return httpx.Response(200, json={"id": "u1", "attributes": {}})
+        return httpx.Response(204)
+
+    admin = httpx.Client(base_url="http://keycloak.test", transport=httpx.MockTransport(handle))
+    for _ in range(2):
+        local_stack.ensure_person(admin, "s", "S", "Local", "pw")
+    assert [p["unmanagedAttributePolicy"] for p in profiles] == ["ADMIN_EDIT"]
+
+
+def test_upgrade_updates_the_web_client() -> None:
+    old = {
+        "id": "w",
+        "clientId": "learning-web",
+        "redirectUris": [f"{setup.WEB_ORIGIN}/*", f"{setup.TEST_WEB_ORIGIN}/*"],
+        "webOrigins": [setup.WEB_ORIGIN, setup.TEST_WEB_ORIGIN],
+        "attributes": {"pkce.code.challenge.method": "S256", "kept": "1"},
+    }
+    updated = upgrade_local.updated_web_client(old, development=True)
+    assert updated["redirectUris"] == [f"{setup.WEB_ORIGIN}/*"]
+    assert updated["webOrigins"] == [setup.WEB_ORIGIN]
+    assert updated["attributes"] == {**setup.WEB_ATTRIBUTES, "kept": "1"}
+    # Running again changes nothing.
+    assert upgrade_local.updated_web_client(updated, development=True) == updated
+    # The test stack's own realm keeps its origin.
+    assert upgrade_local.updated_web_client(old, development=False)["webOrigins"] == old["webOrigins"]
 
 
 class FakeKeycloak:

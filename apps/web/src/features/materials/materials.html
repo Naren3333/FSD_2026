@@ -67,15 +67,17 @@
           }
         </article>
       } @empty {
-        <p class="empty">
-          {{
-            !classroomId()
-              ? 'Select a classroom to view its materials.'
-              : session.isTeacher()
+        @if (!classroomId()) {
+          <app-no-classroom><p class="empty">Select a classroom to view its materials.</p></app-no-classroom>
+        } @else {
+          <p class="empty">
+            {{
+              session.isTeacher()
                 ? 'No documents in this classroom. Upload a teaching resource to begin.'
                 : 'No materials have been shared in this classroom yet.'
-          }}
-        </p>
+            }}
+          </p>
+        }
       }
     }
     @if (polling()) {

@@ -10,6 +10,7 @@ import { ActionState } from '../../shared/action-state';
 import { messageOf } from '../../shared/errors';
 import { FieldComponent, FieldControlDirective } from '../../shared/field';
 import { dateTime, resetTime } from '../../shared/format';
+import { NoClassroomComponent } from '../../shared/no-classroom';
 import { Section } from '../../shared/section';
 import { SectionStateComponent } from '../../shared/section-state';
 import { StatusComponent } from '../../shared/status';
@@ -27,6 +28,7 @@ const OUTCOME_NOTES: Record<string, string> = {
   selector: 'app-chat',
   standalone: true,
   imports: [
+    NoClassroomComponent,
     ReactiveFormsModule,
     FieldComponent,
     FieldControlDirective,
@@ -40,7 +42,10 @@ export class ChatComponent {
   private readonly chat = inject(ChatApi);
   private readonly content = inject(ContentApi);
   private readonly usage = inject(AiUsage);
-  readonly classroomId = inject(ClassroomContext).classroomId;
+  private readonly context = inject(ClassroomContext);
+  readonly classroomId = this.context.classroomId;
+  /** Whether the user's classrooms have loaded; until then the thread list says why there is no classroom. */
+  readonly classroomsKnown = this.context.known;
   readonly state = new ActionState();
   readonly max = MAX_QUESTION;
   readonly notes = OUTCOME_NOTES;

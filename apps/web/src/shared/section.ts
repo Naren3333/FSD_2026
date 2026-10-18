@@ -45,7 +45,8 @@ export class Section<T> {
 
   /** Re-reads the value after a mutation, in place of any pending load. Like a load, it lands only if nothing newer
    * started meanwhile, so a list re-read for a classroom the user has since left never replaces the current one. A
-   * failure keeps what is on show and is thrown to the caller. */
+   * failure keeps what is on show and is thrown to the caller; when nothing is on show yet (the re-read replaced a
+   * first load still under way), the section reports the failure too, rather than show an empty list. */
   async reload(work: () => Promise<T>): Promise<void> {
     const request = ++this.request;
     try {
@@ -53,6 +54,10 @@ export class Section<T> {
       if (request !== this.request) return;
       this.value.set(value);
       this.error.set('');
+    } catch (error) {
+      if (request === this.request && this.value() === null)
+        this.error.set(messageOf(error, 'This could not be loaded. Retry later.'));
+      throw error;
     } finally {
       if (request === this.request) this.loading.set(false);
     }

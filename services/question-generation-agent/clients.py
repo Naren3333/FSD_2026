@@ -13,8 +13,9 @@ from config import Settings
 
 TOPIC_TIMEOUT = 5.0
 SEARCH_TIMEOUT = 15.0
-# One structured reply of up to a few thousand tokens.
-GENERATE_TIMEOUT = 90.0
+# One structured reply of up to GENERATION_TOKENS (6000). ai-core gives it at most 120 s, retries included
+# (openai_client.generation_budget), so this waits that long plus room for ai-core's allowance check and charge.
+GENERATE_TIMEOUT = 135.0
 
 
 def billed(claims: Claims) -> dict[str, str]:
@@ -31,9 +32,6 @@ class Topic:
 class Services(AgentClients):
     settings: Settings  # with Curriculum's URL
     generate_timeout = GENERATE_TIMEOUT
-
-    def __init__(self, settings: Settings, http: httpx.AsyncClient) -> None:
-        super().__init__(settings, http)
 
     # ---- teacher-token calls
 

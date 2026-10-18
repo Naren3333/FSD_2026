@@ -163,8 +163,10 @@ func (w *responseRecorder) Write(data []byte) (int, error) {
 }
 
 // Serve builds the App, lets wire register the service's routes and return its background workers, and runs it
-// until shutdown. Any failure is logged and exits the process with status 1.
+// until shutdown. Any failure is logged and exits the process with status 1. Started with HealthcheckFlag, the
+// binary only checks the running service's readiness and exits (Healthcheck).
 func Serve(name string, migrations fs.FS, bootstrap string, wire func(a *App) ([]func(context.Context), error)) {
+	Healthcheck()
 	a, err := New(name, migrations, bootstrap)
 	if err != nil {
 		slog.Error("startup_failed", "error", err.Error())

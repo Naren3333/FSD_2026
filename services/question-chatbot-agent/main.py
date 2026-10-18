@@ -174,6 +174,8 @@ async def post_message(
     # The relation now decides the prompt, so a thread from before the caller's relation changed follows it.
     thread = {**thread, "role": relation}
     history = await store.start_turn(str(thread_id), body.content, HISTORY_TURNS)
+    if history is None:  # purged with its classroom or its user since it was read
+        raise failure(404, "NOT_FOUND", "Thread not found.")
     asked = TurnRequest(
         thread=thread,
         authorization=request.headers["authorization"],

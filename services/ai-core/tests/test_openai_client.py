@@ -1,6 +1,8 @@
 """openai_client: embeddings, chat (plain, streamed, JSON schema) and the retry rules, against a mock OpenAI.
 Ported from fsd_test's shared tests."""
 
+from collections.abc import Callable
+
 import httpx2
 import openai
 import pytest
@@ -252,3 +254,74 @@ async def test_generate_500_is_retried(openai_fake: FakeOpenAI) -> None:
     openai_fake.reply(json=chat_response(REWRITE))
     assert (await rewrite()).text == REWRITE
     assert len(openai_fake.requests) == 2
+
+
+class Clock:
+    """openai_client's monotonic clock, moved by hand; each recorded retry sleep advances it too."""
+
+    def __init__(self, fake: FakeOpenAI, monkeypatch: pytest.MonkeyPatch) -> None:
+        self.now = 1000.0
+        monkeypatch.setattr(openai_client, "_now", lambda: self.now)
+
+        async def sleep(delay: float) -> None:
+            fake.sleeps.append(delay)
+            self.now += delay
+
+        monkeypatch.setattr(openai_client, "_sleep", sleep)
+
+    def slow(self, seconds: float, status: int) -> Callable[[httpx2.Request], httpx2.Response]:
+        """A reply that fails with `status` after `seconds`."""
+
+        def reply(request: httpx2.Request) -> httpx2.Response:
+            self.now += seconds
+            return httpx2.Response(status, json=BOOM)
+
+        return reply
+
+
+def test_the_generation_budget_grows_with_max_tokens() -> None:
+    budget = openai_client.generation_budget
+    assert budget(300) == openai_client.TIMEOUT  # never below the per-read timeout
+    assert budget(1500) == pytest.approx(45)  # Grading's marking call
+    assert budget(6000) == pytest.approx(120)  # question generation's longest reply
+    assert budget(8000) == openai_client.GENERATE_CAP  # the most the contract allows
+
+
+async def test_a_long_reply_gets_its_whole_budget(
+    openai_fake: FakeOpenAI, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    Clock(openai_fake, monkeypatch)
+    openai_fake.reply(json=chat_response(REWRITE))
+    await openai_client.generate(HELLO, 6000, SCHEMA, name="questions.generated")
+    assert openai_fake.timeouts == [pytest.approx(120)]
+
+
+async def test_a_retry_gets_what_is_left_of_the_budget(
+    openai_fake: FakeOpenAI, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    clock = Clock(openai_fake, monkeypatch)
+    openai_fake.replies += [clock.slow(50, 500), httpx2.Response(200, json=chat_response(REWRITE))]
+    await openai_client.generate(HELLO, 6000, SCHEMA, name="questions.generated")
+    first, second = openai_fake.timeouts
+    assert first == pytest.approx(120) and second == pytest.approx(70 - openai_fake.sleeps[0])
+
+
+async def test_no_retry_starts_without_enough_budget_left(
+    openai_fake: FakeOpenAI, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    clock = Clock(openai_fake, monkeypatch)
+    openai_fake.replies.append(clock.slow(115, 500))
+    with pytest.raises(openai.InternalServerError):
+        await openai_client.generate(HELLO, 6000, SCHEMA, name="questions.generated")
+    assert len(openai_fake.requests) == 1 and openai_fake.sleeps == []
+
+
+async def test_a_stream_is_not_reopened_once_a_whole_attempt_no_longer_fits(
+    openai_fake: FakeOpenAI, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    clock = Clock(openai_fake, monkeypatch)
+    openai_fake.replies.append(clock.slow(20, 503))
+    with pytest.raises(openai.InternalServerError):
+        await collect()
+    # 20 s gone leaves 25 s of STREAM_OPEN_BUDGET: less than one more 30 s attempt.
+    assert len(openai_fake.requests) == 1 and openai_fake.sleeps == []

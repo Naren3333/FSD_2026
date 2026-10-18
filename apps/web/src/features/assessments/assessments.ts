@@ -1,8 +1,7 @@
-import { Component, DestroyRef, ViewChild, computed, inject, signal } from '@angular/core';
+import { Component, ViewChild, computed, inject, signal } from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
-import { FormControl, FormGroup, ReactiveFormsModule, type ValidatorFn } from '@angular/forms';
+import { ReactiveFormsModule, type ValidatorFn } from '@angular/forms';
 import { ActivatedRoute } from '@angular/router';
-import type { Subscription } from 'rxjs';
 import { AssessmentApi, ContentApi } from '../../api/clients';
 import type {
   Assessment,
@@ -10,7 +9,6 @@ import type {
   DocumentRecord,
   Excerpt,
   Question,
-  SavedAnswers,
   Topic,
 } from '../../api/models';
 import { ClassroomContext, onClassroomChange } from '../../core/classroom-context';
@@ -21,12 +19,11 @@ import { UnsavedChanges } from '../../core/unsaved-changes';
 import { ActionState } from '../../shared/action-state';
 import { ConfirmDialogComponent } from '../../shared/confirm-dialog';
 import { FieldComponent, FieldControlDirective } from '../../shared/field';
-import { dueState, type DueState } from '../../shared/due';
-import { dateTime, time } from '../../shared/format';
+import { NoClassroomComponent } from '../../shared/no-classroom';
+import { dueState } from '../../shared/due';
 import { Section, rereadAfterDelete } from '../../shared/section';
 import { SectionStateComponent } from '../../shared/section-state';
 import { StatusComponent } from '../../shared/status';
-import { requiredText } from '../../shared/validators';
 import {
   MAX_ASSESSMENT_EXCERPTS,
   MAX_CRITERIA,
@@ -37,7 +34,6 @@ import {
   excerptLabel,
   fillForm,
   markWrittenBy,
-  marksText,
   questionForm,
   rubricTotal,
   schemeTotal,
@@ -48,16 +44,11 @@ import {
   usesScheme,
   type QuestionForm,
 } from './editor';
+import { AnswerSheetComponent, schedule } from './answer-sheet';
 import { QuestionGeneratorComponent } from './generator';
 import { MarkingGuidanceComponent } from './guidance';
 import { MarkingPointsComponent } from './marking-points';
 
-/** How long a student's typing rests before their work is saved. */
-const SAVE_DELAY = 1500;
-/** Why a student's submission was refused when the teacher changed the assessment after the student opened it. */
-const CHANGED =
-  'This assessment changed since you opened it. Open it again to see the current questions; your answers to ' +
-  'questions that did not change are kept.';
 /** Why a published assessment's replacement was refused, after which the editor keeps only its details. */
 const LOCKED =
   'Students have submitted this assessment, so only its title, due date and late policy can change now. Save ' +
@@ -73,9 +64,11 @@ const LOCKED =
     StatusComponent,
     SectionStateComponent,
     ConfirmDialogComponent,
+    NoClassroomComponent,
     MarkingPointsComponent,
     QuestionGeneratorComponent,
     MarkingGuidanceComponent,
+    AnswerSheetComponent,
   ],
   templateUrl: './assessments.html',
 })
@@ -88,16 +81,14 @@ export class AssessmentsComponent {
   readonly state = new ActionState();
   /** Deleting an assessment, in its confirmation dialog. */
   readonly deleteState = new ActionState();
-  /** Clearing the student's answers, in its confirmation dialog. */
-  readonly clearState = new ActionState();
   readonly assessments = new Section<AssessmentSummary[]>();
   readonly topics = this.curriculum.topics;
   /** Reading the curriculum for the topic a new question uses. */
   readonly topicsState = new Section<Topic[]>();
   /** The classroom's documents, read once for generation, drafted guidance and where passages came from. */
   readonly classDocs = new Section<DocumentRecord[]>();
-  readonly selected = signal<Assessment | null>(null);
-  readonly submitted = signal(false);
+  /** The open assessment, answered or previewed. */
+  @ViewChild(AnswerSheetComponent, { static: true }) sheet?: AnswerSheetComponent;
   /** The assessment the editor is changing; null while it creates a new one. */
   readonly editing = signal<Assessment | null>(null);
   /** Whether anyone had submitted the assessment being edited when the teacher opened it. */
@@ -115,43 +106,24 @@ export class AssessmentsComponent {
     return !!item && submittedBy(item);
   });
   readonly submittedBy = submittedBy;
-  /** The autosave's last outcome, for the student. */
-  readonly saveNote = signal('');
-  /** Whether the teacher changed the open assessment since the student opened it, so it must be opened again. */
-  readonly changed = signal(false);
   @ViewChild('deleteDialog') deleteDialog?: ConfirmDialogComponent;
-  @ViewChild('clearDialog') clearDialog?: ConfirmDialogComponent;
   readonly maxQuestions = MAX_QUESTIONS;
   readonly maxCriteria = MAX_CRITERIA;
   readonly maxMarkingPoints = MAX_ASSESSMENT_EXCERPTS;
   readonly usesScheme = usesScheme;
   /** The assessment a link such as student Home asked to open, until the classroom's list has it. */
   private requested = '';
-  private saveTimer: ReturnType<typeof setTimeout> | undefined;
-  /** Saves the student's answers as they type, while the open assessment still takes them. */
-  private autosave: Subscription | undefined;
-  /** Saves run one after another, so an older save never lands after a newer one. */
-  private saving: Promise<unknown> = Promise.resolve();
-  answers = new FormGroup<Record<string, FormControl<string>>>({});
   readonly form = assessmentForm();
   /** Re-read on every change to the form's questions, so the AI marking option knows whether it applies. */
   private readonly questionTypes = signal(this.form.controls.questions.getRawValue().map((q) => q.type));
   readonly canSuggest = computed(() => teacherMarked(this.questionTypes().map((type) => ({ type }))));
-  /** Where the open assessment stands with its due date. */
-  readonly due = computed<DueState>(() => {
-    const a = this.selected();
-    return dueState(a?.due_at, a?.late_policy);
-  });
 
   constructor() {
-    // A teacher's preview answers are thrown away, so only a student's answers are unsaved work.
-    inject(UnsavedChanges).track(() => this.form.dirty || this.answersUnsaved());
+    // The open assessment's answers are tracked by the answer sheet.
+    inject(UnsavedChanges).track(() => this.form.dirty);
     this.form.controls.questions.valueChanges.pipe(takeUntilDestroyed()).subscribe(() => this.typesChanged());
     this.typesChanged();
-    inject(DestroyRef).onDestroy(() => this.stopAutosave());
     onClassroomChange(() => {
-      this.stopAutosave();
-      this.selected.set(null);
       this.cancelEdit();
       this.load();
     });
@@ -202,7 +174,7 @@ export class AssessmentsComponent {
     if (!this.requested || !this.assessments.value()?.some((a) => a.id === this.requested)) return;
     const id = this.requested;
     this.requested = '';
-    this.open(id);
+    this.sheet?.open(id);
   }
 
   // --- The teacher's editor --------------------------------------------------------------------------------
@@ -409,14 +381,21 @@ export class AssessmentsComponent {
       } catch (error) {
         // A student may have submitted since the list was read: the dialog then says what deleting now takes.
         const refused = hasSubmissions(error);
-        await this.assessments.reload(() => this.assessmentApi.list(classroomId)).catch(() => undefined);
-        const now = this.assessments.value()?.find((a) => a.id === item.id) ?? item;
+        const reread = await this.assessments
+          .reload(() => this.assessmentApi.list(classroomId))
+          .then(
+            () => true,
+            () => false,
+          );
+        const now = (reread && this.assessments.value()?.find((a) => a.id === item.id)) || item;
+        // Without a fresh count, who submitted is unknown: the dialog says so rather than guessing.
+        const counted = reread ? now : { ...now, submissions: undefined };
         if (this.deleting()?.id === item.id)
-          this.deleting.set(refused ? { ...now, has_submissions: true } : now);
+          this.deleting.set(refused ? { ...counted, has_submissions: true } : now);
         throw error;
       }
       if (this.editing()?.id === item.id) this.cancelEdit();
-      if (this.selected()?.id === item.id) this.selected.set(null);
+      if (this.sheet?.selected()?.id === item.id) this.sheet.close();
       this.closeDelete();
       this.state.error.set('');
       this.state.message.set(item.status === 'draft' ? 'Draft deleted.' : `${item.title} deleted.`);
@@ -432,201 +411,14 @@ export class AssessmentsComponent {
     });
   }
 
-  // --- Opening and answering -------------------------------------------------------------------------------
-
-  /** Opens the teacher's preview of an assessment, or closes it when it is the one open. */
-  togglePreview(id: string): void {
-    if (this.selected()?.id === id) this.closePreview();
-    else this.open(id);
-  }
-
-  /** Closes the teacher's preview; its answers were never saved. From the preview's own button, focus goes back to
-   * the button in the list that opened it. */
-  closePreview(returnFocus = false): void {
-    const id = this.selected()?.id;
-    this.stopAutosave();
-    this.selected.set(null);
-    if (returnFocus && id) this.focusLater('preview-' + id);
-  }
-
-  /** Whether a student has answers here that are not submitted; a teacher's preview never counts. */
-  answersUnsaved(): boolean {
-    return this.session.isStudent() && this.answers.dirty;
-  }
-
-  /** Opens the assessment again after the teacher changed it, keeping the student's answers to the questions that are
-   * still there. */
-  reopen(): void {
-    const assessment = this.selected();
-    if (assessment) this.open(assessment.id, this.answers.getRawValue());
-  }
-
-  /** Opens an assessment. `keep` holds answers the student has on the page, which win over their saved work. */
-  open(id: string, keep?: Record<string, string>): void {
-    if (!keep && this.answersUnsaved()) {
-      this.state.error.set('Submit your current answers before opening another assessment.');
-      return;
-    }
-    const classroomId = this.classroomId();
-    void this.state.run(async () => {
-      const assessment = await this.assessmentApi.get(id);
-      const submitted = this.assessments.value()?.find((a) => a.id === id)?.submitted ?? false;
-      const closed = dueState(assessment.due_at, assessment.late_policy) === 'closed';
-      const answering = this.session.isStudent() && !submitted && !closed;
-      const saved =
-        this.session.isStudent() && !submitted ? (await this.assessmentApi.saved(id)).answers : {};
-      if (this.classroomId() !== classroomId) return;
-      this.stopAutosave();
-      this.saveNote.set(Object.keys(saved).length ? 'Your saved answers are back.' : '');
-      this.answers = new FormGroup(
-        Object.fromEntries(
-          assessment.questions.map((q) => [
-            q.id,
-            new FormControl(keep?.[q.id] ?? saved[q.id] ?? '', {
-              nonNullable: true,
-              validators: requiredText(limitOf(q)),
-            }),
-          ]),
-        ),
-      );
-      // Submitted or closed work can only be read; a teacher's preview can be tried but is never saved.
-      if (this.session.isStudent() && !answering) this.answers.disable({ emitEvent: false });
-      if (answering)
-        this.autosave = this.answers.valueChanges.subscribe(() => this.scheduleSave(assessment.id));
-      this.selected.set(assessment);
-      this.submitted.set(submitted);
-      this.changed.set(false);
-      // Kept answers are still unsubmitted work, and those that differ from the saved work are saved now.
-      if (answering && keep) {
-        this.answers.markAsDirty();
-        if (assessment.questions.some((q) => q.id in keep && keep[q.id] !== (saved[q.id] ?? '')))
-          this.scheduleSave(assessment.id);
-      }
-    });
-  }
-
-  /** Stops saving the open answers: no pending save, and typing (or a reset) no longer starts one. */
-  private stopAutosave(): void {
-    clearTimeout(this.saveTimer);
-    this.autosave?.unsubscribe();
-    this.autosave = undefined;
-  }
-
-  /** Saves the student's work once their typing rests. A failure keeps the answers and says so. */
-  private scheduleSave(assessmentId: string): void {
-    clearTimeout(this.saveTimer);
-    this.saveNote.set('Saving…');
-    this.saveTimer = setTimeout(() => {
-      if (this.selected()?.id !== assessmentId || this.submitted()) return;
-      const answers = Object.fromEntries(
-        Object.entries(this.answers.getRawValue()).filter(([, answer]) => answer !== ''),
-      );
-      const stillOpen = () => this.selected()?.id === assessmentId && !this.submitted();
-      this.persist(assessmentId, answers).then(
-        (r) => {
-          if (stillOpen()) this.saveNote.set(r.saved_at ? `Saved at ${time(r.saved_at)}.` : 'Saved.');
-        },
-        () => {
-          if (stillOpen())
-            this.saveNote.set('Your answers could not be saved. They stay here; submit when you are ready.');
-        },
-      );
-    }, SAVE_DELAY);
-  }
-
-  /** Replaces the student's saved work, after any save still on its way. */
-  private persist(assessmentId: string, answers: Record<string, string>): Promise<SavedAnswers> {
-    const save = this.saving.then(
-      () => this.assessmentApi.save(assessmentId, answers),
-      () => this.assessmentApi.save(assessmentId, answers),
-    );
-    this.saving = save.catch(() => undefined);
-    return save;
-  }
-
-  /** The student's Clear form: their saved work goes too, so it asks first. */
-  confirmClear(): void {
-    if (this.session.isStudent()) {
-      this.clearDialog?.show();
-      return;
-    }
-    // A teacher's preview has nothing saved.
-    this.answers.reset();
-  }
-
-  /** Empties the answers and saves that, as the student asked; a failure keeps their answers on the page. */
-  clearAnswers(): void {
-    const assessment = this.selected();
-    if (!assessment || this.submitted()) return;
-    void this.clearState.run(async () => {
-      clearTimeout(this.saveTimer);
-      await this.persist(assessment.id, {});
-      // Empty, not each control's first value (the saved answer); the reset is not typing, so it starts no save.
-      const empty = Object.fromEntries(Object.keys(this.answers.controls).map((id) => [id, '']));
-      this.answers.reset(empty, { emitEvent: false });
-      this.saveNote.set('Your answers are cleared.');
-      this.clearDialog?.close();
-    });
-  }
-
-  submit(): void {
-    const assessment = this.selected();
-    if (!assessment || !this.state.validate(this.answers, 'answer-form')) return;
-    let late = false;
-    void this.state
-      .run(async () => {
-        clearTimeout(this.saveTimer);
-        const submission = await this.assessmentApi
-          .submit(assessment.id, this.answers.getRawValue())
-          .catch((error: unknown) => {
-            if (!(error instanceof ApiError && error.code === 'ASSESSMENT_CHANGED')) throw error;
-            this.changed.set(true);
-            this.focusLater('reopen-assessment');
-            throw new Error(CHANGED);
-          });
-        late = submission.late;
-        // Submitted answers are final: they can be read, no longer changed or saved.
-        this.stopAutosave();
-        this.answers.disable({ emitEvent: false });
-        this.answers.markAsPristine();
-        this.submitted.set(true);
-        this.saveNote.set('');
-        const list = this.assessments.value();
-        if (list)
-          this.assessments.set(list.map((a) => (a.id === assessment.id ? { ...a, submitted: true } : a)));
-      }, 'Answers submitted. Your teacher will review the grade.')
-      .then(() => {
-        if (late)
-          this.state.message.set('Answers submitted after the due date. Your teacher will see it was late.');
-      });
-  }
-
   // --- Labels ----------------------------------------------------------------------------------------------
 
-  /** "Due 13 Oct 2026, 3:00 pm", "Opens …", or '' when the assessment has no dates. */
-  schedule(item: { opens_at?: string | null; due_at?: string | null }): string {
-    const parts = [];
-    if (item.opens_at && new Date(item.opens_at) > new Date()) parts.push(`Opens ${dateTime(item.opens_at)}`);
-    if (item.due_at) parts.push(`Due ${dateTime(item.due_at)}`);
-    return parts.join(' · ');
-  }
+  readonly schedule = schedule;
 
   dueBadge(item: AssessmentSummary): string {
     if (item.status === 'draft' || item.submitted) return '';
     const state = dueState(item.due_at, item.late_policy);
     return state === 'late' ? 'Overdue' : state === 'closed' ? 'Closed' : '';
-  }
-
-  points(question: Question): string {
-    return marksText(question.points);
-  }
-
-  /** The help line under a student's answer: its marks, and for written answers how much is left. */
-  answerHint(question: Question): string {
-    const value = this.answers.get(question.id)?.value ?? '';
-    if (question.type === 'free_response')
-      return `${this.points(question)} · ${value.length} of ${limitOf(question)} characters`;
-    return this.points(question);
   }
 }
 
@@ -639,9 +431,4 @@ function submittedBy(item: AssessmentSummary): boolean {
 /** Whether the server refused a change because students have submitted the assessment. */
 function hasSubmissions(error: unknown): boolean {
   return error instanceof ApiError && error.code === 'HAS_SUBMISSIONS';
-}
-
-/** The most characters a student may give the question, as Assessment allows. */
-function limitOf(question: Question): number {
-  return question.type === 'free_response' ? (question.max_length ?? 5000) : 500;
 }

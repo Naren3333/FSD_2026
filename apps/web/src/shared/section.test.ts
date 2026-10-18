@@ -81,4 +81,19 @@ describe('Section', () => {
     await expect(section.reload(() => Promise.reject(new Error('offline')))).rejects.toThrow('offline');
     expect([section.value(), section.loading(), section.error()]).toEqual(['after the mutation', false, '']);
   });
+
+  it('reports a failed re-read that replaced a first load still under way, rather than show nothing as loaded', async () => {
+    const section = new Section<string[]>();
+    const first = deferred<string[]>();
+    const load = section.load(() => first.promise);
+    await expect(section.reload(() => Promise.reject(new Error('offline')))).rejects.toThrow('offline');
+    first.resolve(['older load']);
+    await load;
+    expect([section.value(), section.loading(), section.ready(), section.error()]).toEqual([
+      null,
+      false,
+      false,
+      'offline',
+    ]);
+  });
 });

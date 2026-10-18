@@ -12,6 +12,7 @@ import { CurriculumNames } from '../../core/curriculum-names';
 import { ApiError } from '../../core/gateway';
 import { Session } from '../../core/session';
 import { UnsavedChanges } from '../../core/unsaved-changes';
+import { AnswerSheetComponent } from './answer-sheet';
 import { AssessmentsComponent } from './assessments';
 import { optionLines } from './editor';
 
@@ -48,7 +49,8 @@ const summary: AssessmentSummary = {
   points: 1,
 };
 
-/** The assessments page's logic (no template) for a user with `role`, against a fake Assessment API. */
+/** The assessments page's logic (no template) for a user with `role`, against a fake Assessment API, with the answer
+ * sheet (no template either) that opens its assessments. */
 function setup(
   role: 'student' | 'teacher',
   open: Assessment = assessment(),
@@ -62,6 +64,9 @@ function setup(
       Promise.resolve({ answers, saved_at: '2026-10-17T02:00:00Z' }),
     ),
     submit: vi.fn(() => Promise.resolve({ id: 's1', status: 'submitted', late: false })),
+    submission: vi.fn(() =>
+      Promise.resolve({ answers: { [QUESTION]: '0.5' }, submitted_at: '2026-10-16T01:00:00Z', late: true }),
+    ),
     update: vi.fn((_id: string, changed: unknown) => Promise.resolve(changed)),
     details: vi.fn((_id: string, changed: unknown) => Promise.resolve(changed)),
     remove: vi.fn((id: string) => Promise.resolve({ id })),
@@ -86,16 +91,31 @@ function setup(
           need: () => Promise.resolve(),
         },
       },
-      { provide: ClassroomContext, useValue: { classroomId } },
+      {
+        provide: ClassroomContext,
+        useValue: {
+          classroomId,
+          known: signal(true),
+          loading: signal(false),
+          error: signal(''),
+          refresh: () => Promise.resolve(),
+        },
+      },
       { provide: ActivatedRoute, useValue: { queryParamMap: of(convertToParamMap({})) } },
     ],
   });
   TestBed.overrideComponent(AssessmentsComponent, { set: { template: '', imports: [] } });
+  TestBed.overrideComponent(AnswerSheetComponent, { set: { template: '', imports: [] } });
   const fixture = TestBed.createComponent(AssessmentsComponent);
   fixture.detectChanges();
+  const sheetFixture = TestBed.createComponent(AnswerSheetComponent);
+  sheetFixture.componentRef.setInput('assessments', fixture.componentInstance.assessments);
+  sheetFixture.componentRef.setInput('state', fixture.componentInstance.state);
+  sheetFixture.detectChanges();
   const settle = () => vi.advanceTimersByTimeAsync(0);
   return {
     page: fixture.componentInstance,
+    sheet: sheetFixture.componentInstance,
     api,
     classroomId,
     archived,
@@ -107,117 +127,217 @@ function setup(
 describe('a student answering an assessment', () => {
   it('saves typing once it rests, and nothing more after the answers are submitted', async () => {
     vi.useFakeTimers();
-    const { page, api, settle, unsaved } = setup('student');
+    const { sheet, api, settle, unsaved } = setup('student');
     await settle();
-    page.open('a1');
+    sheet.open('a1');
     await settle();
-    page.answers.controls[QUESTION].setValue('0.5');
-    page.answers.markAsDirty();
+    sheet.answers.controls[QUESTION].setValue('0.5');
+    sheet.answers.markAsDirty();
     await vi.advanceTimersByTimeAsync(1500);
     expect(api.save).toHaveBeenLastCalledWith('a1', { [QUESTION]: '0.5' });
-    expect(page.saveNote()).toMatch(/^Saved at /);
+    expect(sheet.saveNote()).toMatch(/^Saved at /);
 
-    page.submit();
+    sheet.submit();
     await settle();
-    expect(page.submitted()).toBe(true);
-    expect(page.answers.disabled).toBe(true);
+    expect(sheet.submitted()).toBe(true);
+    expect(sheet.answers.disabled).toBe(true);
     expect(unsaved.any()).toBe(false);
     // Nothing can be typed now; even a programmatic change starts no save.
-    page.answers.controls[QUESTION].setValue('0.6');
+    sheet.answers.controls[QUESTION].setValue('0.6');
     await vi.advanceTimersByTimeAsync(5000);
     expect(api.save).toHaveBeenCalledTimes(1);
-    expect(page.saveNote()).toBe('');
+    expect(sheet.saveNote()).toBe('');
   });
 
   it('opens a closed assessment read only, with no saving', async () => {
     vi.useFakeTimers();
     const past = assessment({ due_at: '2020-01-01T00:00:00Z', late_policy: 'reject' });
-    const { page, api, settle } = setup('student', past);
+    const { sheet, api, settle } = setup('student', past);
     await settle();
-    page.open('a1');
+    sheet.open('a1');
     await settle();
-    expect(page.answers.disabled).toBe(true);
-    page.answers.controls[QUESTION].setValue('1');
+    expect(sheet.answers.disabled).toBe(true);
+    sheet.answers.controls[QUESTION].setValue('1');
     await vi.advanceTimersByTimeAsync(5000);
     expect(api.save).not.toHaveBeenCalled();
   });
 
   it('clears the answers by saving the empty state once, as asked, without a second save from the reset', async () => {
     vi.useFakeTimers();
-    const { page, api, settle } = setup('student', assessment(), { [QUESTION]: '0.5' });
+    const { sheet, api, settle } = setup('student', assessment(), { [QUESTION]: '0.5' });
     await settle();
-    page.open('a1');
+    sheet.open('a1');
     await settle();
-    expect(page.answers.controls[QUESTION].value).toBe('0.5');
-    page.clearAnswers();
+    expect(sheet.answers.controls[QUESTION].value).toBe('0.5');
+    sheet.clearAnswers();
     await settle();
     expect(api.save).toHaveBeenCalledExactlyOnceWith('a1', {});
-    expect(page.answers.controls[QUESTION].value).toBe('');
-    expect(page.saveNote()).toBe('Your answers are cleared.');
+    expect(sheet.answers.controls[QUESTION].value).toBe('');
+    expect(sheet.saveNote()).toBe('Your answers are cleared.');
     await vi.advanceTimersByTimeAsync(5000);
     expect(api.save).toHaveBeenCalledTimes(1);
   });
 
   it('keeps the answers when clearing fails to save', async () => {
     vi.useFakeTimers();
-    const { page, api, settle } = setup('student', assessment(), { [QUESTION]: '0.5' });
+    const { sheet, api, settle } = setup('student', assessment(), { [QUESTION]: '0.5' });
     await settle();
-    page.open('a1');
+    sheet.open('a1');
     await settle();
     api.save.mockRejectedValueOnce(new Error('Assessment is unavailable.'));
-    page.clearAnswers();
+    sheet.clearAnswers();
     await settle();
-    expect(page.answers.controls[QUESTION].value).toBe('0.5');
-    expect(page.clearState.error()).toBe('Assessment is unavailable.');
+    expect(sheet.answers.controls[QUESTION].value).toBe('0.5');
+    expect(sheet.clearState.error()).toBe('Assessment is unavailable.');
   });
 
   it('shows no late save failure once the assessment is submitted', async () => {
     vi.useFakeTimers();
-    const { page, api, settle } = setup('student');
+    const { sheet, api, settle } = setup('student');
     await settle();
-    page.open('a1');
+    sheet.open('a1');
     await settle();
     let fail!: (error: Error) => void;
     api.save.mockImplementationOnce(() => new Promise((_, no) => (fail = no)));
-    page.answers.controls[QUESTION].setValue('0.5');
+    sheet.answers.controls[QUESTION].setValue('0.5');
     await vi.advanceTimersByTimeAsync(1500);
-    page.submit();
+    sheet.submit();
     await settle();
     fail(new Error('offline'));
     await settle();
-    expect(page.saveNote()).toBe('');
+    expect(sheet.saveNote()).toBe('');
+  });
+});
+
+describe('a student opening an assessment they submitted', () => {
+  it('shows their submitted answers, read only, with when they submitted and that it was late', async () => {
+    vi.useFakeTimers();
+    const { page, sheet, api, settle } = setup('student');
+    api.list.mockResolvedValue([{ ...summary, submitted: true }]);
+    page.load();
+    await settle();
+    sheet.open('a1');
+    await settle();
+    expect(api.submission).toHaveBeenCalledWith('a1');
+    expect(api.saved).not.toHaveBeenCalled();
+    expect(sheet.answers.getRawValue()).toEqual({ [QUESTION]: '0.5' });
+    expect(sheet.answers.disabled).toBe(true);
+    expect(sheet.submission()).toEqual({
+      answers: { [QUESTION]: '0.5' },
+      submitted_at: '2026-10-16T01:00:00Z',
+      late: true,
+    });
+    expect(sheet.saveNote()).toBe('');
+  });
+
+  it('opens it empty when Assessment has no submission after all', async () => {
+    vi.useFakeTimers();
+    const { page, sheet, api, settle } = setup('student');
+    api.list.mockResolvedValue([{ ...summary, submitted: true }]);
+    api.submission.mockRejectedValueOnce(new ApiError('You have not submitted this assessment.', 404));
+    page.load();
+    await settle();
+    sheet.open('a1');
+    await settle();
+    expect(page.state.error()).toBe('');
+    expect(sheet.submission()).toBeNull();
+    expect(sheet.answers.getRawValue()).toEqual({ [QUESTION]: '' });
+  });
+
+  it('keeps what they just submitted to show', async () => {
+    vi.useFakeTimers();
+    const { sheet, settle } = setup('student');
+    await settle();
+    sheet.open('a1');
+    await settle();
+    sheet.answers.controls[QUESTION].setValue('0.5');
+    sheet.submit();
+    await settle();
+    expect(sheet.submission()?.answers).toEqual({ [QUESTION]: '0.5' });
+    expect(sheet.submission()?.late).toBe(false);
+  });
+});
+
+describe('a student whose autosave finds the assessment changed', () => {
+  it('asks them to open it again, as a submission would, and saves no more', async () => {
+    vi.useFakeTimers();
+    const { sheet, api, settle } = setup('student');
+    await settle();
+    sheet.open('a1');
+    await settle();
+    api.save.mockRejectedValueOnce(
+      new ApiError('Your teacher changed this assessment.', 409, 'ASSESSMENT_CHANGED'),
+    );
+    sheet.answers.controls[QUESTION].setValue('0.5');
+    await vi.advanceTimersByTimeAsync(1500);
+    expect(sheet.changed()).toBe(true);
+    expect(sheet.saveNote()).toMatch(/^This assessment changed since you opened it/);
+    sheet.answers.controls[QUESTION].setValue('0.6');
+    await vi.advanceTimersByTimeAsync(5000);
+    expect(api.save).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('a student answering as the due date passes', () => {
+  it('closes Submit when a reject-late due time passes while the assessment is open', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-10-16T09:59:00Z'));
+    const due = assessment({ due_at: '2026-10-16T10:00:00Z', late_policy: 'reject' });
+    const { sheet, settle } = setup('student', due);
+    await settle();
+    sheet.open('a1');
+    await settle();
+    expect(sheet.due()).toBe('upcoming');
+    await vi.advanceTimersByTimeAsync(90 * 1000);
+    expect(sheet.due()).toBe('closed');
+  });
+
+  it('checks the due date again at Submit', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-10-16T09:59:59Z'));
+    const due = assessment({ due_at: '2026-10-16T10:00:00Z', late_policy: 'reject' });
+    const { page, sheet, api, settle } = setup('student', due);
+    await settle();
+    sheet.open('a1');
+    await settle();
+    sheet.answers.controls[QUESTION].setValue('0.5');
+    vi.setSystemTime(new Date('2026-10-16T10:00:05Z'));
+    sheet.submit();
+    await settle();
+    expect(api.submit).not.toHaveBeenCalled();
+    expect(page.state.error()).toBe('This assessment is past its due date and no longer takes submissions.');
   });
 });
 
 describe('a student submitting an assessment the teacher changed', () => {
   it('asks them to open it again, and keeps their answers to the questions still there', async () => {
     vi.useFakeTimers();
-    const { page, api, settle, unsaved } = setup('student');
+    const { page, sheet, api, settle, unsaved } = setup('student');
     await settle();
-    page.open('a1');
+    sheet.open('a1');
     await settle();
-    page.answers.controls[QUESTION].setValue('0.5');
-    page.answers.markAsDirty();
+    sheet.answers.controls[QUESTION].setValue('0.5');
+    sheet.answers.markAsDirty();
     api.submit.mockRejectedValueOnce(
       new ApiError('Your teacher changed this assessment.', 409, 'ASSESSMENT_CHANGED'),
     );
-    page.submit();
+    sheet.submit();
     await settle();
     expect(page.state.error()).toBe(
       'This assessment changed since you opened it. Open it again to see the current questions; your answers ' +
         'to questions that did not change are kept.',
     );
-    expect(page.changed()).toBe(true);
-    expect(page.submitted()).toBe(false);
+    expect(sheet.changed()).toBe(true);
+    expect(sheet.submitted()).toBe(false);
 
     const added = { id: 'q2', prompt: 'Half of 4?', type: 'numerical' as const, options: null, points: 1 };
     api.get.mockResolvedValueOnce(
       assessment({ questions: [...assessment().questions, { ...added, topic_id: 's1' }] }),
     );
-    page.reopen();
+    sheet.reopen();
     await settle();
-    expect(page.changed()).toBe(false);
-    expect(page.answers.getRawValue()).toEqual({ [QUESTION]: '0.5', q2: '' });
+    expect(sheet.changed()).toBe(false);
+    expect(sheet.answers.getRawValue()).toEqual({ [QUESTION]: '0.5', q2: '' });
     expect(unsaved.any()).toBe(true);
     await vi.advanceTimersByTimeAsync(1500);
     expect(api.save).toHaveBeenLastCalledWith('a1', { [QUESTION]: '0.5' });
@@ -225,47 +345,47 @@ describe('a student submitting an assessment the teacher changed', () => {
 
   it('shows any other refusal as the server explains it', async () => {
     vi.useFakeTimers();
-    const { page, api, settle } = setup('student');
+    const { page, sheet, api, settle } = setup('student');
     await settle();
-    page.open('a1');
+    sheet.open('a1');
     await settle();
-    page.answers.controls[QUESTION].setValue('0.5');
+    sheet.answers.controls[QUESTION].setValue('0.5');
     api.submit.mockRejectedValueOnce(new ApiError('This assessment is closed.', 409, 'CLOSED'));
-    page.submit();
+    sheet.submit();
     await settle();
     expect(page.state.error()).toBe('This assessment is closed.');
-    expect(page.changed()).toBe(false);
+    expect(sheet.changed()).toBe(false);
   });
 });
 
 describe('opening after the classroom changed', () => {
   it('drops an assessment that arrives after the user moved to another classroom', async () => {
     vi.useFakeTimers();
-    const { page, api, classroomId, settle } = setup('student');
+    const { sheet, api, classroomId, settle } = setup('student');
     await settle();
     let arrive!: (a: Assessment) => void;
     api.get.mockImplementationOnce(() => new Promise((yes) => (arrive = yes)));
-    page.open('a1');
+    sheet.open('a1');
     classroomId.set('c2');
     TestBed.tick();
     arrive(assessment());
     await settle();
-    expect(page.selected()).toBeNull();
+    expect(sheet.selected()).toBeNull();
   });
 });
 
 describe('a teacher previewing an assessment', () => {
   it('never counts preview answers as unsaved work', async () => {
     vi.useFakeTimers();
-    const { page, settle, unsaved } = setup('teacher');
+    const { sheet, settle, unsaved } = setup('teacher');
     await settle();
-    page.open('a1');
+    sheet.open('a1');
     await settle();
-    page.answers.controls[QUESTION].setValue('0.5');
-    page.answers.markAsDirty();
+    sheet.answers.controls[QUESTION].setValue('0.5');
+    sheet.answers.markAsDirty();
     expect(unsaved.any()).toBe(false);
-    page.confirmClear();
-    expect(page.answers.controls[QUESTION].value).toBe('');
+    sheet.confirmClear();
+    expect(sheet.answers.controls[QUESTION].value).toBe('');
   });
 });
 
@@ -407,6 +527,20 @@ describe('a teacher changing a published assessment', () => {
     expect(page.state.message()).toBe('Fractions deleted.');
   });
 
+  it('closes its preview when it is the one open', async () => {
+    vi.useFakeTimers();
+    const { page, sheet, settle } = setup('teacher', published);
+    page.sheet = sheet;
+    await settle();
+    sheet.open('a1');
+    await settle();
+    expect(sheet.selected()?.id).toBe('a1');
+    page.confirmDelete(summary);
+    page.remove();
+    await settle();
+    expect(sheet.selected()).toBeNull();
+  });
+
   it('deletes it with its grades once students have submitted, as the dialog says', async () => {
     vi.useFakeTimers();
     const { page, api, settle } = setup('teacher', published);
@@ -482,6 +616,21 @@ describe('a teacher changing a published assessment', () => {
     page.remove();
     await settle();
     expect(api.remove).toHaveBeenLastCalledWith('a1', true);
+  });
+});
+
+describe('a teacher whose refused delete cannot re-read the list', () => {
+  it('asks again with the grades without saying who submitted', async () => {
+    vi.useFakeTimers();
+    const { page, api, settle } = setup('teacher', assessment({ status: 'published' }));
+    await settle();
+    api.remove.mockRejectedValueOnce(new ApiError('Students have submitted.', 409, 'HAS_SUBMISSIONS'));
+    api.list.mockRejectedValueOnce(new Error('Assessment is unavailable.'));
+    page.confirmDelete({ ...summary, submissions: 0 });
+    page.remove();
+    await settle();
+    expect(page.deletingSubmitted()).toBe(true);
+    expect(page.deleting()?.submissions).toBeUndefined();
   });
 });
 
@@ -588,28 +737,28 @@ describe('a teacher deleting an assessment when the list cannot be re-read', () 
 describe("a teacher's preview", () => {
   it('closes from the same button that opened it', async () => {
     vi.useFakeTimers();
-    const { page, api, settle } = setup('teacher');
+    const { sheet, api, settle } = setup('teacher');
     await settle();
-    page.togglePreview('a1');
+    sheet.togglePreview('a1');
     await settle();
-    expect(page.selected()?.id).toBe('a1');
-    page.togglePreview('a1');
-    expect(page.selected()).toBeNull();
+    expect(sheet.selected()?.id).toBe('a1');
+    sheet.togglePreview('a1');
+    expect(sheet.selected()).toBeNull();
     expect(api.get).toHaveBeenCalledTimes(1);
   });
 
   it('returns focus to the button that opened it when its own Close preview closes it', async () => {
     vi.useFakeTimers();
-    const { page, settle } = setup('teacher');
+    const { sheet, settle } = setup('teacher');
     await settle();
     const toggle = document.body.appendChild(document.createElement('button'));
     toggle.id = 'preview-a1';
     try {
-      page.togglePreview('a1');
+      sheet.togglePreview('a1');
       await settle();
-      page.closePreview(true);
+      sheet.closePreview(true);
       await settle();
-      expect(page.selected()).toBeNull();
+      expect(sheet.selected()).toBeNull();
       expect(document.activeElement).toBe(toggle);
     } finally {
       toggle.remove();

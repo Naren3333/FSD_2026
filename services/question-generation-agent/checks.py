@@ -106,23 +106,65 @@ def cited(item: dict[str, Any], passages: list[Passage]) -> list[Passage]:
     return found
 
 
-def check_evidence(evidence: str, sources: list[Passage]) -> None:
-    """The evidence must be quoted from a cited passage, so the answer rests on the teacher's material."""
+def evidenced_excerpts(evidence: str, sources: list[Passage]) -> list[Excerpt]:
+    """The cited passages as the question stores them, at most MAX_SOURCES of MAX_EXCERPT_TEXT characters each. The
+    evidence must be quoted from one of them as stored, so the answer rests on the teacher's material and the
+    teacher sees it: a long passage is stored as the window around the evidence, and a passage holding the evidence
+    is kept when more than MAX_SOURCES are cited."""
     quote = normalize(evidence)
-    if len(quote) < MIN_EVIDENCE or not any(quote in normalize(p.text) for p in sources):
+    if len(quote) < MIN_EVIDENCE:
         raise RuleBrokenError(EVIDENCE_NOT_FOUND)
-
-
-def excerpts(sources: list[Passage]) -> list[Excerpt]:
+    texts = [_excerpt_text(p.text, quote) for p in sources]
+    holding = [i for i, (_, found) in enumerate(texts) if found]
+    if not holding:
+        raise RuleBrokenError(EVIDENCE_NOT_FOUND)
+    chosen = list(range(min(len(sources), MAX_SOURCES)))
+    if holding[0] not in chosen:
+        chosen = [holding[0], *chosen[:-1]]
     return [
         Excerpt(
-            document_id=UUID(p.document_id),
-            chunk_id=UUID(p.chunk_id),
-            page=p.page,
-            text=p.text[:MAX_EXCERPT_TEXT],
+            document_id=UUID(sources[i].document_id),
+            chunk_id=UUID(sources[i].chunk_id),
+            page=sources[i].page,
+            text=texts[i][0],
         )
-        for p in sources[:MAX_SOURCES]
+        for i in chosen
     ]
+
+
+def _excerpt_text(text: str, quote: str) -> tuple[str, bool]:
+    """At most MAX_EXCERPT_TEXT characters of `text`, and whether they hold the normalized `quote`: the whole text
+    when it fits, else the window centred on the quote, else (no quote in it) its start."""
+    if len(text) <= MAX_EXCERPT_TEXT:
+        return text, quote in normalize(text)
+    folded, positions = _normalized_positions(text)
+    at = folded.find(quote)
+    if at < 0:
+        return text[:MAX_EXCERPT_TEXT], False
+    start, end = positions[at], positions[at + len(quote) - 1] + 1
+    if end - start > MAX_EXCERPT_TEXT:
+        return text[:MAX_EXCERPT_TEXT], False
+    begin = min(max(start - (MAX_EXCERPT_TEXT - (end - start)) // 2, 0), len(text) - MAX_EXCERPT_TEXT)
+    return text[begin : begin + MAX_EXCERPT_TEXT], True
+
+
+def _normalized_positions(text: str) -> tuple[str, list[int]]:
+    """normalize(text), and for each of its characters the index in `text` it came from."""
+    out: list[str] = []
+    positions: list[int] = []
+    gap = False
+    for i, ch in enumerate(text):
+        if ch.isspace():
+            gap = bool(out)
+            continue
+        if gap:
+            out.append(" ")
+            positions.append(i)
+            gap = False
+        for c in normalize(ch):
+            out.append(c)
+            positions.append(i)
+    return "".join(out), positions
 
 
 def points(item: dict[str, Any]) -> int:
@@ -209,15 +251,10 @@ def question(item: Any, request: GenerateRequest, passages: list[Passage], seen:
         raise RuleBrokenError(WRONG_TYPE)
     sources = cited(item, passages)
     evidence = _text(item, "evidence")
-    check_evidence(evidence, sources)
+    stored = evidenced_excerpts(evidence, sources)
     if any(similar(prompt, other) for other in seen):
         raise RuleBrokenError(DUPLICATE)
-    base: dict[str, Any] = {
-        "prompt": prompt,
-        "type": kind,
-        "topic_id": request.topic_id,
-        "sources": excerpts(sources),
-    }
+    base: dict[str, Any] = {"prompt": prompt, "type": kind, "topic_id": request.topic_id, "sources": stored}
     if kind == "multiple_choice":
         choices, answer = options(item)
         draft = DraftQuestion(**base, options=choices, answer=answer, points=points(item))
@@ -273,13 +310,13 @@ def guidance(output: str, request: GuidanceRequest, passages: list[Passage]) -> 
     item = read_reply(output)
     sources = cited(item, passages)
     evidence = _text(item, "evidence")
-    check_evidence(evidence, sources)
+    stored = evidenced_excerpts(evidence, sources)
     short = request.type == "short_answer"
     return Guidance(
         type=request.type,
         accepted_answers=accepted(item) if short else [],
         rubric=None if short else rubric(item),
         marking_points=marking_points(item),
-        sources=excerpts(sources),
+        sources=stored,
         evidence=evidence,
     )

@@ -38,7 +38,14 @@
               </span>
               <strong>{{ evidence.awarded }} / {{ evidence.possible }}</strong>
               · {{ names.prompt(result, evidence) || 'Question ' + (index + 1) }}
-              <span class="caption">Topic: {{ names.topic(evidence) || 'not in the curriculum' }}</span>
+              <span class="caption"
+                >Topic:
+                @if (names.topic(evidence); as name) {
+                  {{ name }}
+                } @else {
+                  <span class="identifier">{{ evidence.topic_id }}</span>
+                }
+              </span>
             </p>
             @if (result.answers[evidence.question_id]; as answer) {
               <p class="caption">Your answer</p>
@@ -52,13 +59,14 @@
         </div>
       </article>
     } @empty {
-      <p class="empty">
-        {{
-          classroomId()
-            ? 'No finalized results yet. After you submit an assessment, your teacher reviews it and your result appears here.'
-            : 'Select a classroom to continue.'
-        }}
-      </p>
+      @if (classroomId()) {
+        <p class="empty">
+          No finalized results yet. After you submit an assessment, your teacher reviews it and your result
+          appears here.
+        </p>
+      } @else {
+        <app-no-classroom><p class="empty">Select a classroom to continue.</p></app-no-classroom>
+      }
     }
   }
 </section>

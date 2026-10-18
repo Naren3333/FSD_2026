@@ -23,7 +23,7 @@
         </button>
       </article>
     } @empty {
-      <p class="empty">No classrooms yet. Create one to get started.</p>
+      <app-no-classroom><p class="empty">No classrooms yet. Create one to get started.</p></app-no-classroom>
     }
   </section>
   @if (session.isTeacher()) {
@@ -59,10 +59,10 @@
         Refresh students
       </button>
     </div>
-    <p class="caption">Up to 500 students, by name</p>
+    <p class="caption">By name, {{ rosterPageSize }} a page</p>
     <app-section-state [section]="roster" loading="Loading students…" />
     @if (roster.ready()) {
-      @for (student of roster.value() ?? []; track student.id) {
+      @for (student of roster.value()?.students ?? []; track student.id) {
         <article class="record roster-row">
           <div>
             <strong>{{ studentName(student) || 'Name not recorded yet' }}</strong>
@@ -83,15 +83,22 @@
           </button>
         </article>
       } @empty {
-        <p class="empty">
-          {{
-            classroomId()
-              ? 'No students enrolled yet. Enroll them from All students below.'
-              : 'Select a classroom to see its students.'
-          }}
-        </p>
+        @if (classroomId()) {
+          <p class="empty">No students enrolled yet. Enroll them from All students below.</p>
+        } @else {
+          <app-no-classroom><p class="empty">Select a classroom to see its students.</p></app-no-classroom>
+        }
       }
     }
+    <!-- Not disabled while a page loads, so the button pressed keeps keyboard focus; only the newest page lands. -->
+    <app-pager
+      label="Classroom students pages"
+      [(page)]="rosterPage"
+      [pageSize]="rosterPageSize"
+      [total]="roster.value()?.total ?? 0"
+      [disabled]="rosterState.busy()"
+      (go)="showRosterPage()"
+    />
     @if (!removing()) {
       <app-status [state]="rosterState" />
     }
@@ -112,12 +119,13 @@
     <p class="caption">Everyone in your school who has signed in with a name</p>
     <app-field controlId="student-search" label="Search students" hint="By name or username">
       <input
+        #searchBox
         appFieldControl
         id="student-search"
         type="search"
         autocomplete="off"
         [value]="search()"
-        (input)="searchFor($any($event.target).value)"
+        (input)="searchFor(searchBox.value)"
       />
     </app-field>
     <app-section-state [section]="everyone" loading="Loading students…" />
@@ -160,7 +168,7 @@
       [(page)]="page"
       [pageSize]="pageSize"
       [total]="everyone.value()?.total ?? 0"
-      [disabled]="everyoneState.busy() || everyone.loading()"
+      [disabled]="everyoneState.busy()"
       (go)="loadEveryone()"
     />
     <app-status [state]="everyoneState" />

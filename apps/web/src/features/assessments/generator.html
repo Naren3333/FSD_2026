@@ -14,9 +14,10 @@
         @for (doc of choices; track doc.id) {
           <label class="check">
             <input
+              #docBox
               type="checkbox"
               [checked]="chosen().includes(doc.id)"
-              (change)="toggleDocument(doc.id, $any($event.target).checked)"
+              (change)="toggleDocument(doc.id, docBox.checked)"
             />
             {{ doc.title }}
           </label>
@@ -35,9 +36,10 @@
         @for (type of types; track type.value) {
           <label class="check">
             <input
+              #typeBox
               type="checkbox"
               [checked]="chosenTypes().includes(type.value)"
-              (change)="toggleType(type.value, $any($event.target).checked)"
+              (change)="toggleType(type.value, typeBox.checked)"
             />
             {{ type.label }}
           </label>

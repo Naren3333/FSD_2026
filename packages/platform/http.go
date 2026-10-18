@@ -10,6 +10,7 @@ import (
 	"log/slog"
 	"net/http"
 	"slices"
+	"strconv"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
@@ -126,6 +127,28 @@ func decodeFailed(w http.ResponseWriter, err error, message string) {
 
 // ID reports whether value is a UUID.
 func ID(value string) bool { _, err := uuid.Parse(value); return err == nil }
+
+// Page reads a list's ?offset= and ?limit= query values: offset defaults to 0 and limit to fallback, and limit must
+// be 1–most. On failure it has written a 422.
+func Page(w http.ResponseWriter, r *http.Request, fallback, most int) (offset, limit int, ok bool) {
+	query := r.URL.Query()
+	offset, okOffset := whole(query.Get("offset"), 0)
+	limit, okLimit := whole(query.Get("limit"), fallback)
+	if !okOffset || !okLimit || limit < 1 || limit > most {
+		Invalid(w, fmt.Sprintf("offset must be 0 or more and limit between 1 and %d.", most))
+		return 0, 0, false
+	}
+	return offset, limit, true
+}
+
+// whole parses a non-negative whole-number query value, or gives fallback when it is absent.
+func whole(value string, fallback int) (int, bool) {
+	if value == "" {
+		return fallback, true
+	}
+	n, err := strconv.Atoi(value)
+	return n, err == nil && n >= 0
+}
 
 // Teacher requires the token's teacher role, writing a 403 otherwise. Classroom-specific access needs TeacherOf.
 func Teacher(w http.ResponseWriter, r *http.Request) bool {

@@ -140,23 +140,34 @@ def purge_user(pool: ConnectionPool[Any], event: UserDeletedEvent) -> None:
         remove_evidence(conn, "student_id=%s AND org_id=%s", (str(data.user_id), data.org_id))
 
 
-# Each deletion topic's event and the purge that applies it.
-PURGES: dict[str, tuple[type[Envelope], Callable[[ConnectionPool[Any], Any], None]]] = {
-    CLASSROOM_DELETED: (ClassroomDeletedEvent, purge),
-    ASSESSMENT_DELETED: (AssessmentDeletedEvent, purge_assessment),
-    USER_DELETED: (UserDeletedEvent, purge_user),
+Purge = Callable[[ConnectionPool[Any], bytes | None], bool]
+
+
+def parsed[E: Envelope](model: type[E], apply: Callable[[ConnectionPool[Any], E], None]) -> Purge:
+    """A deletion topic's handling: its message parsed as `model` and applied, or False when it is not one."""
+
+    def run(pool: ConnectionPool[Any], value: bytes | None) -> bool:
+        deleted = parse(model, value)
+        if deleted is None:
+            return False
+        apply(pool, deleted)
+        return True
+
+    return run
+
+
+# Each deletion topic and the purge that applies its event.
+PURGES: dict[str, Purge] = {
+    CLASSROOM_DELETED: parsed(ClassroomDeletedEvent, purge),
+    ASSESSMENT_DELETED: parsed(AssessmentDeletedEvent, purge_assessment),
+    USER_DELETED: parsed(UserDeletedEvent, purge_user),
 }
 
 
 def handler(pool: ConnectionPool[Any]) -> Handler:
     def handle(topic: str, value: bytes | None) -> bool:
         if topic in PURGES:
-            model, apply = PURGES[topic]
-            deleted = parse(model, value)
-            if deleted is None:
-                return False
-            apply(pool, deleted)
-            return True
+            return PURGES[topic](pool, value)
         finalized = parse(Event, value)
         if finalized is None or finalized.event_type != topic:
             return False

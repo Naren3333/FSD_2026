@@ -14,6 +14,11 @@ export interface Student {
   username: string;
   display_name: string;
 }
+/** One page of students, and how many there are across every page. */
+export interface StudentPage {
+  students: Student[];
+  total: number;
+}
 export interface Classroom {
   id: string;
   name: string;
@@ -176,6 +181,13 @@ export interface Submission {
   /** Submitted after the due date. */
   late: boolean;
 }
+/** A student's own submitted answers, as they read them again; never the answer keys. */
+export interface OwnSubmission {
+  answers: Record<string, string>;
+  submitted_at: string;
+  /** Submitted after the due date. */
+  late: boolean;
+}
 /** A student's unsubmitted work on an assessment. */
 export interface SavedAnswers {
   answers: Record<string, string>;
@@ -305,6 +317,11 @@ export interface Enrollment {
   classroom_id: string;
 }
 /** How many of a classroom's grades wait for its teacher, and how many are final. */
+/** One page of a teacher's grades, and how many there are across every page. */
+export interface EvaluationPage {
+  evaluations: Evaluation[];
+  total: number;
+}
 export interface GradingCounts {
   drafts: number;
   finalized: number;
