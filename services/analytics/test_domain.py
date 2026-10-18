@@ -275,9 +275,10 @@ class Recorder:
 
 def test_storing_and_purging_lock_the_classroom_before_its_tombstone():
     from learning_transport.db import LOCK
+    from learning_transport.kafka import ClassroomDeletedEvent
 
     from consumer import process, purge
-    from domain import ClassroomDeletedEvent, Event
+    from domain import Event
 
     stored = Recorder()
     process(stored, Event.model_validate(finalized("grading.finalized.v2", 1)))  # type: ignore[arg-type]

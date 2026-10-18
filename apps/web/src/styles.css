@@ -567,13 +567,6 @@ thead th {
     transform: translateX(250%);
   }
 }
-@media (prefers-reduced-motion: reduce) {
-  .loading-bar::after {
-    animation: none;
-    width: 100%;
-    opacity: 0.5;
-  }
-}
 .learning-rail {
   display: grid;
   grid-template-columns: repeat(4, 1fr);
@@ -632,6 +625,11 @@ dialog::backdrop {
   * {
     transition: none !important;
     scroll-behavior: auto !important;
+  }
+  .loading-bar::after {
+    animation: none;
+    width: 100%;
+    opacity: 0.5;
   }
 }
 @media (forced-colors: active) {

@@ -24,7 +24,7 @@
               <span class="badge badge-plain">Submitted late</span>
             }
           </span>
-          <h3>{{ title(result) }}</h3>
+          <h3>{{ names.title(result) || 'Assessment' }}</h3>
           <p>
             <strong>{{ result.evidence | marks }}</strong>
             marks
@@ -37,8 +37,8 @@
                 {{ outcome(evidence) }}
               </span>
               <strong>{{ evidence.awarded }} / {{ evidence.possible }}</strong>
-              · {{ prompt(result, evidence) || 'Question ' + (index + 1) }}
-              <span class="caption">Topic: {{ topic(evidence) || 'not in the curriculum' }}</span>
+              · {{ names.prompt(result, evidence) || 'Question ' + (index + 1) }}
+              <span class="caption">Topic: {{ names.topic(evidence) || 'not in the curriculum' }}</span>
             </p>
             @if (result.answers[evidence.question_id]; as answer) {
               <p class="caption">Your answer</p>

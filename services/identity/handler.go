@@ -24,6 +24,7 @@ func (s server) routes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /v1/classrooms/{id}/enrollments", s.enroll)
 	mux.HandleFunc("DELETE /v1/classrooms/{id}/enrollments/{student}", s.unenroll)
 	mux.HandleFunc("GET /v1/classrooms/{id}/students", s.roster)
+	mux.HandleFunc("GET /v1/classrooms/{id}/student-ids", s.rosterIDs)
 	mux.HandleFunc("GET /v1/students", s.students)
 }
 
@@ -230,6 +231,21 @@ func (s server) roster(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	platform.JSON(w, http.StatusOK, students)
+}
+
+// rosterIDs lists the ids of every student enrolled in the classroom, for its teacher. Assessment and Grading (through
+// platform.Identity.Roster) count and list only enrolled students' work by it, so unlike roster it has no cap.
+func (s server) rosterIDs(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	if !s.owner(w, r, id, "see the roster") {
+		return
+	}
+	ids, err := s.store.listStudentIDs(r.Context(), id)
+	if err != nil {
+		platform.Fail(w, err)
+		return
+	}
+	platform.JSON(w, http.StatusOK, ids)
 }
 
 // maxPage is the most students one page of the school's list holds.

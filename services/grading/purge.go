@@ -26,10 +26,8 @@ func purge(ctx context.Context, tx pgx.Tx, event platform.Event) error {
 		"DELETE FROM audit WHERE evaluation_id IN (SELECT id FROM evaluations WHERE classroom_id=$1 AND org_id=$2)",
 		"DELETE FROM evaluations WHERE classroom_id=$1 AND org_id=$2",
 	}
-	for _, sql := range statements {
-		if _, err = tx.Exec(ctx, sql, v.Classroom, v.Org); err != nil {
-			return err
-		}
+	if err = platform.ExecAll(ctx, tx, statements, v.Classroom, v.Org); err != nil {
+		return err
 	}
 	return platform.DiscardPending(ctx, tx, v)
 }
@@ -66,13 +64,10 @@ func purgeAssessment(ctx context.Context, tx pgx.Tx, event platform.Event) error
 		"DELETE FROM audit WHERE evaluation_id IN (SELECT id FROM evaluations WHERE assessment_id=$1 AND classroom_id=$2 AND org_id=$3)",
 		"DELETE FROM evaluations WHERE assessment_id=$1 AND classroom_id=$2 AND org_id=$3",
 	}
-	for _, sql := range statements {
-		if _, err := tx.Exec(ctx, sql, v.Assessment, v.Classroom, v.Org); err != nil {
-			return err
-		}
+	if err := platform.ExecAll(ctx, tx, statements, v.Assessment, v.Classroom, v.Org); err != nil {
+		return err
 	}
-	_, err := tx.Exec(ctx, "DELETE FROM outbox WHERE body->'data'->>'assessment_id'=$1::text AND body->'data'->>'org_id'=$2", v.Assessment, v.Org)
-	return err
+	return platform.DiscardPendingBy(ctx, tx, "%", "assessment_id", v.Assessment, v.Org)
 }
 
 // purgeUser removes the evaluations of a student who deleted their account, with their audit trail, marking jobs,
@@ -95,12 +90,9 @@ func purgeUser(ctx context.Context, tx pgx.Tx, event platform.Event) error {
 		"DELETE FROM marking_jobs WHERE evaluation_id IN (SELECT id FROM evaluations WHERE student_id=$1 AND org_id=$2)",
 		"DELETE FROM audit WHERE evaluation_id IN (SELECT id FROM evaluations WHERE student_id=$1 AND org_id=$2)",
 		"DELETE FROM evaluations WHERE student_id=$1 AND org_id=$2",
-		"DELETE FROM outbox WHERE body->'data'->>'student_id'=$1::text AND body->'data'->>'org_id'=$2",
 	}
-	for _, sql := range statements {
-		if _, err = tx.Exec(ctx, sql, v.User, v.Org); err != nil {
-			return err
-		}
+	if err = platform.ExecAll(ctx, tx, statements, v.User, v.Org); err != nil {
+		return err
 	}
-	return nil
+	return platform.DiscardPendingBy(ctx, tx, "%", "student_id", v.User, v.Org)
 }

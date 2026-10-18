@@ -106,7 +106,7 @@ class Pipeline:
                 billed(self.claims),
             )
         except UpstreamError as e:
-            log.warning("generation failed: %s", e)
+            log.warning("generation_failed", extra={"error": str(e)})
             raise refused(e) from None
         try:
             kept, dropped = checks.questions(output, body, passages)
@@ -143,7 +143,7 @@ class Pipeline:
                 billed(self.claims),
             )
         except UpstreamError as e:
-            log.warning("guidance failed: %s", e)
+            log.warning("guidance_failed", extra={"error": str(e)})
             raise refused(e) from None
         try:
             return checks.guidance(output, body, passages)

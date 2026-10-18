@@ -70,12 +70,10 @@ export class ClassroomsComponent {
   searchFor(words: string): void {
     this.search.set(words);
     clearTimeout(this.searchTimer);
-    this.searchTimer = setTimeout(() => this.goTo(0), 250);
-  }
-
-  goTo(page: number): void {
-    this.page.set(Math.max(0, page));
-    this.loadEveryone();
+    this.searchTimer = setTimeout(() => {
+      this.page.set(0);
+      this.loadEveryone();
+    }, 250);
   }
 
   /** Fetches the page on show; a page past the end, after students leave, falls back to the last one. */

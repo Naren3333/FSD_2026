@@ -7,11 +7,11 @@ import os
 import threading
 from collections.abc import Callable
 from datetime import datetime
-from typing import Any
+from typing import Any, Literal
 from uuid import UUID
 
 from confluent_kafka import Consumer, KafkaException, Message, Producer
-from pydantic import BaseModel, Field, ValidationError, field_validator
+from pydantic import BaseModel, Field, ValidationError, field_validator, model_validator
 
 from learning_transport.errors import Contract
 
@@ -43,6 +43,49 @@ class Envelope(Contract):
         if timestamp.tzinfo is None:
             raise ValueError("Timestamp must have a timezone")
         return timestamp
+
+
+# Identity's events that every service keeping data for a classroom or a user consumes to purge it
+# (packages/platform/classrooms.go has the Go side).
+CLASSROOM_DELETED = "identity.classroom.deleted.v1"
+USER_DELETED = "identity.user.deleted.v1"
+
+
+class ClassroomDeleted(Contract):
+    classroom_id: UUID
+    org_id: str = Field(min_length=1)
+
+
+class ClassroomDeletedEvent(Envelope):
+    """A deleted classroom: every service that keeps data for it purges it."""
+
+    event_type: Literal["identity.classroom.deleted.v1"]
+    data: ClassroomDeleted
+
+    @model_validator(mode="after")
+    def deleted(self) -> "ClassroomDeletedEvent":
+        if self.resource_id != self.data.classroom_id:
+            raise ValueError("Not this classroom's deletion")
+        return self
+
+
+class UserDeleted(Contract):
+    user_id: UUID
+    org_id: str = Field(min_length=1)
+    role: Literal["teacher", "student"]
+
+
+class UserDeletedEvent(Envelope):
+    """A user who deleted their own account (ADR 0011): every service that keeps data for them purges it."""
+
+    event_type: Literal["identity.user.deleted.v1"]
+    data: UserDeleted
+
+    @model_validator(mode="after")
+    def deleted(self) -> "UserDeletedEvent":
+        if self.resource_id != self.data.user_id:
+            raise ValueError("Not this user's deletion")
+        return self
 
 
 def parse[M: BaseModel](model: type[M], value: bytes | None) -> M | None:

@@ -39,8 +39,25 @@ def test_data_writing_scripts_refuse_the_development_stack(monkeypatch: pytest.M
     local_stack.require_test_stack(dev=True)  # --dev: no check, no docker call
 
 
+def test_data_writing_scripts_refuse_the_development_ports(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The test project name with the development ports would send psql to the test stack but HTTP to the
+    development stack's Kong and Keycloak."""
+    monkeypatch.setenv("COMPOSE_PROJECT_NAME", local_stack.TEST_PROJECT)
+    monkeypatch.setattr(local_stack.subprocess, "run", lambda *_a, **_k: pytest.fail("checked docker first"))
+    monkeypatch.setattr(local_stack, "KONG_PORT", "8000")
+    monkeypatch.setattr(local_stack, "KEYCLOAK_PORT", local_stack.TEST_PORTS["KEYCLOAK_PORT"])
+    with pytest.raises(SystemExit, match="KONG_PORT=8000"):
+        local_stack.require_test_stack(dev=False)
+    monkeypatch.setattr(local_stack, "KONG_PORT", local_stack.TEST_PORTS["KONG_PORT"])
+    monkeypatch.setattr(local_stack, "KEYCLOAK_PORT", "8081")
+    with pytest.raises(SystemExit, match="KEYCLOAK_PORT=8081"):
+        local_stack.require_test_stack(dev=False)
+
+
 def test_data_writing_scripts_need_the_test_stack_running(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("COMPOSE_PROJECT_NAME", local_stack.TEST_PROJECT)
+    monkeypatch.setattr(local_stack, "KONG_PORT", local_stack.TEST_PORTS["KONG_PORT"])
+    monkeypatch.setattr(local_stack, "KEYCLOAK_PORT", local_stack.TEST_PORTS["KEYCLOAK_PORT"])
     outputs = iter(["", "4f2a9c\n"])
     monkeypatch.setattr(local_stack.subprocess, "run", lambda *_a, **_k: compose_result(next(outputs)))
     with pytest.raises(SystemExit, match="not running"):

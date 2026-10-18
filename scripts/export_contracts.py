@@ -205,7 +205,14 @@ assessment_summary = obj(
         "submissions": {
             "type": "integer",
             "minimum": 0,
-            "description": "How many students have submitted it; for the classroom's teacher only.",
+            "description": "How many of the classroom's enrolled students have submitted it; for the classroom's "
+            "teacher only.",
+        },
+        "has_submissions": {
+            "type": "boolean",
+            "description": "Whether any student has submitted it, students since removed from the classroom included: "
+            "once one has, it can no longer be replaced, and deleting it needs with_submissions=true. For the "
+            "classroom's teacher only.",
         },
     },
     ["id", "title", "submitted", "status", "opens_at", "due_at", "late_policy", "question_count", "points"],
@@ -515,6 +522,9 @@ operations = {
             obj({"student_id": TEXT, "classroom_id": UUID}),
         ),
         operation("GET", "/v1/classrooms/{id}/students", None, array(student, maximum=500)),
+        # Every enrolled student's id, in the same order and without the cap, for the services that keep removed
+        # students' work out of the teacher's lists (platform.Identity.Roster).
+        operation("GET", "/v1/classrooms/{id}/student-ids", None, {"type": "array", "items": TEXT}),
         school_students,
     ],
     "curriculum": [

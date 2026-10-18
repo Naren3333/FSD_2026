@@ -408,16 +408,3 @@ export function localInput(iso: string | null): string {
   const pad = (n: number) => String(n).padStart(2, '0');
   return `${at.getFullYear()}-${pad(at.getMonth() + 1)}-${pad(at.getDate())}T${pad(at.getHours())}:${pad(at.getMinutes())}`;
 }
-
-/** Where a student stands with an assessment's due date. */
-export type DueState = 'none' | 'upcoming' | 'late' | 'closed';
-
-export function dueState(
-  due: string | null | undefined,
-  latePolicy: LatePolicy | undefined,
-  now = new Date(),
-): DueState {
-  if (!due) return 'none';
-  if (new Date(due) >= now) return 'upcoming';
-  return latePolicy === 'reject' ? 'closed' : 'late';
-}

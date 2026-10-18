@@ -3,13 +3,17 @@
 Adds missing secrets to .env (it never changes an existing line), creates missing service databases and roles in
 the running Compose PostgreSQL (for example `chatbot`, added in ADR 0002 stage 4, and `aicore`, ai-core's usage
 ledger from ADR 0003), and creates missing AI service-account clients in the running Keycloak (for example
-`grading-marker`, ADR 0004) and Identity's `identity-accounts` client (ADR 0011). Existing clients, users and databases are left as they are. Safe to run again.
+`grading-marker`, ADR 0004) and Identity's `identity-accounts` client (ADR 0011). Existing clients, users and
+databases are left as they are, but every service account still gets its role, so a run that stopped half-way is
+finished by the next. Safe to run again.
 It also rewrites the generated realm import from .env, for the next fresh Keycloak volume. Other realm changes to
 a running Keycloak still need a fresh volume (see operations.md).
 """
 
 import json
+from collections.abc import Callable
 from pathlib import Path
+from typing import TYPE_CHECKING, Any
 
 from local_stack import ROOT, admin_client, check, psql, psql_value, read_env
 from setup import (
@@ -25,6 +29,9 @@ from setup import (
     realm,
     service_client,
 )
+
+if TYPE_CHECKING:
+    import httpx
 
 # Values only read when a volume is first created: added to an .env that lacks them, they do not change a running
 # PostgreSQL superuser, Keycloak admin or local person, whose existing passwords stay in effect.
@@ -64,33 +71,45 @@ def add_missing_databases(env: dict[str, str]) -> None:
 
 def add_missing_clients(env: dict[str, str]) -> None:
     """Creates each AI client Keycloak lacks, with .env's secret, and gives its service account the ai-client
-    role."""
+    role. The role is assigned to existing clients too (Keycloak ignores a mapping it already has), so a run that
+    stopped after creating a client is finished by the next one."""
     with admin_client() as admin:
         for client in AI_CLIENTS:
-            if check(admin.get("/clients", params={"clientId": client})).json():
-                continue
-            check(admin.post("/clients", json=service_client(client, env[client_secret_key(client)])))
+            created = ensure_client(
+                admin, client, lambda c=client: service_client(c, env[client_secret_key(c)])
+            )
             client_id = check(admin.get("/clients", params={"clientId": client})).json()[0]["id"]
             account = check(admin.get(f"/clients/{client_id}/service-account-user")).json()
             role = check(admin.get("/roles/ai-client")).json()
             check(admin.post(f"/users/{account['id']}/role-mappings/realm", json=[role]))
-            print(f"Created Keycloak client {client}")
+            if created:
+                print(f"Created Keycloak client {client}")
 
 
 def add_missing_accounts_client(env: dict[str, str]) -> None:
     """Creates Identity's identity-accounts client if Keycloak lacks it, with .env's secret, and gives its service
-    account realm-management's manage-users role."""
+    account realm-management's manage-users role. The role is assigned to an existing client too, so a run that
+    stopped after creating the client is finished by the next one; without it Identity cannot remove sign-ins."""
     with admin_client() as admin:
-        if check(admin.get("/clients", params={"clientId": ACCOUNTS_CLIENT})).json():
-            return
-        check(admin.post("/clients", json=accounts_client(env[client_secret_key(ACCOUNTS_CLIENT)])))
+        created = ensure_client(
+            admin, ACCOUNTS_CLIENT, lambda: accounts_client(env[client_secret_key(ACCOUNTS_CLIENT)])
+        )
         client_id = check(admin.get("/clients", params={"clientId": ACCOUNTS_CLIENT})).json()[0]["id"]
         account = check(admin.get(f"/clients/{client_id}/service-account-user")).json()
         owner, role_name = ACCOUNTS_ROLE
         management = check(admin.get("/clients", params={"clientId": owner})).json()[0]["id"]
         role = check(admin.get(f"/clients/{management}/roles/{role_name}")).json()
         check(admin.post(f"/users/{account['id']}/role-mappings/clients/{management}", json=[role]))
-        print(f"Created Keycloak client {ACCOUNTS_CLIENT}")
+        if created:
+            print(f"Created Keycloak client {ACCOUNTS_CLIENT}")
+
+
+def ensure_client(admin: "httpx.Client", client: str, representation: Callable[[], dict[str, Any]]) -> bool:
+    """Creates the client unless Keycloak has it; True when it was created."""
+    if check(admin.get("/clients", params={"clientId": client})).json():
+        return False
+    check(admin.post("/clients", json=representation()))
+    return True
 
 
 def refresh_realm_import(env: dict[str, str]) -> None:

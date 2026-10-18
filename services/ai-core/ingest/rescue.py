@@ -96,12 +96,12 @@ async def _laid_out(
             "layout",
         )
     except Exception as e:
-        log.warning("table %d on %s not laid out: %s", i + 1, page, e)
+        log.warning("table_not_laid_out", extra={"table": i + 1, "page": str(page), "error": str(e)})
         return None
     header = tuple(clean_cell(c) for c in items(raw.get("header"))) or None
     rows = tuple(tuple(clean_cell(c) for c in row) for row in items(raw.get("rows")) if isinstance(row, list))
     problem = extraction.verify_layout(header, rows, words, table)
     if problem:
-        log.info("table %d on %s stays prose: %s", i + 1, page, problem)
+        log.info("table_stays_prose", extra={"table": i + 1, "page": str(page), "problem": problem})
         return None
     return header, rows

@@ -19,7 +19,7 @@
         }
       </dd>
       <dt>Role</dt>
-      <dd>{{ p.role === 'teacher' ? 'Teacher' : 'Student' }}</dd>
+      <dd>{{ session.isTeacher() ? 'Teacher' : 'Student' }}</dd>
       <dt>Organization</dt>
       <dd>{{ p.org_id }}</dd>
       <dt>Account ID</dt>
@@ -36,7 +36,16 @@
         Deleting your account removes your sign-in and your chat history for good. The classrooms you teach,
         with their materials, assessments and grades, are deleted separately from Classrooms first.
       </p>
-      @if (classroomCount() > 0) {
+      @if (context.error()) {
+        <p class="error" id="delete-account-blocked">
+          Your classrooms could not be loaded, so your account cannot be deleted yet. {{ context.error() }}
+        </p>
+        <button type="button" class="secondary" (click)="retryClassrooms()" [disabled]="context.loading()">
+          Try again
+        </button>
+      } @else if (classroomsUnknown()) {
+        <p class="caption" id="delete-account-blocked">Checking your classrooms…</p>
+      } @else if (classroomCount() > 0) {
         <p class="error" id="delete-account-blocked">
           You still have {{ classroomCount() }} {{ classroomCount() === 1 ? 'classroom' : 'classrooms' }}.
           Delete {{ classroomCount() === 1 ? 'it' : 'them' }} from Classrooms before deleting your account.
@@ -52,8 +61,8 @@
       type="button"
       class="danger"
       (click)="confirmDelete()"
-      [disabled]="state.busy() || classroomCount() > 0"
-      [attr.aria-describedby]="classroomCount() > 0 ? 'delete-account-blocked' : null"
+      [disabled]="state.busy() || blocked()"
+      [attr.aria-describedby]="blocked() ? 'delete-account-blocked' : null"
     >
       Delete account
     </button>

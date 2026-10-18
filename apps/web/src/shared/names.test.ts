@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import type { Assessment, Evaluation } from '../api/models';
-import { assessmentsOf, promptOf, topicNames, studentName, studentNames, total } from './names';
+import type { Assessment, Evaluation, Evidence } from '../api/models';
+import { EvidenceNames, assessmentsOf, topicNames, studentName, studentNames, total } from './names';
 
 const evaluation = (id: string, assessment: string): Evaluation => ({
   id,
@@ -38,9 +38,19 @@ describe('names', () => {
       questions: [{ id: 'q1', prompt: 'What is 1/2 + 1/4?', type: 'numerical', options: [], topic_id: 'k1' }],
     };
     const assessments = new Map([['a1', assessment]]);
-    expect(promptOf(assessments, 'a1', 'q1')).toBe('What is 1/2 + 1/4?');
-    expect(promptOf(assessments, 'a1', 'q2')).toBe('');
-    expect(promptOf(assessments, 'a2', 'q1')).toBe('');
+    const names = new EvidenceNames(
+      () => assessments,
+      (id) => topics.get(id) ?? '',
+    );
+    const grade = { assessment_id: 'a1' } as Evaluation;
+    const evidence = (question_id: string, topic_id = 'k1') =>
+      ({ question_id, topic_id, correct: true, awarded: 1, possible: 1 }) as Evidence;
+    expect(names.title(grade)).toBe('Quiz');
+    expect(names.prompt(grade, evidence('q1'))).toBe('What is 1/2 + 1/4?');
+    expect(names.prompt(grade, evidence('q2'))).toBe('');
+    expect(names.prompt({ assessment_id: 'a2' } as Evaluation, evidence('q1'))).toBe('');
+    expect(names.topic(evidence('q1'))).toBe('Fractions');
+    expect(names.topic(evidence('q1', 'gone'))).toBe('');
   });
 
   it('totals marks and loads each referenced assessment once', async () => {

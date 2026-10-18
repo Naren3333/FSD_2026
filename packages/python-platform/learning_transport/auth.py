@@ -75,7 +75,7 @@ class KeySet:
                 raise jwt.PyJWKSetError("the key set is not a JSON object")
             keys = jwt.PyJWKSet.from_dict(data).keys
         except (httpx.HTTPError, ValueError, jwt.PyJWTError) as error:
-            log.warning("fetching the identity provider's key set failed: %s", error)
+            log.warning("key_set_fetch_failed", extra={"error": str(error)})
             # Try again after REFETCH_INTERVAL, not on every request meanwhile.
             self._fetched = now - self._lifespan + REFETCH_INTERVAL
             return

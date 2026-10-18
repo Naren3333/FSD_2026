@@ -285,8 +285,11 @@ export interface AssessmentSummary {
   late_policy: LatePolicy;
   question_count: number;
   points: number;
-  /** How many students have submitted it; for the classroom's teacher only. */
+  /** How many students still enrolled have submitted it; for the classroom's teacher only. */
   submissions?: number;
+  /** Whether anyone has submitted it, students since removed from the classroom included, so its questions are fixed
+   * and deleting it takes their grades; for the classroom's teacher only. */
+  has_submissions?: boolean;
 }
 /** How many students have submitted an assessment. */
 export interface AssessmentProgress {

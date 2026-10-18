@@ -92,7 +92,11 @@
                       "submissions": {
                         "type": "integer",
                         "minimum": 0,
-                        "description": "How many students have submitted it; for the classroom's teacher only."
+                        "description": "How many of the classroom's enrolled students have submitted it; for the classroom's teacher only."
+                      },
+                      "has_submissions": {
+                        "type": "boolean",
+                        "description": "Whether any student has submitted it, students since removed from the classroom included: once one has, it can no longer be replaced, and deleting it needs with_submissions=true. For the classroom's teacher only."
                       }
                     },
                     "required": [

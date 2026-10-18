@@ -248,6 +248,10 @@ def classroom(u: Users) -> dict[str, Any]:
     assert request(u.teacher, "GET", roster) == expected
     request(u.student, "GET", roster, 403)
     request(u.other, "GET", roster, 403)
+    # The id-only roster Assessment and Grading filter by has every student, uncapped.
+    ids = f"/identity/classrooms/{room['id']}/student-ids"
+    assert request(u.teacher, "GET", ids) == [u.student_id]
+    request(u.student, "GET", ids, 403)
 
     # Teachers page through every student in their school, by search, to enroll them; students cannot.
     found = request(u.teacher, "GET", "/identity/students?search=STUDENT%20local&limit=50")

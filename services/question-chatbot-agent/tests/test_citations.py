@@ -41,7 +41,9 @@ def test_unknown_tag_is_dropped_and_logged(caplog: pytest.LogCaptureFixture) -> 
     with caplog.at_level(logging.WARNING, "question-chatbot-agent.citations"):
         out, r = run(["Fact [S9]."], {"S1": "c1"})
     assert out == "Fact ." and r.cited == []
-    assert "S9" in caplog.text
+    assert [(r.getMessage(), getattr(r, "label", None)) for r in caplog.records] == [
+        ("citation_dropped_unknown_source", "S9")
+    ]
 
 
 @pytest.mark.parametrize("tag", ["[S1, S3]", "[S1,S3]", "[S1; S3]"])

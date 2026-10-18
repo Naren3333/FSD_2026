@@ -1,4 +1,5 @@
 import { computed, signal } from '@angular/core';
+import type { ActionState } from './action-state';
 import { messageOf } from './errors';
 
 /** One part of a page that loads on its own: whether it is loading, its value, or the error that stopped it. Only the newest
@@ -70,5 +71,27 @@ export class Section<T> {
     this.value.set(null);
     this.loading.set(false);
     this.error.set('');
+  }
+}
+
+/** Re-reads a list with `reread` after the item `id` was deleted from it. When that fails (the deletion itself is
+ * done), the list on show leaves the item out, unless `current` says the page has moved on, and `state` says the list
+ * could not be refreshed: "The `what` could not be refreshed. Choose Refresh `what` to try again." */
+export async function rereadAfterDelete<T extends { id: string }>(
+  list: Section<T[]>,
+  id: string,
+  reread: () => Promise<unknown>,
+  current: () => boolean,
+  state: ActionState,
+  what: { list: string; refresh: string },
+): Promise<void> {
+  try {
+    await reread();
+  } catch (error) {
+    const value = list.value();
+    if (value && current()) list.set(value.filter((item) => item.id !== id));
+    state.error.set(
+      `The ${what.list} could not be refreshed. ${messageOf(error, `Choose ${what.refresh} to try again.`)}`,
+    );
   }
 }

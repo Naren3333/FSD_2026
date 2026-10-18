@@ -391,8 +391,11 @@ func (s server) submit(w http.ResponseWriter, r *http.Request) {
 		platform.Error(w, http.StatusUnprocessableEntity, "SUBMISSION_TOO_LARGE", "These answers are too long to submit together. Shorten the longest ones and try again.")
 		return
 	}
-	inserted, err := s.store.insertSubmission(r.Context(), v, sub)
+	inserted, late, err := s.store.insertSubmission(r.Context(), v, sub)
 	switch {
+	case errors.Is(err, errClosed):
+		closed(w) // the teacher changed the due date or late policy meanwhile
+		return
 	case errors.Is(err, errAccountDeleted):
 		platform.Forbidden(w, "This account was deleted.")
 		return
@@ -410,7 +413,7 @@ func (s server) submit(w http.ResponseWriter, r *http.Request) {
 		alreadySubmitted(w)
 		return
 	}
-	platform.JSON(w, http.StatusCreated, map[string]any{"id": sub.ID, "status": "submitted", "late": sub.Late})
+	platform.JSON(w, http.StatusCreated, map[string]any{"id": sub.ID, "status": "submitted", "late": late})
 }
 
 func assessmentChanged(w http.ResponseWriter) {
@@ -452,6 +455,10 @@ func (s server) save(w http.ResponseWriter, r *http.Request) {
 		Answers map[string]string `json:"answers"`
 	}
 	if !platform.Decode(w, r, &input) {
+		return
+	}
+	if !answersCurrent(v, input.Answers) {
+		assessmentChanged(w) // work on questions the teacher has since replaced, as for a submission
 		return
 	}
 	if input.Answers == nil || !validateSaved(v, input.Answers) {

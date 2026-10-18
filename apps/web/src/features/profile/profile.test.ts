@@ -37,16 +37,30 @@ const student: Profile = {
   display_name: 'Ada L',
 };
 
-/** The Profile page for this user, whose deletion answers as `remove` does. */
+/** The Profile page for this user, whose deletion answers as `remove` does. `rooms` is the user's classrooms, or
+ * where loading them stands. */
 function render(
   profile: Profile,
-  rooms: Classroom[] = [],
+  rooms: Classroom[] | 'loading' | 'failed' = [],
   remove = () => Promise.resolve(),
   unsaved = false,
 ) {
   const logout = vi.fn(() => Promise.resolve());
   const deleteAccount = vi.fn(remove);
   const current = signal(profile);
+  const known = Array.isArray(rooms);
+  const context = {
+    classrooms: signal(known ? rooms : []),
+    known: signal(known),
+    loading: signal(rooms === 'loading'),
+    error: signal(rooms === 'failed' ? 'Identity is unavailable.' : ''),
+    refresh: vi.fn(() => {
+      context.classrooms.set([]);
+      context.known.set(true);
+      context.error.set('');
+      return Promise.resolve();
+    }),
+  };
   TestBed.resetTestingModule();
   TestBed.configureTestingModule({
     providers: [
@@ -60,7 +74,7 @@ function render(
         },
       },
       { provide: IdentityApi, useValue: { deleteAccount } },
-      { provide: ClassroomContext, useValue: { classrooms: signal(rooms) } },
+      { provide: ClassroomContext, useValue: context },
       { provide: UnsavedChanges, useValue: { any: () => unsaved } },
     ],
   });
@@ -79,7 +93,7 @@ function render(
     await new Promise((resolve) => setTimeout(resolve));
     fixture.detectChanges();
   };
-  return { root, button, settle, logout, deleteAccount, fixture };
+  return { root, button, settle, logout, deleteAccount, fixture, context };
 }
 
 describe('the Profile page', () => {
@@ -118,6 +132,28 @@ describe('the Profile page', () => {
     expect(page.button('Delete account').disabled).toBe(true);
     expect(page.button('Delete account').getAttribute('aria-describedby')).toBe('delete-account-blocked');
     expect(render(teacher).button('Delete account').disabled).toBe(false);
+  });
+
+  it("waits for a teacher's classrooms before offering deletion", () => {
+    const teacher: Profile = { ...student, role: 'teacher' };
+    const page = render(teacher, 'loading');
+    expect(page.root.textContent).toContain('Checking your classrooms');
+    expect(page.button('Delete account').disabled).toBe(true);
+    expect(page.button('Delete account').getAttribute('aria-describedby')).toBe('delete-account-blocked');
+    // A student has no classrooms of their own to wait for.
+    expect(render(student, 'loading').button('Delete account').disabled).toBe(false);
+  });
+
+  it("says when a teacher's classrooms failed to load and lets them try again", async () => {
+    const teacher: Profile = { ...student, role: 'teacher' };
+    const page = render(teacher, 'failed');
+    expect(page.root.textContent).toContain('Your classrooms could not be loaded');
+    expect(page.root.textContent).toContain('Identity is unavailable.');
+    expect(page.button('Delete account').disabled).toBe(true);
+    page.button('Try again').click();
+    await page.settle();
+    expect(page.context.refresh).toHaveBeenCalledOnce();
+    expect(page.button('Delete account').disabled).toBe(false);
   });
 
   it('opens no dialog while another page has unsaved work', () => {

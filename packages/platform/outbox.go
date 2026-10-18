@@ -212,3 +212,12 @@ func pruneOutbox(ctx context.Context, db *pgxpool.Pool, retention time.Duration)
 	tag, err := db.Exec(ctx, "DELETE FROM outbox WHERE id IN (SELECT id FROM outbox WHERE published_at<now()-make_interval(secs=>$1) LIMIT 1000)", retention.Seconds())
 	return tag.RowsAffected(), err
 }
+
+// DiscardPendingBy removes, inside tx, the outbox rows of the events of org whose topic matches topics (a LIKE
+// pattern, "%" for every topic) and whose data names value as key, published or not: those not yet published never
+// are, and nothing deleted for good stays behind in the outbox. Like the purge it is part of, it scans the matching
+// topics' rows, which deletions are rare enough to afford.
+func DiscardPendingBy(ctx context.Context, tx pgx.Tx, topics, key, value, org string) error {
+	_, err := tx.Exec(ctx, "DELETE FROM outbox WHERE topic LIKE $1 AND body->'data'->>$2::text=$3::text AND body->'data'->>'org_id'=$4", topics, key, value, org)
+	return err
+}

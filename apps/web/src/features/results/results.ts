@@ -5,7 +5,7 @@ import { ClassroomContext, onClassroomChange } from '../../core/classroom-contex
 import { CurriculumNames } from '../../core/curriculum-names';
 import { date } from '../../shared/format';
 import { MarksPipe } from '../../shared/marks';
-import { assessmentsOf, promptOf } from '../../shared/names';
+import { EvidenceNames, assessmentsOf } from '../../shared/names';
 import { Section } from '../../shared/section';
 import { SectionStateComponent } from '../../shared/section-state';
 
@@ -29,6 +29,10 @@ export class ResultsComponent {
   private readonly curriculum = inject(CurriculumNames);
   readonly classroomId = inject(ClassroomContext).classroomId;
   readonly results = new Section<Results>();
+  readonly names = new EvidenceNames(
+    () => this.results.value()?.assessments,
+    (id) => this.curriculum.topicName(id),
+  );
 
   constructor() {
     onClassroomChange(() => this.load());
@@ -49,19 +53,6 @@ export class ResultsComponent {
     });
   }
 
-  title(result: Evaluation): string {
-    return this.results.value()?.assessments.get(result.assessment_id)?.title ?? 'Assessment';
-  }
-  prompt(result: Evaluation, evidence: Evidence): string {
-    return promptOf(
-      this.results.value()?.assessments ?? new Map(),
-      result.assessment_id,
-      evidence.question_id,
-    );
-  }
-  topic(evidence: Evidence): string {
-    return this.curriculum.topicName(evidence.topic_id);
-  }
   outcome(evidence: Evidence): string {
     if (evidence.correct) return 'Correct';
     return evidence.awarded > 0 ? 'Part marks' : 'Incorrect';

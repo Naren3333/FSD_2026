@@ -5,8 +5,20 @@ import (
 	"io/fs"
 	"time"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
+
+// ExecAll runs the statements in order inside tx, each with the same arguments, and stops at the first that fails.
+// A purge deletes what it holds for a classroom, assessment or user this way, statement by statement.
+func ExecAll(ctx context.Context, tx pgx.Tx, statements []string, args ...any) error {
+	for _, sql := range statements {
+		if _, err := tx.Exec(ctx, sql, args...); err != nil {
+			return err
+		}
+	}
+	return nil
+}
 
 // OpenDB connects to url and applies the service's numbered migrations (migrations/NNN_name.sql in the given file
 // system, normally an embed.FS) plus bootstrap, under an advisory lock, before returning the pool.

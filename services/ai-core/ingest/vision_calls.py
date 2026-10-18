@@ -83,7 +83,7 @@ def _read(path: Path) -> dict | None:
     except FileNotFoundError:
         return None
     except ValueError:
-        log.warning("unreadable cache entry %s: asking again", path.name)
+        log.warning("vision_cache_entry_unreadable", extra={"path": path.name})
         return None
     return answer if isinstance(answer, dict) else None
 

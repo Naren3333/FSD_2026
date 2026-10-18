@@ -1,7 +1,7 @@
 import { Component, DestroyRef, ViewChild, computed, inject, signal } from '@angular/core';
 import { FormControl, FormGroup, ReactiveFormsModule } from '@angular/forms';
 import { AssessmentApi, GradingApi, IdentityApi } from '../../api/clients';
-import type { Assessment, AssessmentSummary, Evaluation, Evidence, Question } from '../../api/models';
+import type { Assessment, AssessmentSummary, Evaluation, Evidence } from '../../api/models';
 import { ClassroomContext, onClassroomChange } from '../../core/classroom-context';
 import { CurriculumNames } from '../../core/curriculum-names';
 import { UnsavedChanges } from '../../core/unsaved-changes';
@@ -10,7 +10,7 @@ import { ConfirmDialogComponent } from '../../shared/confirm-dialog';
 import { FieldComponent, FieldControlDirective } from '../../shared/field';
 import { dateTime } from '../../shared/format';
 import { MarksPipe } from '../../shared/marks';
-import { assessmentsOf, promptOf, studentNames } from '../../shared/names';
+import { EvidenceNames, assessmentsOf, studentNames } from '../../shared/names';
 import { Section } from '../../shared/section';
 import { SectionStateComponent } from '../../shared/section-state';
 import { StatusComponent } from '../../shared/status';
@@ -61,6 +61,10 @@ export class ReviewComponent {
   /** Releasing an assessment's results, in its confirmation dialog. */
   readonly releaseState = new ActionState();
   readonly grades = new Section<Grades>();
+  readonly names = new EvidenceNames(
+    () => this.grades.value()?.assessments,
+    (id) => this.curriculum.topicName(id),
+  );
   /** The classroom's published assessments, to choose one to mark. */
   readonly published = new Section<AssessmentSummary[]>();
   readonly filter = new FormControl('', { nonNullable: true });
@@ -138,21 +142,6 @@ export class ReviewComponent {
   studentName(grade: Evaluation): string {
     return this.grades.value()?.students.get(grade.student_id) ?? '';
   }
-  title(grade: Evaluation): string {
-    return this.grades.value()?.assessments.get(grade.assessment_id)?.title ?? '';
-  }
-  prompt(grade: Evaluation, evidence: Evidence): string {
-    return promptOf(this.grades.value()?.assessments ?? new Map(), grade.assessment_id, evidence.question_id);
-  }
-  question(grade: Evaluation, evidence: Evidence): Question | undefined {
-    return this.grades
-      .value()
-      ?.assessments.get(grade.assessment_id)
-      ?.questions.find((q) => q.id === evidence.question_id);
-  }
-  topic(evidence: Evidence): string {
-    return this.curriculum.topicName(evidence.topic_id);
-  }
   toMark(grade: Evaluation): number {
     return grade.evidence.filter((e) => e.needs_marking).length;
   }
@@ -192,7 +181,9 @@ export class ReviewComponent {
   }
 
   levelName(grade: Evaluation, evidence: Evidence, criterionId: string, points: number): string {
-    const criterion = this.question(grade, evidence)?.rubric?.criteria.find((c) => c.id === criterionId);
+    const criterion = this.names
+      .question(grade, evidence)
+      ?.rubric?.criteria.find((c) => c.id === criterionId);
     const level = criterion?.levels.find((l) => l.points === points);
     return `${criterion?.title ?? 'Criterion'}: ${points} (${level?.descriptor ?? 'level'})`;
   }

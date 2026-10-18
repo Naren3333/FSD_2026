@@ -290,7 +290,7 @@ async def _see_page(
             for i, t in enumerate(tables)
         ]
     except Exception as e:  # never fail the ingest over vision
-        log.warning("vision failed for %s, falling back to lines: %s", page, e)
+        log.warning("vision_failed_using_lines", extra={"page": str(page), "error": str(e)})
         return None if transcript is None else PageVision(transcript=transcript)
     if models.figure:
         # each one scans the whole document's text: off the event loop
@@ -325,7 +325,7 @@ async def _transcribed_page(page: PageRef, model: str) -> tuple[SeenText, ...] |
             "ocr",
         )
     except Exception as e:
-        log.warning("%s not transcribed: %s", page, e)
+        log.warning("page_not_transcribed", extra={"page": str(page), "error": str(e)})
         return None
     return tuple(b for d in items(raw.get("blocks")) if isinstance(d, dict) and (b := SeenText.from_json(d)))
 
@@ -367,7 +367,7 @@ async def _described(
             "describe",
         )
     except Exception as e:
-        log.warning("figure %d on %s not described: %s", i + 1, page, e)
+        log.warning("figure_not_described", extra={"figure": i + 1, "page": str(page), "error": str(e)})
         return f
     description = " ".join(str(raw.get("description") or "").split())
     if raw.get("useful") is False or not description:

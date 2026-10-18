@@ -11,8 +11,8 @@ import (
 
 // agedBucket is the fixture's objects, each written at the time given for it, or long ago.
 type agedBucket struct {
-	store    *memoryStore
-	modified map[string]time.Time
+	store   *memoryStore
+	written map[string]time.Time
 }
 
 func (b agedBucket) list(context.Context) ([]storedObject, error) {
@@ -20,13 +20,25 @@ func (b agedBucket) list(context.Context) ([]storedObject, error) {
 	defer b.store.mu.Unlock()
 	objects := []storedObject{}
 	for key := range b.store.objects {
-		at, ok := b.modified[key]
+		at, ok := b.written[key]
 		if !ok {
 			at = time.Now().Add(-24 * time.Hour)
 		}
 		objects = append(objects, storedObject{key, at})
 	}
 	return objects, nil
+}
+
+func (b agedBucket) modified(_ context.Context, key string) (time.Time, bool, error) {
+	b.store.mu.Lock()
+	defer b.store.mu.Unlock()
+	if _, ok := b.store.objects[key]; !ok {
+		return time.Time{}, false, nil
+	}
+	if at, ok := b.written[key]; ok {
+		return at, true, nil
+	}
+	return time.Now().Add(-24 * time.Hour), true, nil
 }
 
 func (b agedBucket) remove(_ context.Context, key string) error {
@@ -77,5 +89,36 @@ func TestTheSweeperRemovesOnlyObjectsNoRowNames(t *testing.T) {
 	}
 	if again, err := (sweeper{f.db, b}).sweep(ctx, time.Now().Add(-sweepGrace)); err != nil || again != 0 {
 		t.Fatalf("a second sweep removed %d, %v", again, err)
+	}
+}
+
+// restoredBucket is an agedBucket where a reindex stores the objects in restored again after the sweeper listed them.
+type restoredBucket struct {
+	agedBucket
+	restored []string
+}
+
+func (b restoredBucket) list(ctx context.Context) ([]storedObject, error) {
+	objects, err := b.agedBucket.list(ctx)
+	for _, key := range b.restored {
+		b.written[key] = time.Now()
+	}
+	return objects, err
+}
+
+// A crop stored again between the sweeper's listing and its removal is kept: the reindex that stored it may cite it.
+func TestTheSweeperKeepsACropStoredAgainMeanwhile(t *testing.T) {
+	f := newFixture(t)
+	ctx := context.Background()
+	indexed := f.upload("teaching_material")
+	f.runAll()
+	crop, gone := f.org+"/"+indexed+"/figures/aaaaaaaaaaaaaaaa.png", f.org+"/"+indexed+"/figures/bbbbbbbbbbbbbbbb.png"
+	for _, key := range []string{crop, gone} {
+		f.store.put(ctx, key, []byte("x"), mimePNG)
+	}
+	b := restoredBucket{agedBucket{f.store, map[string]time.Time{}}, []string{crop}}
+	removed, err := sweeper{f.db, b}.sweep(ctx, time.Now().Add(-sweepGrace))
+	if err != nil || removed != 1 || !slices.Contains(f.keys(), crop) || slices.Contains(f.keys(), gone) {
+		t.Fatalf("removed %d, %v; left %v", removed, err, f.keys())
 	}
 }

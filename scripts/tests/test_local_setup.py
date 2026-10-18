@@ -7,8 +7,10 @@ import subprocess
 from pathlib import Path
 
 import bootstrap
+import httpx
 import local_stack
 import pytest
+import setup
 import upgrade_local
 import wait_ready
 from setup import generate_secrets
@@ -106,3 +108,62 @@ def test_psql_json_keeps_tabs_and_line_breaks(monkeypatch: pytest.MonkeyPatch) -
     rows = local_stack.psql_json("SELECT title FROM documents")
     assert rows == [{"title": "Week 1\tintro\nPart 2", "ids": ["a", "b"], "tokens": None}]
     assert seen == ["SELECT coalesce(json_agg(r), '[]') FROM (SELECT title FROM documents) r"]
+
+
+class FakeKeycloak:
+    """The parts of the learning realm's admin API that upgrade_local uses: clients by clientId, their service
+    accounts, and role mappings (which Keycloak keeps as a set, so a repeated mapping changes nothing)."""
+
+    def __init__(self, clients: set[str]) -> None:
+        self.clients = {name: f"id-{name}" for name in {*clients, setup.ACCOUNTS_ROLE[0]}}
+        self.created: list[str] = []
+        self.mappings: set[tuple[str, str]] = set()
+
+    def handle(self, request: httpx.Request) -> httpx.Response:
+        path, method = request.url.path, request.method
+        if path == "/clients" and method == "GET":
+            name = request.url.params["clientId"]
+            found = [{"id": self.clients[name], "clientId": name}] if name in self.clients else []
+            return httpx.Response(200, json=found)
+        if path == "/clients" and method == "POST":
+            name = json.loads(request.content)["clientId"]
+            self.clients[name] = f"id-{name}"
+            self.created.append(name)
+            return httpx.Response(201)
+        if path.endswith("/service-account-user"):
+            return httpx.Response(200, json={"id": "account-" + path.split("/")[2]})
+        if method == "GET" and "/roles/" in path:
+            return httpx.Response(200, json={"name": path.rsplit("/", 1)[1]})
+        if method == "POST" and "/role-mappings/" in path:
+            for role in json.loads(request.content):
+                self.mappings.add((path.split("/")[2], role["name"]))
+            return httpx.Response(204)
+        return httpx.Response(404, text=f"unexpected {method} {path}")
+
+    def admin(self) -> httpx.Client:
+        return httpx.Client(base_url="http://keycloak.test", transport=httpx.MockTransport(self.handle))
+
+
+def test_upgrade_assigns_the_accounts_role_after_a_half_finished_run(monkeypatch: pytest.MonkeyPatch) -> None:
+    """An earlier run created identity-accounts and stopped before giving its service account manage-users: the
+    next run assigns it without creating the client again."""
+    keycloak = FakeKeycloak({setup.ACCOUNTS_CLIENT})
+    monkeypatch.setattr(upgrade_local, "admin_client", keycloak.admin)
+    upgrade_local.add_missing_accounts_client(generate_secrets())
+    assert keycloak.created == []
+    assert keycloak.mappings == {(f"account-id-{setup.ACCOUNTS_CLIENT}", setup.ACCOUNTS_ROLE[1])}
+    # A fresh Keycloak gets the client and the role; running again changes nothing.
+    keycloak = FakeKeycloak(set())
+    monkeypatch.setattr(upgrade_local, "admin_client", keycloak.admin)
+    upgrade_local.add_missing_accounts_client(generate_secrets())
+    upgrade_local.add_missing_accounts_client(generate_secrets())
+    assert keycloak.created == [setup.ACCOUNTS_CLIENT]
+    assert keycloak.mappings == {(f"account-id-{setup.ACCOUNTS_CLIENT}", setup.ACCOUNTS_ROLE[1])}
+
+
+def test_upgrade_assigns_the_ai_client_role_to_existing_clients(monkeypatch: pytest.MonkeyPatch) -> None:
+    keycloak = FakeKeycloak({setup.AI_CLIENTS[0]})
+    monkeypatch.setattr(upgrade_local, "admin_client", keycloak.admin)
+    upgrade_local.add_missing_clients(generate_secrets())
+    assert keycloak.created == setup.AI_CLIENTS[1:]
+    assert keycloak.mappings == {(f"account-id-{client}", "ai-client") for client in setup.AI_CLIENTS}

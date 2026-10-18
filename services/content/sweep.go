@@ -27,6 +27,8 @@ type storedObject struct {
 // bucket is what sweeping needs from object storage.
 type bucket interface {
 	list(ctx context.Context) ([]storedObject, error)
+	// modified is when the object was last written, with exists false once it is gone.
+	modified(ctx context.Context, key string) (at time.Time, exists bool, err error)
 	remove(ctx context.Context, key string) error
 }
 
@@ -83,17 +85,26 @@ func (s sweeper) sweep(ctx context.Context, cutoff time.Time) (int, error) {
 	if err != nil {
 		return 0, err
 	}
-	return s.removeUnowned(ctx, old, owners)
+	return s.removeUnowned(ctx, old, owners, cutoff)
 }
 
 // removeUnowned removes the keys, grouped by document id, that their document's row does not keep, and reports how
-// many it removed before any failure.
-func (s sweeper) removeUnowned(ctx context.Context, old map[string][]string, owners map[string]owner) (int, error) {
+// many it removed before any failure. Each is looked at again just before it goes: a reindex that started after the
+// rows were read may have stored the same crop again (a crop's key is its content's hash), and one written since
+// cutoff is left for a later sweep to judge.
+func (s sweeper) removeUnowned(ctx context.Context, old map[string][]string, owners map[string]owner, cutoff time.Time) (int, error) {
 	removed := 0
 	for id, keys := range old {
 		o, owned := owners[id]
 		for _, key := range keys {
 			if owned && o.keeps(key) {
+				continue
+			}
+			at, exists, err := s.files.modified(ctx, key)
+			if err != nil {
+				return removed, err
+			}
+			if !exists || !at.Before(cutoff) {
 				continue
 			}
 			if err := s.files.remove(ctx, key); err != nil {

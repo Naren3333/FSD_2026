@@ -116,6 +116,10 @@ func (m *memoryStore) listStudents(_ context.Context, classroom string) ([]Stude
 	return result, nil
 }
 
+func (m *memoryStore) listStudentIDs(_ context.Context, classroom string) ([]string, error) {
+	return append([]string{}, m.enrolled[classroom]...), nil
+}
+
 func (m *memoryStore) deleteClassroom(_ context.Context, classroom, _ string) error {
 	delete(m.owners, classroom)
 	delete(m.enrolled, classroom)
@@ -154,18 +158,31 @@ func call(t *testing.T, store store, method, path, body, subject string, roles .
 	return platformtest.Serve(server{store: store}.routes, method, path, body, subject, roles...)
 }
 
+// step is one request of a scenario, by subject with the space-separated roles, and the answer it expects: its
+// status and, when want is set, a part of the body.
+type step struct {
+	name, method, path, body, subject, roles string
+	status                                   int
+	want                                     string
+}
+
+// run sends the steps in order to the same store and stops at the first answer that is not the one expected.
+func run(t *testing.T, store store, steps ...step) {
+	t.Helper()
+	for _, s := range steps {
+		if w := call(t, store, s.method, s.path, s.body, s.subject, strings.Fields(s.roles)...); w.Code != s.status || !strings.Contains(w.Body.String(), s.want) {
+			t.Fatalf("%s: %d %s", s.name, w.Code, w.Body.String())
+		}
+	}
+}
+
 func TestRegisterRecordsOneRole(t *testing.T) {
 	store := newMemoryStore()
-	if w := call(t, store, http.MethodPost, "/v1/me", "", "new-teacher", "teacher"); w.Code != http.StatusOK {
-		t.Fatalf("status %d", w.Code)
-	}
-	if w := call(t, store, http.MethodPost, "/v1/me", "", "service"); w.Code != http.StatusForbidden {
-		t.Fatalf("a caller without a person role registered: %d", w.Code)
-	}
-	w := call(t, store, http.MethodPost, "/v1/me", "", "dual", "student", "teacher")
-	if w.Code != http.StatusForbidden || !strings.Contains(w.Body.String(), "ROLE_CONFLICT") {
-		t.Fatalf("an account with both roles registered: %d %s", w.Code, w.Body.String())
-	}
+	run(t, store,
+		step{"register", http.MethodPost, "/v1/me", "", "new-teacher", "teacher", http.StatusOK, ""},
+		step{"a caller without a person role registered", http.MethodPost, "/v1/me", "", "service", "", http.StatusForbidden, ""},
+		step{"an account with both roles registered", http.MethodPost, "/v1/me", "", "dual", "student teacher", http.StatusForbidden, "ROLE_CONFLICT"},
+	)
 	if len(store.registered) != 1 || store.registered[0] != "new-teacher:teacher::" {
 		t.Fatalf("registered %v", store.registered)
 	}
@@ -173,18 +190,14 @@ func TestRegisterRecordsOneRole(t *testing.T) {
 
 func TestARegisteredRoleNeverChanges(t *testing.T) {
 	store := newMemoryStore()
-	for _, tc := range []struct{ subject, role string }{{"student-1", "teacher"}, {"teacher-1", "student"}} {
-		w := call(t, store, http.MethodPost, "/v1/me", "", tc.subject, tc.role)
-		if w.Code != http.StatusConflict || !strings.Contains(w.Body.String(), "ROLE_CONFLICT") {
-			t.Fatalf("%s signed in as %s: %d %s", tc.subject, tc.role, w.Code, w.Body.String())
-		}
-	}
+	run(t, store,
+		step{"a student signed in as a teacher", http.MethodPost, "/v1/me", "", "student-1", "teacher", http.StatusConflict, "ROLE_CONFLICT"},
+		step{"a teacher signed in as a student", http.MethodPost, "/v1/me", "", "teacher-1", "student", http.StatusConflict, "ROLE_CONFLICT"},
+	)
 	if store.roles["student-1"] != "student" || store.roles["teacher-1"] != "teacher" || len(store.registered) != 0 {
 		t.Fatalf("roles changed: %v %v", store.roles, store.registered)
 	}
-	if w := call(t, store, http.MethodPost, "/v1/me", "", "student-1", "student"); w.Code != http.StatusOK {
-		t.Fatalf("a student signing in again: %d", w.Code)
-	}
+	run(t, store, step{"a student signing in again", http.MethodPost, "/v1/me", "", "student-1", "student", http.StatusOK, ""})
 }
 
 func TestAccessAnswersTheRelation(t *testing.T) {
@@ -208,33 +221,22 @@ func TestAccessAnswersTheRelation(t *testing.T) {
 }
 
 func TestCreateValidatesTheName(t *testing.T) {
-	store := newMemoryStore()
-	if w := call(t, store, http.MethodPost, "/v1/classrooms", `{"name":"  "}`, "teacher-1", "teacher"); w.Code != http.StatusUnprocessableEntity {
-		t.Fatalf("blank name: %d", w.Code)
-	}
-	if w := call(t, store, http.MethodPost, "/v1/classrooms", `{"name":"Year 5"}`, "student-1", "student"); w.Code != http.StatusForbidden {
-		t.Fatalf("student created a classroom: %d", w.Code)
-	}
-	if w := call(t, store, http.MethodPost, "/v1/classrooms", `{"name":" Year 5 "}`, "teacher-1", "teacher"); w.Code != http.StatusCreated || !strings.Contains(w.Body.String(), `"name":"Year 5"`) {
-		t.Fatalf("%d %s", w.Code, w.Body.String())
-	}
-	// The limit counts characters, not bytes.
-	if w := call(t, store, http.MethodPost, "/v1/classrooms", `{"name":"`+strings.Repeat("é", maxName)+`"}`, "teacher-1", "teacher"); w.Code != http.StatusCreated {
-		t.Fatalf("%d characters: %d", maxName, w.Code)
-	}
-	if w := call(t, store, http.MethodPost, "/v1/classrooms", `{"name":"`+strings.Repeat("é", maxName+1)+`"}`, "teacher-1", "teacher"); w.Code != http.StatusUnprocessableEntity {
-		t.Fatalf("%d characters: %d", maxName+1, w.Code)
-	}
+	named := func(name string) string { return `{"name":"` + name + `"}` }
+	run(t, newMemoryStore(),
+		step{"blank name", http.MethodPost, "/v1/classrooms", named("  "), "teacher-1", "teacher", http.StatusUnprocessableEntity, ""},
+		step{"student created a classroom", http.MethodPost, "/v1/classrooms", named("Year 5"), "student-1", "student", http.StatusForbidden, ""},
+		step{"create", http.MethodPost, "/v1/classrooms", named(" Year 5 "), "teacher-1", "teacher", http.StatusCreated, `"name":"Year 5"`},
+		// The limit counts characters, not bytes.
+		step{"the most characters", http.MethodPost, "/v1/classrooms", named(strings.Repeat("é", maxName)), "teacher-1", "teacher", http.StatusCreated, ""},
+		step{"one character more", http.MethodPost, "/v1/classrooms", named(strings.Repeat("é", maxName+1)), "teacher-1", "teacher", http.StatusUnprocessableEntity, ""},
+	)
 }
 
 func TestCreateTellsAMissingProfileFromAFailure(t *testing.T) {
-	store := newMemoryStore()
-	if w := call(t, store, http.MethodPost, "/v1/classrooms", `{"name":"Year 5"}`, "teacher-9", "teacher"); w.Code != http.StatusConflict || !strings.Contains(w.Body.String(), "PROFILE_REQUIRED") {
-		t.Fatalf("unregistered teacher: %d %s", w.Code, w.Body.String())
-	}
-	if w := call(t, store, http.MethodPost, "/v1/classrooms", `{"name":"db down"}`, "teacher-1", "teacher"); w.Code != http.StatusInternalServerError {
-		t.Fatalf("database failure: %d", w.Code)
-	}
+	run(t, newMemoryStore(),
+		step{"unregistered teacher", http.MethodPost, "/v1/classrooms", `{"name":"Year 5"}`, "teacher-9", "teacher", http.StatusConflict, "PROFILE_REQUIRED"},
+		step{"database failure", http.MethodPost, "/v1/classrooms", `{"name":"db down"}`, "teacher-1", "teacher", http.StatusInternalServerError, ""},
+	)
 }
 
 func TestTeachersCannotBeEnrolled(t *testing.T) {
@@ -253,15 +255,11 @@ func TestTeachersCannotBeEnrolled(t *testing.T) {
 func TestOnlyTheOwnerEnrollsKnownStudents(t *testing.T) {
 	store := newMemoryStore()
 	path := "/v1/classrooms/" + room + "/enrollments"
-	if w := call(t, store, http.MethodPost, path, `{"student_id":"student-2"}`, "teacher-2", "teacher"); w.Code != http.StatusForbidden {
-		t.Fatalf("another teacher enrolled: %d", w.Code)
-	}
-	if w := call(t, store, http.MethodPost, path, `{"student_id":"stranger"}`, "teacher-1", "teacher"); w.Code != http.StatusUnprocessableEntity {
-		t.Fatalf("unknown student: %d", w.Code)
-	}
-	if w := call(t, store, http.MethodPost, path, `{"student_id":"student-2"}`, "teacher-1", "teacher"); w.Code != http.StatusOK {
-		t.Fatalf("status %d", w.Code)
-	}
+	run(t, store,
+		step{"another teacher enrolled", http.MethodPost, path, `{"student_id":"student-2"}`, "teacher-2", "teacher", http.StatusForbidden, ""},
+		step{"unknown student", http.MethodPost, path, `{"student_id":"stranger"}`, "teacher-1", "teacher", http.StatusUnprocessableEntity, ""},
+		step{"enroll", http.MethodPost, path, `{"student_id":"student-2"}`, "teacher-1", "teacher", http.StatusOK, ""},
+	)
 	if enrolled, _ := store.isEnrolled(context.Background(), room, "student-2"); !enrolled {
 		t.Fatal("student-2 was not enrolled")
 	}
@@ -300,49 +298,36 @@ func TestEnrollByUsername(t *testing.T) {
 
 func TestOnlyTheOwnerSeesTheRosterAndRemovesStudents(t *testing.T) {
 	store := newMemoryStore()
-	roster := "/v1/classrooms/" + room + "/students"
-	if w := call(t, store, http.MethodGet, roster, "", "student-1", "student"); w.Code != http.StatusForbidden {
-		t.Fatalf("a student read the roster: %d", w.Code)
-	}
-	if w := call(t, store, http.MethodGet, roster, "", "teacher-2", "teacher"); w.Code != http.StatusForbidden {
-		t.Fatalf("another teacher read the roster: %d", w.Code)
-	}
-	if w := call(t, store, http.MethodGet, roster, "", "teacher-1", "teacher"); w.Code != http.StatusOK || !strings.Contains(w.Body.String(), `"username":"ada"`) {
-		t.Fatalf("%d %s", w.Code, w.Body.String())
-	}
+	roster, ids := "/v1/classrooms/"+room+"/students", "/v1/classrooms/"+room+"/student-ids"
 	remove := "/v1/classrooms/" + room + "/enrollments/student-1"
-	if w := call(t, store, http.MethodDelete, remove, "", "teacher-2", "teacher"); w.Code != http.StatusForbidden {
-		t.Fatalf("another teacher removed a student: %d", w.Code)
-	}
-	if w := call(t, store, http.MethodDelete, remove, "", "teacher-1", "teacher"); w.Code != http.StatusOK {
-		t.Fatalf("status %d", w.Code)
-	}
+	run(t, store,
+		step{"a student read the roster", http.MethodGet, roster, "", "student-1", "student", http.StatusForbidden, ""},
+		step{"another teacher read the roster", http.MethodGet, roster, "", "teacher-2", "teacher", http.StatusForbidden, ""},
+		step{"roster", http.MethodGet, roster, "", "teacher-1", "teacher", http.StatusOK, `"username":"ada"`},
+		step{"a student read the roster's ids", http.MethodGet, ids, "", "student-1", "student", http.StatusForbidden, ""},
+		step{"another teacher read the roster's ids", http.MethodGet, ids, "", "teacher-2", "teacher", http.StatusForbidden, ""},
+		step{"roster ids", http.MethodGet, ids, "", "teacher-1", "teacher", http.StatusOK, `["student-1"]`},
+		step{"another teacher removed a student", http.MethodDelete, remove, "", "teacher-2", "teacher", http.StatusForbidden, ""},
+		step{"remove", http.MethodDelete, remove, "", "teacher-1", "teacher", http.StatusOK, ""},
+		step{"removing twice", http.MethodDelete, remove, "", "teacher-1", "teacher", http.StatusNotFound, ""},
+		step{"roster ids after the removal", http.MethodGet, ids, "", "teacher-1", "teacher", http.StatusOK, `[]`},
+	)
 	if enrolled, _ := store.isEnrolled(context.Background(), room, "student-1"); enrolled {
 		t.Fatal("student-1 is still enrolled")
-	}
-	if w := call(t, store, http.MethodDelete, remove, "", "teacher-1", "teacher"); w.Code != http.StatusNotFound {
-		t.Fatalf("removing twice: %d", w.Code)
 	}
 }
 
 func TestOnlyTheOwnerDeletesAClassroom(t *testing.T) {
 	store := newMemoryStore()
 	path := "/v1/classrooms/" + room
-	if w := call(t, store, http.MethodDelete, path, "", "student-1", "student"); w.Code != http.StatusForbidden {
-		t.Fatalf("a student deleted the classroom: %d", w.Code)
-	}
-	if w := call(t, store, http.MethodDelete, path, "", "teacher-2", "teacher"); w.Code != http.StatusForbidden {
-		t.Fatalf("another teacher deleted the classroom: %d", w.Code)
-	}
-	if w := call(t, store, http.MethodDelete, path, "", "teacher-1", "teacher"); w.Code != http.StatusOK {
-		t.Fatalf("status %d", w.Code)
-	}
-	// Once deleted, nobody has access, including its teacher and its students.
-	for _, caller := range [][2]string{{"teacher-1", "teacher"}, {"student-1", "student"}} {
-		if w := call(t, store, http.MethodGet, path+"/access", "", caller[0], caller[1]); w.Code != http.StatusForbidden {
-			t.Errorf("%s still has access: %d", caller[0], w.Code)
-		}
-	}
+	run(t, store,
+		step{"a student deleted the classroom", http.MethodDelete, path, "", "student-1", "student", http.StatusForbidden, ""},
+		step{"another teacher deleted the classroom", http.MethodDelete, path, "", "teacher-2", "teacher", http.StatusForbidden, ""},
+		step{"delete", http.MethodDelete, path, "", "teacher-1", "teacher", http.StatusOK, ""},
+		// Once deleted, nobody has access, including its teacher and its students.
+		step{"its teacher still has access", http.MethodGet, path + "/access", "", "teacher-1", "teacher", http.StatusForbidden, ""},
+		step{"its student still has access", http.MethodGet, path + "/access", "", "student-1", "student", http.StatusForbidden, ""},
+	)
 	if enrolled, _ := store.isEnrolled(context.Background(), room, "student-1"); enrolled {
 		t.Error("student-1 is still enrolled in the deleted classroom")
 	}
@@ -353,9 +338,7 @@ func TestOnlyTheOwnerDeletesAClassroom(t *testing.T) {
 
 func TestOnlyTeachersListTheSchoolsStudents(t *testing.T) {
 	store := newMemoryStore()
-	if w := call(t, store, http.MethodGet, "/v1/students", "", "student-1", "student"); w.Code != http.StatusForbidden {
-		t.Fatalf("a student listed every student: %d", w.Code)
-	}
+	run(t, store, step{"a student listed every student", http.MethodGet, "/v1/students", "", "student-1", "student", http.StatusForbidden, ""})
 	cases := []struct {
 		query, want string
 		status      int
@@ -382,17 +365,12 @@ func TestUsersDeleteOnlyTheirOwnAccount(t *testing.T) {
 	student, teacher := "0b0e1f2a-3b4c-4d5e-8f60-718293a4b5c6", "1c1f2a3b-4c5d-4e6f-9071-8293a4b5c6d7"
 	store.roles[student], store.roles[teacher] = "student", "teacher"
 	store.owners[room] = teacher
-	if w := call(t, store, http.MethodDelete, "/v1/me", "", teacher, "teacher"); w.Code != http.StatusConflict || !strings.Contains(w.Body.String(), "OWNS_CLASSROOMS") {
-		t.Fatalf("a teacher with a classroom deleted their account: %d %s", w.Code, w.Body.String())
-	}
-	if w := call(t, store, http.MethodDelete, "/v1/me", "", student, "student"); w.Code != http.StatusNoContent {
-		t.Fatalf("status %d %s", w.Code, w.Body.String())
-	}
-	for _, again := range []string{student, "not-a-uuid"} {
-		if w := call(t, store, http.MethodDelete, "/v1/me", "", again, "student"); w.Code != http.StatusNotFound {
-			t.Fatalf("%s: status %d", again, w.Code)
-		}
-	}
+	run(t, store,
+		step{"a teacher with a classroom deleted their account", http.MethodDelete, "/v1/me", "", teacher, "teacher", http.StatusConflict, "OWNS_CLASSROOMS"},
+		step{"delete", http.MethodDelete, "/v1/me", "", student, "student", http.StatusNoContent, ""},
+		step{"delete again", http.MethodDelete, "/v1/me", "", student, "student", http.StatusNotFound, ""},
+		step{"a malformed account id", http.MethodDelete, "/v1/me", "", "not-a-uuid", "student", http.StatusNotFound, ""},
+	)
 	if len(store.deleted) != 1 || store.deleted[0] != student || store.roles["student-1"] != "student" {
 		t.Fatalf("deleted %v", store.deleted)
 	}

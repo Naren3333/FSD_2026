@@ -120,8 +120,11 @@ type Summary struct {
 	LatePolicy string     `json:"late_policy"`
 	Questions  int        `json:"question_count"`
 	Points     int        `json:"points"`
-	// Submissions is how many students have submitted it, for the classroom's teacher only.
+	// Submissions is how many of the enrolled students have submitted it, for the classroom's teacher only.
 	Submissions *int `json:"submissions,omitempty"`
+	// HasSubmissions is whether any student has submitted it, students since removed included, for the classroom's
+	// teacher only: once one has, it can no longer be replaced, and deleting it deletes their work (ADR 0008).
+	HasSubmissions *bool `json:"has_submissions,omitempty"`
 }
 
 // Details are what a teacher may change after students have submitted: nothing their grades depend on.
@@ -303,10 +306,7 @@ func sameTime(a, b *time.Time) bool {
 // sameMarking reports whether a and b have the same questions and marking settings: whether answers to one are
 // graded as answers to the other.
 func sameMarking(a, b Assessment) bool {
-	x, err1 := json.Marshal(a.Questions)
-	y, err2 := json.Marshal(b.Questions)
-	return a.Status == b.Status && a.ReleasePolicy == b.ReleasePolicy && a.AIMarking == b.AIMarking &&
-		err1 == nil && err2 == nil && string(x) == string(y)
+	return a.Status == b.Status && a.ReleasePolicy == b.ReleasePolicy && a.AIMarking == b.AIMarking && sameJSON(a.Questions, b.Questions)
 }
 
 // keepQuestionIDs gives each of v's questions that is unchanged from one of before's the id it had, so the work
@@ -326,7 +326,7 @@ func (v *Assessment) keepQuestionIDs(before []Question) {
 }
 
 // sameJSON compares questions as stored, so an empty list and a missing one are alike where the JSON omits both.
-func sameJSON(a, b Question) bool {
+func sameJSON(a, b any) bool {
 	x, err1 := json.Marshal(a)
 	y, err2 := json.Marshal(b)
 	return err1 == nil && err2 == nil && string(x) == string(y)

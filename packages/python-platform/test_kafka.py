@@ -1,6 +1,8 @@
+import json
 import threading
 from collections.abc import Callable
 from typing import Any
+from uuid import uuid4
 
 import pytest
 
@@ -129,3 +131,39 @@ def test_a_handler_that_recovers_is_committed_once(monkeypatch: Any) -> None:
     progressed, broker, _ = session(monkeypatch, handle, [b"first"])
     assert progressed
     assert broker.log == ["commit first"]
+
+
+def identity_event(event_type: str, resource: str, data: dict[str, Any]) -> bytes:
+    return json.dumps(
+        {
+            "event_id": str(uuid4()),
+            "event_type": event_type,
+            "schema_version": 1,
+            "timestamp": "2026-10-14T00:00:00Z",
+            "correlation_id": str(uuid4()),
+            "resource_id": resource,
+            "data": data,
+        }
+    ).encode()
+
+
+def test_identity_deletions_parse_or_are_dead_lettered() -> None:
+    room, user = str(uuid4()), str(uuid4())
+    classroom = {"classroom_id": room, "org_id": "o1"}
+    deleted = kafka.parse(
+        kafka.ClassroomDeletedEvent, identity_event(kafka.CLASSROOM_DELETED, room, classroom)
+    )
+    assert deleted is not None and str(deleted.data.classroom_id) == room
+    assert (
+        kafka.parse(kafka.ClassroomDeletedEvent, identity_event(kafka.CLASSROOM_DELETED, user, classroom))
+        is None
+    )
+    assert (
+        kafka.parse(kafka.ClassroomDeletedEvent, identity_event(kafka.USER_DELETED, room, classroom)) is None
+    )
+    account = {"user_id": user, "org_id": "o1", "role": "student"}
+    gone = kafka.parse(kafka.UserDeletedEvent, identity_event(kafka.USER_DELETED, user, account))
+    assert gone is not None and gone.data.role == "student"
+    assert kafka.parse(kafka.UserDeletedEvent, identity_event(kafka.USER_DELETED, room, account)) is None
+    admin = {**account, "role": "admin"}
+    assert kafka.parse(kafka.UserDeletedEvent, identity_event(kafka.USER_DELETED, user, admin)) is None

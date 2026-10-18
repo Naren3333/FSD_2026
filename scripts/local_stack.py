@@ -63,6 +63,16 @@ def require_test_stack(*, dev: bool) -> None:
             "This creates and deletes data, so it runs against the disposable test stack: "
             "python scripts/stack_tests.py. Pass --dev to run it against the development stack instead."
         )
+    # The HTTP calls go to these ports, read when this module loads: the test project name alone would send psql to
+    # the test stack but requests to the development stack's Kong and Keycloak.
+    published = {"KONG_PORT": KONG_PORT, "KEYCLOAK_PORT": KEYCLOAK_PORT}
+    wrong = [f"{name}={port}" for name, port in published.items() if port != TEST_PORTS[name]]
+    if wrong:
+        raise SystemExit(
+            f"COMPOSE_PROJECT_NAME is {TEST_PROJECT}, but {', '.join(wrong)} is not the test stack's port "
+            f"({', '.join(f'{name}={TEST_PORTS[name]}' for name in published)}). "
+            "Run it through python scripts/stack_tests.py."
+        )
     running = subprocess.run(
         ["docker", "compose", "ps", "--status", "running", "--quiet", "postgres"],
         cwd=ROOT,

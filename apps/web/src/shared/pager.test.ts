@@ -24,7 +24,7 @@ function render(page: number, total: number, disabled = false) {
   fixture.detectChanges();
   const root = fixture.nativeElement as HTMLElement;
   const went: number[] = [];
-  fixture.componentInstance.go.subscribe((p) => went.push(p));
+  fixture.componentInstance.go.subscribe(() => went.push(fixture.componentInstance.page));
   const button = (name: string) =>
     [...root.querySelectorAll('button')].find((b) => b.textContent?.trim() === name) as HTMLButtonElement;
   return { root, button, went };

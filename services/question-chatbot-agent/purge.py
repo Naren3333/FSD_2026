@@ -10,36 +10,26 @@ from uuid import UUID
 
 from learning_transport import Contract
 from learning_transport.db import LOCK_CLASSROOM, LOCK_USER, lock
-from learning_transport.kafka import Envelope, consume, parse
+from learning_transport.kafka import (
+    CLASSROOM_DELETED,
+    USER_DELETED,
+    ClassroomDeletedEvent,
+    Envelope,
+    UserDeletedEvent,
+    consume,
+    parse,
+)
 from psycopg_pool import ConnectionPool
 from pydantic import Field, model_validator
 
 from store import LOCK_DOCUMENT
 
-TOPIC = "identity.classroom.deleted.v1"
 DOCUMENT_DELETED = "content.deleted.v1"
-USER_DELETED = "identity.user.deleted.v1"
 GROUP = "question-chatbot-agent-v1"
 # Blanks every citation of the document in one message's citations (%s: the document id), keeping their order.
 REDACT = """(SELECT jsonb_agg(CASE WHEN c->>'document_id' = %s
     THEN c || '{"content": "", "image": null, "removed": true}'::jsonb ELSE c END ORDER BY n)
     FROM jsonb_array_elements(citations) WITH ORDINALITY AS e(c, n))"""
-
-
-class ClassroomDeleted(Contract):
-    classroom_id: UUID
-    org_id: str = Field(min_length=1)
-
-
-class ClassroomDeletedEvent(Envelope):
-    event_type: Literal["identity.classroom.deleted.v1"]
-    data: ClassroomDeleted
-
-    @model_validator(mode="after")
-    def deleted(self) -> "ClassroomDeletedEvent":
-        if self.resource_id != self.data.classroom_id:
-            raise ValueError("Not this classroom's deletion")
-        return self
 
 
 class DocumentDeleted(Contract):
@@ -56,23 +46,6 @@ class DocumentDeletedEvent(Envelope):
     def deleted(self) -> "DocumentDeletedEvent":
         if self.resource_id != self.data.document_id:
             raise ValueError("Not this document's deletion")
-        return self
-
-
-class UserDeleted(Contract):
-    user_id: UUID
-    org_id: str = Field(min_length=1)
-    role: Literal["teacher", "student"]
-
-
-class UserDeletedEvent(Envelope):
-    event_type: Literal["identity.user.deleted.v1"]
-    data: UserDeleted
-
-    @model_validator(mode="after")
-    def deleted(self) -> "UserDeletedEvent":
-        if self.resource_id != self.data.user_id:
-            raise ValueError("Not this user's deletion")
         return self
 
 
@@ -151,7 +124,7 @@ def handle(pool: ConnectionPool[Any], topic: str, value: bytes | None) -> bool:
 def run(pool: ConnectionPool[Any], stop: threading.Event, connected: threading.Event) -> None:
     consume(
         GROUP,
-        [TOPIC, DOCUMENT_DELETED, USER_DELETED],
+        [CLASSROOM_DELETED, DOCUMENT_DELETED, USER_DELETED],
         lambda topic, value: handle(pool, topic, value),
         stop,
         connected,

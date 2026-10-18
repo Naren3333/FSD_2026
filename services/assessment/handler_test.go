@@ -3,7 +3,6 @@ package main
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"learning/platform"
 	"learning/platform/platformtest"
 	"net/http"
@@ -127,13 +126,16 @@ func (m *memoryStore) listAssessments(_ context.Context, _, _, student string, a
 			_, done := m.submitted[v.ID+"/"+student]
 			summary := Summary{ID: v.ID, Title: v.Title, Submitted: done, Status: v.Status, DueAt: v.DueAt}
 			if all {
-				n := 0
+				n, has := 0, false
 				for key := range m.submitted {
-					if strings.HasPrefix(key, v.ID+"/") && slices.Contains(enrolled, strings.TrimPrefix(key, v.ID+"/")) {
-						n++
+					if student, ok := strings.CutPrefix(key, v.ID+"/"); ok {
+						has = true
+						if slices.Contains(enrolled, student) {
+							n++
+						}
 					}
 				}
-				summary.Submissions = &n
+				summary.Submissions, summary.HasSubmissions = &n, &has
 			}
 			result = append(result, summary)
 		}
@@ -155,22 +157,25 @@ func (m *memoryStore) listProgress(_ context.Context, _, _ string, enrolled []st
 	return result, nil
 }
 
-func (m *memoryStore) insertSubmission(_ context.Context, v Assessment, sub Submission) (bool, error) {
+func (m *memoryStore) insertSubmission(_ context.Context, v Assessment, sub Submission) (bool, bool, error) {
 	current, ok := m.assessments[v.ID]
-	if !ok {
-		return false, platform.ErrNotFound
-	}
-	if !sameMarking(current, v) {
-		return false, errAssessmentChanged
+	switch {
+	case !ok:
+		return false, false, platform.ErrNotFound
+	case !sameMarking(current, v):
+		return false, false, errAssessmentChanged
+	case current.closed(sub.SubmittedAt):
+		return false, false, errClosed
 	}
 	key := v.ID + "/" + sub.Student
 	if _, done := m.submitted[key]; done {
-		return false, nil
+		return false, false, nil
 	}
+	sub.Late = current.late(sub.SubmittedAt)
 	m.submitted[key] = sub
 	m.events = append(m.events, submittedEvent(v, sub))
 	delete(m.saved, key)
-	return true, nil
+	return true, sub.Late, nil
 }
 
 func (m *memoryStore) findSaved(_ context.Context, assessment, student string) (SavedAnswers, error) {
@@ -206,6 +211,27 @@ func newServer(relation string, topicAnswer topicStatus) (server, *memoryStore) 
 func call(t *testing.T, s server, method, path, body string, roles ...string) *httptest.ResponseRecorder {
 	t.Helper()
 	return platformtest.Serve(s.routes, method, path, body, "user", roles...)
+}
+
+// step is one request of a scenario, sent to s with the caller's role, and the answer it expects: its status and, when
+// set, a part of the body it has (want) or must not have (absent).
+type step struct {
+	name                     string
+	s                        server
+	method, path, body, role string
+	status                   int
+	want, absent             string
+}
+
+// run sends the steps in order and stops at the first answer that is not the one expected.
+func run(t *testing.T, steps ...step) {
+	t.Helper()
+	for _, st := range steps {
+		w := call(t, st.s, st.method, st.path, st.body, st.role)
+		if w.Code != st.status || !strings.Contains(w.Body.String(), st.want) || (st.absent != "" && strings.Contains(w.Body.String(), st.absent)) {
+			t.Fatalf("%s: %d %s", st.name, w.Code, w.Body.String())
+		}
+	}
 }
 
 const quiz = `{"classroom_id":"` + room + `","title":"Fractions","questions":[{"prompt":"1/2 + 1/2?","type":"numerical","options":[],"answer":"1","tolerance":"0","topic_id":"` + topic + `"}]}`
@@ -245,72 +271,47 @@ func TestEachStudentSubmitsOnce(t *testing.T) {
 	s, v := created(t, platform.RelationStudent)
 	path := "/v1/assessments/" + v.ID + "/submissions"
 	body := `{"answers":{"` + v.Questions[0].ID + `":"1"}}`
-	if w := call(t, s, http.MethodPost, path, body, "student"); w.Code != http.StatusCreated {
-		t.Fatalf("status %d %s", w.Code, w.Body.String())
-	}
-	if w := call(t, s, http.MethodPost, path, body, "student"); w.Code != http.StatusConflict {
-		t.Fatalf("second submission: %d", w.Code)
-	}
-	if w := call(t, s, http.MethodPost, path, body, "teacher"); w.Code != http.StatusForbidden {
-		t.Fatalf("a teacher submitted: %d", w.Code)
-	}
+	run(t,
+		step{"submit", s, http.MethodPost, path, body, "student", http.StatusCreated, "", ""},
+		step{"second submission", s, http.MethodPost, path, body, "student", http.StatusConflict, "", ""},
+		step{"a teacher submitted", s, http.MethodPost, path, body, "teacher", http.StatusForbidden, "", ""},
+	)
 }
 
 func TestOnlyTheTeacherSeesSubmissionCounts(t *testing.T) {
 	s, v := created(t, platform.RelationStudent)
-	path := "/v1/assessments/" + v.ID + "/submissions"
-	if w := call(t, s, http.MethodPost, path, `{"answers":{"`+v.Questions[0].ID+`":"1"}}`, "student"); w.Code != http.StatusCreated {
-		t.Fatalf("status %d", w.Code)
-	}
-	progress := "/v1/assessments/progress?classroom_id=" + room
-	if w := call(t, s, http.MethodGet, progress, "", "student"); w.Code != http.StatusForbidden {
-		t.Fatalf("a student saw submission counts: %d", w.Code)
-	}
-	s.access = platformtest.Access(platform.RelationTeacher)
-	w := call(t, s, http.MethodGet, progress, "", "teacher")
-	if w.Code != http.StatusOK || !strings.Contains(w.Body.String(), `"submissions":1`) {
-		t.Fatalf("%d %s", w.Code, w.Body.String())
-	}
-	// Once the student is removed from the classroom, their kept submission is not counted.
-	s.roster = platformtest.Roster{}
-	for _, path := range []string{progress, "/v1/assessments?classroom_id=" + room} {
-		if w = call(t, s, http.MethodGet, path, "", "teacher"); w.Code != http.StatusOK || !strings.Contains(w.Body.String(), `"submissions":0`) {
-			t.Fatalf("%s after removal: %d %s", path, w.Code, w.Body.String())
-		}
-	}
+	progress, list := "/v1/assessments/progress?classroom_id="+room, "/v1/assessments?classroom_id="+room
+	teacher := s
+	teacher.access = platformtest.Access(platform.RelationTeacher)
+	// Once the student is removed from the classroom, their kept submission is not counted, though the list still
+	// says one was made.
+	removed := teacher
+	removed.roster = platformtest.Roster{}
+	run(t,
+		step{"submit", s, http.MethodPost, "/v1/assessments/" + v.ID + "/submissions", `{"answers":{"` + v.Questions[0].ID + `":"1"}}`, "student", http.StatusCreated, "", ""},
+		step{"a student saw submission counts", s, http.MethodGet, progress, "", "student", http.StatusForbidden, "", ""},
+		step{"progress", teacher, http.MethodGet, progress, "", "teacher", http.StatusOK, `"submissions":1`, ""},
+		step{"progress after removal", removed, http.MethodGet, progress, "", "teacher", http.StatusOK, `"submissions":0`, ""},
+		step{"list after removal", removed, http.MethodGet, list, "", "teacher", http.StatusOK, `"submissions":0,"has_submissions":true`, ""},
+	)
 }
 
 func TestTheListSaysWhetherTheStudentSubmitted(t *testing.T) {
 	s, v := created(t, platform.RelationStudent)
 	list := "/v1/assessments?classroom_id=" + room
-	if w := call(t, s, http.MethodGet, list, "", "student"); !strings.Contains(w.Body.String(), `"submitted":false`) {
-		t.Fatalf("%d %s", w.Code, w.Body.String())
-	}
-	path := "/v1/assessments/" + v.ID + "/submissions"
-	if w := call(t, s, http.MethodPost, path, `{"answers":{"`+v.Questions[0].ID+`":"1"}}`, "student"); w.Code != http.StatusCreated {
-		t.Fatalf("status %d", w.Code)
-	}
-	if w := call(t, s, http.MethodGet, list, "", "student"); !strings.Contains(w.Body.String(), `"submitted":true`) {
-		t.Fatalf("%d %s", w.Code, w.Body.String())
-	}
-}
-
-// The decoder is tested in platform; this checks purge refuses before touching the database (tx is nil).
-func TestPurgeRejectsMalformedDeletions(t *testing.T) {
-	event := platform.Event{Resource: room, Data: json.RawMessage(`{"classroom_id":"` + room + `","org_id":""}`)}
-	var invalid platform.InvalidEvent
-	if !errors.As(purge(context.Background(), nil, event), &invalid) {
-		t.Fatal("a malformed deletion was not rejected")
-	}
+	run(t,
+		step{"before", s, http.MethodGet, list, "", "student", http.StatusOK, `"submitted":false`, ""},
+		step{"submit", s, http.MethodPost, "/v1/assessments/" + v.ID + "/submissions", `{"answers":{"` + v.Questions[0].ID + `":"1"}}`, "student", http.StatusCreated, "", ""},
+		step{"after", s, http.MethodGet, list, "", "student", http.StatusOK, `"submitted":true`, ""},
+	)
 }
 
 func TestAMalformedOrUnknownAssessmentIsNotFound(t *testing.T) {
 	s, _ := newServer(platform.RelationTeacher, topicValid)
-	for _, id := range []string{"not-a-uuid", room} {
-		if w := call(t, s, http.MethodGet, "/v1/assessments/"+id, "", "teacher"); w.Code != http.StatusNotFound {
-			t.Errorf("%s: %d", id, w.Code)
-		}
-	}
+	run(t,
+		step{"malformed", s, http.MethodGet, "/v1/assessments/not-a-uuid", "", "teacher", http.StatusNotFound, "", ""},
+		step{"unknown", s, http.MethodGet, "/v1/assessments/" + room, "", "teacher", http.StatusNotFound, "", ""},
+	)
 }
 
 const draftQuiz = `{"classroom_id":"` + room + `","title":"Draft","status":"draft","questions":[{"prompt":"1/2 + 1/2?","type":"numerical","options":[],"answer":"1","tolerance":"0","topic_id":"` + topic + `"}]}`
@@ -326,37 +327,20 @@ func TestADraftIsTheTeachersUntilPublished(t *testing.T) {
 	list := "/v1/assessments?classroom_id=" + room
 	student := s
 	student.access = platformtest.Access(platform.RelationStudent)
-	if w = call(t, student, http.MethodGet, path, "", "student"); w.Code != http.StatusNotFound {
-		t.Fatalf("a student opened a draft: %d", w.Code)
-	}
-	if w = call(t, student, http.MethodGet, list, "", "student"); strings.Contains(w.Body.String(), v.ID) {
-		t.Fatalf("a student listed a draft: %s", w.Body.String())
-	}
-	if w = call(t, s, http.MethodGet, list, "", "teacher"); !strings.Contains(w.Body.String(), `"status":"draft"`) {
-		t.Fatalf("the teacher did not list the draft: %s", w.Body.String())
-	}
 	edited := strings.Replace(draftQuiz, `"Draft"`, `"Edited"`, 1)
-	if w = call(t, student, http.MethodPut, path, edited, "student"); w.Code != http.StatusForbidden {
-		t.Fatalf("a student edited a draft: %d", w.Code)
-	}
 	moved := strings.Replace(edited, room, topic, 1)
-	if w = call(t, s, http.MethodPut, path, moved, "teacher"); w.Code != http.StatusUnprocessableEntity {
-		t.Fatalf("a draft moved classroom: %d", w.Code)
-	}
-	if w = call(t, s, http.MethodPut, path, edited, "teacher"); w.Code != http.StatusOK || !strings.Contains(w.Body.String(), `"title":"Edited"`) {
-		t.Fatalf("edit: %d %s", w.Code, w.Body.String())
-	}
-	if w = call(t, s, http.MethodPost, path+"/publish", "", "teacher"); w.Code != http.StatusOK || !strings.Contains(w.Body.String(), `"status":"published"`) {
-		t.Fatalf("publish: %d %s", w.Code, w.Body.String())
-	}
-	if w = call(t, student, http.MethodGet, path, "", "student"); w.Code != http.StatusOK {
-		t.Fatalf("a student could not open it once published: %d", w.Code)
-	}
-	for _, tc := range []struct{ method, path, body string }{{http.MethodPut, path, edited}, {http.MethodPost, path + "/publish", ""}} {
-		if w = call(t, s, tc.method, tc.path, tc.body, "teacher"); w.Code != http.StatusConflict {
-			t.Errorf("%s %s once published: %d", tc.method, tc.path, w.Code)
-		}
-	}
+	run(t,
+		step{"a student opened a draft", student, http.MethodGet, path, "", "student", http.StatusNotFound, "", ""},
+		step{"a student listed a draft", student, http.MethodGet, list, "", "student", http.StatusOK, "", v.ID},
+		step{"the teacher did not list the draft", s, http.MethodGet, list, "", "teacher", http.StatusOK, `"status":"draft"`, ""},
+		step{"a student edited a draft", student, http.MethodPut, path, edited, "student", http.StatusForbidden, "", ""},
+		step{"a draft moved classroom", s, http.MethodPut, path, moved, "teacher", http.StatusUnprocessableEntity, "", ""},
+		step{"edit", s, http.MethodPut, path, edited, "teacher", http.StatusOK, `"title":"Edited"`, ""},
+		step{"publish", s, http.MethodPost, path + "/publish", "", "teacher", http.StatusOK, `"status":"published"`, ""},
+		step{"a student could not open it once published", student, http.MethodGet, path, "", "student", http.StatusOK, "", ""},
+		step{"edited back to a draft once published", s, http.MethodPut, path, edited, "teacher", http.StatusConflict, "", ""},
+		step{"published again", s, http.MethodPost, path + "/publish", "", "teacher", http.StatusConflict, "", ""},
+	)
 }
 
 // twoQuestions is a published assessment of two questions, as a teacher would send it again with changes.
@@ -392,30 +376,24 @@ func TestAPublishedAssessmentChangesUntilAStudentSubmits(t *testing.T) {
 	if got.Questions[0].ID != first || got.Questions[1].ID == second {
 		t.Fatalf("question ids: %s %s, were %s %s", got.Questions[0].ID, got.Questions[1].ID, first, second)
 	}
-	w = call(t, student, http.MethodGet, path+"/saved-answers", "", "student")
-	if !strings.Contains(w.Body.String(), first) || strings.Contains(w.Body.String(), second) {
-		t.Fatalf("saved work after the edit: %s", w.Body.String())
-	}
-	// A student who opened it before the edit answers the old second question: they are told to open it again.
-	if w = call(t, student, http.MethodPost, path+"/submissions", saved, "student"); w.Code != http.StatusConflict || !strings.Contains(w.Body.String(), "ASSESSMENT_CHANGED") {
-		t.Fatalf("answers to a replaced question: %d %s", w.Code, w.Body.String())
-	}
 	unchanged := strings.Replace(changed, `"status":"published",`, "", 1)
-	if w = call(t, s, http.MethodPut, path, unchanged, "teacher"); w.Code != http.StatusOK || !strings.Contains(w.Body.String(), `"status":"published"`) {
-		t.Fatalf("an edit without a status: %d %s", w.Code, w.Body.String())
-	}
+	run(t,
+		step{"saved work after the edit", student, http.MethodGet, path + "/saved-answers", "", "student", http.StatusOK, first, second},
+		// A student who opened it before the edit answers the old second question: they are told to open it again,
+		// and so is one whose page autosaves work on it.
+		step{"answers to a replaced question", student, http.MethodPost, path + "/submissions", saved, "student", http.StatusConflict, "ASSESSMENT_CHANGED", ""},
+		step{"saved work on a replaced question", student, http.MethodPut, path + "/saved-answers", saved, "student", http.StatusConflict, "ASSESSMENT_CHANGED", ""},
+		step{"an edit without a status", s, http.MethodPut, path, unchanged, "teacher", http.StatusOK, `"status":"published"`, ""},
+	)
 
 	// A student submits: the questions and grading settings are now fixed, and the assessment is kept.
 	got = store.assessments[v.ID]
 	answers := `{"answers":{"` + got.Questions[0].ID + `":"1","` + got.Questions[1].ID + `":"0.5"}}`
-	if w = call(t, student, http.MethodPost, path+"/submissions", answers, "student"); w.Code != http.StatusCreated {
-		t.Fatalf("submit: %d %s", w.Code, w.Body.String())
-	}
-	for _, tc := range []struct{ method, body string }{{http.MethodPut, twoQuestions}, {http.MethodDelete, ""}} {
-		if w = call(t, s, tc.method, path, tc.body, "teacher"); w.Code != http.StatusConflict || !strings.Contains(w.Body.String(), "HAS_SUBMISSIONS") {
-			t.Errorf("%s after a submission: %d %s", tc.method, w.Code, w.Body.String())
-		}
-	}
+	run(t,
+		step{"submit", student, http.MethodPost, path + "/submissions", answers, "student", http.StatusCreated, "", ""},
+		step{"replaced after a submission", s, http.MethodPut, path, twoQuestions, "teacher", http.StatusConflict, "HAS_SUBMISSIONS", ""},
+		step{"deleted after a submission", s, http.MethodDelete, path, "", "teacher", http.StatusConflict, "HAS_SUBMISSIONS", ""},
+	)
 	if !sameMarking(store.assessments[v.ID], got) {
 		t.Fatal("a refused change changed the assessment")
 	}
@@ -423,49 +401,37 @@ func TestAPublishedAssessmentChangesUntilAStudentSubmits(t *testing.T) {
 	// Its details still change: a new title, and a due date that is not already past.
 	due := time.Now().Add(48 * time.Hour).UTC().Truncate(time.Second)
 	details := `{"title":"Halves and quarters","due_at":` + stamp(due) + `,"late_policy":"reject"}`
-	if w = call(t, s, http.MethodPatch, path, details, "teacher"); w.Code != http.StatusOK || !strings.Contains(w.Body.String(), `"title":"Halves and quarters"`) {
-		t.Fatalf("details: %d %s", w.Code, w.Body.String())
-	}
+	run(t, step{"details", s, http.MethodPatch, path, details, "teacher", http.StatusOK, `"title":"Halves and quarters"`, ""})
 	if v := store.assessments[v.ID]; v.DueAt == nil || !v.DueAt.Equal(due) || v.LatePolicy != lateReject || !sameMarking(v, got) {
 		t.Fatalf("details stored: %+v", v)
 	}
 	// Fields left out keep their values.
-	if w = call(t, s, http.MethodPatch, path, `{"title":"Only the title"}`, "teacher"); w.Code != http.StatusOK {
-		t.Fatalf("title only: %d %s", w.Code, w.Body.String())
-	}
+	run(t, step{"title only", s, http.MethodPatch, path, `{"title":"Only the title"}`, "teacher", http.StatusOK, "", ""})
 	if v := store.assessments[v.ID]; v.Title != "Only the title" || v.DueAt == nil || !v.DueAt.Equal(due) || v.LatePolicy != lateReject {
 		t.Fatalf("a title-only change changed the rest: %+v", v)
 	}
 	past := `{"title":"Halves","due_at":` + stamp(time.Now().Add(-time.Hour)) + `}`
-	for name, body := range map[string]string{"a past due date": past, "no title": `{"title":" "}`, "a bad late policy": `{"title":"x","late_policy":"never"}`} {
-		if w = call(t, s, http.MethodPatch, path, body, "teacher"); w.Code != http.StatusUnprocessableEntity {
-			t.Errorf("%s: %d %s", name, w.Code, w.Body.String())
-		}
-	}
-	if w = call(t, student, http.MethodPatch, path, details, "student"); w.Code != http.StatusForbidden {
-		t.Errorf("a student changed the details: %d", w.Code)
-	}
+	run(t,
+		step{"a past due date", s, http.MethodPatch, path, past, "teacher", http.StatusUnprocessableEntity, "", ""},
+		step{"no title", s, http.MethodPatch, path, `{"title":" "}`, "teacher", http.StatusUnprocessableEntity, "", ""},
+		step{"a bad late policy", s, http.MethodPatch, path, `{"title":"x","late_policy":"never"}`, "teacher", http.StatusUnprocessableEntity, "", ""},
+		step{"a student changed the details", student, http.MethodPatch, path, details, "student", http.StatusForbidden, "", ""},
+	)
 }
 
 func TestDeletingASubmittedAssessmentNeedsConfirming(t *testing.T) {
 	s, v := scheduled(t, "")
 	store := s.store.(*memoryStore)
 	path := "/v1/assessments/" + v.ID
-	if w := call(t, s, http.MethodPost, path+"/submissions", `{"answers":{"`+v.Questions[0].ID+`":"1"}}`, "student"); w.Code != http.StatusCreated {
-		t.Fatalf("submit: %d %s", w.Code, w.Body.String())
-	}
-	if w := call(t, s, http.MethodDelete, path+"?with_submissions=true", "", "student"); w.Code != http.StatusForbidden {
-		t.Fatalf("a student deleted it: %d", w.Code)
-	}
-	s.access = platformtest.Access(platform.RelationTeacher)
-	for _, query := range []string{"", "?with_submissions=false"} {
-		if w := call(t, s, http.MethodDelete, path+query, "", "teacher"); w.Code != http.StatusConflict || !strings.Contains(w.Body.String(), "HAS_SUBMISSIONS") {
-			t.Fatalf("%q: %d %s", query, w.Code, w.Body.String())
-		}
-	}
-	if w := call(t, s, http.MethodDelete, path+"?with_submissions=true", "", "teacher"); w.Code != http.StatusOK {
-		t.Fatalf("%d %s", w.Code, w.Body.String())
-	}
+	teacher := s
+	teacher.access = platformtest.Access(platform.RelationTeacher)
+	run(t,
+		step{"submit", s, http.MethodPost, path + "/submissions", `{"answers":{"` + v.Questions[0].ID + `":"1"}}`, "student", http.StatusCreated, "", ""},
+		step{"a student deleted it", s, http.MethodDelete, path + "?with_submissions=true", "", "student", http.StatusForbidden, "", ""},
+		step{"without confirming", teacher, http.MethodDelete, path, "", "teacher", http.StatusConflict, "HAS_SUBMISSIONS", ""},
+		step{"declining", teacher, http.MethodDelete, path + "?with_submissions=false", "", "teacher", http.StatusConflict, "HAS_SUBMISSIONS", ""},
+		step{"confirmed", teacher, http.MethodDelete, path + "?with_submissions=true", "", "teacher", http.StatusOK, "", ""},
+	)
 	if len(store.assessments)+len(store.submitted) != 0 || !slices.Equal(store.deleted, []string{v.ID}) {
 		t.Fatalf("left %v %v, announced %v", store.assessments, store.submitted, store.deleted)
 	}
@@ -473,18 +439,15 @@ func TestDeletingASubmittedAssessmentNeedsConfirming(t *testing.T) {
 
 func TestTheTeacherSeesHowManySubmittedEach(t *testing.T) {
 	s, v := scheduled(t, "")
-	answer := `{"answers":{"` + v.Questions[0].ID + `":"1"}}`
-	if w := call(t, s, http.MethodPost, "/v1/assessments/"+v.ID+"/submissions", answer, "student"); w.Code != http.StatusCreated {
-		t.Fatalf("submit: %d %s", w.Code, w.Body.String())
-	}
 	list := "/v1/assessments?classroom_id=" + room
-	if w := call(t, s, http.MethodGet, list, "", "student"); strings.Contains(w.Body.String(), "submissions") {
-		t.Fatalf("a student saw the submission count: %s", w.Body.String())
-	}
-	s.access = platformtest.Access(platform.RelationTeacher)
-	if w := call(t, s, http.MethodGet, list, "", "teacher"); !strings.Contains(w.Body.String(), `"submissions":1`) {
-		t.Fatalf("the teacher's list: %s", w.Body.String())
-	}
+	teacher := s
+	teacher.access = platformtest.Access(platform.RelationTeacher)
+	run(t,
+		step{"submit", s, http.MethodPost, "/v1/assessments/" + v.ID + "/submissions", `{"answers":{"` + v.Questions[0].ID + `":"1"}}`, "student", http.StatusCreated, "", ""},
+		// "submissions" is also part of "has_submissions".
+		step{"a student saw the submission count", s, http.MethodGet, list, "", "student", http.StatusOK, "", "submissions"},
+		step{"the teacher's list", teacher, http.MethodGet, list, "", "teacher", http.StatusOK, `"submissions":1,"has_submissions":true`, ""},
+	)
 }
 
 func TestAPublishedAssessmentIsDeletedWithItsSavedWork(t *testing.T) {
@@ -529,17 +492,14 @@ func stamp(t time.Time) string { return `"` + t.UTC().Format(time.RFC3339) + `"`
 func TestStudentsWaitForTheOpeningDate(t *testing.T) {
 	opens := time.Now().Add(time.Hour)
 	s, v := scheduled(t, `"opens_at":`+stamp(opens)+`,`)
-	if w := call(t, s, http.MethodGet, "/v1/assessments/"+v.ID, "", "student"); w.Code != http.StatusNotFound {
-		t.Fatalf("opened early: %d", w.Code)
-	}
-	body := `{"answers":{"` + v.Questions[0].ID + `":"1"}}`
-	if w := call(t, s, http.MethodPost, "/v1/assessments/"+v.ID+"/submissions", body, "student"); w.Code != http.StatusNotFound {
-		t.Fatalf("submitted early: %d", w.Code)
-	}
-	s.clock = func() time.Time { return opens.Add(time.Minute) }
-	if w := call(t, s, http.MethodGet, "/v1/assessments/"+v.ID, "", "student"); w.Code != http.StatusOK {
-		t.Fatalf("not open after the opening date: %d", w.Code)
-	}
+	path := "/v1/assessments/" + v.ID
+	later := s
+	later.clock = func() time.Time { return opens.Add(time.Minute) }
+	run(t,
+		step{"opened early", s, http.MethodGet, path, "", "student", http.StatusNotFound, "", ""},
+		step{"submitted early", s, http.MethodPost, path + "/submissions", `{"answers":{"` + v.Questions[0].ID + `":"1"}}`, "student", http.StatusNotFound, "", ""},
+		step{"not open after the opening date", later, http.MethodGet, path, "", "student", http.StatusOK, "", ""},
+	)
 }
 
 func TestLateWorkIsFlaggedOrRefused(t *testing.T) {
@@ -564,28 +524,19 @@ func TestLateWorkIsFlaggedOrRefused(t *testing.T) {
 func TestSavedWorkUntilSubmission(t *testing.T) {
 	s, v := created(t, platform.RelationStudent)
 	path := "/v1/assessments/" + v.ID + "/saved-answers"
-	if w := call(t, s, http.MethodGet, path, "", "student"); w.Code != http.StatusOK || w.Body.String() != `{"answers":{},"saved_at":null}`+"\n" {
-		t.Fatalf("%d %s", w.Code, w.Body.String())
-	}
-	if w := call(t, s, http.MethodPut, path, `{"answers":{"elsewhere":"1"}}`, "student"); w.Code != http.StatusUnprocessableEntity {
-		t.Fatalf("saved an answer to another question: %d", w.Code)
-	}
 	saved := `{"answers":{"` + v.Questions[0].ID + `":"0.5"}}`
-	if w := call(t, s, http.MethodPut, path, saved, "student"); w.Code != http.StatusOK {
-		t.Fatalf("%d %s", w.Code, w.Body.String())
-	}
-	if w := call(t, s, http.MethodGet, path, "", "student"); !strings.Contains(w.Body.String(), `"0.5"`) {
-		t.Fatalf("saved work lost: %s", w.Body.String())
-	}
-	if w := call(t, s, http.MethodPut, path, saved, "teacher"); w.Code != http.StatusForbidden {
-		t.Fatalf("a teacher saved answers: %d", w.Code)
-	}
-	if w := call(t, s, http.MethodPost, "/v1/assessments/"+v.ID+"/submissions", `{"answers":{"`+v.Questions[0].ID+`":"1"}}`, "student"); w.Code != http.StatusCreated {
-		t.Fatalf("%d", w.Code)
-	}
-	if w := call(t, s, http.MethodPut, path, saved, "student"); w.Code != http.StatusConflict {
-		t.Fatalf("saved after submitting: %d", w.Code)
-	}
+	run(t,
+		step{"nothing saved yet", s, http.MethodGet, path, "", "student", http.StatusOK, `{"answers":{},"saved_at":null}`, ""},
+		// An answer to a question it does not have was made against a version the teacher has since changed, as
+		// for a submission.
+		step{"saved an answer to another question", s, http.MethodPut, path, `{"answers":{"elsewhere":"1"}}`, "student", http.StatusConflict, "ASSESSMENT_CHANGED", ""},
+		step{"saved no answers", s, http.MethodPut, path, `{}`, "student", http.StatusUnprocessableEntity, "", ""},
+		step{"save", s, http.MethodPut, path, saved, "student", http.StatusOK, "", ""},
+		step{"saved work lost", s, http.MethodGet, path, "", "student", http.StatusOK, `"0.5"`, ""},
+		step{"a teacher saved answers", s, http.MethodPut, path, saved, "teacher", http.StatusForbidden, "", ""},
+		step{"submit", s, http.MethodPost, "/v1/assessments/" + v.ID + "/submissions", `{"answers":{"` + v.Questions[0].ID + `":"1"}}`, "student", http.StatusCreated, "", ""},
+		step{"saved after submitting", s, http.MethodPut, path, saved, "student", http.StatusConflict, "", ""},
+	)
 }
 
 func TestMissingAnswersAreRefused(t *testing.T) {
@@ -761,12 +712,14 @@ func TestStrangersChangeNothing(t *testing.T) {
 func TestDeletingNeedsAKnownDraftAndItsTeacher(t *testing.T) {
 	s, store := newServer(platform.RelationTeacher, topicValid)
 	draft := post(t, s, draftQuiz)
-	if w := call(t, s, http.MethodDelete, "/v1/assessments/"+room, "", "teacher"); w.Code != http.StatusNotFound {
-		t.Fatalf("unknown id: %d", w.Code)
-	}
-	s.access = platformtest.Access("") // another classroom's teacher
-	if w := call(t, s, http.MethodDelete, "/v1/assessments/"+draft.ID, "", "teacher"); w.Code != http.StatusForbidden || len(store.assessments) != 1 {
-		t.Fatalf("another teacher: %d", w.Code)
+	other := s
+	other.access = platformtest.Access("") // another classroom's teacher
+	run(t,
+		step{"unknown id", s, http.MethodDelete, "/v1/assessments/" + room, "", "teacher", http.StatusNotFound, "", ""},
+		step{"another teacher", other, http.MethodDelete, "/v1/assessments/" + draft.ID, "", "teacher", http.StatusForbidden, "", ""},
+	)
+	if len(store.assessments) != 1 {
+		t.Fatalf("another teacher deleted it: %v", store.assessments)
 	}
 }
 

@@ -108,7 +108,7 @@ func TestAnAssessmentChangesUntilAStudentSubmits(t *testing.T) {
 		t.Fatal(err)
 	}
 	sub := Submission{ID: uuid.NewString(), Org: "org", Student: "s", Answers: map[string]string{got.Questions[0].ID: "4"}, SubmittedAt: time.Now()}
-	if _, err = p.insertSubmission(ctx, got, sub); err != nil {
+	if _, _, err = p.insertSubmission(ctx, got, sub); err != nil {
 		t.Fatal(err)
 	}
 	changed := got
@@ -158,7 +158,7 @@ func TestAnAssessmentIsDeletedWithItsSubmissions(t *testing.T) {
 	v := stored(t, p, "org", statusPublished, nil)
 	for _, student := range []string{"s1", "s2"} {
 		sub := Submission{ID: uuid.NewString(), Org: "org", Student: student, Answers: map[string]string{v.Questions[0].ID: "2"}, SubmittedAt: time.Now()}
-		if _, err := p.insertSubmission(ctx, v, sub); err != nil {
+		if _, _, err := p.insertSubmission(ctx, v, sub); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -169,7 +169,7 @@ func TestAnAssessmentIsDeletedWithItsSubmissions(t *testing.T) {
 		t.Fatal(err)
 	}
 	// An event written as an older version before an upgrade holds answers too.
-	if _, err := p.db.Exec(ctx, `INSERT INTO outbox(id,topic,partition_key,body) VALUES($1::uuid,'assessment.submitted.v3',$1::text,jsonb_build_object('data',jsonb_build_object('assessment_id',$2::text)))`, uuid.NewString(), v.ID); err != nil {
+	if _, err := p.db.Exec(ctx, `INSERT INTO outbox(id,topic,partition_key,body) VALUES($1::uuid,'assessment.submitted.v3',$1::text,jsonb_build_object('data',jsonb_build_object('assessment_id',$2::text,'org_id','org')))`, uuid.NewString(), v.ID); err != nil {
 		t.Fatal(err)
 	}
 	if err := p.deleteAssessment(ctx, "org", v.ID, false); !errors.Is(err, errHasSubmissions) {
@@ -229,13 +229,13 @@ func TestASubmissionIsToTheQuestionsAsTheyAre(t *testing.T) {
 		t.Fatalf("a change made against an older version: %v", err)
 	}
 	sub := Submission{ID: uuid.NewString(), Org: "org", Student: "s", Answers: map[string]string{v.Questions[0].ID: "2"}, SubmittedAt: time.Now()}
-	if _, err := p.insertSubmission(ctx, v, sub); !errors.Is(err, errAssessmentChanged) {
+	if _, _, err := p.insertSubmission(ctx, v, sub); !errors.Is(err, errAssessmentChanged) {
 		t.Fatalf("answers to the old questions: %v", err)
 	}
 	if err := p.deleteAssessment(ctx, "org", v.ID, false); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := p.insertSubmission(ctx, changed, sub); !errors.Is(err, platform.ErrNotFound) {
+	if _, _, err := p.insertSubmission(ctx, changed, sub); !errors.Is(err, platform.ErrNotFound) {
 		t.Fatalf("answers to a deleted assessment: %v", err)
 	}
 
@@ -247,7 +247,7 @@ func TestASubmissionIsToTheQuestionsAsTheyAre(t *testing.T) {
 		sub := Submission{ID: uuid.NewString(), Org: "org", Student: "s", Answers: map[string]string{v.Questions[0].ID: "2"}, SubmittedAt: time.Now()}
 		var wg sync.WaitGroup
 		var submitErr, editErr error
-		wg.Go(func() { _, submitErr = p.insertSubmission(ctx, v, sub) })
+		wg.Go(func() { _, _, submitErr = p.insertSubmission(ctx, v, sub) })
 		wg.Go(func() { editErr = p.updateAssessment(ctx, "org", v, edit) })
 		wg.Wait()
 		submitted := count(t, p, "SELECT count(*) FROM submissions WHERE assessment_id=$1", v.ID) == 1
@@ -273,7 +273,7 @@ func TestStudentsListOnlyWhatIsOpen(t *testing.T) {
 	if err := p.insertAssessment(ctx, "org", elsewhere); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := p.insertSubmission(ctx, open, Submission{ID: uuid.NewString(), Org: "org", Student: "s", Answers: map[string]string{"q": "2"}, SubmittedAt: now}); err != nil {
+	if _, _, err := p.insertSubmission(ctx, open, Submission{ID: uuid.NewString(), Org: "org", Student: "s", Answers: map[string]string{"q": "2"}, SubmittedAt: now}); err != nil {
 		t.Fatal(err)
 	}
 	for all, want := range map[bool]int{false: 2, true: 4} {
@@ -283,14 +283,14 @@ func TestStudentsListOnlyWhatIsOpen(t *testing.T) {
 		}
 		if all {
 			for _, v := range list {
-				if v.Submissions == nil || *v.Submissions != map[bool]int{true: 1, false: 0}[v.ID == open.ID] {
+				if v.Submissions == nil || *v.Submissions != map[bool]int{true: 1, false: 0}[v.ID == open.ID] || v.HasSubmissions == nil || *v.HasSubmissions != (v.ID == open.ID) {
 					t.Errorf("the teacher's count: %+v", v)
 				}
 			}
 			continue
 		}
 		for _, v := range list {
-			if v.Submissions != nil {
+			if v.Submissions != nil || v.HasSubmissions != nil {
 				t.Errorf("a student saw the submission count: %+v", v)
 			}
 		}
@@ -324,6 +324,10 @@ func TestStudentsListOnlyWhatIsOpen(t *testing.T) {
 		if *v.Submissions != 0 {
 			t.Errorf("a removed student counted in the list: %+v", v)
 		}
+		// Their submission still stops a replacement or a plain deletion, which the list says.
+		if *v.HasSubmissions != (v.ID == open.ID) {
+			t.Errorf("has_submissions without the roster: %+v", v)
+		}
 	}
 }
 
@@ -338,7 +342,7 @@ func TestANewDueDateDecidesLatenessAgain(t *testing.T) {
 	}
 	v.DueAt = &past
 	sub := Submission{ID: uuid.NewString(), Org: "org", Student: "s1", Answers: map[string]string{v.Questions[0].ID: "2"}, Late: true, SubmittedAt: time.Now()}
-	if _, err := p.insertSubmission(ctx, v, sub); err != nil {
+	if _, _, err := p.insertSubmission(ctx, v, sub); err != nil {
 		t.Fatal(err)
 	}
 	lateCount := func() int {
@@ -384,7 +388,7 @@ func TestANewDueDateDecidesLatenessAgain(t *testing.T) {
 	}
 	// A submission checked against the old, passed due date is judged against the one stored when it commits.
 	sub = Submission{ID: uuid.NewString(), Org: "org", Student: "s2", Answers: map[string]string{v.Questions[0].ID: "2"}, Late: true, SubmittedAt: time.Now()}
-	if _, err = p.insertSubmission(ctx, v, sub); err != nil {
+	if _, _, err = p.insertSubmission(ctx, v, sub); err != nil {
 		t.Fatal(err)
 	}
 	if lateCount() != 0 {
@@ -396,6 +400,79 @@ func TestANewDueDateDecidesLatenessAgain(t *testing.T) {
 	}
 	if n := count(t, p, "SELECT count(*) FROM outbox WHERE topic=$1 AND partition_key=$2", topicDueChanged, draft.ID); n != 0 {
 		t.Fatal("a draft's due date was announced")
+	}
+}
+
+// A replacement of a published assessment with a new due date is announced like a details change; a draft's is not.
+func TestAReplacementsNewDueDateIsAnnounced(t *testing.T) {
+	p, ctx := testStore(t), context.Background()
+	events := func(id string) int {
+		return count(t, p, "SELECT count(*) FROM outbox WHERE topic=$1 AND partition_key=$2", topicDueChanged, id)
+	}
+	v := stored(t, p, "org", statusPublished, nil)
+	renamed := v
+	renamed.Title = "Renamed"
+	if err := p.updateAssessment(ctx, "org", v, renamed); err != nil || events(v.ID) != 0 {
+		t.Fatalf("a replacement with the same due date: %v, %d events", err, events(v.ID))
+	}
+	due := time.Now().Add(48 * time.Hour).UTC().Truncate(time.Microsecond)
+	later := renamed
+	later.DueAt = &due
+	if err := p.updateAssessment(ctx, "org", renamed, later); err != nil {
+		t.Fatal(err)
+	}
+	var body []byte
+	if err := p.db.QueryRow(ctx, "SELECT body FROM outbox WHERE topic=$1 AND partition_key=$2", topicDueChanged, v.ID).Scan(&body); err != nil {
+		t.Fatal(err)
+	}
+	var event map[string]any
+	if err := json.Unmarshal(body, &event); err != nil {
+		t.Fatal(err)
+	}
+	for _, problem := range conform("event", eventSchema(t, topicDueChanged), event) {
+		t.Error(problem)
+	}
+	data, _ := event["data"].(map[string]any)
+	if data["assessment_id"] != v.ID || data["classroom_id"] != room || data["org_id"] != "org" || data["due_at"] != due.Format(time.RFC3339Nano) {
+		t.Errorf("%v", data)
+	}
+	// One whose replacement fails (another change landed first) announces nothing.
+	stale := v
+	stale.Questions = slices.Clone(v.Questions)
+	stale.Questions[0].Answer = "9"
+	if err := p.updateAssessment(ctx, "org", stale, renamed); !errors.Is(err, errAssessmentChanged) || events(v.ID) != 1 {
+		t.Fatalf("a refused replacement: %v, %d events", err, events(v.ID))
+	}
+	draft := stored(t, p, "org", statusDraft, nil)
+	dated := draft
+	dated.DueAt = &due
+	if err := p.updateAssessment(ctx, "org", draft, dated); err != nil || events(draft.ID) != 0 {
+		t.Fatalf("a draft's replacement: %v, %d events", err, events(draft.ID))
+	}
+}
+
+// A submission is judged against the due date and late policy stored when it commits, which the teacher may have
+// changed since the handler read them, and reports the late flag it stored.
+func TestASubmissionTakesTheLatePolicyAsStored(t *testing.T) {
+	p, ctx := testStore(t), context.Background()
+	v := stored(t, p, "org", statusPublished, nil)
+	past := time.Now().Add(-time.Hour)
+	if err := p.updateDetails(ctx, "org", v.ID, Details{Title: v.Title, DueAt: &past, LatePolicy: lateReject}); err != nil {
+		t.Fatal(err)
+	}
+	sub := Submission{ID: uuid.NewString(), Org: "org", Student: "s", Answers: map[string]string{v.Questions[0].ID: "2"}, SubmittedAt: time.Now()}
+	if _, _, err := p.insertSubmission(ctx, v, sub); !errors.Is(err, errClosed) {
+		t.Fatalf("a submission after late work became refused: %v", err)
+	}
+	if n := count(t, p, "SELECT count(*) FROM submissions WHERE assessment_id=$1", v.ID); n != 0 {
+		t.Fatalf("%d stored", n)
+	}
+	if err := p.updateDetails(ctx, "org", v.ID, Details{Title: v.Title, DueAt: &past, LatePolicy: lateAccept}); err != nil {
+		t.Fatal(err)
+	}
+	inserted, late, err := p.insertSubmission(ctx, v, sub)
+	if err != nil || !inserted || !late || count(t, p, "SELECT count(*) FROM submissions WHERE assessment_id=$1 AND late", v.ID) != 1 {
+		t.Fatalf("inserted %v, late %v, %v", inserted, late, err)
 	}
 }
 
@@ -411,7 +488,7 @@ func TestOneSubmissionOneEvent(t *testing.T) {
 	for i := range 2 {
 		wg.Go(func() {
 			sub := Submission{ID: uuid.NewString(), Org: "org", Student: "s", Answers: map[string]string{v.Questions[0].ID: "2"}, SubmittedAt: time.Now()}
-			inserted[i], errs[i] = p.insertSubmission(ctx, v, sub)
+			inserted[i], _, errs[i] = p.insertSubmission(ctx, v, sub)
 		})
 	}
 	wg.Wait()
@@ -443,7 +520,7 @@ func TestTheOutboxEventMatchesItsContract(t *testing.T) {
 	p, ctx := testStore(t), context.Background()
 	v := stored(t, p, "org", statusPublished, nil)
 	sub := Submission{ID: uuid.NewString(), Org: "org", Student: "s", Answers: map[string]string{v.Questions[0].ID: "2"}, Late: true, SubmittedAt: time.Now()}
-	if _, err := p.insertSubmission(ctx, v, sub); err != nil {
+	if _, _, err := p.insertSubmission(ctx, v, sub); err != nil {
 		t.Fatal(err)
 	}
 	var body []byte
@@ -469,7 +546,7 @@ func TestAFailedEventLeavesNoSubmission(t *testing.T) {
 		t.Fatal(err)
 	}
 	sub := Submission{ID: uuid.NewString(), Org: "org", Student: "s", Answers: map[string]string{v.Questions[0].ID: "2"}, SubmittedAt: time.Now()}
-	if ok, err := p.insertSubmission(ctx, v, sub); ok || err == nil {
+	if ok, _, err := p.insertSubmission(ctx, v, sub); ok || err == nil {
 		t.Fatalf("inserted %v, error %v", ok, err)
 	}
 	if count(t, p, "SELECT count(*) FROM submissions") != 0 || count(t, p, "SELECT count(*) FROM saved_answers") != 1 {
@@ -556,7 +633,7 @@ func TestADeletedAccountsWorkIsPurged(t *testing.T) {
 	gone, kept := uuid.NewString(), uuid.NewString()
 	answers := map[string]string{v.Questions[0].ID: "2"}
 	for _, student := range []string{gone, kept} {
-		if _, err := p.insertSubmission(ctx, v, Submission{ID: uuid.NewString(), Org: "org", Student: student, Answers: answers, SubmittedAt: time.Now()}); err != nil {
+		if _, _, err := p.insertSubmission(ctx, v, Submission{ID: uuid.NewString(), Org: "org", Student: student, Answers: answers, SubmittedAt: time.Now()}); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -589,7 +666,7 @@ func TestADeletedAccountsWorkIsPurged(t *testing.T) {
 			t.Errorf("another student lost %s: %d", what, n)
 		}
 	}
-	if _, err := p.insertSubmission(ctx, other, Submission{ID: uuid.NewString(), Org: "org", Student: gone, Answers: map[string]string{other.Questions[0].ID: "2"}, SubmittedAt: time.Now()}); !errors.Is(err, errAccountDeleted) {
+	if _, _, err := p.insertSubmission(ctx, other, Submission{ID: uuid.NewString(), Org: "org", Student: gone, Answers: map[string]string{other.Questions[0].ID: "2"}, SubmittedAt: time.Now()}); !errors.Is(err, errAccountDeleted) {
 		t.Errorf("a deleted account submitted: %v", err)
 	}
 	if _, err := p.saveAnswers(ctx, other.ID, gone, map[string]string{other.Questions[0].ID: "1"}); !errors.Is(err, errAccountDeleted) {

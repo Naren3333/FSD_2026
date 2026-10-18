@@ -66,7 +66,7 @@
             }
           </h3>
           <p>
-            {{ title(grade) || 'Assessment' }} ·
+            {{ names.title(grade) || 'Assessment' }} ·
             <strong>{{ grade.evidence | marks }}</strong>
             marks
             @if (submittedAt(grade); as when) {
@@ -80,13 +80,13 @@
               <p>
                 <strong>{{ evidence.awarded }} / {{ evidence.possible }}</strong>
                 · {{ outcome(evidence) }} ·
-                @if (prompt(grade, evidence); as text) {
+                @if (names.prompt(grade, evidence); as text) {
                   {{ text }}
                 } @else {
                   Question
                   <span class="identifier">{{ evidence.question_id }}</span>
                 }
-                <span class="caption">Topic: {{ topic(evidence) || 'not in the curriculum' }}</span>
+                <span class="caption">Topic: {{ names.topic(evidence) || 'not in the curriculum' }}</span>
               </p>
             }
           </div>
@@ -109,7 +109,7 @@
                   Question {{ n + 1 }} · {{ evidence.possible }}
                   {{ evidence.possible === 1 ? 'mark' : 'marks' }}
                 </h4>
-                <p>{{ prompt(grade, evidence) || 'Question' }}</p>
+                <p>{{ names.prompt(grade, evidence) || 'Question' }}</p>
                 <p class="caption">Student's answer</p>
                 <p class="answer-text">{{ grade.answers[evidence.question_id] || '(blank)' }}</p>
                 @if (evidence.suggestion; as suggestion) {
@@ -132,7 +132,10 @@
                             Read with {{ suggestion.scheme_passages }} marking
                             {{ suggestion.scheme_passages === 1 ? 'point' : 'points' }}
                           </summary>
-                          @for (excerpt of question(grade, evidence)?.marking_scheme ?? []; track $index) {
+                          @for (
+                            excerpt of names.question(grade, evidence)?.marking_scheme ?? [];
+                            track $index
+                          ) {
                             <p class="passage">{{ excerpt.text }}</p>
                           }
                         </details>
@@ -165,7 +168,7 @@
                     }
                   </div>
                 }
-                @if (question(grade, evidence)?.rubric; as rubric) {
+                @if (names.question(grade, evidence)?.rubric; as rubric) {
                   <div formGroupName="criteria">
                     @for (criterion of rubric.criteria; track criterion.id) {
                       @let group = 'level-' + evidence.question_id + '-' + criterion.id;
@@ -279,7 +282,8 @@
   @if (selected(); as grade) {
     <p>
       <strong>{{ studentName(grade) || grade.student_id }}</strong>
-      · {{ title(grade) || 'Assessment' }} · {{ grade.evidence | marks }} marks before any unsaved changes
+      · {{ names.title(grade) || 'Assessment' }} · {{ grade.evidence | marks }} marks before any unsaved
+      changes
     </p>
   }
   <p>
@@ -287,11 +291,7 @@
     changed.
   </p>
   <form id="finalize-form" novalidate [formGroup]="form" (ngSubmit)="finalize()">
-    <app-field
-      controlId="review-reason"
-      label="Review notes"
-      [invalid]="form.controls.reason.touched && form.controls.reason.invalid"
-    >
+    <app-field controlId="review-reason" label="Review notes" [control]="form.controls.reason">
       <textarea
         appFieldControl
         id="review-reason"

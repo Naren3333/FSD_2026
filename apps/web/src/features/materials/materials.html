@@ -86,11 +86,7 @@
     <section class="panel">
       <h3>Upload a document</h3>
       <form id="upload-form" novalidate [formGroup]="form" (ngSubmit)="upload()">
-        <app-field
-          controlId="document-title"
-          label="Document title"
-          [invalid]="form.controls.title.touched && form.controls.title.invalid"
-        >
+        <app-field controlId="document-title" label="Document title" [control]="form.controls.title">
           <input appFieldControl id="document-title" formControlName="title" maxlength="160" />
         </app-field>
         <app-field

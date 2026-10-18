@@ -55,13 +55,13 @@ class CitationRewriter:
             for label in re.split(r"\s*[,;]\s*", m[1]):
                 chunk_id = self.tag_map.get(label)
                 if chunk_id is None:
-                    log.warning("dropped citation %s: no such source in the prompt", label)
+                    log.warning("citation_dropped_unknown_source", extra={"label": label})
                     continue
                 if chunk_id not in self.cited:
                     self.cited.append(chunk_id)
                 markers.append(f"[doc:{chunk_id}]")
             return "".join(markers)
         if _RANGE.fullmatch(tag):
-            log.warning("dropped citation range %s", tag)
+            log.warning("citation_range_dropped", extra={"tag": tag})
             return ""
         return tag  # e.g. "[S]": tag-like, but not a citation

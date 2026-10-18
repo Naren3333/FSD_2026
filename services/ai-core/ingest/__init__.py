@@ -105,12 +105,14 @@ async def ingest(path: Path, title: str, vision_cfg: VisionConfig | None) -> Ing
     figures = {c.image: crops[c.image] for c in chunks if c.image and c.image in crops}
     chunks = [c if c.image in figures else replace(c, image=None) for c in chunks]
     log.info(
-        "ingest: %d pages (%d OCR), %d chunks (%d tables, %d figures)",
-        len(document.pages),
-        len(document.ocr_pages),
-        len(chunks),
-        sum(1 for c in chunks if c.kind == "table"),
-        sum(1 for c in chunks if c.kind == "figure"),
+        "ingest",
+        extra={
+            "pages": len(document.pages),
+            "ocr_pages": len(document.ocr_pages),
+            "chunks": len(chunks),
+            "tables": sum(1 for c in chunks if c.kind == "table"),
+            "figures": sum(1 for c in chunks if c.kind == "figure"),
+        },
     )
     return IngestResult(
         pages=len(document.pages),

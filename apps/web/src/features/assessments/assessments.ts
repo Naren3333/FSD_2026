@@ -1,6 +1,6 @@
 import { Component, DestroyRef, ViewChild, computed, inject, signal } from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
-import { FormControl, FormGroup, ReactiveFormsModule, Validators, type ValidatorFn } from '@angular/forms';
+import { FormControl, FormGroup, ReactiveFormsModule, type ValidatorFn } from '@angular/forms';
 import { ActivatedRoute } from '@angular/router';
 import type { Subscription } from 'rxjs';
 import { AssessmentApi, ContentApi } from '../../api/clients';
@@ -20,12 +20,13 @@ import { Session } from '../../core/session';
 import { UnsavedChanges } from '../../core/unsaved-changes';
 import { ActionState } from '../../shared/action-state';
 import { ConfirmDialogComponent } from '../../shared/confirm-dialog';
-import { messageOf } from '../../shared/errors';
 import { FieldComponent, FieldControlDirective } from '../../shared/field';
+import { dueState, type DueState } from '../../shared/due';
 import { dateTime, time } from '../../shared/format';
-import { Section } from '../../shared/section';
+import { Section, rereadAfterDelete } from '../../shared/section';
 import { SectionStateComponent } from '../../shared/section-state';
 import { StatusComponent } from '../../shared/status';
+import { requiredText } from '../../shared/validators';
 import {
   MAX_ASSESSMENT_EXCERPTS,
   MAX_CRITERIA,
@@ -33,7 +34,6 @@ import {
   assessmentForm,
   clearForm,
   criterionForm,
-  dueState,
   excerptLabel,
   fillForm,
   markWrittenBy,
@@ -46,7 +46,6 @@ import {
   toDetails,
   untouched,
   usesScheme,
-  type DueState,
   type QuestionForm,
 } from './editor';
 import { QuestionGeneratorComponent } from './generator';
@@ -59,6 +58,10 @@ const SAVE_DELAY = 1500;
 const CHANGED =
   'This assessment changed since you opened it. Open it again to see the current questions; your answers to ' +
   'questions that did not change are kept.';
+/** Why a published assessment's replacement was refused, after which the editor keeps only its details. */
+const LOCKED =
+  'Students have submitted this assessment, so only its title, due date and late policy can change now. Save ' +
+  'again to keep those changes.';
 
 @Component({
   selector: 'app-assessments',
@@ -97,15 +100,21 @@ export class AssessmentsComponent {
   readonly submitted = signal(false);
   /** The assessment the editor is changing; null while it creates a new one. */
   readonly editing = signal<Assessment | null>(null);
-  /** How many students had submitted the assessment being edited when the teacher opened it. */
-  readonly editingSubmissions = signal(0);
+  /** Whether anyone had submitted the assessment being edited when the teacher opened it. */
+  readonly editingSubmitted = signal(false);
   /** Whether the editor changes a published assessment, which stays published. */
   readonly editingPublished = computed(() => this.editing()?.status === 'published');
   /** Whether students have submitted the published assessment being edited, so only its title, due date and late
    * policy can change: its questions and grading settings are what their answers are graded against. */
-  readonly detailsOnly = computed(() => this.editingPublished() && this.editingSubmissions() > 0);
+  readonly detailsOnly = computed(() => this.editingPublished() && this.editingSubmitted());
   /** The assessment waiting for its deletion to be confirmed. */
   readonly deleting = signal<AssessmentSummary | null>(null);
+  /** Whether deleting the assessment waiting for confirmation also deletes submissions and their grades. */
+  readonly deletingSubmitted = computed(() => {
+    const item = this.deleting();
+    return !!item && submittedBy(item);
+  });
+  readonly submittedBy = submittedBy;
   /** The autosave's last outcome, for the student. */
   readonly saveNote = signal('');
   /** Whether the teacher changed the open assessment since the student opened it, so it must be opened again. */
@@ -313,10 +322,11 @@ export class AssessmentsComponent {
         if (detailsOnly) await this.assessmentApi.details(editing.id, toDetails(this.form));
         else await this.assessmentApi.update(editing.id, toAssessment(this.form, classroomId, 'published'));
       } catch (error) {
-        await this.assessments.reload(() => this.assessmentApi.list(classroomId));
-        const submissions = this.assessments.value()?.find((a) => a.id === editing.id)?.submissions ?? 0;
-        if (this.editing()?.id === editing.id) this.lockTo(submissions);
-        throw error;
+        const refused = hasSubmissions(error);
+        await this.assessments.reload(() => this.assessmentApi.list(classroomId)).catch(() => undefined);
+        const now = this.assessments.value()?.find((a) => a.id === editing.id);
+        if (this.editing()?.id === editing.id && (refused || (now && submittedBy(now)))) this.lockTo(true);
+        throw refused ? new Error(LOCKED) : error;
       }
       this.cancelEdit();
       await this.assessments.reload(() => this.assessmentApi.list(classroomId));
@@ -347,15 +357,15 @@ export class AssessmentsComponent {
       }
       this.editing.set(assessment);
       this.typesChanged();
-      this.lockTo(item.submissions ?? 0);
+      this.lockTo(submittedBy(item));
       this.focusLater('assessment-title');
     });
   }
 
-  /** Records how many students have submitted the assessment being edited and, once any has, disables everything
-   * but its details, so the form checks and sends only those. */
-  private lockTo(submissions: number): void {
-    this.editingSubmissions.set(submissions);
+  /** Records whether anyone has submitted the assessment being edited and, once anyone has, disables everything but
+   * its details, so the form checks and sends only those. */
+  private lockTo(submitted: boolean): void {
+    this.editingSubmitted.set(submitted);
     if (!this.detailsOnly()) return;
     const c = this.form.controls;
     for (const control of [c.questions, c.opens_at, c.release_policy, c.ai_marking])
@@ -366,7 +376,7 @@ export class AssessmentsComponent {
     this.form.enable({ emitEvent: false });
     clearForm(this.form);
     this.editing.set(null);
-    this.editingSubmissions.set(0);
+    this.editingSubmitted.set(false);
     this.typesChanged();
   }
 
@@ -395,12 +405,14 @@ export class AssessmentsComponent {
     if (!item) return;
     void this.deleteState.run(async () => {
       try {
-        await this.assessmentApi.remove(item.id, !!item.submissions);
+        await this.assessmentApi.remove(item.id, submittedBy(item));
       } catch (error) {
         // A student may have submitted since the list was read: the dialog then says what deleting now takes.
-        await this.assessments.reload(() => this.assessmentApi.list(classroomId));
-        const now = this.assessments.value()?.find((a) => a.id === item.id);
-        if (now && this.deleting()?.id === item.id) this.deleting.set(now);
+        const refused = hasSubmissions(error);
+        await this.assessments.reload(() => this.assessmentApi.list(classroomId)).catch(() => undefined);
+        const now = this.assessments.value()?.find((a) => a.id === item.id) ?? item;
+        if (this.deleting()?.id === item.id)
+          this.deleting.set(refused ? { ...now, has_submissions: true } : now);
         throw error;
       }
       if (this.editing()?.id === item.id) this.cancelEdit();
@@ -408,17 +420,15 @@ export class AssessmentsComponent {
       this.closeDelete();
       this.state.error.set('');
       this.state.message.set(item.status === 'draft' ? 'Draft deleted.' : `${item.title} deleted.`);
-      try {
-        await this.assessments.reload(() => this.assessmentApi.list(classroomId));
-      } catch (error) {
-        // The dialog is closed, so the page says the list is out of date, without the deleted assessment.
-        const list = this.assessments.value();
-        if (list && this.classroomId() === classroomId)
-          this.assessments.set(list.filter((a) => a.id !== item.id));
-        this.state.error.set(
-          `The list could not be refreshed. ${messageOf(error, 'Choose Refresh assessments to try again.')}`,
-        );
-      }
+      // The dialog is closed, so a failure is reported on the page, without the deleted assessment.
+      await rereadAfterDelete(
+        this.assessments,
+        item.id,
+        () => this.assessments.reload(() => this.assessmentApi.list(classroomId)),
+        () => this.classroomId() === classroomId,
+        this.state,
+        { list: 'list', refresh: 'Refresh assessments' },
+      );
     });
   }
 
@@ -474,7 +484,7 @@ export class AssessmentsComponent {
             q.id,
             new FormControl(keep?.[q.id] ?? saved[q.id] ?? '', {
               nonNullable: true,
-              validators: [Validators.required, Validators.pattern(/\S/), Validators.maxLength(limitOf(q))],
+              validators: requiredText(limitOf(q)),
             }),
           ]),
         ),
@@ -618,6 +628,17 @@ export class AssessmentsComponent {
       return `${this.points(question)} · ${value.length} of ${limitOf(question)} characters`;
     return this.points(question);
   }
+}
+
+/** Whether anyone has submitted the assessment, students since removed from the classroom included. A server that
+ * does not say falls back to the count of enrolled students who have. */
+function submittedBy(item: AssessmentSummary): boolean {
+  return item.has_submissions ?? !!item.submissions;
+}
+
+/** Whether the server refused a change because students have submitted the assessment. */
+function hasSubmissions(error: unknown): boolean {
+  return error instanceof ApiError && error.code === 'HAS_SUBMISSIONS';
 }
 
 /** The most characters a student may give the question, as Assessment allows. */

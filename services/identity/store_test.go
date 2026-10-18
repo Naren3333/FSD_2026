@@ -5,6 +5,7 @@ import (
 	"errors"
 	"learning/platform"
 	"learning/platform/platformtest"
+	"slices"
 	"testing"
 
 	"github.com/google/uuid"
@@ -180,6 +181,24 @@ func TestADeletedClassroomIsGoneAndAnnounced(t *testing.T) {
 	}
 }
 
+// The named roster stops at 500, as the teacher's list does; the ids other services filter by do not.
+func TestTheRosterOfIDsHasEveryStudent(t *testing.T) {
+	ctx, s := context.Background(), testStore(t)
+	register(t, s, "org-a", "teacher-a", "teacher", "a")
+	id := classroom(t, s, "org-a", "teacher-a")
+	if _, err := s.db.Exec(ctx, "INSERT INTO users(id,org_id,role,username) SELECT 'student-'||lpad(n::text,3,'0'),'org-a','student','s'||lpad(n::text,3,'0') FROM generate_series(1,501) n"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.db.Exec(ctx, "INSERT INTO enrollments(classroom_id,student_id) SELECT $1,id FROM users WHERE role='student'", id); err != nil {
+		t.Fatal(err)
+	}
+	roster, err := s.listStudents(ctx, id)
+	ids, err2 := s.listStudentIDs(ctx, id)
+	if err != nil || err2 != nil || len(roster) != 500 || len(ids) != 501 || ids[0] != roster[0].ID || ids[500] != "student-501" {
+		t.Fatalf("%d named, %d ids (%v %v)", len(roster), len(ids), err, err2)
+	}
+}
+
 func TestInsertClassroomNeedsARegisteredTeacher(t *testing.T) {
 	s := testStore(t)
 	register(t, s, "org-a", "teacher-a", "teacher", "a")
@@ -202,6 +221,9 @@ func TestRostersAndRemoval(t *testing.T) {
 	roster, err := s.listStudents(ctx, id)
 	if err != nil || len(roster) != 2 || roster[0].ID != "student-a" || roster[1].Name != "bea" {
 		t.Fatalf("roster = %v, %v", roster, err)
+	}
+	if ids, err := s.listStudentIDs(ctx, id); err != nil || !slices.Equal(ids, []string{"student-a", "student-b"}) {
+		t.Fatalf("roster ids = %v, %v", ids, err)
 	}
 	if removed, err := s.removeEnrollment(ctx, id, "org-a", "student-a"); err != nil || !removed {
 		t.Fatalf("remove = %v, %v", removed, err)
@@ -301,7 +323,8 @@ func TestDeletedAccountsLoseTheirSignInOnce(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	keycloak := &fakeKeycloak{fail: map[string]bool{second: true}}
+	// The oldest one failing does not hold back the next; it is retried in the next round.
+	keycloak := &fakeKeycloak{fail: map[string]bool{first: true}}
 	remover := signInCleanup{s.db, keycloak}
 	if n, err := remover.removePending(ctx); err == nil || n != 1 {
 		t.Fatalf("removed %d, %v", n, err)
@@ -312,7 +335,7 @@ func TestDeletedAccountsLoseTheirSignInOnce(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	if len(keycloak.removed) != 2 || keycloak.removed[0] != first || keycloak.removed[1] != second {
+	if len(keycloak.removed) != 2 || keycloak.removed[0] != second || keycloak.removed[1] != first {
 		t.Fatalf("removed %v", keycloak.removed)
 	}
 }

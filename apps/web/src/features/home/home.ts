@@ -6,9 +6,9 @@ import type { AssessmentSummary, Evaluation, Performance } from '../../api/model
 import { ClassroomContext, onClassroomChange } from '../../core/classroom-context';
 import { CurriculumNames } from '../../core/curriculum-names';
 import { Session } from '../../core/session';
+import { dueState } from '../../shared/due';
 import { dateTime } from '../../shared/format';
 import { MarksPipe } from '../../shared/marks';
-import { dueState } from '../assessments/editor';
 import { Section } from '../../shared/section';
 import { SectionStateComponent } from '../../shared/section-state';
 

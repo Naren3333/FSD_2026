@@ -10,7 +10,7 @@ import { ConfirmDialogComponent } from '../../shared/confirm-dialog';
 import { messageOf } from '../../shared/errors';
 import { FieldComponent, FieldControlDirective } from '../../shared/field';
 import { isPdf } from '../../shared/files';
-import { Section } from '../../shared/section';
+import { Section, rereadAfterDelete } from '../../shared/section';
 import { SectionStateComponent } from '../../shared/section-state';
 import { StatusComponent } from '../../shared/status';
 import { requiredText } from '../../shared/validators';
@@ -224,17 +224,15 @@ export class MaterialsComponent implements OnDestroy {
       this.state.error.set('');
       this.state.message.set(`${doc.title} deleted.`);
       setTimeout(() => document.getElementById('library-title')?.focus());
-      try {
-        await this.reread(classroomId);
-      } catch (error) {
-        // The dialog is closed, so the page says the library is out of date, without the deleted document.
-        const list = this.documents.value();
-        if (list && this.classroomId() === classroomId)
-          this.documents.set(list.filter((d) => d.id !== doc.id));
-        this.state.error.set(
-          `The library could not be refreshed. ${messageOf(error, 'Choose Refresh materials to try again.')}`,
-        );
-      }
+      // The dialog is closed, so a failure is reported on the page, without the deleted document.
+      await rereadAfterDelete(
+        this.documents,
+        doc.id,
+        () => this.reread(classroomId),
+        () => this.classroomId() === classroomId,
+        this.state,
+        { list: 'library', refresh: 'Refresh materials' },
+      );
     });
   }
 }

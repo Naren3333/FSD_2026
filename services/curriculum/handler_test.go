@@ -128,6 +128,24 @@ func call(t *testing.T, store store, method, path, body string, roles ...string)
 	return platformtest.Serve(server{store: store}.routes, method, path, body, "user", roles...)
 }
 
+// step is one request of a scenario and the answer it expects: its status and, when want is set, a part of the body.
+// A want that is a whole JSON object, as the handlers write them, can only match the whole body.
+type step struct {
+	name, method, path, body, role string
+	status                         int
+	want                           string
+}
+
+// run sends the steps in order to the same store and stops at the first answer that is not the one expected.
+func run(t *testing.T, store store, steps ...step) {
+	t.Helper()
+	for _, s := range steps {
+		if w := call(t, store, s.method, s.path, s.body, s.role); w.Code != s.status || !strings.Contains(w.Body.String(), s.want) {
+			t.Fatalf("%s: %d %s", s.name, w.Code, w.Body.String())
+		}
+	}
+}
+
 func TestATopicIsJustANameAndTheResponseEchoesItTrimmed(t *testing.T) {
 	store := newMemoryStore()
 	cases := []struct {
@@ -151,43 +169,29 @@ func TestATopicIsJustANameAndTheResponseEchoesItTrimmed(t *testing.T) {
 			}
 		}
 	}
-	if w := call(t, store, http.MethodPost, "/v1/topics", `{"name":"Fractions"}`, "student"); w.Code != http.StatusForbidden {
-		t.Fatalf("a student changed the curriculum: %d", w.Code)
-	}
+	run(t, store, step{"a student changed the curriculum", http.MethodPost, "/v1/topics", `{"name":"Fractions"}`, "student", http.StatusForbidden, ""})
 }
 
 func TestRenameEchoesTheTrimmedName(t *testing.T) {
-	store := newMemoryStore()
-	w := call(t, store, http.MethodPatch, "/v1/topics/"+topicB, `{"name":" Halves "}`, "teacher")
-	if w.Code != http.StatusOK || w.Body.String() != `{"id":"`+topicB+`","name":"Halves"}`+"\n" {
-		t.Fatalf("%d %s", w.Code, w.Body.String())
-	}
-	if w = call(t, store, http.MethodPatch, "/v1/topics/"+topicB[:35]+"9", `{"name":"Halves"}`, "teacher"); w.Code != http.StatusNotFound {
-		t.Fatalf("renamed a missing topic: %d", w.Code)
-	}
+	run(t, newMemoryStore(),
+		step{"rename", http.MethodPatch, "/v1/topics/" + topicB, `{"name":" Halves "}`, "teacher", http.StatusOK, `{"id":"` + topicB + `","name":"Halves"}`},
+		step{"renamed a missing topic", http.MethodPatch, "/v1/topics/" + topicB[:35] + "9", `{"name":"Halves"}`, "teacher", http.StatusNotFound, ""},
+	)
 }
 
 func TestPrerequisitesRejectSelfReferenceAndCycles(t *testing.T) {
-	store := newMemoryStore()
 	path := func(id string) string { return "/v1/topics/" + id + "/prerequisites" }
-	if w := call(t, store, http.MethodPost, path(topicA), `{"prerequisite_id":"`+topicA+`"}`, "teacher"); w.Code != http.StatusUnprocessableEntity {
-		t.Fatalf("self prerequisite: %d", w.Code)
-	}
-	w := call(t, store, http.MethodPost, path(topicA), `{"prerequisite_id":"`+topicB+`"}`, "teacher")
-	if w.Code != http.StatusOK || w.Body.String() != `{"prerequisite_id":"`+topicB+`","topic_id":"`+topicA+`"}`+"\n" {
-		t.Fatalf("%d %s", w.Code, w.Body.String())
-	}
-	if w := call(t, store, http.MethodPost, path(topicB), `{"prerequisite_id":"`+topicA+`"}`, "teacher"); w.Code != http.StatusConflict {
-		t.Fatalf("cycle accepted: %d", w.Code)
-	}
+	run(t, newMemoryStore(),
+		step{"self prerequisite", http.MethodPost, path(topicA), `{"prerequisite_id":"` + topicA + `"}`, "teacher", http.StatusUnprocessableEntity, ""},
+		step{"add", http.MethodPost, path(topicA), `{"prerequisite_id":"` + topicB + `"}`, "teacher", http.StatusOK, `{"prerequisite_id":"` + topicB + `","topic_id":"` + topicA + `"}`},
+		step{"cycle accepted", http.MethodPost, path(topicB), `{"prerequisite_id":"` + topicA + `"}`, "teacher", http.StatusConflict, ""},
+	)
 }
 
 func TestAFailedInsertIsAnInternalError(t *testing.T) {
 	store := newMemoryStore()
 	store.broken = true
-	if w := call(t, store, http.MethodPost, "/v1/topics", `{"name":"Simplify"}`, "teacher"); w.Code != http.StatusInternalServerError {
-		t.Fatalf("status %d", w.Code)
-	}
+	run(t, store, step{"insert", http.MethodPost, "/v1/topics", `{"name":"Simplify"}`, "teacher", http.StatusInternalServerError, ""})
 }
 
 func TestArchive(t *testing.T) {
@@ -231,25 +235,20 @@ func TestAnArchivedTopicIsListedApartAndCanBeRestored(t *testing.T) {
 	if got := list("?archived=false", "teacher"); got != list("", "teacher") {
 		t.Fatalf("archived=false differs from the default: %s", got)
 	}
-	if w := call(t, store, http.MethodGet, "/v1/topics?archived=yes", "", "teacher"); w.Code != http.StatusUnprocessableEntity {
-		t.Fatalf("archived=yes: %d", w.Code)
-	}
-
-	if w := call(t, store, http.MethodPost, "/v1/topics/"+topicA+"/restore", "", "student"); w.Code != http.StatusForbidden {
-		t.Fatalf("student restore: %d", w.Code)
-	}
-	w := call(t, store, http.MethodPost, "/v1/topics/"+topicA+"/restore", "", "teacher")
-	if w.Code != http.StatusOK || strings.TrimSpace(w.Body.String()) != `{"id":"`+topicA+`","name":"Add fractions"}` {
-		t.Fatalf("restore: %d %s", w.Code, w.Body.String())
-	}
+	restore := func(id string) string { return "/v1/topics/" + id + "/restore" }
+	run(t, store,
+		step{"archived=yes", http.MethodGet, "/v1/topics?archived=yes", "", "teacher", http.StatusUnprocessableEntity, ""},
+		step{"student restore", http.MethodPost, restore(topicA), "", "student", http.StatusForbidden, ""},
+		step{"restore", http.MethodPost, restore(topicA), "", "teacher", http.StatusOK, `{"id":"` + topicA + `","name":"Add fractions"}`},
+	)
 	if got := list("?archived=true", "teacher"); got != "[]" {
 		t.Fatalf("restored topic still archived: %s", got)
 	}
-	for _, id := range []string{topicA, topicB, "not-a-uuid"} { // now active, never archived, malformed
-		if w := call(t, store, http.MethodPost, "/v1/topics/"+id+"/restore", "", "teacher"); w.Code != http.StatusNotFound {
-			t.Errorf("restore %s: %d", id, w.Code)
-		}
-	}
+	run(t, store,
+		step{"restore an active topic", http.MethodPost, restore(topicA), "", "teacher", http.StatusNotFound, ""},
+		step{"restore one never archived", http.MethodPost, restore(topicB), "", "teacher", http.StatusNotFound, ""},
+		step{"restore a malformed id", http.MethodPost, restore("not-a-uuid"), "", "teacher", http.StatusNotFound, ""},
+	)
 }
 
 func TestAMalformedPathIDIsNotFoundBeforeTheBodyIsRead(t *testing.T) {
@@ -261,19 +260,14 @@ func TestAMalformedPathIDIsNotFoundBeforeTheBodyIsRead(t *testing.T) {
 }
 
 func TestReadingATopic(t *testing.T) {
-	if w := call(t, newMemoryStore(), http.MethodGet, "/v1/topics/"+topicA, "", "student"); w.Code != http.StatusOK || w.Body.String() != `{"id":"`+topicA+`","name":"Add fractions"}`+"\n" {
-		t.Fatalf("%d %s", w.Code, w.Body.String())
-	}
-	for _, id := range []string{topicB[:35] + "9", "not-a-uuid"} {
-		if w := call(t, newMemoryStore(), http.MethodGet, "/v1/topics/"+id, "", "student"); w.Code != http.StatusNotFound {
-			t.Fatalf("%s: status %d", id, w.Code)
-		}
-	}
+	run(t, newMemoryStore(),
+		step{"read", http.MethodGet, "/v1/topics/" + topicA, "", "student", http.StatusOK, `{"id":"` + topicA + `","name":"Add fractions"}`},
+		step{"an unknown topic", http.MethodGet, "/v1/topics/" + topicB[:35] + "9", "", "student", http.StatusNotFound, ""},
+		step{"a malformed id", http.MethodGet, "/v1/topics/not-a-uuid", "", "student", http.StatusNotFound, ""},
+	)
 	store := newMemoryStore()
 	store.broken = true
-	if w := call(t, store, http.MethodGet, "/v1/topics/"+topicA, "", "student"); w.Code != http.StatusInternalServerError {
-		t.Fatalf("an outage answered %d", w.Code)
-	}
+	run(t, store, step{"an outage", http.MethodGet, "/v1/topics/" + topicA, "", "student", http.StatusInternalServerError, ""})
 }
 
 func TestStudentsCannotChangeTheCurriculum(t *testing.T) {
@@ -294,27 +288,15 @@ func TestStudentsCannotChangeTheCurriculum(t *testing.T) {
 }
 
 func TestPrerequisitesAreListedAndOnlyATeacherRemovesThem(t *testing.T) {
-	store := newMemoryStore()
-	if w := call(t, store, http.MethodPost, "/v1/topics/"+topicA+"/prerequisites", `{"prerequisite_id":"`+topicB+`"}`, "teacher"); w.Code != http.StatusOK {
-		t.Fatalf("add: %d %s", w.Code, w.Body.String())
-	}
 	list := "/v1/topics/" + topicA + "/prerequisites"
-	if w := call(t, store, http.MethodGet, list, "", "student"); w.Code != http.StatusOK || !strings.Contains(w.Body.String(), "Compare fractions") {
-		t.Fatalf("list: %d %s", w.Code, w.Body.String())
-	}
 	edge := list + "/" + topicB
-	if w := call(t, store, http.MethodDelete, edge, "", "student"); w.Code != http.StatusForbidden {
-		t.Fatalf("a student removed a prerequisite: %d", w.Code)
-	}
-	if w := call(t, store, http.MethodDelete, edge, "", "teacher"); w.Code != http.StatusNoContent {
-		t.Fatalf("remove: %d %s", w.Code, w.Body.String())
-	}
-	for _, path := range []string{edge, list + "/not-an-id"} {
-		if w := call(t, store, http.MethodDelete, path, "", "teacher"); w.Code != http.StatusNotFound {
-			t.Errorf("%s: %d", path, w.Code)
-		}
-	}
-	if w := call(t, store, http.MethodGet, "/v1/topics/"+topicB+"0/prerequisites", "", "teacher"); w.Code != http.StatusNotFound {
-		t.Errorf("an unknown topic's prerequisites: %d", w.Code)
-	}
+	run(t, newMemoryStore(),
+		step{"add", http.MethodPost, list, `{"prerequisite_id":"` + topicB + `"}`, "teacher", http.StatusOK, ""},
+		step{"list", http.MethodGet, list, "", "student", http.StatusOK, "Compare fractions"},
+		step{"a student removed a prerequisite", http.MethodDelete, edge, "", "student", http.StatusForbidden, ""},
+		step{"remove", http.MethodDelete, edge, "", "teacher", http.StatusNoContent, ""},
+		step{"remove again", http.MethodDelete, edge, "", "teacher", http.StatusNotFound, ""},
+		step{"remove a malformed id", http.MethodDelete, list + "/not-an-id", "", "teacher", http.StatusNotFound, ""},
+		step{"an unknown topic's prerequisites", http.MethodGet, "/v1/topics/" + topicB + "0/prerequisites", "", "teacher", http.StatusNotFound, ""},
+	)
 }

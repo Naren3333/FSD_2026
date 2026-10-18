@@ -107,11 +107,13 @@ async def embed(texts: list[str], tally: Tally | None = None) -> tuple[list[list
         if tally is not None:
             tally.tokens += result.usage.prompt_tokens
     log.info(
-        "embed: model=%s inputs=%d batches=%d tokens=%d",
-        model,
-        len(texts),
-        -(-len(texts) // EMBED_BATCH),
-        tokens,
+        "embed",
+        extra={
+            "model": model,
+            "inputs": len(texts),
+            "batches": -(-len(texts) // EMBED_BATCH),
+            "tokens": tokens,
+        },
     )
     return vectors, tokens
 
@@ -143,17 +145,19 @@ async def stream_chat(messages: list[Any], max_tokens: int) -> AsyncGenerator[st
     finally:
         await stream.close()
     if usage is None:
-        log.warning("stream_chat: model=%s ended without a usage chunk", settings.chat_model)
+        log.warning("stream_chat_without_usage", extra={"model": settings.chat_model})
         yield Usage(None, None)
         return
     counts = usage_of(usage)
     log.info(
-        "stream_chat: model=%s tokens_in=%d cached_in=%d tokens_out=%d finish_reason=%s",
-        settings.chat_model,
-        counts.tokens_in,
-        counts.cached_in,
-        counts.tokens_out,
-        finish_reason,
+        "stream_chat",
+        extra={
+            "model": settings.chat_model,
+            "tokens_in": counts.tokens_in,
+            "cached_in": counts.cached_in,
+            "tokens_out": counts.tokens_out,
+            "finish_reason": finish_reason,
+        },
     )
     yield counts
 
@@ -197,13 +201,15 @@ async def generate(
         if choice.finish_reason in ("length", "content_filter"):
             raise StructuredOutputError(f"{name}: finish_reason={choice.finish_reason}", usage, text)
     log.info(
-        "generate: %s model=%s tokens_in=%s cached_in=%s tokens_out=%s finish_reason=%s",
-        name or "-",
-        settings.chat_model,
-        usage.tokens_in,
-        usage.cached_in,
-        usage.tokens_out,
-        choice.finish_reason,
+        "generate",
+        extra={
+            "schema_name": name or None,
+            "model": settings.chat_model,
+            "tokens_in": usage.tokens_in,
+            "cached_in": usage.cached_in,
+            "tokens_out": usage.tokens_out,
+            "finish_reason": choice.finish_reason,
+        },
     )
     return Completion(choice.message.content or "", usage, choice.finish_reason)
 
@@ -236,7 +242,8 @@ async def call[T](
             if seconds is None:
                 raise
             log.warning(
-                "OpenAI call failed (attempt %d), retrying in %.2fs: %s", attempts.count, seconds, exc
+                "openai_call_retrying",
+                extra={"attempt": attempts.count, "retry_in_seconds": round(seconds, 2), "error": str(exc)},
             )
             await _sleep(seconds)
 

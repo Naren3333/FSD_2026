@@ -4,7 +4,7 @@ import { TestBed } from '@angular/core/testing';
 import { BrowserTestingModule, platformBrowserTesting } from '@angular/platform-browser/testing';
 import { provideRouter } from '@angular/router';
 import { readFileSync } from 'node:fs';
-import { beforeAll, describe, expect, it } from 'vitest';
+import { beforeAll, describe, expect, it, vi } from 'vitest';
 import { AnalyticsApi, AssessmentApi, GradingApi, IdentityApi } from '../../api/clients';
 import type { AssessmentProgress, ClassPerformance, GradingCounts, Student } from '../../api/models';
 import { ClassroomContext } from '../../core/classroom-context';
@@ -62,6 +62,7 @@ const performance: ClassPerformance = {
 /** The class dashboard for classroom `classroomId`, each part answering as `parts` says (by default, a class with
  * data in every part). */
 async function render(parts: Parts = {}, classroomId = 'c1') {
+  const classPerformance = vi.fn(() => parts.performance ?? Promise.resolve(performance));
   TestBed.resetTestingModule();
   TestBed.configureTestingModule({
     providers: [
@@ -79,7 +80,7 @@ async function render(parts: Parts = {}, classroomId = 'c1') {
       },
       {
         provide: AnalyticsApi,
-        useValue: { classPerformance: () => parts.performance ?? Promise.resolve(performance) },
+        useValue: { classPerformance },
       },
       {
         provide: CurriculumNames,
@@ -118,7 +119,7 @@ async function render(parts: Parts = {}, classroomId = 'c1') {
       caption: tile?.querySelector('.caption')?.textContent?.replace(/\s+/g, ' ').trim(),
     };
   };
-  return { text, settle, alerts, stat, root };
+  return { text, settle, alerts, stat, root, classPerformance };
 }
 
 describe('class dashboard states', () => {
@@ -196,5 +197,16 @@ describe('class dashboard states', () => {
     });
     await page.settle();
     expect(page.text()).toContain('No finalized grades for these students yet.');
+  });
+
+  it('pages the class topics twenty students at a time', async () => {
+    const page = await render({ performance: Promise.resolve({ ...performance, total: 45 }) });
+    await page.settle();
+    expect(page.text()).toContain('Page 1 of 3 · 45 students');
+    const next = [...page.root.querySelectorAll('button')].find((b) => b.textContent?.trim() === 'Next');
+    next?.click();
+    await page.settle();
+    expect(page.classPerformance).toHaveBeenLastCalledWith('c1', 20, 20);
+    expect(page.text()).toContain('Page 2 of 3 · 45 students');
   });
 });

@@ -96,6 +96,18 @@ func (s storage) list(ctx context.Context) ([]storedObject, error) {
 	return objects, nil
 }
 
+// modified is when the object was last written, with exists false once it is gone.
+func (s storage) modified(ctx context.Context, key string) (time.Time, bool, error) {
+	info, err := s.client.StatObject(ctx, s.bucket, key, minio.StatObjectOptions{})
+	if minio.ToErrorResponse(err).Code == "NoSuchKey" {
+		return time.Time{}, false, nil
+	}
+	if err != nil {
+		return time.Time{}, false, err
+	}
+	return info.LastModified, true, nil
+}
+
 // remove deletes one object; removing one that is already gone succeeds.
 func (s storage) remove(ctx context.Context, key string) error {
 	return s.client.RemoveObject(ctx, s.bucket, key, minio.RemoveObjectOptions{})

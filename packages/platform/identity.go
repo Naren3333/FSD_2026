@@ -5,6 +5,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"slices"
 )
 
 // Relations Identity reports between the caller and a classroom.
@@ -99,22 +100,26 @@ func (i *Identity) Relation(w http.ResponseWriter, r *http.Request, classroom, s
 	return answer.Relation, true
 }
 
+// maxRoster is the most of Identity's id-only roster read, in bytes: about 100,000 account ids.
+const maxRoster = 4 << 20
+
 // ClassroomRoster lists the students enrolled in a classroom, for its teacher. Roster writes the error response
 // itself when it is refused or cannot answer.
 type ClassroomRoster interface {
-	// Roster is the ids of the classroom's enrolled students (Identity lists up to 500).
+	// Roster is the ids of every student enrolled in the classroom.
 	Roster(w http.ResponseWriter, r *http.Request, classroom string) ([]string, bool)
 }
 
-// Roster asks Identity for the classroom's enrolled students with the caller's own token, so only the classroom's
-// teacher gets an answer. Work kept for students since removed (their submissions and grades) is left out of a
-// teacher's lists with it. On denial or failure it has already written the error response.
+// Roster asks Identity for the ids of the classroom's enrolled students with the caller's own token, so only the
+// classroom's teacher gets an answer. Work kept for students since removed (their submissions and grades) is left out
+// of a teacher's lists with it, so it asks for the id-only roster, which has every student: the named one stops at 500.
+// On denial or failure it has already written the error response.
 func (i *Identity) Roster(w http.ResponseWriter, r *http.Request, classroom string) ([]string, bool) {
 	if !ID(classroom) {
 		Invalid(w, "A valid classroom identifier is required.")
 		return nil, false
 	}
-	req, err := Forward(r, http.MethodGet, i.base+"/v1/classrooms/"+classroom+"/students")
+	req, err := Forward(r, http.MethodGet, i.base+"/v1/classrooms/"+classroom+"/student-ids")
 	if err != nil {
 		Unavailable(w, "Authorization unavailable.")
 		return nil, false
@@ -136,20 +141,10 @@ func (i *Identity) Roster(w http.ResponseWriter, r *http.Request, classroom stri
 		}
 		return nil, false
 	}
-	var students []struct {
-		ID string `json:"id"`
-	}
-	if json.NewDecoder(io.LimitReader(res.Body, 1<<20)).Decode(&students) != nil {
+	var ids []string
+	if json.NewDecoder(io.LimitReader(res.Body, maxRoster)).Decode(&ids) != nil || ids == nil || slices.Contains(ids, "") {
 		Unavailable(w, "The classroom's roster was not understood.")
 		return nil, false
-	}
-	ids := make([]string, 0, len(students))
-	for _, s := range students {
-		if s.ID == "" {
-			Unavailable(w, "The classroom's roster was not understood.")
-			return nil, false
-		}
-		ids = append(ids, s.ID)
 	}
 	return ids, true
 }

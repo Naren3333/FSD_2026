@@ -33,7 +33,7 @@
         <app-field
           controlId="class-name"
           label="Classroom name"
-          [invalid]="form.controls.name.touched && form.controls.name.invalid"
+          [control]="form.controls.name"
           error="Enter a name of 1–120 characters."
         >
           <input appFieldControl id="class-name" formControlName="name" maxlength="120" />
@@ -157,11 +157,11 @@
     }
     <app-pager
       label="All students pages"
-      [page]="page()"
+      [(page)]="page"
       [pageSize]="pageSize"
       [total]="everyone.value()?.total ?? 0"
       [disabled]="everyoneState.busy() || everyone.loading()"
-      (go)="goTo($event)"
+      (go)="loadEveryone()"
     />
     <app-status [state]="everyoneState" />
   </section>

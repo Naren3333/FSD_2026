@@ -17,12 +17,19 @@ import { StatusComponent } from '../../shared/status';
 export class ProfileComponent {
   readonly session = inject(Session);
   private readonly identity = inject(IdentityApi);
-  private readonly context = inject(ClassroomContext);
+  readonly context = inject(ClassroomContext);
   private readonly unsaved = inject(UnsavedChanges);
   readonly profile = this.session.profile;
   readonly state = new ActionState();
   /** A teacher's own classrooms: deleting those comes first, since each one deletes its students' work. */
   readonly classroomCount = computed(() => (this.session.isTeacher() ? this.context.classrooms().length : 0));
+  /** Whether a teacher's classrooms are still unknown (loading, or failed to load), so they may still have some. */
+  readonly classroomsUnknown = computed(
+    () =>
+      this.session.isTeacher() && (!this.context.known() || this.context.loading() || !!this.context.error()),
+  );
+  /** Whether a teacher must wait, or delete their classrooms, before deleting their account. */
+  readonly blocked = computed(() => this.classroomsUnknown() || this.classroomCount() > 0);
   @ViewChild('deleteDialog') deleteDialog?: ConfirmDialogComponent;
 
   confirmDelete(): void {
@@ -31,6 +38,11 @@ export class ProfileComponent {
       return;
     }
     this.deleteDialog?.show();
+  }
+
+  /** Reads the teacher's classrooms again after they failed to load. */
+  retryClassrooms(): void {
+    this.context.refresh().catch(() => undefined);
   }
 
   closeDelete(): void {

@@ -1,5 +1,6 @@
 // @vitest-environment jsdom
 import { Component, signal } from '@angular/core';
+import { FormControl, Validators } from '@angular/forms';
 import { TestBed } from '@angular/core/testing';
 import { BrowserTestingModule, platformBrowserTesting } from '@angular/platform-browser/testing';
 import { readFileSync } from 'node:fs';
@@ -51,4 +52,35 @@ describe('field control', () => {
     fixture.detectChanges();
     expect(input.getAttribute('aria-invalid')).toBeNull();
   });
+
+  it('shows the error of the control it is given once that control is touched and invalid', () => {
+    TestBed.resetTestingModule();
+    TestBed.overrideComponent(FieldComponent, { set: { template: template('./field.html') } });
+    const fixture = TestBed.createComponent(ControlHostComponent);
+    fixture.detectChanges();
+    const root = fixture.nativeElement as HTMLElement;
+    const input = root.querySelector('input') as HTMLInputElement;
+    expect(input.getAttribute('aria-invalid')).toBeNull();
+    // As a blur or submit would, which also asks for change detection.
+    fixture.componentInstance.name.markAsTouched();
+    fixture.componentRef.changeDetectorRef.markForCheck();
+    fixture.detectChanges();
+    expect(input.getAttribute('aria-invalid')).toBe('true');
+    expect(root.querySelector('small')?.textContent).toBe('This field is required.');
+    fixture.componentInstance.name.setValue('Ada');
+    fixture.componentRef.changeDetectorRef.markForCheck();
+    fixture.detectChanges();
+    expect(input.getAttribute('aria-invalid')).toBeNull();
+  });
 });
+
+@Component({
+  standalone: true,
+  imports: [FieldComponent, FieldControlDirective],
+  template: `<app-field controlId="name" label="Name" [control]="name">
+    <input appFieldControl id="name" />
+  </app-field>`,
+})
+class ControlHostComponent {
+  readonly name = new FormControl('', { nonNullable: true, validators: Validators.required });
+}

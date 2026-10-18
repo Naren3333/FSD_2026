@@ -74,6 +74,5 @@ func DecodeUserDeleted(event Event) (UserDeleted, error) {
 // DiscardPending removes, inside tx, the outbox rows of events about the deleted classroom, so those not yet
 // published never are. The service's own data for the classroom is the caller's to delete in the same transaction.
 func DiscardPending(ctx context.Context, tx pgx.Tx, v ClassroomDeleted) error {
-	_, err := tx.Exec(ctx, "DELETE FROM outbox WHERE body->'data'->>'classroom_id'=$1::text AND body->'data'->>'org_id'=$2", v.Classroom, v.Org)
-	return err
+	return DiscardPendingBy(ctx, tx, "%", "classroom_id", v.Classroom, v.Org)
 }

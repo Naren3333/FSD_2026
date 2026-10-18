@@ -2,8 +2,6 @@ package main
 
 import (
 	"context"
-	"encoding/json"
-	"errors"
 	"learning/platform"
 	"learning/platform/platformtest"
 	"net/http"
@@ -144,15 +142,6 @@ func TestOnlyAnEnrolledStudentReadsTheirOwnResults(t *testing.T) {
 		if w.Code != tc.status || !strings.Contains(w.Body.String(), tc.body) {
 			t.Errorf("%s: %d %s", tc.subject, w.Code, w.Body.String())
 		}
-	}
-}
-
-// The decoder is tested in platform; this checks purge refuses before touching the database (tx is nil).
-func TestPurgeRejectsMalformedDeletions(t *testing.T) {
-	event := platform.Event{Resource: room, Data: json.RawMessage(`{"classroom_id":"` + room + `","org_id":""}`)}
-	var invalid platform.InvalidEvent
-	if !errors.As(purge(context.Background(), nil, event), &invalid) {
-		t.Fatal("a malformed deletion was not rejected")
 	}
 }
 

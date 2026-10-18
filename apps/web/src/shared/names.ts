@@ -1,4 +1,4 @@
-import type { Assessment, Evaluation, Evidence, Student, Topic } from '../api/models';
+import type { Assessment, Evaluation, Evidence, Question, Student, Topic } from '../api/models';
 
 /** Turns the ids the grading APIs return into the names people recognise. Unknown ids stay ids. */
 
@@ -17,13 +17,28 @@ export function topicNames(topics: readonly Topic[]): Map<string, string> {
   return new Map(topics.map((t) => [t.id, t.name]));
 }
 
-/** The prompt of a question in its assessment, or '' when the assessment or question is unknown. */
-export function promptOf(
-  assessments: ReadonlyMap<string, Assessment>,
-  assessmentId: string,
-  questionId: string,
-): string {
-  return assessments.get(assessmentId)?.questions.find((q) => q.id === questionId)?.prompt ?? '';
+/** The names in evaluations' evidence, from the assessments they belong to and the curriculum: '' for whatever is
+ * unknown. */
+export class EvidenceNames {
+  constructor(
+    private readonly assessments: () => ReadonlyMap<string, Assessment> | undefined,
+    private readonly topicName: (topicId: string) => string,
+  ) {}
+
+  title(evaluation: Evaluation): string {
+    return this.assessments()?.get(evaluation.assessment_id)?.title ?? '';
+  }
+  question(evaluation: Evaluation, evidence: Evidence): Question | undefined {
+    return this.assessments()
+      ?.get(evaluation.assessment_id)
+      ?.questions.find((q) => q.id === evidence.question_id);
+  }
+  prompt(evaluation: Evaluation, evidence: Evidence): string {
+    return this.question(evaluation, evidence)?.prompt ?? '';
+  }
+  topic(evidence: Evidence): string {
+    return this.topicName(evidence.topic_id);
+  }
 }
 
 /** The marks awarded across an evaluation's questions, out of the marks possible. */

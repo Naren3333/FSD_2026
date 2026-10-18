@@ -13,7 +13,7 @@
         label="Student"
         [hint]="rosterHint()"
         error="Choose a student."
-        [invalid]="form.controls.student.touched && form.controls.student.invalid"
+        [control]="form.controls.student"
       >
         <select appFieldControl id="performance-student" formControlName="student">
           <option value="">Choose a student</option>

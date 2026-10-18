@@ -135,7 +135,7 @@ class Turn:
         """Saves the turn as `interrupted` if its events never started: the client left before the stream began."""
         if not self.begun:
             self.begun = True
-            log.info("thread %s: client gone before the answer started", self.thread["id"])
+            log.info("chat_client_gone_before_answer", extra={"thread_id": str(self.thread["id"])})
             self._save_detached("interrupted")
 
     async def events(self) -> AsyncIterator[str]:
@@ -148,14 +148,16 @@ class Turn:
         except (asyncio.CancelledError, GeneratorExit):
             # The client went away. Saved in a task of its own: this one is being cancelled, and any await here
             # would be cancelled too.
-            log.info("thread %s: client disconnected; saving the partial answer", self.thread["id"])
+            log.info("chat_client_disconnected", extra={"thread_id": str(self.thread["id"])})
             self._save_detached("interrupted")
             raise
         except UpstreamError as e:
-            log.warning("thread %s: %s", self.thread["id"], e)
+            log.warning(
+                "chat_turn_upstream_failed", extra={"thread_id": str(self.thread["id"]), "error": str(e)}
+            )
             error, resets_at = error_of(e), e.resets_at
         except Exception:
-            log.exception("thread %s: chat turn failed", self.thread["id"])
+            log.exception("chat_turn_failed", extra={"thread_id": str(self.thread["id"])})
             error = ("INTERNAL_ERROR", "The answer failed.")
         # Saved before the last events, so a disconnect while they are sent can't lose the row, and shielded, so a
         # disconnect during the save can't either: the save carries on and the lifespan waits for it.
@@ -251,12 +253,10 @@ class Turn:
         except UpstreamError as e:
             if error_of(e)[0] in ("AI_UNAVAILABLE", "AI_SPEND_LIMIT", "AI_BUSY"):
                 raise
-            log.warning(
-                "thread %s: query rewrite failed, searching the raw message: %s", self.thread["id"], e
-            )
+            log.warning("query_rewrite_failed", extra={"thread_id": str(self.thread["id"]), "error": str(e)})
             return
         except (ValueError, KeyError, TypeError):
-            log.warning("thread %s: unusable query rewrite, searching the raw message", self.thread["id"])
+            log.warning("query_rewrite_unusable", extra={"thread_id": str(self.thread["id"])})
             return
         self.rewritten_query = query.strip()[:MAX_MESSAGE] or self.content
         self.is_on_topic, self.small_talk = on_topic, small_talk
@@ -312,4 +312,4 @@ class Turn:
 
 def _log_failure(task: asyncio.Task[Any]) -> None:
     if not task.cancelled() and task.exception() is not None:
-        log.error("saving an answer failed", exc_info=task.exception())
+        log.error("answer_save_failed", exc_info=task.exception())

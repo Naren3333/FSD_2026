@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"learning/platform"
 	"log/slog"
@@ -90,7 +91,7 @@ func (s signInCleanup) run(ctx context.Context) {
 }
 
 // removePending removes up to 20 pending sign-in accounts and marks each one removed, reporting how many it removed.
-// It stops at the first failure, which the next round retries.
+// One that fails is left for the next round to retry and does not stop the others; the error says how many failed.
 func (s signInCleanup) removePending(ctx context.Context) (int, error) {
 	rows, err := s.db.Query(ctx, "SELECT id FROM users WHERE deleted_at IS NOT NULL AND signin_removed_at IS NULL ORDER BY deleted_at LIMIT 20")
 	if err != nil {
@@ -100,13 +101,19 @@ func (s signInCleanup) removePending(ctx context.Context) (int, error) {
 	if err != nil {
 		return 0, err
 	}
-	for i, id := range ids {
-		if err = s.keycloak.remove(ctx, id); err != nil {
-			return i, err
+	removed, failures := 0, []error{}
+	for _, id := range ids {
+		if err = s.keycloak.remove(ctx, id); err == nil {
+			_, err = s.db.Exec(ctx, "UPDATE users SET signin_removed_at=now() WHERE id=$1", id)
 		}
-		if _, err = s.db.Exec(ctx, "UPDATE users SET signin_removed_at=now() WHERE id=$1", id); err != nil {
-			return i, err
+		if err != nil {
+			failures = append(failures, err)
+			continue
 		}
+		removed++
 	}
-	return len(ids), nil
+	if len(failures) > 0 {
+		return removed, fmt.Errorf("%d of %d sign-in removals failed: %w", len(failures), len(ids), errors.Join(failures...))
+	}
+	return removed, nil
 }

@@ -1,8 +1,9 @@
 """Analytics' events: grading.finalized.v3 (and v2 and v1, still read for queued or replayed events, with their
 evidence's older field mapped onto topic_id) stores each finalized evaluation's evidence once (inbox), and
 identity.classroom.deleted.v1 purges a deleted classroom's evidence, assessment.deleted.v1 a deleted assessment's
-(ADR 0008), and identity.user.deleted.v1 the evidence of a student who deleted their account (ADR 0011). Messages that don't match the contract, or whose
-event type is not their Kafka topic's, are dead-lettered; learning_transport.kafka runs the consumer.
+(ADR 0008), and identity.user.deleted.v1 the evidence of a student who deleted their account (ADR 0011). Messages
+that don't match the contract, or whose event type is not their Kafka topic's, are dead-lettered;
+learning_transport.kafka runs the consumer.
 
 Storing and purging take the same per-classroom lock (an assessment's purge takes its classroom's), so a purge and a
 finalized grade for its classroom never interleave across replicas: either the evidence is stored first and the purge
@@ -11,17 +12,26 @@ grades take the student's lock the same way."""
 
 import os
 import threading
+from collections.abc import Callable
 from typing import Any
 
 from learning_transport.db import LOCK_CLASSROOM, LOCK_USER, lock
-from learning_transport.kafka import Handler, consume, parse
+from learning_transport.kafka import (
+    CLASSROOM_DELETED,
+    USER_DELETED,
+    ClassroomDeletedEvent,
+    Envelope,
+    Handler,
+    UserDeletedEvent,
+    consume,
+    parse,
+)
+from psycopg import Connection
 from psycopg_pool import ConnectionPool
 
-from domain import FINALIZED, AssessmentDeletedEvent, ClassroomDeletedEvent, Event, UserDeletedEvent
+from domain import FINALIZED, AssessmentDeletedEvent, Event
 
-CLASSROOM_DELETED = "identity.classroom.deleted.v1"
 ASSESSMENT_DELETED = "assessment.deleted.v1"
-USER_DELETED = "identity.user.deleted.v1"
 DEFAULT_GROUP = "analytics-v1"  # KAFKA_GROUP overrides it, e.g. to rebuild from the start of the topics
 
 
@@ -72,6 +82,19 @@ def process(pool: ConnectionPool[Any], event: Event) -> None:
             )
 
 
+def remove_evidence(conn: Connection[Any], where: str, params: tuple[Any, ...]) -> None:
+    """Delete the evidence `where` picks (a condition with %s placeholders for `params`) and the evaluations it was
+    stored under."""
+    evaluations = conn.execute(
+        f"DELETE FROM evidence WHERE {where} RETURNING evaluation_id", params
+    ).fetchall()
+    if evaluations:
+        conn.execute(
+            "DELETE FROM evaluations WHERE evaluation_id = ANY(%s)",
+            ([row["evaluation_id"] for row in evaluations],),
+        )
+
+
 def purge(pool: ConnectionPool[Any], event: ClassroomDeletedEvent) -> None:
     """Remove a deleted classroom's evidence and remember the classroom, so a finalized grade that arrives later is
     not stored. Deleting what is already gone changes nothing, so a repeated event is harmless."""
@@ -82,15 +105,7 @@ def purge(pool: ConnectionPool[Any], event: ClassroomDeletedEvent) -> None:
             "INSERT INTO purged_classrooms(classroom_id,org_id) VALUES(%s,%s) ON CONFLICT DO NOTHING",
             (data.classroom_id, data.org_id),
         )
-        evaluations = conn.execute(
-            "DELETE FROM evidence WHERE classroom_id=%s AND org_id=%s RETURNING evaluation_id",
-            (data.classroom_id, data.org_id),
-        ).fetchall()
-        if evaluations:
-            conn.execute(
-                "DELETE FROM evaluations WHERE evaluation_id = ANY(%s)",
-                ([row["evaluation_id"] for row in evaluations],),
-            )
+        remove_evidence(conn, "classroom_id=%s AND org_id=%s", (data.classroom_id, data.org_id))
 
 
 def purge_assessment(pool: ConnectionPool[Any], event: AssessmentDeletedEvent) -> None:
@@ -104,15 +119,11 @@ def purge_assessment(pool: ConnectionPool[Any], event: AssessmentDeletedEvent) -
             " ON CONFLICT DO NOTHING",
             (data.assessment_id, data.classroom_id, data.org_id),
         )
-        evaluations = conn.execute(
-            "DELETE FROM evidence WHERE assessment_id=%s AND classroom_id=%s AND org_id=%s RETURNING evaluation_id",
+        remove_evidence(
+            conn,
+            "assessment_id=%s AND classroom_id=%s AND org_id=%s",
             (data.assessment_id, data.classroom_id, data.org_id),
-        ).fetchall()
-        if evaluations:
-            conn.execute(
-                "DELETE FROM evaluations WHERE evaluation_id = ANY(%s)",
-                ([row["evaluation_id"] for row in evaluations],),
-            )
+        )
 
 
 def purge_user(pool: ConnectionPool[Any], event: UserDeletedEvent) -> None:
@@ -126,39 +137,30 @@ def purge_user(pool: ConnectionPool[Any], event: UserDeletedEvent) -> None:
             "INSERT INTO deleted_users(user_id,org_id) VALUES(%s,%s) ON CONFLICT DO NOTHING",
             (str(data.user_id), data.org_id),
         )
-        evaluations = conn.execute(
-            "DELETE FROM evidence WHERE student_id=%s AND org_id=%s RETURNING evaluation_id",
-            (str(data.user_id), data.org_id),
-        ).fetchall()
-        if evaluations:
-            conn.execute(
-                "DELETE FROM evaluations WHERE evaluation_id = ANY(%s)",
-                ([row["evaluation_id"] for row in evaluations],),
-            )
+        remove_evidence(conn, "student_id=%s AND org_id=%s", (str(data.user_id), data.org_id))
+
+
+# Each deletion topic's event and the purge that applies it.
+PURGES: dict[str, tuple[type[Envelope], Callable[[ConnectionPool[Any], Any], None]]] = {
+    CLASSROOM_DELETED: (ClassroomDeletedEvent, purge),
+    ASSESSMENT_DELETED: (AssessmentDeletedEvent, purge_assessment),
+    USER_DELETED: (UserDeletedEvent, purge_user),
+}
 
 
 def handler(pool: ConnectionPool[Any]) -> Handler:
     def handle(topic: str, value: bytes | None) -> bool:
-        if topic == CLASSROOM_DELETED:
-            deleted = parse(ClassroomDeletedEvent, value)
+        if topic in PURGES:
+            model, apply = PURGES[topic]
+            deleted = parse(model, value)
             if deleted is None:
                 return False
-            purge(pool, deleted)
-        elif topic == ASSESSMENT_DELETED:
-            removed = parse(AssessmentDeletedEvent, value)
-            if removed is None:
-                return False
-            purge_assessment(pool, removed)
-        elif topic == USER_DELETED:
-            gone = parse(UserDeletedEvent, value)
-            if gone is None:
-                return False
-            purge_user(pool, gone)
-        else:
-            finalized = parse(Event, value)
-            if finalized is None or finalized.event_type != topic:
-                return False
-            process(pool, finalized)
+            apply(pool, deleted)
+            return True
+        finalized = parse(Event, value)
+        if finalized is None or finalized.event_type != topic:
+            return False
+        process(pool, finalized)
         return True
 
     return handle

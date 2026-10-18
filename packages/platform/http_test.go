@@ -95,9 +95,11 @@ func TestRosterReadsTheEnrolledStudents(t *testing.T) {
 		want   []string
 		code   int
 	}{
-		{200, `[{"id":"s-1","username":"ann","display_name":"Ann"},{"id":"s-2","username":"","display_name":""}]`, []string{"s-1", "s-2"}, 200},
+		{200, `["s-1","s-2"]`, []string{"s-1", "s-2"}, 200},
 		{200, `[]`, []string{}, 200},
-		{200, `[{"username":"ann"}]`, nil, 503},
+		{200, `["s-1",""]`, nil, 503},
+		{200, `[{"id":"s-1"}]`, nil, 503},
+		{200, `null`, nil, 503},
 		{200, `not json`, nil, 503},
 		{403, `{}`, nil, 403},
 		{401, `{}`, nil, 401},
@@ -109,6 +111,19 @@ func TestRosterReadsTheEnrolledStudents(t *testing.T) {
 		if ok != (tc.want != nil) || !slices.Equal(got, tc.want) || (!ok && w.Code != tc.code) {
 			t.Errorf("%d %s: got %v %v, status %d", tc.status, tc.body, got, ok, w.Code)
 		}
+	}
+}
+
+func TestRosterAsksForTheIDOnlyRoster(t *testing.T) {
+	var asked string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		asked = r.URL.Path
+		_, _ = w.Write([]byte(`["s-1"]`))
+	}))
+	t.Cleanup(server.Close)
+	got, ok := NewIdentity(server.URL, server.Client()).Roster(httptest.NewRecorder(), asTeacher(httptest.NewRequest(http.MethodGet, "/", nil)), classroom)
+	if !ok || !slices.Equal(got, []string{"s-1"}) || asked != "/v1/classrooms/"+classroom+"/student-ids" {
+		t.Fatalf("asked %s: %v %v", asked, got, ok)
 	}
 }
 

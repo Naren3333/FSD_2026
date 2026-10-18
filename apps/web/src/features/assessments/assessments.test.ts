@@ -429,6 +429,60 @@ describe('a teacher changing a published assessment', () => {
     expect(page.deleteState.error()).toBe('Students have submitted this assessment.');
     expect(page.deleting()?.submissions).toBe(1);
   });
+
+  it('keeps only the details when only students since removed from the class have submitted', async () => {
+    vi.useFakeTimers();
+    const { page, settle } = setup('teacher', published);
+    await settle();
+    page.edit({ ...summary, submissions: 0, has_submissions: true });
+    await settle();
+    expect(page.detailsOnly()).toBe(true);
+    expect(page.questions.disabled).toBe(true);
+  });
+
+  it('deletes it with its grades when only students since removed from the class have submitted', async () => {
+    vi.useFakeTimers();
+    const { page, api, settle } = setup('teacher', published);
+    await settle();
+    page.confirmDelete({ ...summary, submissions: 0, has_submissions: true });
+    expect(page.deletingSubmitted()).toBe(true);
+    page.remove();
+    await settle();
+    expect(api.remove).toHaveBeenCalledWith('a1', true);
+  });
+
+  it('keeps only the details when the server refuses a replacement because of submissions', async () => {
+    vi.useFakeTimers();
+    const { page, api, settle } = setup('teacher', published);
+    await settle();
+    page.edit({ ...summary, submissions: 0 });
+    await settle();
+    // The list cannot tell: the only submitter is no longer enrolled.
+    api.update.mockRejectedValueOnce(new ApiError('Students have submitted.', 409, 'HAS_SUBMISSIONS'));
+    page.save(false);
+    await settle();
+    expect(page.detailsOnly()).toBe(true);
+    expect(page.state.error()).toContain('only its title, due date and late policy can change');
+    page.form.controls.title.setValue('Halves');
+    page.save(false);
+    await settle();
+    expect(api.details).toHaveBeenCalledWith('a1', expect.objectContaining({ title: 'Halves' }));
+  });
+
+  it('asks again with the grades when the server refuses a delete because of submissions', async () => {
+    vi.useFakeTimers();
+    const { page, api, settle } = setup('teacher', published);
+    await settle();
+    api.remove.mockRejectedValueOnce(new ApiError('Students have submitted.', 409, 'HAS_SUBMISSIONS'));
+    page.confirmDelete({ ...summary, submissions: 0 });
+    page.remove();
+    await settle();
+    expect(page.deleteState.error()).toBe('Students have submitted.');
+    expect(page.deletingSubmitted()).toBe(true);
+    page.remove();
+    await settle();
+    expect(api.remove).toHaveBeenLastCalledWith('a1', true);
+  });
 });
 
 describe('a teacher editing one assessment after another', () => {

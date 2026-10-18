@@ -68,5 +68,5 @@ async def rerank(query: str, documents: list[str]) -> tuple[list[float], int | N
         raise RerankError(f"{missing} of {len(documents)} documents have no score")
     usage = body.get("usage")  # Voyage may send null: the caller then estimates the tokens
     tokens = usage.get("total_tokens") if isinstance(usage, dict) else None
-    log.info("rerank: model=%s documents=%d tokens=%s", model, len(documents), tokens)
+    log.info("rerank", extra={"model": model, "documents": len(documents), "tokens": tokens})
     return [s for s in scores if s is not None], tokens if isinstance(tokens, int) else None

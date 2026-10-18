@@ -22,6 +22,7 @@ type store interface {
 	insertEnrollment(ctx context.Context, classroom, student string) error
 	removeEnrollment(ctx context.Context, classroom, org, student string) (bool, error)
 	listStudents(ctx context.Context, classroom string) ([]Student, error)
+	listStudentIDs(ctx context.Context, classroom string) ([]string, error)
 	deleteClassroom(ctx context.Context, classroom, org string) error
 	listOrgStudents(ctx context.Context, org, search string, offset, limit int) ([]Student, int, error)
 	deleteAccount(ctx context.Context, org, subject string) error
@@ -191,13 +192,26 @@ func (p pgStore) removeEnrollment(ctx context.Context, classroom, org, student s
 	return true, tx.Commit(ctx)
 }
 
-// listStudents is the classroom's roster, by name (students without one last, by id).
+// rosterOrder orders a classroom's enrolled students by name, those without one last, by id.
+const rosterOrder = "ORDER BY lower(COALESCE(u.display_name,u.username)) NULLS LAST,u.id"
+
+// listStudents is the classroom's roster with names, in rosterOrder: the first 500, as the teacher's list shows.
 func (p pgStore) listStudents(ctx context.Context, classroom string) ([]Student, error) {
-	rows, err := p.db.Query(ctx, `SELECT u.id,COALESCE(u.username,''),COALESCE(u.display_name,'') FROM enrollments e JOIN users u ON u.id=e.student_id WHERE e.classroom_id=$1 ORDER BY lower(COALESCE(u.display_name,u.username)) NULLS LAST,u.id LIMIT 500`, classroom)
+	rows, err := p.db.Query(ctx, `SELECT u.id,COALESCE(u.username,''),COALESCE(u.display_name,'') FROM enrollments e JOIN users u ON u.id=e.student_id WHERE e.classroom_id=$1 `+rosterOrder+` LIMIT 500`, classroom)
 	if err != nil {
 		return nil, err
 	}
 	return pgx.CollectRows(rows, scanStudent)
+}
+
+// listStudentIDs is every enrolled student's id, in rosterOrder and without listStudents' cap: other services keep
+// a removed student's work out of the teacher's lists by it, so a student left off would vanish from them.
+func (p pgStore) listStudentIDs(ctx context.Context, classroom string) ([]string, error) {
+	rows, err := p.db.Query(ctx, "SELECT u.id FROM enrollments e JOIN users u ON u.id=e.student_id WHERE e.classroom_id=$1 "+rosterOrder, classroom)
+	if err != nil {
+		return nil, err
+	}
+	return pgx.CollectRows(rows, pgx.RowTo[string])
 }
 
 // listOrgStudents is one page of the organization's students who have signed in since names were recorded, by

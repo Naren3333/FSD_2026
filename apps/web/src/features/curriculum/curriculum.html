@@ -53,7 +53,7 @@
         <app-field
           controlId="topic-name"
           label="Name"
-          [invalid]="form.controls.name.touched && form.controls.name.invalid"
+          [control]="form.controls.name"
           error="Enter a name of 1–160 characters."
         >
           <input appFieldControl id="topic-name" formControlName="name" maxlength="160" />

@@ -45,6 +45,38 @@ export class DashboardComponent {
     const label = (id: string) => this.topic(id) || id;
     return [...ids].sort((a, b) => label(a).localeCompare(label(b)));
   });
+  /** The summary tiles, each linking to where the teacher acts on it. The submissions panel below shows why the
+   * assessments failed to load, so that tile repeats no error. */
+  readonly stats = computed(() => {
+    const c = this.counts.value();
+    const unreleased = c?.unreleased ? ` · ${c.unreleased} not released` : '';
+    return [
+      tile(
+        this.counts,
+        'Needs grading',
+        '/review',
+        c?.drafts,
+        `${c?.finalized} finalized${unreleased} · Open Grading review`,
+      ),
+      tile(
+        this.roster,
+        'Students enrolled',
+        '/classrooms',
+        this.roster.value()?.length,
+        'Manage students under Classrooms',
+      ),
+      {
+        ...tile(
+          this.assessments,
+          'Published assessments',
+          '/assessments',
+          this.assessments.value()?.length,
+          'Published · drafts are under Assessments',
+        ),
+        error: '',
+      },
+    ];
+  });
   /** Each student's evidence on this page, by topic. */
   private readonly metrics = computed(
     () =>
@@ -76,12 +108,8 @@ export class DashboardComponent {
     void this.loadPerformance(classroomId);
   }
 
-  goTo(page: number): void {
-    this.page.set(Math.max(0, page));
-    void this.loadPerformance(this.classroomId());
-  }
-
-  private loadPerformance(classroomId: string): Promise<void> {
+  /** Loads the class topics page on show. */
+  loadPerformance(classroomId = this.classroomId()): Promise<void> {
     return this.performance.load(async () => {
       const page = await this.analytics.classPerformance(
         classroomId,
@@ -114,4 +142,22 @@ export class DashboardComponent {
       ? `${progress.submissions} of ${enrolled} students submitted`
       : `${progress.submissions} ${noun} submitted`;
   }
+}
+
+/** A summary tile: its count and caption once `section` has loaded, else whether it is loading or unavailable. */
+function tile(
+  section: Section<unknown>,
+  label: string,
+  link: string,
+  count: number | undefined,
+  caption: string,
+) {
+  const loading = section.loading();
+  return {
+    label,
+    link,
+    value: count !== undefined ? String(count) : loading ? '…' : '–',
+    caption: count !== undefined ? caption : loading ? 'Loading…' : 'Unavailable',
+    error: section.error(),
+  };
 }

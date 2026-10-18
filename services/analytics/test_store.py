@@ -11,11 +11,12 @@ from uuid import uuid4
 import psycopg
 import pytest
 from learning_transport.db import LOCK_CLASSROOM, lock, migrations
+from learning_transport.kafka import ClassroomDeletedEvent, UserDeletedEvent
 from psycopg.rows import dict_row
 from psycopg_pool import ConnectionPool
 
 from consumer import process, purge, purge_assessment, purge_user
-from domain import AssessmentDeletedEvent, ClassroomDeletedEvent, Event, UserDeletedEvent
+from domain import AssessmentDeletedEvent, Event
 from main import MIGRATIONS
 from test_domain import finalized
 

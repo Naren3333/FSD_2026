@@ -238,7 +238,7 @@ def test_migrations_reject_gaps_and_bad_names(tmp_path: Path, names: list[str]) 
 
 def roster_client(status: int, body: Any) -> IdentityClient:
     def answer(request: httpx.Request) -> httpx.Response:
-        assert str(request.url) == "http://identity/v1/classrooms/c1/students"
+        assert str(request.url) == "http://identity/v1/classrooms/c1/student-ids"
         assert request.headers["authorization"] == "Bearer t"
         return httpx.Response(status, json=body)
 
@@ -246,12 +246,8 @@ def roster_client(status: int, body: Any) -> IdentityClient:
 
 
 def test_identity_roster_is_the_students_ids_in_order() -> None:
-    students = [
-        {"id": "s2", "username": "b", "display_name": "B"},
-        {"id": "s1", "username": "a", "display_name": "A"},
-    ]
-    assert run(roster_client(200, students).roster("Bearer t", "c1", "corr")) == ["s2", "s1"]
+    assert run(roster_client(200, ["s2", "s1"]).roster("Bearer t", "c1", "corr")) == ["s2", "s1"]
     assert run(roster_client(403, {}).roster("Bearer t", "c1", "corr")) is None
-    for status, body in [(503, {}), (200, {"students": []}), (200, [{"name": "x"}])]:
+    for status, body in [(503, {}), (200, {"students": []}), (200, [{"id": "s1"}]), (200, [""])]:
         with pytest.raises(UpstreamError):
             run(roster_client(status, body).roster("Bearer t", "c1", "corr"))

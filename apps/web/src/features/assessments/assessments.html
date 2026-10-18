@@ -78,15 +78,15 @@
               </button>
             } @else if (session.isTeacher()) {
               <button class="secondary" (click)="edit(item)" [disabled]="state.busy()">
-                {{ item.submissions ? 'Edit details' : 'Edit'
-                }}<span class="visually-hidden">{{ item.submissions ? ' of ' : ' ' }}{{ item.title }}</span>
+                {{ submittedBy(item) ? 'Edit details' : 'Edit'
+                }}<span class="visually-hidden">{{ submittedBy(item) ? ' of ' : ' ' }}{{ item.title }}</span>
               </button>
               <button class="secondary" (click)="confirmDelete(item)" [disabled]="state.busy()">
                 Delete<span class="visually-hidden"> {{ item.title }}</span>
               </button>
             }
           </span>
-          @if (session.isTeacher() && item.status === 'published' && item.submissions) {
+          @if (session.isTeacher() && item.status === 'published' && submittedBy(item)) {
             <span class="caption">
               Students have submitted it, so its questions are fixed. Deleting it also deletes their grades.
             </span>
@@ -123,7 +123,7 @@
               [controlId]="'answer-' + question.id"
               [label]="question.prompt"
               [hint]="answerHint(question)"
-              [invalid]="!!answers.get(question.id)?.touched && !!answers.get(question.id)?.invalid"
+              [control]="answers.get(question.id)"
               [error]="
                 question.type === 'free_response'
                   ? 'Write an answer of at most ' + (question.max_length ?? 5000) + ' characters.'
@@ -234,11 +234,7 @@
         }
       </p>
       <form id="assessment-editor" novalidate [formGroup]="form" (ngSubmit)="save(false)">
-        <app-field
-          controlId="assessment-title"
-          label="Assessment title"
-          [invalid]="form.controls.title.touched && form.controls.title.invalid"
-        >
+        <app-field controlId="assessment-title" label="Assessment title" [control]="form.controls.title">
           <input appFieldControl id="assessment-title" formControlName="title" maxlength="160" />
         </app-field>
         @if (!detailsOnly()) {
@@ -270,7 +266,7 @@
               <app-field
                 [controlId]="'question-' + i + '-prompt'"
                 label="Question"
-                [invalid]="question.controls.prompt.touched && question.controls.prompt.invalid"
+                [control]="question.controls.prompt"
               >
                 <textarea
                   appFieldControl
@@ -308,7 +304,7 @@
                     label="Marks"
                     hint="1–100."
                     error="Give 1–100 marks."
-                    [invalid]="question.controls.points.touched && question.controls.points.invalid"
+                    [control]="question.controls.points"
                   >
                     <input
                       appFieldControl
@@ -329,7 +325,7 @@
                     ? 'This topic is archived. Choose an active topic.'
                     : 'This field is required.'
                 "
-                [invalid]="question.controls.topic_id.touched && question.controls.topic_id.invalid"
+                [control]="question.controls.topic_id"
               >
                 <select appFieldControl [id]="'question-' + i + '-topic'" formControlName="topic_id">
                   <option value="">Choose a topic</option>
@@ -350,7 +346,7 @@
                     label="Answer options"
                     hint="One option per line; 2–8 unique options."
                     error="Give 2–8 unique options, one per line."
-                    [invalid]="question.controls.options.touched && question.controls.options.invalid"
+                    [control]="question.controls.options"
                   >
                     <textarea
                       appFieldControl
@@ -363,7 +359,7 @@
                     [controlId]="'question-' + i + '-key'"
                     label="Correct answer"
                     hint="Use the exact option text."
-                    [invalid]="question.controls.answer.touched && question.controls.answer.invalid"
+                    [control]="question.controls.answer"
                   >
                     <input appFieldControl [id]="'question-' + i + '-key'" formControlName="answer" />
                   </app-field>
@@ -373,7 +369,7 @@
                     <app-field
                       [controlId]="'question-' + i + '-key'"
                       label="Correct answer"
-                      [invalid]="question.controls.answer.touched && question.controls.answer.invalid"
+                      [control]="question.controls.answer"
                     >
                       <input
                         appFieldControl
@@ -402,7 +398,7 @@
                     label="Accepted answers"
                     hint="One per line. A matching answer gets full marks; any other answer comes to you to mark."
                     error="Give 1–20 accepted answers, one per line."
-                    [invalid]="question.controls.accepted.touched && question.controls.accepted.invalid"
+                    [control]="question.controls.accepted"
                   >
                     <textarea
                       appFieldControl
@@ -422,7 +418,7 @@
                     label="Longest answer, in characters"
                     hint="Up to 20,000."
                     error="Allow 1–20,000 characters."
-                    [invalid]="question.controls.max_length.touched && question.controls.max_length.invalid"
+                    [control]="question.controls.max_length"
                   >
                     <input
                       appFieldControl
@@ -440,7 +436,7 @@
                         <app-field
                           [controlId]="'question-' + i + '-criterion-' + c + '-title'"
                           [label]="'Criterion ' + (c + 1)"
-                          [invalid]="criterion.controls.title.touched && criterion.controls.title.invalid"
+                          [control]="criterion.controls.title"
                         >
                           <input
                             appFieldControl
@@ -454,7 +450,7 @@
                           [label]="'Criterion ' + (c + 1) + ' levels'"
                           hint='One level per line, as "points: what work at this level shows". 2–6 levels.'
                           error='Give 2–6 levels, one per line, as "points: description", each with its own points from 0 to 100.'
-                          [invalid]="criterion.controls.levels.touched && criterion.controls.levels.invalid"
+                          [control]="criterion.controls.levels"
                         >
                           <textarea
                             appFieldControl
@@ -608,14 +604,14 @@
   #deleteDialog
   dialogId="delete-assessment"
   [heading]="
-    deleting()?.submissions
+    deletingSubmitted()
       ? 'Delete this assessment and its grades?'
       : deleting()?.status === 'published'
         ? 'Delete this assessment?'
         : 'Delete this draft?'
   "
   [confirmLabel]="
-    deleting()?.submissions
+    deletingSubmitted()
       ? 'Delete assessment and grades'
       : deleting()?.status === 'published'
         ? 'Delete assessment'
@@ -628,8 +624,11 @@
   @if (deleting(); as item) {
     <p>
       <strong>{{ item.title }}</strong> and its questions will be deleted.
-      @if (item.submissions) {
-        @if (item.submissions === 1) {
+      @if (deletingSubmitted()) {
+        @if (!item.submissions) {
+          So are the submissions made by students who have since left the class and every grade for them,
+          finalized and released ones included.
+        } @else if (item.submissions === 1) {
           So are the 1 submission a student made and every grade for it, finalized and released ones included:
           the student loses these results, and class performance and progress stop counting them.
         } @else {

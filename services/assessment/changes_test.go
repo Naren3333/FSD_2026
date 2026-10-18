@@ -18,7 +18,7 @@ type racingStore struct {
 	meanwhile func()
 }
 
-func (r racingStore) insertSubmission(ctx context.Context, v Assessment, sub Submission) (bool, error) {
+func (r racingStore) insertSubmission(ctx context.Context, v Assessment, sub Submission) (bool, bool, error) {
 	r.meanwhile()
 	return r.memoryStore.insertSubmission(ctx, v, sub)
 }
@@ -50,6 +50,15 @@ func changeIt(m *memoryStore, v Assessment) {
 	m.assessments[v.ID] = v
 }
 
+// pastDue moves the due date an hour back, with the given late policy, as a teacher's details change would.
+func pastDue(policy string) func(*memoryStore, Assessment) {
+	return func(m *memoryStore, v Assessment) {
+		due := time.Now().Add(-time.Hour)
+		v.DueAt, v.LatePolicy = &due, policy
+		m.assessments[v.ID] = v
+	}
+}
+
 func TestAStudentRacingTheTeachersChangeIsToldWhatHappened(t *testing.T) {
 	cases := []struct {
 		name      string
@@ -62,6 +71,9 @@ func TestAStudentRacingTheTeachersChangeIsToldWhatHappened(t *testing.T) {
 		{"submit while it is deleted", deleteIt, http.MethodPost, "/submissions", http.StatusNotFound, "NOT_FOUND"},
 		{"save while it is deleted", deleteIt, http.MethodPut, "/saved-answers", http.StatusNotFound, "NOT_FOUND"},
 		{"submit while a question changes", changeIt, http.MethodPost, "/submissions", http.StatusConflict, "ASSESSMENT_CHANGED"},
+		// The due date and late policy as stored when the submission commits decide, and the answer says what was stored.
+		{"submit while late work becomes refused", pastDue(lateReject), http.MethodPost, "/submissions", http.StatusConflict, "CLOSED"},
+		{"submit while the due date passes", pastDue(lateAccept), http.MethodPost, "/submissions", http.StatusCreated, `"late":true`},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

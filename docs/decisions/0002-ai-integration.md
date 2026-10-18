@@ -38,4 +38,4 @@ The owner decided to:
 - **Line endings:** `.gitattributes` keeps LF line endings on Windows, so `gofmt` in `scripts/check.py` passes there.
 - **Migrations:** Go services now apply numbered migrations (`migrations/NNN_name.sql`) once each, recorded in `schema_migrations`, under the existing advisory lock. Content's chunk and index tables arrive as `002_*.sql`.
 - **Chatbot database:** the chatbot gets the seventh service-owned database and credential, with the same isolation as the other six.
-- **Delivery:** the work lands in stages: foundations, ai-core, Content indexing and search, chatbot, Angular, then documentation. See `docs/development/handover.md` for what each stage verified.
+- **Delivery:** the work lands in stages: foundations, ai-core, Content indexing and search, chatbot, Angular, then documentation. What each stage verified is in the git history of `docs/development/handover.md` (before 2026-10-18).

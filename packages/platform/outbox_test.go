@@ -221,3 +221,40 @@ func TestOutboxPrunesOnlyEventsPublishedLongAgo(t *testing.T) {
 		t.Fatalf("left %v", left)
 	}
 }
+
+func TestDiscardPendingByRemovesOnlyTheMatchingEvents(t *testing.T) {
+	db := eventDB(t)
+	ctx := context.Background()
+	tx, err := db.Begin(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer tx.Rollback(ctx)
+	for _, e := range []struct{ topic, name, student, org string }{
+		{"a.submitted.v1", "gone/old", "s1", "o"},
+		{"a.submitted.v2", "gone/new", "s1", "o"},
+		{"a.other.v1", "kept/topic", "s1", "o"},
+		{"a.submitted.v2", "kept/student", "s2", "o"},
+		{"a.submitted.v2", "kept/org", "s1", "p"},
+	} {
+		if err = Emit(ctx, tx, e.topic, "k", map[string]string{"name": e.name, "student_id": e.student, "org_id": e.org}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err = ExecAll(ctx, tx, []string{"SELECT $1::text", "SELECT length($1::text)"}, "x"); err != nil {
+		t.Fatal(err)
+	}
+	if err = DiscardPendingBy(ctx, tx, "a.submitted.%", "student_id", "s1", "o"); err != nil {
+		t.Fatal(err)
+	}
+	var left []string
+	if err = tx.QueryRow(ctx, "SELECT array_agg(body->'data'->>'name' ORDER BY body->'data'->>'name') FROM outbox").Scan(&left); err != nil {
+		t.Fatal(err)
+	}
+	if !slices.Equal(left, []string{"kept/org", "kept/student", "kept/topic"}) {
+		t.Fatalf("left %v", left)
+	}
+	if err = ExecAll(ctx, tx, []string{"SELECT 1", "SELECT * FROM missing_table", "DELETE FROM outbox"}); err == nil {
+		t.Fatal("a failing statement was not reported")
+	}
+}

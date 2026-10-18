@@ -82,11 +82,6 @@ class Event(Envelope):
         return self
 
 
-class ClassroomDeleted(Contract):
-    classroom_id: UUID
-    org_id: str = Field(min_length=1)
-
-
 class AssessmentDeleted(Contract):
     assessment_id: UUID
     classroom_id: UUID
@@ -103,36 +98,6 @@ class AssessmentDeletedEvent(Envelope):
     def deleted(self) -> "AssessmentDeletedEvent":
         if self.resource_id != self.data.assessment_id:
             raise ValueError("Not this assessment's deletion")
-        return self
-
-
-class UserDeleted(Contract):
-    user_id: UUID
-    org_id: str = Field(min_length=1)
-    role: Literal["teacher", "student"]
-
-
-class UserDeletedEvent(Envelope):
-    """A user who deleted their own account (ADR 0011)."""
-
-    event_type: Literal["identity.user.deleted.v1"]
-    data: UserDeleted
-
-    @model_validator(mode="after")
-    def deleted(self) -> "UserDeletedEvent":
-        if self.resource_id != self.data.user_id:
-            raise ValueError("Not this user's deletion")
-        return self
-
-
-class ClassroomDeletedEvent(Envelope):
-    event_type: Literal["identity.classroom.deleted.v1"]
-    data: ClassroomDeleted
-
-    @model_validator(mode="after")
-    def deleted(self) -> "ClassroomDeletedEvent":
-        if self.resource_id != self.data.classroom_id:
-            raise ValueError("Not this classroom's deletion")
         return self
 
 

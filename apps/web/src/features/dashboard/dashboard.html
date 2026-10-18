@@ -11,51 +11,18 @@
   </p>
 } @else {
   <ul class="stats" aria-label="Class summary">
-    <li>
-      <a class="stat" routerLink="/review">
-        <span class="stat-label">Needs grading</span>
-        @if (counts.value(); as c) {
-          <strong class="stat-value">{{ c.drafts }}</strong>
-          <span class="caption"
-            >{{ c.finalized }} finalized{{ c.unreleased ? ' · ' + c.unreleased + ' not released' : '' }} ·
-            Open Grading review</span
-          >
-        } @else {
-          <strong class="stat-value">{{ counts.loading() ? '…' : '–' }}</strong>
-          <span class="caption">{{ counts.loading() ? 'Loading…' : 'Unavailable' }}</span>
+    @for (tile of stats(); track tile.label) {
+      <li>
+        <a class="stat" [routerLink]="tile.link">
+          <span class="stat-label">{{ tile.label }}</span>
+          <strong class="stat-value">{{ tile.value }}</strong>
+          <span class="caption">{{ tile.caption }}</span>
+        </a>
+        @if (tile.error) {
+          <p role="alert" class="error">{{ tile.error }}</p>
         }
-      </a>
-      @if (counts.error()) {
-        <p role="alert" class="error">{{ counts.error() }}</p>
-      }
-    </li>
-    <li>
-      <a class="stat" routerLink="/classrooms">
-        <span class="stat-label">Students enrolled</span>
-        @if (roster.value(); as students) {
-          <strong class="stat-value">{{ students.length }}</strong>
-          <span class="caption">Manage students under Classrooms</span>
-        } @else {
-          <strong class="stat-value">{{ roster.loading() ? '…' : '–' }}</strong>
-          <span class="caption">{{ roster.loading() ? 'Loading…' : 'Unavailable' }}</span>
-        }
-      </a>
-      @if (roster.error()) {
-        <p role="alert" class="error">{{ roster.error() }}</p>
-      }
-    </li>
-    <li>
-      <a class="stat" routerLink="/assessments">
-        <span class="stat-label">Published assessments</span>
-        @if (assessments.value(); as list) {
-          <strong class="stat-value">{{ list.length }}</strong>
-          <span class="caption">Published · drafts are under Assessments</span>
-        } @else {
-          <strong class="stat-value">{{ assessments.loading() ? '…' : '–' }}</strong>
-          <span class="caption">{{ assessments.loading() ? 'Loading…' : 'Unavailable' }}</span>
-        }
-      </a>
-    </li>
+      </li>
+    }
   </ul>
 
   <section class="panel dashboard-panel" aria-labelledby="submissions-title">
@@ -149,10 +116,10 @@
       }
       <app-pager
         label="Class topics pages"
-        [page]="page()"
+        [(page)]="page"
         [pageSize]="pageSize"
         [total]="data.total"
-        (go)="goTo($event)"
+        (go)="loadPerformance()"
       />
     }
   </section>
