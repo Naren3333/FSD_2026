@@ -1,7 +1,9 @@
 """Probe all ten applications from their private network, then the public Kong and Keycloak ports, with bounded
 startup wait."""
 
+import argparse
 import json
+import os
 import subprocess
 import time
 import urllib.error
@@ -10,7 +12,7 @@ from collections.abc import Callable
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
-TIMEOUT = 180  # seconds for both phases together
+TIMEOUT = 180  # seconds for both phases together, unless --timeout says otherwise
 SERVICES = [
     "identity",
     "curriculum",
@@ -23,11 +25,12 @@ SERVICES = [
     "student-performance-agent",
     "question-chatbot-agent",
 ]
-# What the tests and the browser call from the host. Kong starts last and needs a few seconds to listen after its
-# container starts, so the applications being ready says nothing about it.
+# What the tests and the browser call from the host, on the ports docker-compose.yml publishes for this stack. Kong
+# starts last and needs a few seconds to listen after its container starts, so the applications being ready says
+# nothing about it.
 PUBLIC = {
-    "kong": ("http://127.0.0.1:8000/api/identity/classrooms", 401),
-    "keycloak": ("http://127.0.0.1:8081/realms/learning", 200),
+    "kong": (f"http://127.0.0.1:{os.environ.get('KONG_PORT') or 8000}/api/identity/classrooms", 401),
+    "keycloak": (f"http://127.0.0.1:{os.environ.get('KEYCLOAK_PORT') or 8081}/realms/learning", 200),
 }
 # Runs inside the analytics container, on the private network, and prints each service's readiness status.
 PROBE = f"""
@@ -84,13 +87,18 @@ def wait(ready: Callable[[], bool], deadline: float) -> bool:
 
 
 def main() -> None:
-    deadline = time.monotonic() + TIMEOUT
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument(
+        "--timeout", type=int, default=TIMEOUT, help="seconds to wait for both phases together"
+    )
+    timeout = parser.parse_args().timeout
+    deadline = time.monotonic() + timeout
     if not wait(applications_ready, deadline):
-        raise SystemExit(f"Applications did not become ready within {TIMEOUT} seconds")
+        raise SystemExit(f"Applications did not become ready within {timeout} seconds")
     print("PASS: all ten applications ready")
     if not wait(public_ports_ready, deadline):
         states = ", ".join(f"{name} {status(url)}" for name, (url, _) in PUBLIC.items())
-        raise SystemExit(f"Kong or Keycloak did not answer within {TIMEOUT} seconds: {states}")
+        raise SystemExit(f"Kong or Keycloak did not answer within {timeout} seconds: {states}")
     print("PASS: Kong and Keycloak answer on their public ports")
 
 

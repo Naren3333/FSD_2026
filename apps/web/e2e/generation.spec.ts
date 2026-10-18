@@ -1,13 +1,14 @@
 import { test, expect, type Route } from '@playwright/test';
 import {
   archiveTopic,
-  deleteTopicsAfterEach,
+  deleteTestDataAfterEach,
   expectNoHorizontalScroll,
+  restoreTopic,
   topicToDelete,
   teacherWithClassroom,
 } from './helpers';
 
-deleteTopicsAfterEach();
+deleteTestDataAfterEach();
 
 // The agent and the classroom's documents are stubbed in the browser: real generation needs provider keys and
 // indexed PDFs. The editor, the curriculum and saving the draft are real.
@@ -46,7 +47,7 @@ function draft(topicId: string, prompt: string) {
 const json = (route: Route, status: number, body: unknown) =>
   route.fulfill({ status, contentType: 'application/json', body: JSON.stringify(body) });
 
-test('a teacher generates questions, drafts marking guidance and matches a scheme', async ({ page }) => {
+test('a teacher generates questions and drafts marking guidance', async ({ page }) => {
   const suffix = Date.now().toString();
   await teacherWithClassroom(page, 'Generation ' + suffix);
   await page.getByRole('link', { name: 'Curriculum', exact: true }).click();
@@ -92,22 +93,6 @@ test('a teacher generates questions, drafts marking guidance and matches a schem
       requires_teacher_review: true,
     }),
   );
-  await page.route('**/api/content/search', (route) =>
-    json(route, 200, {
-      results: [
-        {
-          chunk_id: SCHEME,
-          document_id: SCHEME,
-          title: 'Testing scheme',
-          doc_type: 'marking_scheme',
-          section_path: null,
-          page_start: 1,
-          page_end: 1,
-          content: 'Q2: accept "unit test".',
-        },
-      ],
-    }),
-  );
   await page.route('**/api/chatbot/usage', (route) =>
     json(route, 200, { spent_usd: 0.01, limit_usd: 10, resets_at: new Date().toISOString() }),
   );
@@ -117,7 +102,7 @@ test('a teacher generates questions, drafts marking guidance and matches a schem
   await page.getByLabel('Assessment title').fill('Generated ' + suffix);
   await page.getByText('Generate questions from teaching materials').click();
   await page.getByRole('checkbox', { name: 'Testing slides' }).check();
-  // A marking scheme is not a source for questions.
+  // A marking scheme uploaded before they were retired is not a source for questions.
   await expect(page.getByRole('checkbox', { name: 'Testing scheme' })).toHaveCount(0);
   await page.locator('#generate-topic').selectOption({ label: 'Testing topic ' + suffix });
   await page.getByRole('button', { name: 'Generate questions' }).click();
@@ -138,26 +123,33 @@ test('a teacher generates questions, drafts marking guidance and matches a schem
   await first.getByText('AI-generated from 1 passage of your materials').click();
   await expect(first.getByText('Testing slides, page 2')).toBeVisible();
 
-  // A hand-written short answer gets drafted guidance, then a matched scheme passage.
+  // A hand-written short answer gets drafted guidance, from teaching materials only, then a marking point of the
+  // teacher's own.
   await page.getByRole('button', { name: 'Add question', exact: true }).click();
   const second = page.getByRole('group', { name: 'Question 2', exact: true });
   await second.getByLabel('Question', { exact: true }).fill('Name the test that checks one function.');
   await second.getByLabel('Question type').selectOption('short_answer');
+  await expect(second.getByLabel('Draft from').locator('option')).toHaveText([
+    'All teaching materials',
+    'Testing slides',
+  ]);
   await second.getByRole('button', { name: 'Draft marking guidance for question 2' }).click();
   await expect(second.getByText('AI-written guidance')).toBeVisible();
   await expect(second.getByLabel('Accepted answers')).toHaveValue('');
   await second.getByRole('button', { name: 'Use this guidance for question 2' }).click();
   await expect(second.getByLabel('Accepted answers')).toHaveValue('unit test\na unit test');
-  const scheme = second.getByRole('group', { name: 'Marking scheme (optional)' });
-  await expect(scheme.getByText('1 mark: names a unit test.')).toBeVisible();
-  await page.getByLabel('Marking scheme', { exact: true }).selectOption({ label: 'Testing scheme' });
-  await page.getByRole('button', { name: 'Match scheme to questions' }).click();
-  await expect(page.getByText('Added a passage to 1 question. Check each one before saving.')).toBeVisible();
-  await expect(scheme.getByText('Q2: accept "unit test".')).toBeVisible();
+  const points = second.getByRole('group', { name: 'Marking points (optional)' });
+  await expect(points.getByText('1 mark: names a unit test.')).toBeVisible();
+  await expect(points.getByText('Written by AI', { exact: true })).toBeVisible();
+  await points.getByLabel('Add a marking point').fill('Accept "unit testing".');
+  await points.getByRole('button', { name: 'Add marking point to question 2' }).click();
+  await expect(points.getByText('Written by you', { exact: true })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Match scheme to questions' })).toHaveCount(0);
 
   await page.getByRole('button', { name: 'Create draft' }).click();
   await expect(page.getByText('Draft created.', { exact: true })).toBeVisible();
   await expectNoHorizontalScroll(page, 'test-results/generation-mobile.png');
   await page.setViewportSize({ width: 1280, height: 800 });
   await archiveTopic(page, 'Testing topic ' + suffix);
+  await restoreTopic(page, 'Testing topic ' + suffix);
 });

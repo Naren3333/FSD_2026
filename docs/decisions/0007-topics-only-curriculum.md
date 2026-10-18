@@ -8,7 +8,7 @@ Curriculum stored a tree of six kinds of node (subject, course, unit, topic, ski
 
 ## Decision
 
-**Curriculum has one level, the topic.** A topic is `{id, name}` with no kind and no parent. Prerequisites link topics to topics. The API is `GET/POST /v1/topics`, `GET/PATCH/DELETE /v1/topics/{id}` and `POST /v1/topics/{id}/prerequisites` (`{topic_id, prerequisite_id}`); `/v1/nodes` is removed. The Curriculum page is one list of topics with an add form and an archive action.
+**Curriculum has one level, the topic.** A topic is `{id, name}` with no kind and no parent. Prerequisites link topics to topics. The API is `GET/POST /v1/topics`, `GET/PATCH/DELETE /v1/topics/{id}` and `POST /v1/topics/{id}/prerequisites` (`{topic_id, prerequisite_id}`); `/v1/nodes` is removed. Archived topics are listed with `GET /v1/topics?archived=true` and made active again with `POST /v1/topics/{id}/restore`. The Curriculum page is one list of topics with an add form and an archive action.
 
 **The word "skill" is gone from new contracts.** Every `skill_id` is `topic_id`; error codes are `UNKNOWN_TOPIC` (question generation) and `INVALID_TOPIC` (Assessment); Analytics returns `topics` and `TopicMetric`; the web app says "topic".
 

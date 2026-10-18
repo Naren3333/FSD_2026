@@ -5,10 +5,12 @@ import json
 from pathlib import Path
 from typing import Any, Protocol
 
-from learning_transport.db import LOCK_CLASSROOM, AsyncPooled, lock_async
+from learning_transport.db import LOCK_CLASSROOM, LOCK_USER, AsyncPooled, lock_async
 from psycopg.types.json import Jsonb
 
 MIGRATIONS = Path(__file__).parent / "migrations"
+# A deleted document's redaction (purge.redact) against an answer citing it being saved.
+LOCK_DOCUMENT = "document"
 TITLE_CHARS = 80
 THREAD_COLUMNS = "id, classroom_id, role, title, created_at, last_message_at"
 MESSAGE_COLUMNS = "id, role, content, outcome, citations, created_at"
@@ -40,14 +42,16 @@ class PostgresStore(AsyncPooled):
 
     async def create_thread(self, org: str, user: str, role: str, classroom_id: str) -> dict[str, Any] | None:
         async with self.pool.connection() as conn, conn.transaction():
-            # The classroom's purge takes the same lock, so a thread is never created in a classroom whose purge is
-            # committing.
+            # The classroom's purge and a deleted account's take the same locks, so a thread is never created in a
+            # classroom, or for a user, whose purge is committing.
             await lock_async(conn, LOCK_CLASSROOM, classroom_id)
+            await lock_async(conn, LOCK_USER, user)
             cur = await conn.execute(
                 f"INSERT INTO threads (org_id, user_id, role, classroom_id) SELECT %s,%s,%s,%s"
                 f" WHERE NOT EXISTS (SELECT 1 FROM purged_classrooms WHERE classroom_id=%s)"
+                f" AND NOT EXISTS (SELECT 1 FROM deleted_users WHERE user_id=%s)"
                 f" RETURNING {THREAD_COLUMNS}",
-                (org, user, role, classroom_id, classroom_id),
+                (org, user, role, classroom_id, classroom_id, user),
             )
             row = await cur.fetchone()
             return dict(row) if row else None
@@ -98,6 +102,23 @@ class PostgresStore(AsyncPooled):
     async def save_answer(self, thread_id: str, answer: dict[str, Any]) -> str:
         citations = answer.get("citations")
         async with self.pool.connection() as conn, conn.transaction():
+            if citations:
+                # A document deleted while the answer was written is cited as removed (purge.redact). The locks,
+                # taken in order, make a redaction either see this answer or come after this check.
+                documents = sorted({str(c["document_id"]) for c in citations})
+                for document in documents:
+                    await lock_async(conn, LOCK_DOCUMENT, document)
+                cur = await conn.execute(
+                    "SELECT document_id::text AS id FROM deleted_documents WHERE document_id = ANY(%s::uuid[])",
+                    (documents,),
+                )
+                deleted = {row["id"] for row in await cur.fetchall()}
+                citations = [
+                    {**c, "content": "", "image": None, "removed": True}
+                    if str(c["document_id"]) in deleted
+                    else c
+                    for c in citations
+                ]
             cur = await conn.execute(
                 "INSERT INTO messages (thread_id, role, content, outcome, rewritten_query, is_on_topic,"
                 " retrieved_chunk_ids, citations, prompt_version, model, usage_tokens, latency_ms)"

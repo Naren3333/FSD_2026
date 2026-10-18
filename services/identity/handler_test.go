@@ -21,6 +21,7 @@ type memoryStore struct {
 	owners     map[string]string   // classroom -> teacher
 	enrolled   map[string][]string // classroom -> students
 	registered []string
+	deleted    []string
 }
 
 func newMemoryStore() *memoryStore {
@@ -95,7 +96,7 @@ func (m *memoryStore) studentsNamed(_ context.Context, _, username string) ([]st
 	return ids, nil
 }
 
-func (m *memoryStore) removeEnrollment(_ context.Context, classroom, student string) (bool, error) {
+func (m *memoryStore) removeEnrollment(_ context.Context, classroom, _, student string) (bool, error) {
 	kept := []string{}
 	for _, s := range m.enrolled[classroom] {
 		if s != student {
@@ -131,6 +132,20 @@ func (m *memoryStore) listOrgStudents(_ context.Context, _, search string, offse
 	sort.Slice(matching, func(i, j int) bool { return matching[i].ID < matching[j].ID })
 	end := min(offset+limit, len(matching))
 	return matching[min(offset, end):end], len(matching), nil
+}
+
+func (m *memoryStore) deleteAccount(_ context.Context, _, subject string) error {
+	if _, ok := m.roles[subject]; !ok {
+		return platform.ErrNotFound
+	}
+	for _, teacher := range m.owners {
+		if teacher == subject {
+			return errOwnsClassrooms
+		}
+	}
+	delete(m.roles, subject)
+	m.deleted = append(m.deleted, subject)
+	return nil
 }
 
 // call sends a request as a verified caller with the given roles.
@@ -359,5 +374,59 @@ func TestOnlyTeachersListTheSchoolsStudents(t *testing.T) {
 		if w.Code != tc.status || !strings.Contains(w.Body.String(), tc.want) {
 			t.Errorf("%s: %d %s", tc.query, w.Code, w.Body.String())
 		}
+	}
+}
+
+func TestUsersDeleteOnlyTheirOwnAccount(t *testing.T) {
+	store := newMemoryStore()
+	student, teacher := "0b0e1f2a-3b4c-4d5e-8f60-718293a4b5c6", "1c1f2a3b-4c5d-4e6f-9071-8293a4b5c6d7"
+	store.roles[student], store.roles[teacher] = "student", "teacher"
+	store.owners[room] = teacher
+	if w := call(t, store, http.MethodDelete, "/v1/me", "", teacher, "teacher"); w.Code != http.StatusConflict || !strings.Contains(w.Body.String(), "OWNS_CLASSROOMS") {
+		t.Fatalf("a teacher with a classroom deleted their account: %d %s", w.Code, w.Body.String())
+	}
+	if w := call(t, store, http.MethodDelete, "/v1/me", "", student, "student"); w.Code != http.StatusNoContent {
+		t.Fatalf("status %d %s", w.Code, w.Body.String())
+	}
+	for _, again := range []string{student, "not-a-uuid"} {
+		if w := call(t, store, http.MethodDelete, "/v1/me", "", again, "student"); w.Code != http.StatusNotFound {
+			t.Fatalf("%s: status %d", again, w.Code)
+		}
+	}
+	if len(store.deleted) != 1 || store.deleted[0] != student || store.roles["student-1"] != "student" {
+		t.Fatalf("deleted %v", store.deleted)
+	}
+}
+
+func TestKeycloakRemovesASignInOnceAndTreatsAMissingOneAsRemoved(t *testing.T) {
+	var calls []string
+	keycloak := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls = append(calls, r.Method+" "+r.URL.Path)
+		switch r.URL.Path {
+		case "/realms/learning/protocol/openid-connect/token":
+			_, _ = w.Write([]byte(`{"access_token":"admin","expires_in":60}`))
+		case "/admin/realms/learning/users/gone":
+			w.WriteHeader(http.StatusNotFound)
+		case "/admin/realms/learning/users/broken":
+			w.WriteHeader(http.StatusForbidden)
+		default:
+			if r.Header.Get("Authorization") != "Bearer admin" {
+				w.WriteHeader(http.StatusUnauthorized)
+				return
+			}
+			w.WriteHeader(http.StatusNoContent)
+		}
+	}))
+	defer keycloak.Close()
+	t.Setenv("KEYCLOAK_URL", keycloak.URL)
+	t.Setenv("ACCOUNTS_CLIENT_SECRET", "secret")
+	k := newKeycloakUsers()
+	for user, ok := range map[string]bool{"u1": true, "gone": true, "broken": false} {
+		if err := k.remove(context.Background(), user); (err == nil) != ok {
+			t.Errorf("%s: %v", user, err)
+		}
+	}
+	if calls[0] != "POST /realms/learning/protocol/openid-connect/token" {
+		t.Fatalf("calls %v", calls)
 	}
 }

@@ -127,11 +127,16 @@ input_rubric = obj(
     },
     ["criteria"],
 )
-# A question's id is optional and ignored: Assessment gives every question of a new or edited draft a new id.
+# A question's id is optional and ignored: Assessment gives every saved question a new id, except that a question
+# left unchanged on a published assessment keeps the one it had.
 question_input = obj(
     {
         **question_fields,
-        "id": {**UUID, "description": "Ignored; every saved question gets a new id."},
+        "id": {
+            **UUID,
+            "description": "Ignored; every saved question gets a new id, except one left unchanged on a published "
+            "assessment, which keeps its id and the work students saved on it.",
+        },
         "rubric": input_rubric,
     },
     ["prompt", "type", "skill_id"],
@@ -169,8 +174,8 @@ assessment_input = obj(
         **settings,
         "status": {
             **STATUS,
-            "description": "Omitted: published on create; on update the draft stays a draft (only an explicit "
-            "`published` publishes it).",
+            "description": "Omitted: published on create; on update it keeps its status (only an explicit "
+            "`published` publishes a draft, and a published assessment cannot become a draft again).",
         },
     },
     ["classroom_id", "title", "questions"],
@@ -197,7 +202,13 @@ assessment_summary = obj(
         "late_policy": LATE,
         "question_count": {"type": "integer", "minimum": 1, "maximum": 50},
         "points": {"type": "integer", "minimum": 1},
-    }
+        "submissions": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "How many students have submitted it; for the classroom's teacher only.",
+        },
+    },
+    ["id", "title", "submitted", "status", "opens_at", "due_at", "late_policy", "question_count", "points"],
 )
 saved_answers = obj(
     {"answers": {"type": "object", "additionalProperties": {"type": "string"}}, "saved_at": NULLABLE_TIME}
@@ -397,12 +408,19 @@ def operation(method, path, body, response, code=200, query=()):
     parameters += (
         [{"name": "student", "in": "path", "required": True, "schema": TEXT}] if "{student}" in path else []
     )
+    parameters += (
+        [{"name": "prerequisite", "in": "path", "required": True, "schema": UUID}]
+        if "{prerequisite}" in path
+        else []
+    )
     parameters += [
         {
             "name": q,
             "in": "query",
-            "required": q not in ("student_id", "assessment_id"),
-            "schema": {"student_id": TEXT, "title": TITLE}.get(q, UUID),
+            "required": q not in ("student_id", "assessment_id", "with_submissions"),
+            "schema": {"student_id": TEXT, "title": TITLE, "with_submissions": {"type": "boolean"}}.get(
+                q, UUID
+            ),
         }
         for q in query
     ]
@@ -425,6 +443,13 @@ def operation(method, path, body, response, code=200, query=()):
         op["requestBody"] = {"required": True, "content": {"application/json": {"schema": body}}}
     return path, method.lower(), op
 
+
+# The organization's active topics, or with archived=true its archived ones (still named by older questions and
+# evidence), by name.
+topic_list = operation("GET", "/v1/topics", None, array(curriculum_topic, maximum=200))
+topic_list[2]["parameters"] = [
+    {"name": "archived", "in": "query", "required": False, "schema": {"type": "boolean", "default": False}}
+]
 
 # One page of the teacher's school's students, narrowed by an optional search.
 school_students = operation(
@@ -460,6 +485,7 @@ operations = {
                 }
             ),
         ),
+        operation("DELETE", "/v1/me", None, None, 204),
         operation("GET", "/v1/classrooms", None, array(classroom)),
         operation(
             "POST",
@@ -492,23 +518,28 @@ operations = {
         school_students,
     ],
     "curriculum": [
-        operation("GET", "/v1/topics", None, array(curriculum_topic, maximum=200)),
+        topic_list,
         operation("GET", "/v1/topics/{id}", None, curriculum_topic),
         operation("POST", "/v1/topics", obj({"name": TOPIC_NAME}), curriculum_topic, 201),
         operation("PATCH", "/v1/topics/{id}", obj({"name": TOPIC_NAME}), curriculum_topic),
         operation("DELETE", "/v1/topics/{id}", None, None, 204),
+        operation("POST", "/v1/topics/{id}/restore", None, curriculum_topic),
+        # The topic's active prerequisites, by name; links to archived topics are kept and listed again on restore.
+        operation("GET", "/v1/topics/{id}/prerequisites", None, array(curriculum_topic, maximum=200)),
         operation(
             "POST",
             "/v1/topics/{id}/prerequisites",
             obj({"prerequisite_id": UUID}),
             obj({"topic_id": UUID, "prerequisite_id": UUID}),
         ),
+        operation("DELETE", "/v1/topics/{id}/prerequisites/{prerequisite}", None, None, 204),
     ],
     "content": [
         operation("GET", "/v1/documents", None, array(document), query=["classroom_id"]),
         operation("GET", "/v1/documents/{id}", None, document),
         operation("POST", "/v1/documents", None, document, 201, query=["classroom_id", "title"]),
         operation("POST", "/v1/documents/{id}/reindex", None, document, 202),
+        operation("DELETE", "/v1/documents/{id}", None, None, 204),
         operation("POST", "/v1/search", search_request, search_response),
     ],
     "assessment": [
@@ -533,7 +564,21 @@ operations = {
         ),
         operation("GET", "/v1/assessments/{id}", None, {"oneOf": [assessment, public_assessment]}),
         operation("PUT", "/v1/assessments/{id}", assessment_input, assessment),
-        operation("DELETE", "/v1/assessments/{id}", None, obj({"id": UUID})),
+        operation(
+            "PATCH",
+            "/v1/assessments/{id}",
+            obj(
+                {
+                    "title": {"type": "string", "minLength": 1, "maxLength": 160},
+                    "due_at": NULLABLE_TIME,
+                    "late_policy": LATE,
+                },
+                [],  # a field left out keeps its value
+            ),
+            assessment,
+        ),
+        # Once students have submitted, only with with_submissions=true: their submissions and grades go too (ADR 0008).
+        operation("DELETE", "/v1/assessments/{id}", None, obj({"id": UUID}), query=["with_submissions"]),
         operation("POST", "/v1/assessments/{id}/publish", None, assessment),
         operation(
             "POST",
@@ -615,7 +660,8 @@ for name, routes in operations.items():
                 "name": "doc_type",
                 "in": "query",
                 "required": False,
-                "schema": {**DOC_TYPE, "default": "teaching_material"},
+                # Rubrics and marking schemes are no longer uploaded (ADR 0009); documents keep their type.
+                "schema": {"const": "teaching_material", "default": "teaching_material"},
             }
         )
         upload["responses"]["413"] = {
@@ -701,6 +747,14 @@ for name, routes in operations.items():
 
 payloads = {
     "identity.classroom.deleted.v1": obj({"classroom_id": UUID, "org_id": TEXT}),
+    "identity.enrollment.removed.v1": obj({"classroom_id": UUID, "org_id": TEXT, "student_id": TEXT}),
+    "identity.user.deleted.v1": obj(
+        {"user_id": UUID, "org_id": TEXT, "role": {"enum": ["teacher", "student"]}}
+    ),
+    "assessment.deleted.v1": obj({"assessment_id": UUID, "classroom_id": UUID, "org_id": TEXT}),
+    "assessment.due_changed.v1": obj(
+        {"assessment_id": UUID, "classroom_id": UUID, "org_id": TEXT, "due_at": NULLABLE_TIME}
+    ),
     "content.uploaded.v1": obj(
         {
             "document_id": UUID,
@@ -722,6 +776,7 @@ payloads = {
             "embedding_model": TEXT,
         }
     ),
+    "content.deleted.v1": obj({"document_id": UUID, "classroom_id": UUID, "org_id": TEXT}),
     "assessment.submitted.v1": obj(
         {
             "submission_id": UUID,
@@ -824,6 +879,16 @@ FINALIZED_TIMING = (
     "show its marks to the student, and must deduplicate by evaluation_id."
 )
 descriptions = {
+    "identity.user.deleted.v1": "A user deleted their own account (ADR 0011); the resource is the user. Assessment, "
+    "Grading, Analytics and the chatbot delete the user's submissions, saved work, grades, evidence and chats, and "
+    "refuse new ones for them. A teacher deletes their classrooms first.",
+    "identity.enrollment.removed.v1": "A teacher removed a student from a classroom. The student's submissions and "
+    "grades are kept, and leave the teacher's lists and counts while the student is not enrolled; Grading makes no "
+    "more AI suggestions for work they submitted before.",
+    "assessment.due_changed.v1": "A published assessment's teacher changed its due date, or removed it (null). "
+    "Grading sets each evaluation's late flag again: late only when submitted after the new due date.",
+    "assessment.deleted.v1": "A published assessment its teacher deleted, with any submissions (ADR 0008). Grading "
+    "deletes its evaluations, Analytics its evidence, and both ignore anything for it that arrives later.",
     "grading.finalized.v3": FINALIZED_TIMING,
     "grading.finalized.v2": FINALIZED_TIMING,
 }

@@ -44,14 +44,10 @@ npm ci
 npx playwright install chromium
 cd ../..
 python scripts/check.py
-python scripts/wait_ready.py
-python scripts/integration.py
-python scripts/db_tests.py
-cd apps/web
-npm run test:e2e
+python scripts/stack_tests.py
 ```
 
-Integration, database and browser tests require the Docker stack to be running; `check.py` does not, and its web tests can time out while the stack loads the machine. `check.py` runs its checks in parallel (`--serial` runs them one at a time, `--keep-going` reports every failure instead of stopping at the first) and lists any tests that skipped themselves. It also fails if any contract in `contracts/` differs from what `scripts/export_contracts.py` produces, which regenerates them. The five Python services' contracts come from their FastAPI apps; the five Go services' contracts and the event schemas are written by hand inside `export_contracts.py`, so for Go that check only keeps the files in step with the script. What checks the Go contracts against the running services is `integration.py`, which validates every JSON response it receives against them.
+`stack_tests.py` runs the integration, database and browser tests in a fresh, disposable `learning-test` stack and removes it afterwards, so they never touch the development stack's data; it publishes its own ports (Kong 18000, Keycloak 18081, the web app 14200), so a running development stack is left alone (docs/development/operations.md, "Test stack"). `check.py` needs no stack, and its web tests can time out while the stack loads the machine. `check.py` runs its checks in parallel (`--serial` runs them one at a time, `--keep-going` reports every failure instead of stopping at the first) and lists any tests that skipped themselves. It also fails if any contract in `contracts/` differs from what `scripts/export_contracts.py` produces, which regenerates them. The five Python services' contracts come from their FastAPI apps; the five Go services' contracts and the event schemas are written by hand inside `export_contracts.py`, so for Go that check only keeps the files in step with the script. What checks the Go contracts against the running services is `integration.py`, which validates every JSON response it receives against them.
 
 `check.py` fails on unformatted web code; run `npm run format` in `apps/web` to fix it. Component templates live in `.html` files next to their components.
 

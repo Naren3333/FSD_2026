@@ -20,6 +20,7 @@ MIGRATION_NAME = re.compile(r"^(\d{3})_[a-z0-9_]+\.sql$")
 # lock, derived exactly as the Go services derive it.
 LOCK_MIGRATIONS = "migrations"  # no key: serializes replicas migrating at once
 LOCK_CLASSROOM = "classroom"  # a classroom's purge against new rows in it
+LOCK_USER = "user"  # a deleted account's purge against new rows for it
 LOCK = "SELECT pg_advisory_xact_lock(hashtextextended(%s::text || ':' || %s::text, 0))"
 CREATE_LEDGER = (
     "CREATE TABLE IF NOT EXISTS schema_migrations"

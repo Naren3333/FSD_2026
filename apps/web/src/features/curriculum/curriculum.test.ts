@@ -14,8 +14,11 @@ beforeAll(() => TestBed.initTestEnvironment(BrowserTestingModule, platformBrowse
 const testing: Topic = { id: 't1', name: 'Testing' };
 const unitTests: Topic = { id: 't2', name: 'Unit tests' };
 
+const mocks: Topic = { id: 't4', name: 'Mocks' };
+
 function setup(archive = vi.fn(() => Promise.resolve())) {
   let topics = [testing, unitTests];
+  const archived = signal<Topic[]>([mocks]);
   const refresh = vi.fn(() => Promise.resolve(topics));
   const createTopic = vi.fn(async ({ name }: { name: string }) => {
     const topic = { id: 't3', name };
@@ -23,30 +26,37 @@ function setup(archive = vi.fn(() => Promise.resolve())) {
     return topic;
   });
   archive.mockImplementation(async (id: string) => {
+    archived.update((list) => [...list, ...topics.filter((t) => t.id === id)]);
     topics = topics.filter((t) => t.id !== id);
+  });
+  const restoreTopic = vi.fn(async (id: string) => {
+    const [topic] = archived().filter((t) => t.id === id);
+    archived.update((list) => list.filter((t) => t.id !== id));
+    topics = [...topics, topic];
+    return topic;
   });
   TestBed.resetTestingModule();
   TestBed.configureTestingModule({
     providers: [
-      { provide: CurriculumApi, useValue: { archiveTopic: archive, createTopic } },
-      { provide: CurriculumNames, useValue: { refresh } },
+      { provide: CurriculumApi, useValue: { archiveTopic: archive, createTopic, restoreTopic } },
+      { provide: CurriculumNames, useValue: { refresh, archived } },
       { provide: Session, useValue: { isTeacher: signal(true) } },
     ],
   });
   TestBed.overrideComponent(CurriculumComponent, { set: { template: '', imports: [] } });
   const page = TestBed.createComponent(CurriculumComponent).componentInstance;
   page.load();
-  return { page, archive, refresh, createTopic };
+  return { page, archive, refresh, createTopic, restoreTopic };
 }
 
 describe('curriculum topics', () => {
   it('adds a topic by name and lists it', async () => {
     const { page, createTopic } = setup();
     await vi.waitFor(() => expect(page.topics.value()).toHaveLength(2));
-    page.form.setValue({ name: 'Mocks' });
+    page.form.setValue({ name: 'Stubs' });
     page.create();
     await vi.waitFor(() => expect(page.topics.value()).toHaveLength(3));
-    expect(createTopic).toHaveBeenCalledWith({ name: 'Mocks' });
+    expect(createTopic).toHaveBeenCalledWith({ name: 'Stubs' });
     expect(page.state.message()).toBe('Topic added.');
     expect(page.form.getRawValue()).toEqual({ name: '' });
   });
@@ -60,6 +70,7 @@ describe('curriculum topics', () => {
     page.archive();
     await vi.waitFor(() => expect(page.topics.value()).toEqual([testing]));
     expect(archive).toHaveBeenCalledWith('t2');
+    expect(page.archived()).toEqual([mocks, unitTests]);
     expect(page.state.message()).toBe('Unit tests archived.');
     expect(page.archiving()).toBeNull();
   });
@@ -85,5 +96,26 @@ describe('curriculum topics', () => {
     await vi.waitFor(() => expect(page.state.error()).toBe('Curriculum is unavailable.'));
     expect(page.archiving()).toBeNull();
     expect(page.archiveState.error()).toBe('');
+  });
+
+  it('restores an archived topic to the list', async () => {
+    const { page, restoreTopic } = setup();
+    await vi.waitFor(() => expect(page.topics.value()).toHaveLength(2));
+    expect(page.archived()).toEqual([mocks]);
+    page.restore(mocks);
+    await vi.waitFor(() => expect(page.topics.value()).toEqual([testing, unitTests, mocks]));
+    expect(restoreTopic).toHaveBeenCalledWith('t4');
+    expect(page.archived()).toEqual([]);
+    expect(page.state.message()).toBe('Mocks restored.');
+  });
+
+  it('keeps an archived topic listed with the reason when restoring fails', async () => {
+    const { page, restoreTopic } = setup();
+    await vi.waitFor(() => expect(page.topics.value()).toHaveLength(2));
+    restoreTopic.mockRejectedValueOnce(new Error('Archived topic not found.'));
+    page.restore(mocks);
+    await vi.waitFor(() => expect(page.state.error()).toBe('Archived topic not found.'));
+    expect(page.archived()).toEqual([mocks]);
+    expect(page.topics.value()).toHaveLength(2);
   });
 });

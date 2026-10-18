@@ -115,8 +115,14 @@ describe('marking form', () => {
     expect(suggestionReason({ status: 'failed', awarded: 0, reason: 'MARKED_BY_TEACHER' })).toContain(
       'already marked',
     );
+    expect(suggestionReason({ status: 'failed', awarded: 0, reason: 'CONTRADICTED' })).toContain(
+      'competing answers',
+    );
     expect(suggestionReason({ status: 'failed', awarded: 0, reason: 'AI_OUTPUT_REJECTED' })).toContain(
       'yourself',
+    );
+    expect(suggestionReason({ status: 'failed', awarded: 0, reason: 'STUDENT_REMOVED' })).toContain(
+      'removed from the classroom',
     );
   });
 });

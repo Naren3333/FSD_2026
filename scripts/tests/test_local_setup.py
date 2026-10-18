@@ -34,7 +34,12 @@ def test_no_unguarded_secret_in_compose() -> None:
     """A plain ${NAME} would silently become empty; only optional values carry a default."""
     assert re.findall(r"\$\{\w+\}", COMPOSE) == []
     optional = set(re.findall(r"\$\{(\w+):-", COMPOSE))
-    assert optional == {"OPENAI_API_KEY", "VOYAGE_API_KEY", "ANALYTICS_KAFKA_GROUP"}
+    assert optional == {
+        "OPENAI_API_KEY",
+        "VOYAGE_API_KEY",
+        "ANALYTICS_KAFKA_GROUP",
+        *("KONG_PORT", "KEYCLOAK_PORT", "WEB_PORT"),  # the published ports, which the test stack moves
+    }
 
 
 def test_upgrade_adds_only_what_env_lacks(tmp_path: Path) -> None:

@@ -18,6 +18,18 @@ const maxSubmittedEvent = 900_000
 // when the curriculum became a single level of topics and each question named its topic in topic_id.
 const topicSubmitted = "assessment.submitted.v4"
 
+// topicSubmittedAll matches every submission version's topic, for removing a deleted assessment's events from the
+// outbox whichever version they were written as.
+const topicSubmittedAll = "assessment.submitted.%"
+
+// topicDeleted announces a published assessment its teacher deleted, with its submissions
+// (contracts/events/assessment.deleted.v1.schema.json): Grading and Analytics delete what they hold for it (ADR 0008).
+const topicDeleted = "assessment.deleted.v1"
+
+// topicDueChanged announces a published assessment's new due date, or its removal (null)
+// (contracts/events/assessment.due_changed.v1.schema.json): Grading sets its evaluations' late flags against it.
+const topicDueChanged = "assessment.due_changed.v1"
+
 // submittedEventTooLarge reports whether the submission's event would be over maxSubmittedEvent.
 func submittedEventTooLarge(v Assessment, sub Submission) bool {
 	body, err := json.Marshal(submittedEvent(v, sub))

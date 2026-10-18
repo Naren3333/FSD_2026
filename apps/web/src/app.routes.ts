@@ -71,6 +71,11 @@ export const SECTIONS: WorkspaceSection[] = [
     studentLabel: 'My progress',
     load: () => import('./features/performance/performance').then((m) => m.PerformanceComponent),
   },
+  {
+    path: 'profile',
+    label: 'Profile',
+    load: () => import('./features/profile/profile').then((m) => m.ProfileComponent),
+  },
 ];
 
 /** The section label for the signed-in user's role. */

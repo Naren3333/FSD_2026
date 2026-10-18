@@ -107,15 +107,10 @@ jobs:
           cache-dependency-path: apps/web/package-lock.json
       - run: python -m pip install -r requirements-dev.lock
       - run: python scripts/setup.py
-      - run: docker compose up -d --build
-      - run: python scripts/wait_ready.py
-      - run: python scripts/integration.py
-      # Content's and the chatbot's database-backed tests, which skip themselves in the jobs above.
-      - run: python scripts/db_tests.py
       - working-directory: apps/web
         run: |
           npm ci
           npx playwright install --with-deps chromium
-          npm run test:e2e
-      - if: always()
-        run: docker compose down
+      # Integration, then the database-backed tests that skip themselves in the jobs above, then the browser tests,
+      # in a fresh learning-test stack that the script removes afterwards.
+      - run: python scripts/stack_tests.py integration db e2e

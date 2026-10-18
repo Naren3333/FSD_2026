@@ -27,7 +27,9 @@
       </div>
       <p class="caption" aria-live="polite">{{ note() }}</p>
     } @else {
-      <p class="empty">No indexed document in this classroom yet. Upload a PDF to draft guidance from it.</p>
+      <p class="empty">
+        No indexed teaching material in this classroom yet. Upload a PDF to draft guidance from it.
+      </p>
     }
   }
   <app-section-state [section]="result" loading="Reading your documents and drafting guidance…" />
@@ -73,7 +75,7 @@
             g.type === 'short_answer'
               ? 'Using it adds these accepted answers to yours'
               : 'Using it replaces the rubric and model answer'
-          }}{{ schemeFull() ? '.' : ', and adds the marking points as a marking-scheme passage.' }}
+          }}{{ schemeFull() ? '.' : ', and adds its marking points to the question.' }}
         </p>
         <button type="button" (click)="use()" [disabled]="disabled">
           Use this<span class="visually-hidden"> guidance for question {{ index + 1 }}</span>

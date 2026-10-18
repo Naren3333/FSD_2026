@@ -69,6 +69,95 @@ func TestSuggestionsThatDontFitTheRubricAreRefused(t *testing.T) {
 	}
 }
 
+func against(c map[string]any, quotes ...string) map[string]any {
+	c["contradicting_quotes"] = quotes
+	return c
+}
+
+func tddQuestion() (Question, Rubric) {
+	q := Question{ID: "q", Type: typeShortAnswer, Prompt: "Which TDD phase writes the simplest code to pass a failing test?", AcceptedAnswers: []string{"Green"}, Points: 1,
+		MarkingScheme: []Excerpt{{Text: "Award 1 mark for identifying the phase as Green. Do not accept Red or Refactor."}}}
+	r, _ := markingRubric(q)
+	return q, r
+}
+
+func TestAHedgedAnswerCannotKeepTheMark(t *testing.T) {
+	q, r := tddQuestion()
+	answer := "green red refactor"
+	// The model saw the competing answers but still gave the mark: it broke its own rule, so nothing is suggested.
+	output := reply(t, []map[string]any{against(criterion("match", 1, "green"), "red", "refactor")}, "")
+	if s, err := checkSuggestion(q, r, answer, output, "m"); !errors.Is(err, errContradicted) {
+		t.Fatalf("kept %+v %v", s, err)
+	}
+	// Giving the lowest level with the competing answers quoted is a suggestion of 0.
+	output = reply(t, []map[string]any{against(criterion("match", 0), "red", "refactor")}, "")
+	if s, err := checkSuggestion(q, r, answer, output, "m"); err != nil || s.Awarded != 0 {
+		t.Fatalf("%+v %v", s, err)
+	}
+	// Quotes against the answer must be in it too.
+	output = reply(t, []map[string]any{against(criterion("match", 0), "blue")}, "")
+	if _, err := checkSuggestion(q, r, answer, output, "m"); !errors.Is(err, errUngrounded) {
+		t.Fatalf("invented quote against the answer kept: %v", err)
+	}
+	// A committed answer keeps its mark.
+	output = reply(t, []map[string]any{against(criterion("match", 1, "Green"))}, "")
+	if s, err := checkSuggestion(q, r, "Green", output, "m"); err != nil || s.Awarded != 1 {
+		t.Fatalf("%+v %v", s, err)
+	}
+}
+
+func TestQuotesAgainstTheAnswerAreChecked(t *testing.T) {
+	q, r := essayRubric()
+	tooMany := make([]string, maxQuotes+1)
+	for i := range tooMany {
+		tooMany[i] = "lost"
+	}
+	cases := map[string]struct {
+		criteria []map[string]any
+		want     error
+	}{
+		// One contradicted criterion refuses the whole suggestion, though the other is fine.
+		"one criterion contradicted": {[]map[string]any{criterion("c1", 2, "both read the counter"), against(criterion("c2", 3, "lost"), "one update is lost")}, errContradicted},
+		"a blank quote against":      {[]map[string]any{criterion("c1", 0), against(criterion("c2", 0), "  ")}, errUngrounded},
+		// Matching ignores how whitespace runs but not case, so a quote in other case is not in the answer.
+		"other case":       {[]map[string]any{criterion("c1", 0), against(criterion("c2", 0), "TWO THREADS")}, errUngrounded},
+		"other whitespace": {[]map[string]any{criterion("c1", 0), against(criterion("c2", 0), "both  read the\ncounter")}, nil},
+		"too many quotes":  {[]map[string]any{criterion("c1", 0), against(criterion("c2", 0), tooMany...)}, errors.New("INVALID_OUTPUT")},
+		"none against":     {[]map[string]any{criterion("c1", 0), criterion("c2", 0)}, nil},
+	}
+	for name, tc := range cases {
+		s, err := checkSuggestion(q, r, essayAnswer, reply(t, tc.criteria, ""), "m")
+		switch {
+		case tc.want == nil && err != nil:
+			t.Errorf("%s: refused: %v", name, err)
+		case tc.want == nil && s.Awarded != 0:
+			t.Errorf("%s: awarded %d", name, s.Awarded)
+		case tc.want != nil && (err == nil || err.Error() != tc.want.Error()):
+			t.Errorf("%s: got %v, want %v", name, err, tc.want)
+		}
+	}
+}
+
+func TestThePromptAsksForTheWholeAnswerAndExclusions(t *testing.T) {
+	q, r := tddQuestion()
+	messages, err := markingMessages(q, r, "green red refactor")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, rule := range []string{"Judge the whole answer", "competing answers", "not to accept", "contradicting_quotes"} {
+		if !strings.Contains(messages[0].Content, rule) {
+			t.Errorf("the instructions lost %q", rule)
+		}
+	}
+	if !strings.Contains(messages[1].Content, "Do not accept Red or Refactor") {
+		t.Fatal("the marking scheme's exclusions were not sent")
+	}
+	c := markingSchema()["properties"].(map[string]any)["criteria"].(map[string]any)["items"].(map[string]any)
+	if !slices.Contains(c["required"].([]string), "contradicting_quotes") {
+		t.Fatalf("the reply need not say what counts against the answer: %v", c)
+	}
+}
+
 func TestFeedbackThatGivesAwayTheModelAnswerIsWithheld(t *testing.T) {
 	q, r := essayRubric()
 	output := reply(t, []map[string]any{criterion("c1", 0), criterion("c2", 0)}, "Remember: use a MUTEX around the increment!")

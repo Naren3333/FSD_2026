@@ -1,7 +1,8 @@
 # Golden retrieval queries, ported from fsd_test's knowledge/eval/golden.yaml (its RAG_PLAN.md has the history).
 # Run with scripts/eval/run_golden.py after scripts/eval/load_corpus.py. Corpus: corpus.yaml (CSD lecture decks + gen-* stand-ins).
 # Users: t1 = teacher (C1 and C2), s1 = student (C1 only), s2 = eval-student2 (C2 only).
-# C1: decks 01-06, 10, 11, the rubric, the marking scheme, the Git handout. C2: 09 Basic Security, 12 Automation.
+# C1: decks 01-06, 10, 11, the Git handout. C2: 09 Basic Security, 12 Automation. The rubric and marking scheme left
+# the corpus when their uploads were retired (ADR 0009); the leak checks that name them stay as a guard.
 # `page` is the slide the answer is on; several entries mean any of them counts.
 # Since Iteration 12 the `tables` / `figures` queries are `kind`-checked: only a table / figure chunk counts.
 
@@ -111,15 +112,7 @@
   query: what does a pull request need before it can be merged
   expect: [{title: Git Workflow Handout}, {title: Collaboration Methods, page: 33}, {title: Collaboration Methods (Revised), page: 31}]
 
-# --- t1: teacher-only material and C2 -------------------------------------------------------
-- id: rubric-version-control
-  as: t1
-  query: how many marks does a team get for version control in the project
-  expect: [{title: CSD Team Project Rubric}]
-- id: marking-partitions
-  as: t1
-  query: what answer is expected for the 20 to 80 character input partition question
-  expect: [{title: Quiz 3 Marking Scheme}]
+# --- t1: C2 material -------------------------------------------------------------------------
 - id: sql-injection-t1
   as: t1
   query: how do prepared statements stop SQL injection
@@ -1309,93 +1302,9 @@
 
 # ==== Teacher and refusal batch (2026-10-13) ====
 # Added after a review found only 5 teacher queries and a 20-query floor sample. All holdout, labelled from the
-# PDF text before any run. t1 sees C1 and C2, the rubric and the marking scheme, so each `expect` lists every
+# PDF text before any run. t1 sees C1 and C2, so each `expect` lists every
 # visible document that answers, distractors included. Unanswerable entries were checked by searching every
 # document the asking user can see for their key terms.
-- id: t1-rubric-coverage-target
-  group: teacher
-  split: holdout
-  as: t1
-  style: clean
-  query: what branch coverage does a team need for full marks on automated testing
-  expect: [{title: CSD Team Project Rubric, page: 2}]
-- id: t1-rubric-hardcoded-credentials
-  group: teacher
-  split: holdout
-  as: t1
-  style: clean
-  query: how many marks are deducted when a team commits credentials in the code
-  expect: [{title: CSD Team Project Rubric, page: 2}]
-- id: t1-rubric-deployment-full-marks
-  group: teacher
-  split: holdout
-  as: t1
-  style: followup
-  query: deployment criterion what earns 4 marks
-  expect: [{title: CSD Team Project Rubric, page: 2}]
-- id: t1-rubric-project-weight
-  group: teacher
-  split: holdout
-  as: t1
-  style: clean
-  query: how much of the course grade is the team project worth
-  expect: [{title: CSD Team Project Rubric, page: 1}]
-- id: t1-rubric-missing-retros
-  group: teacher
-  split: holdout
-  as: t1
-  style: vague
-  query: a team skipped their retrospective in two sprints, what do they get for sprint discipline
-  expect: [{title: CSD Team Project Rubric, page: 1}]
-- id: t1-rubric-self-merge
-  group: teacher
-  split: holdout
-  as: t1
-  style: vague
-  query: students keep merging their own pull requests without review, how should I grade that
-  expect: [{title: CSD Team Project Rubric, page: 1}]
-- id: t1-rubric-typo-security
-  group: teacher
-  split: holdout
-  as: t1
-  style: typo
-  query: rubrik criteria for securty
-  expect: [{title: CSD Team Project Rubric, page: 2}]
-- id: t1-scheme-tool-names
-  group: teacher
-  split: holdout
-  as: t1
-  style: vague
-  query: a student only listed JUnit and Selenium for the blackbox versus whitebox question, do they get marks
-  expect: [{title: Quiz 3 Marking Scheme, page: 1}]
-- id: t1-scheme-coverage-counterexample
-  group: teacher
-  split: holdout
-  as: t1
-  style: clean
-  query: what counterexample is needed for full marks on the statement versus branch coverage question
-  expect: [{title: Quiz 3 Marking Scheme, page: 1}]
-- id: t1-scheme-copied-answer
-  group: teacher
-  split: holdout
-  as: t1
-  style: clean
-  query: is there a phrase that shows a quiz answer was copied from last year
-  expect: [{title: Quiz 3 Marking Scheme, page: 1}]
-- id: t1-scheme-boundary-values
-  group: teacher
-  split: holdout
-  as: t1
-  style: clean
-  query: which boundary values must students give for an input of length 20 to 80
-  expect: [{title: Quiz 3 Marking Scheme, page: 1}]
-- id: t1-coverage-grade-and-lecture
-  group: teacher
-  split: holdout
-  as: t1
-  style: multi
-  query: what coverage do I grade teams against, and how does the lecture define branch coverage
-  expect_all: [{title: CSD Team Project Rubric, page: 2}, {title: Software Testing, page: 12}]
 - id: t1-teach-planning-poker
   group: teacher
   split: holdout

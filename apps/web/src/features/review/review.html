@@ -129,8 +129,8 @@
                       @if (suggestion.scheme_passages) {
                         <details class="scheme-used">
                           <summary>
-                            Read with {{ suggestion.scheme_passages }} marking-scheme
-                            {{ suggestion.scheme_passages === 1 ? 'passage' : 'passages' }}
+                            Read with {{ suggestion.scheme_passages }} marking
+                            {{ suggestion.scheme_passages === 1 ? 'point' : 'points' }}
                           </summary>
                           @for (excerpt of question(grade, evidence)?.marking_scheme ?? []; track $index) {
                             <p class="passage">{{ excerpt.text }}</p>

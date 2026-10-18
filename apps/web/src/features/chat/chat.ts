@@ -254,8 +254,8 @@ export class ChatComponent {
     item.focus();
   }
   reveal(event: Event, source: Citation): void {
-    if (!(event.target as HTMLDetailsElement).open || !source.image || this.figures()[source.chunk_id])
-      return;
+    const open = (event.target as HTMLDetailsElement).open;
+    if (!open || source.removed || !source.image || this.figures()[source.chunk_id]) return;
     this.figureErrors.update((e) => ({ ...e, [source.chunk_id]: '' }));
     this.content
       .figure(source.document_id, source.image)

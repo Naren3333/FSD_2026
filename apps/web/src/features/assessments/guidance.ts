@@ -19,12 +19,6 @@ import {
 } from './editor';
 import { MAX_SOURCE_DOCUMENTS, sourceDocuments } from './generator';
 
-/** The documents guidance can be drafted from: every indexed one, teaching materials first. */
-export function guidanceDocuments(documents: readonly DocumentRecord[]): DocumentRecord[] {
-  const indexed = documents.filter((d) => d.status === 'indexed');
-  return [...sourceDocuments(indexed), ...indexed.filter((d) => d.doc_type !== 'teaching_material')];
-}
-
 /** The accepted answers with the suggested ones added after them, without repeats, up to Assessment's limit. */
 export function mergeAccepted(current: string, suggested: readonly string[]): string {
   const answers = optionLines(current);
@@ -50,7 +44,7 @@ export class MarkingGuidanceComponent {
   @Input({ required: true }) index = 0;
   @Input({ required: true }) classroomId = '';
   @Input({ required: true }) documents!: Section<DocumentRecord[]>;
-  /** Marking-scheme passages across the whole assessment, which has a limit of its own. */
+  /** Marking points across the whole assessment, which has a limit of its own. */
   @Input() assessmentPassages = 0;
   @Input() disabled = false;
 
@@ -65,7 +59,7 @@ export class MarkingGuidanceComponent {
   private drafted = { prompt: '', type: '' };
 
   get choices(): DocumentRecord[] {
-    return guidanceDocuments(this.documents.value() ?? []);
+    return sourceDocuments(this.documents.value() ?? []);
   }
 
   draft(): void {
@@ -108,7 +102,7 @@ export class MarkingGuidanceComponent {
   }
 
   /** Puts the draft into the question: accepted answers are added, a rubric and model answer replace the old ones,
-   * and the marking points become one of its marking-scheme passages when there is room. */
+   * and the marking points are added to the question's when there is room. */
   use(): void {
     const g = this.result.value();
     const c = this.question.controls;
@@ -130,7 +124,7 @@ export class MarkingGuidanceComponent {
     setTimeout(() => document.getElementById(`question-${this.index}-guidance-used`)?.focus());
   }
 
-  /** Whether the question or the assessment has no room for another marking-scheme passage. */
+  /** Whether the question or the assessment has no room for another marking point. */
   schemeFull(): boolean {
     return (
       this.question.controls.marking_scheme.value.length >= MAX_EXCERPTS ||

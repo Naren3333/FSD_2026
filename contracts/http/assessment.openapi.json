@@ -88,6 +88,11 @@
                       "points": {
                         "type": "integer",
                         "minimum": 1
+                      },
+                      "submissions": {
+                        "type": "integer",
+                        "minimum": 0,
+                        "description": "How many students have submitted it; for the classroom's teacher only."
                       }
                     },
                     "required": [
@@ -941,7 +946,7 @@
                         "id": {
                           "type": "string",
                           "format": "uuid",
-                          "description": "Ignored; every saved question gets a new id."
+                          "description": "Ignored; every saved question gets a new id, except one left unchanged on a published assessment, which keeps its id and the work students saved on it."
                         },
                         "prompt": {
                           "type": "string",
@@ -1144,7 +1149,7 @@
                       "draft",
                       "published"
                     ],
-                    "description": "Omitted: published on create; on update the draft stays a draft (only an explicit `published` publishes it)."
+                    "description": "Omitted: published on create; on update it keeps its status (only an explicit `published` publishes a draft, and a published assessment cannot become a draft again)."
                   },
                   "opens_at": {
                     "type": [
@@ -2753,7 +2758,7 @@
                         "id": {
                           "type": "string",
                           "format": "uuid",
-                          "description": "Ignored; every saved question gets a new id."
+                          "description": "Ignored; every saved question gets a new id, except one left unchanged on a published assessment, which keeps its id and the work students saved on it."
                         },
                         "prompt": {
                           "type": "string",
@@ -2956,7 +2961,7 @@
                       "draft",
                       "published"
                     ],
-                    "description": "Omitted: published on create; on update the draft stays a draft (only an explicit `published` publishes it)."
+                    "description": "Omitted: published on create; on update it keeps its status (only an explicit `published` publishes a draft, and a published assessment cannot become a draft again)."
                   },
                   "opens_at": {
                     "type": [
@@ -2999,6 +3004,617 @@
           }
         }
       },
+      "patch": {
+        "operationId": "PATCH_v1_assessments_id",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "id": {
+                      "type": "string",
+                      "format": "uuid"
+                    },
+                    "classroom_id": {
+                      "type": "string",
+                      "format": "uuid"
+                    },
+                    "title": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "questions": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "id": {
+                            "type": "string",
+                            "format": "uuid"
+                          },
+                          "prompt": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 2000
+                          },
+                          "type": {
+                            "enum": [
+                              "multiple_choice",
+                              "numerical",
+                              "short_answer",
+                              "free_response"
+                            ]
+                          },
+                          "options": {
+                            "type": [
+                              "array",
+                              "null"
+                            ],
+                            "items": {
+                              "type": "string",
+                              "minLength": 1
+                            }
+                          },
+                          "answer": {
+                            "type": "string"
+                          },
+                          "tolerance": {
+                            "type": "string"
+                          },
+                          "accepted_answers": {
+                            "type": "array",
+                            "items": {
+                              "type": "string",
+                              "minLength": 1
+                            },
+                            "minItems": 1,
+                            "maxItems": 20
+                          },
+                          "case_sensitive": {
+                            "type": "boolean"
+                          },
+                          "rubric": {
+                            "type": "object",
+                            "properties": {
+                              "criteria": {
+                                "type": "array",
+                                "items": {
+                                  "type": "object",
+                                  "properties": {
+                                    "id": {
+                                      "type": "string",
+                                      "minLength": 1
+                                    },
+                                    "title": {
+                                      "type": "string",
+                                      "minLength": 1
+                                    },
+                                    "levels": {
+                                      "type": "array",
+                                      "items": {
+                                        "type": "object",
+                                        "properties": {
+                                          "points": {
+                                            "type": "integer",
+                                            "minimum": 0,
+                                            "maximum": 100
+                                          },
+                                          "descriptor": {
+                                            "type": "string",
+                                            "minLength": 1
+                                          }
+                                        },
+                                        "required": [
+                                          "points",
+                                          "descriptor"
+                                        ],
+                                        "additionalProperties": false
+                                      },
+                                      "minItems": 2,
+                                      "maxItems": 6
+                                    }
+                                  },
+                                  "required": [
+                                    "id",
+                                    "title",
+                                    "levels"
+                                  ],
+                                  "additionalProperties": false
+                                },
+                                "minItems": 1,
+                                "maxItems": 10
+                              },
+                              "model_answer": {
+                                "type": "string",
+                                "maxLength": 5000
+                              }
+                            },
+                            "required": [
+                              "criteria"
+                            ],
+                            "additionalProperties": false
+                          },
+                          "max_length": {
+                            "type": "integer",
+                            "minimum": 1,
+                            "maximum": 20000
+                          },
+                          "points": {
+                            "type": "integer",
+                            "minimum": 1,
+                            "maximum": 100
+                          },
+                          "topic_id": {
+                            "type": "string",
+                            "format": "uuid"
+                          },
+                          "marking_scheme": {
+                            "type": "array",
+                            "items": {
+                              "type": "object",
+                              "properties": {
+                                "document_id": {
+                                  "type": "string",
+                                  "format": "uuid"
+                                },
+                                "chunk_id": {
+                                  "type": "string",
+                                  "format": "uuid"
+                                },
+                                "page": {
+                                  "type": "integer",
+                                  "minimum": 1,
+                                  "maximum": 100000
+                                },
+                                "text": {
+                                  "type": "string",
+                                  "minLength": 1,
+                                  "maxLength": 2000
+                                }
+                              },
+                              "required": [
+                                "text"
+                              ],
+                              "additionalProperties": false
+                            },
+                            "minItems": 1,
+                            "maxItems": 5
+                          },
+                          "sources": {
+                            "type": "array",
+                            "items": {
+                              "type": "object",
+                              "properties": {
+                                "document_id": {
+                                  "type": "string",
+                                  "format": "uuid"
+                                },
+                                "chunk_id": {
+                                  "type": "string",
+                                  "format": "uuid"
+                                },
+                                "page": {
+                                  "type": "integer",
+                                  "minimum": 1,
+                                  "maximum": 100000
+                                },
+                                "text": {
+                                  "type": "string",
+                                  "minLength": 1,
+                                  "maxLength": 2000
+                                }
+                              },
+                              "required": [
+                                "text"
+                              ],
+                              "additionalProperties": false
+                            },
+                            "minItems": 1,
+                            "maxItems": 5
+                          },
+                          "origin": {
+                            "enum": [
+                              "generated"
+                            ],
+                            "description": "Left out for a question the teacher wrote."
+                          }
+                        },
+                        "required": [
+                          "id",
+                          "prompt",
+                          "type",
+                          "options",
+                          "answer",
+                          "tolerance",
+                          "points",
+                          "topic_id"
+                        ],
+                        "additionalProperties": false
+                      },
+                      "minItems": 1,
+                      "maxItems": 50
+                    },
+                    "status": {
+                      "enum": [
+                        "draft",
+                        "published"
+                      ]
+                    },
+                    "opens_at": {
+                      "type": [
+                        "string",
+                        "null"
+                      ],
+                      "format": "date-time"
+                    },
+                    "due_at": {
+                      "type": [
+                        "string",
+                        "null"
+                      ],
+                      "format": "date-time"
+                    },
+                    "late_policy": {
+                      "enum": [
+                        "accept_flagged",
+                        "reject"
+                      ]
+                    },
+                    "release_policy": {
+                      "enum": [
+                        "on_finalize",
+                        "manual"
+                      ]
+                    },
+                    "ai_marking": {
+                      "type": "boolean"
+                    },
+                    "published_at": {
+                      "type": [
+                        "string",
+                        "null"
+                      ],
+                      "format": "date-time"
+                    }
+                  },
+                  "required": [
+                    "id",
+                    "classroom_id",
+                    "title",
+                    "questions",
+                    "status",
+                    "opens_at",
+                    "due_at",
+                    "late_policy",
+                    "release_policy",
+                    "ai_marking",
+                    "published_at"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthenticated",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "minLength": 1
+                        },
+                        "message": {
+                          "type": "string",
+                          "minLength": 1
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message"
+                      ],
+                      "additionalProperties": false
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "minLength": 1
+                        },
+                        "message": {
+                          "type": "string",
+                          "minLength": 1
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message"
+                      ],
+                      "additionalProperties": false
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "minLength": 1
+                        },
+                        "message": {
+                          "type": "string",
+                          "minLength": 1
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message"
+                      ],
+                      "additionalProperties": false
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "State conflict",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "minLength": 1
+                        },
+                        "message": {
+                          "type": "string",
+                          "minLength": 1
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message"
+                      ],
+                      "additionalProperties": false
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "Too large",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "minLength": 1
+                        },
+                        "message": {
+                          "type": "string",
+                          "minLength": 1
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message"
+                      ],
+                      "additionalProperties": false
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "minLength": 1
+                        },
+                        "message": {
+                          "type": "string",
+                          "minLength": 1
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message"
+                      ],
+                      "additionalProperties": false
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "minLength": 1
+                        },
+                        "message": {
+                          "type": "string",
+                          "minLength": 1
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message"
+                      ],
+                      "additionalProperties": false
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Dependency unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "minLength": 1
+                        },
+                        "message": {
+                          "type": "string",
+                          "minLength": 1
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message"
+                      ],
+                      "additionalProperties": false
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "title": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 160
+                  },
+                  "due_at": {
+                    "type": [
+                      "string",
+                      "null"
+                    ],
+                    "format": "date-time"
+                  },
+                  "late_policy": {
+                    "enum": [
+                      "accept_flagged",
+                      "reject"
+                    ]
+                  }
+                },
+                "required": [],
+                "additionalProperties": false
+              }
+            }
+          }
+        }
+      },
       "delete": {
         "operationId": "DELETE_v1_assessments_id",
         "parameters": [
@@ -3009,6 +3625,14 @@
             "schema": {
               "type": "string",
               "format": "uuid"
+            }
+          },
+          {
+            "name": "with_submissions",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "boolean"
             }
           }
         ],

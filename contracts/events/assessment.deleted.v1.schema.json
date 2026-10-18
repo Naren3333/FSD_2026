@@ -1,0 +1,63 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:learning:assessment.deleted.v1",
+  "description": "A published assessment its teacher deleted, with any submissions (ADR 0008). Grading deletes its evaluations, Analytics its evidence, and both ignore anything for it that arrives later.",
+  "type": "object",
+  "properties": {
+    "event_id": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "event_type": {
+      "const": "assessment.deleted.v1"
+    },
+    "schema_version": {
+      "const": 1
+    },
+    "timestamp": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "correlation_id": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "resource_id": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "data": {
+      "type": "object",
+      "properties": {
+        "assessment_id": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "classroom_id": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "org_id": {
+          "type": "string",
+          "minLength": 1
+        }
+      },
+      "required": [
+        "assessment_id",
+        "classroom_id",
+        "org_id"
+      ],
+      "additionalProperties": false
+    }
+  },
+  "required": [
+    "event_id",
+    "event_type",
+    "schema_version",
+    "timestamp",
+    "correlation_id",
+    "resource_id",
+    "data"
+  ],
+  "additionalProperties": false
+}

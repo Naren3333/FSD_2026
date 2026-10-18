@@ -5,6 +5,7 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -84,6 +85,30 @@ func TestRelationReportsStudent(t *testing.T) {
 	relation, ok := a.Relation(httptest.NewRecorder(), asTeacher(httptest.NewRequest(http.MethodGet, "/", nil)), classroom, "")
 	if !ok || relation != RelationStudent {
 		t.Fatalf("got %q %v", relation, ok)
+	}
+}
+
+func TestRosterReadsTheEnrolledStudents(t *testing.T) {
+	cases := []struct {
+		status int
+		body   string
+		want   []string
+		code   int
+	}{
+		{200, `[{"id":"s-1","username":"ann","display_name":"Ann"},{"id":"s-2","username":"","display_name":""}]`, []string{"s-1", "s-2"}, 200},
+		{200, `[]`, []string{}, 200},
+		{200, `[{"username":"ann"}]`, nil, 503},
+		{200, `not json`, nil, 503},
+		{403, `{}`, nil, 403},
+		{401, `{}`, nil, 401},
+		{500, `{}`, nil, 503},
+	}
+	for _, tc := range cases {
+		w := httptest.NewRecorder()
+		got, ok := identityStub(t, tc.status, tc.body).Roster(w, asTeacher(httptest.NewRequest(http.MethodGet, "/", nil)), classroom)
+		if ok != (tc.want != nil) || !slices.Equal(got, tc.want) || (!ok && w.Code != tc.code) {
+			t.Errorf("%d %s: got %v %v, status %d", tc.status, tc.body, got, ok, w.Code)
+		}
 	}
 }
 

@@ -13,6 +13,10 @@ SERVICES = ["identity", "curriculum", "content", "assessment", "grading", "analy
 # grading-marker asks for AI marking suggestions (ADR 0004); question-generation-agent drafts questions and marking
 # guidance (ADR 0006).
 AI_CLIENTS = ["content-indexer", "question-chatbot-agent", "grading-marker", "question-generation-agent"]
+# Identity's service account for removing the sign-in account of a user who deleted theirs (ADR 0011). Its only role
+# is realm-management's manage-users, so it can manage the realm's users and nothing else.
+ACCOUNTS_CLIENT = "identity-accounts"
+ACCOUNTS_ROLE = ("realm-management", "manage-users")
 # Local people: username, realm role, and the .env key holding their password.
 PEOPLE = [
     ("teacher", "teacher", "TEACHER_PASSWORD"),
@@ -21,6 +25,8 @@ PEOPLE = [
 ]
 ORG = "local-school"
 WEB_ORIGIN = "http://localhost:4200"
+# The disposable test stack's web app (scripts/stack_tests.py), which signs in through the same realm import.
+TEST_WEB_ORIGIN = "http://localhost:14200"
 
 
 def client_secret_key(client: str) -> str:
@@ -40,6 +46,7 @@ def generate_secrets() -> dict[str, str]:
         *(key for _, _, key in PEOPLE),
         "S3_CONTENT_PASSWORD",
         *(client_secret_key(c) for c in AI_CLIENTS),
+        client_secret_key(ACCOUNTS_CLIENT),
         *(password_key(s) for s in SERVICES),
     ]
     values = {key: secrets.token_hex(20) for key in keys}
@@ -132,8 +139,8 @@ def clients(values: dict[str, str]) -> list[dict[str, Any]]:
         "publicClient": True,
         "standardFlowEnabled": True,
         "directAccessGrantsEnabled": False,
-        "redirectUris": [f"{WEB_ORIGIN}/*"],
-        "webOrigins": [WEB_ORIGIN],
+        "redirectUris": [f"{origin}/*" for origin in (WEB_ORIGIN, TEST_WEB_ORIGIN)],
+        "webOrigins": [WEB_ORIGIN, TEST_WEB_ORIGIN],
         "attributes": {"pkce.code.challenge.method": "S256"},
         "protocolMappers": PERSON_MAPPERS,
     }
@@ -146,7 +153,20 @@ def clients(values: dict[str, str]) -> list[dict[str, Any]]:
         "protocolMappers": PERSON_MAPPERS,
     }
     services = [service_client(client, values[client_secret_key(client)]) for client in AI_CLIENTS]
-    return [web, e2e, *services]
+    return [web, e2e, *services, accounts_client(values[client_secret_key(ACCOUNTS_CLIENT)])]
+
+
+def accounts_client(secret: str) -> dict[str, Any]:
+    """Identity's confidential client-credentials client for Keycloak's admin API. Its tokens are for Keycloak only,
+    so it has none of the learning audience or organization mappers."""
+    return {
+        "clientId": ACCOUNTS_CLIENT,
+        "publicClient": False,
+        "secret": secret,
+        "standardFlowEnabled": False,
+        "directAccessGrantsEnabled": False,
+        "serviceAccountsEnabled": True,
+    }
 
 
 def service_client(client: str, secret: str) -> dict[str, Any]:
@@ -165,6 +185,15 @@ def service_client(client: str, secret: str) -> dict[str, Any]:
 def realm(values: dict[str, str]) -> dict[str, Any]:
     users = [person(username, role, values[key]) for username, role, key in PEOPLE]
     users += [service_account(client) for client in AI_CLIENTS]
+    owner, role = ACCOUNTS_ROLE
+    users.append(
+        {
+            "username": f"service-account-{ACCOUNTS_CLIENT}",
+            "enabled": True,
+            "serviceAccountClientId": ACCOUNTS_CLIENT,
+            "clientRoles": {owner: [role]},
+        }
+    )
     return {
         "realm": "learning",
         "enabled": True,

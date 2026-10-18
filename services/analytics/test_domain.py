@@ -1,4 +1,5 @@
 import json
+from pathlib import Path
 from uuid import uuid4
 
 import pytest
@@ -65,6 +66,49 @@ def test_malformed_classroom_deletions_are_dead_lettered():
     handle = handler(None)  # type: ignore[arg-type]  # never reached: the message is rejected first
     assert handle(CLASSROOM_DELETED, json.dumps(deletion).encode()) is False
     assert handle(CLASSROOM_DELETED, b"not json") is False
+
+
+def test_malformed_assessment_deletions_are_dead_lettered():
+    from consumer import ASSESSMENT_DELETED, handler
+
+    assessment = str(uuid4())
+    deletion = {
+        "event_id": str(uuid4()),
+        "event_type": ASSESSMENT_DELETED,
+        "schema_version": 1,
+        "timestamp": "2026-10-18T00:00:00Z",
+        "correlation_id": str(uuid4()),
+        "resource_id": str(uuid4()),  # not the deleted assessment
+        "data": {"assessment_id": assessment, "classroom_id": str(uuid4()), "org_id": "o"},
+    }
+    handle = handler(None)  # type: ignore[arg-type]  # never reached: the message is rejected first
+    assert handle(ASSESSMENT_DELETED, json.dumps(deletion).encode()) is False
+    assert (
+        handle(
+            ASSESSMENT_DELETED,
+            json.dumps({**deletion, "event_type": "identity.classroom.deleted.v1"}).encode(),
+        )
+        is False
+    )
+
+
+def test_malformed_account_deletions_are_dead_lettered():
+    from consumer import USER_DELETED, handler
+
+    user = str(uuid4())
+    deletion = {
+        "event_id": str(uuid4()),
+        "event_type": USER_DELETED,
+        "schema_version": 1,
+        "timestamp": "2026-10-18T00:00:00Z",
+        "correlation_id": str(uuid4()),
+        "resource_id": user,
+        "data": {"user_id": user, "org_id": "o", "role": "admin"},
+    }
+    handle = handler(None)  # type: ignore[arg-type]  # never reached: the message is rejected first
+    assert handle(USER_DELETED, json.dumps(deletion).encode()) is False
+    other = {**deletion, "resource_id": str(uuid4()), "data": {**deletion["data"], "role": "student"}}
+    assert handle(USER_DELETED, json.dumps(other).encode()) is False
 
 
 def test_class_performance_keeps_roster_order_and_students_without_evidence():
@@ -279,6 +323,8 @@ def test_the_consumer_reads_every_finalized_version(monkeypatch):
             "grading.finalized.v2",
             "grading.finalized.v3",
             "identity.classroom.deleted.v1",
+            "assessment.deleted.v1",
+            "identity.user.deleted.v1",
         ]
     ]
 
@@ -314,3 +360,14 @@ def test_a_grade_for_a_purged_classroom_stores_nothing():
     stored = Recorder()
     process(stored, Event.model_validate(finalized("grading.finalized.v2", 1)))  # type: ignore[arg-type]
     assert any("INSERT INTO evaluations" in s for s in stored.statements)
+
+
+def test_the_assessment_deletion_model_matches_its_contract():
+    from domain import AssessmentDeleted, AssessmentDeletedEvent
+
+    path = Path(__file__).resolve().parents[2] / "contracts/events/assessment.deleted.v1.schema.json"
+    schema = json.loads(path.read_text(encoding="utf-8"))
+    data = schema["properties"]["data"]
+    assert set(AssessmentDeletedEvent.model_fields) == set(schema["required"])
+    assert set(AssessmentDeleted.model_fields) == set(data["required"]) == set(data["properties"])
+    assert schema["properties"]["event_type"]["const"] == "assessment.deleted.v1"

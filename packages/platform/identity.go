@@ -98,3 +98,58 @@ func (i *Identity) Relation(w http.ResponseWriter, r *http.Request, classroom, s
 	}
 	return answer.Relation, true
 }
+
+// ClassroomRoster lists the students enrolled in a classroom, for its teacher. Roster writes the error response
+// itself when it is refused or cannot answer.
+type ClassroomRoster interface {
+	// Roster is the ids of the classroom's enrolled students (Identity lists up to 500).
+	Roster(w http.ResponseWriter, r *http.Request, classroom string) ([]string, bool)
+}
+
+// Roster asks Identity for the classroom's enrolled students with the caller's own token, so only the classroom's
+// teacher gets an answer. Work kept for students since removed (their submissions and grades) is left out of a
+// teacher's lists with it. On denial or failure it has already written the error response.
+func (i *Identity) Roster(w http.ResponseWriter, r *http.Request, classroom string) ([]string, bool) {
+	if !ID(classroom) {
+		Invalid(w, "A valid classroom identifier is required.")
+		return nil, false
+	}
+	req, err := Forward(r, http.MethodGet, i.base+"/v1/classrooms/"+classroom+"/students")
+	if err != nil {
+		Unavailable(w, "Authorization unavailable.")
+		return nil, false
+	}
+	res, err := i.client.Do(req)
+	if err != nil {
+		Unavailable(w, "Authorization unavailable; retry later.")
+		return nil, false
+	}
+	defer res.Body.Close()
+	if res.StatusCode != http.StatusOK {
+		switch {
+		case res.StatusCode >= 500:
+			Unavailable(w, "Authorization unavailable.")
+		case res.StatusCode == http.StatusUnauthorized:
+			Unauthenticated(w, "The access token was not accepted.")
+		default:
+			Forbidden(w, "Only the classroom's teacher may do this.")
+		}
+		return nil, false
+	}
+	var students []struct {
+		ID string `json:"id"`
+	}
+	if json.NewDecoder(io.LimitReader(res.Body, 1<<20)).Decode(&students) != nil {
+		Unavailable(w, "The classroom's roster was not understood.")
+		return nil, false
+	}
+	ids := make([]string, 0, len(students))
+	for _, s := range students {
+		if s.ID == "" {
+			Unavailable(w, "The classroom's roster was not understood.")
+			return nil, false
+		}
+		ids = append(ids, s.ID)
+	}
+	return ids, true
+}

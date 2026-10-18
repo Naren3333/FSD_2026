@@ -9,6 +9,7 @@ import {
 } from '@angular/forms';
 import type {
   Assessment,
+  AssessmentDetails,
   AssessmentSettings,
   Criterion,
   DocumentRecord,
@@ -26,14 +27,13 @@ import { requiredText } from '../../shared/validators';
 
 export const MAX_QUESTIONS = 50;
 export const MAX_CRITERIA = 10;
-/** Marking-scheme passages: per question, characters per passage, and per assessment. */
+/** Marking points (the questions' `marking_scheme` passages): per question, characters per point, and per
+ * assessment. */
 export const MAX_EXCERPTS = 5;
 export const MAX_EXCERPT_TEXT = 2000;
 export const MAX_ASSESSMENT_EXCERPTS = 20;
 export const MAX_PROMPT = 2000;
 export const MAX_ACCEPTED = 20;
-/** The longest search query Content takes. */
-export const MAX_QUERY = 1000;
 const DEFAULT_MAX_LENGTH = 5000;
 
 export type CriterionForm = FormGroup<{
@@ -55,7 +55,7 @@ export type QuestionForm = FormGroup<{
   max_length: FormControl<number>;
   model_answer: FormControl<string>;
   criteria: FormArray<CriterionForm>;
-  /** Short answers and free responses: passages of the marking scheme for AI suggestions. */
+  /** Short answers and free responses: marking points for AI suggestions. */
   marking_scheme: FormControl<Excerpt[]>;
   /** Generated questions: the passages they were drawn from, kept for the teacher (ADR 0006). */
   sources: FormControl<Excerpt[]>;
@@ -200,7 +200,7 @@ function applyType(form: QuestionForm): void {
   c.accepted.updateValueAndValidity({ emitEvent: false });
 }
 
-/** At most five passages, each with 1–2,000 characters of text. */
+/** At most five marking points, each with 1–2,000 characters of text. */
 const schemeValidator: ValidatorFn = (control: AbstractControl<Excerpt[]>) => {
   const excerpts = control.value;
   return excerpts.length <= MAX_EXCERPTS &&
@@ -219,14 +219,14 @@ export function clipText(text: string, limit: number): string {
   return characters(text) <= limit ? text : Array.from(text).slice(0, limit).join('');
 }
 
-/** Marking-scheme passages across the assessment's questions, counting only questions that keep them. */
+/** Marking points across the assessment's questions, counting only questions that keep them. */
 export function schemeTotal(
   questions: readonly { type: QuestionType; marking_scheme?: readonly Excerpt[] }[],
 ): number {
   return questions.reduce((sum, q) => sum + (usesScheme(q.type) ? (q.marking_scheme?.length ?? 0) : 0), 0);
 }
 
-/** At most twenty passages across the assessment's questions. */
+/** At most twenty marking points across the assessment's questions. */
 const assessmentSchemeValidator: ValidatorFn = (control: AbstractControl) =>
   schemeTotal((control as FormArray<QuestionForm>).getRawValue()) <= MAX_ASSESSMENT_EXCERPTS
     ? null
@@ -242,9 +242,9 @@ export function marksText(points: number): string {
   return points === 1 ? '1 mark' : `${points} marks`;
 }
 
-/** Where each of a question's text-only marking-scheme passages came from, for this session: the model's drafted
- * marking points, or the teacher's paste. Neither carries a document, so once the assessment is reloaded they can no
- * longer be told apart. */
+/** Who wrote each of a question's marking points, for this session: AI (drafted guidance or a kept generated
+ * question) or the teacher. Neither carries a document, so once the assessment is reloaded they can no longer be told
+ * apart. */
 const writtenBy = new WeakMap<FormControl<Excerpt[]>, Map<string, 'ai' | 'teacher'>>();
 
 export function markWrittenBy(control: FormControl<Excerpt[]>, excerpt: Excerpt, by: 'ai' | 'teacher'): void {
@@ -252,8 +252,8 @@ export function markWrittenBy(control: FormControl<Excerpt[]>, excerpt: Excerpt,
   writtenBy.set(control, new Map([...(writtenBy.get(control) ?? []), [excerpt.text, by]]));
 }
 
-/** Where a passage is from: its document and page, or that AI wrote it or the teacher pasted it, or, when that is no
- * longer known, that it is not from a document. */
+/** Where a passage is from: its document and page, or that AI or the teacher wrote it, or, when that is no longer
+ * known, that it was written for the question. */
 export function excerptLabel(
   excerpt: Excerpt,
   documents: readonly DocumentRecord[] | null | undefined,
@@ -261,17 +261,13 @@ export function excerptLabel(
 ): string {
   if (!excerpt.document_id) {
     const by = scheme && writtenBy.get(scheme)?.get(excerpt.text);
-    return by === 'ai'
-      ? 'AI-written marking points'
-      : by === 'teacher'
-        ? 'Pasted passage'
-        : 'Written passage, not from a document';
+    return by === 'ai' ? 'Written by AI' : by === 'teacher' ? 'Written by you' : 'Written for this question';
   }
   const title = documents?.find((d) => d.id === excerpt.document_id)?.title ?? 'Class document';
   return excerpt.page ? `${title}, page ${excerpt.page}` : title;
 }
 
-/** Whether questions of the type can carry marking-scheme passages: the ones a teacher (or AI) marks. */
+/** Whether questions of the type can carry marking points: the ones a teacher (or AI) marks. */
 export function usesScheme(type: QuestionType): boolean {
   return type === 'short_answer' || type === 'free_response';
 }
@@ -342,6 +338,12 @@ export function toAssessment(
     ai_marking: v.ai_marking && teacherMarked(v.questions),
     questions: v.questions.map(toQuestion),
   };
+}
+
+/** The details the editor describes, which can change after students have submitted. */
+export function toDetails(form: AssessmentForm): AssessmentDetails {
+  const v = form.getRawValue();
+  return { title: v.title, due_at: isoOrNull(v.due_at), late_policy: v.late_policy };
 }
 
 function toQuestion(q: ReturnType<QuestionForm['getRawValue']>): Omit<Question, 'id'> {

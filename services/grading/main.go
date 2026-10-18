@@ -16,11 +16,12 @@ var migrations embed.FS
 
 func main() {
 	platform.Serve("grading", migrations, platform.EventMigration, func(a *platform.App) ([]func(context.Context), error) {
-		server{store: pgStore{a.DB}, access: a.Identity()}.routes(a.Mux)
-		// Ready only while all five consumers run: a stalled one would otherwise go unnoticed.
-		var v1Running, v2Running, v3Running, v4Running, classroomsRunning atomic.Bool
+		identity := a.Identity()
+		server{store: pgStore{a.DB}, access: identity, roster: identity}.routes(a.Mux)
+		// Ready only while all nine consumers run: a stalled one would otherwise go unnoticed.
+		var v1Running, v2Running, v3Running, v4Running, classroomsRunning, assessmentsRunning, enrollmentsRunning, dueRunning, usersRunning atomic.Bool
 		a.Checks = append(a.Checks, func(ctx context.Context) error {
-			if !v1Running.Load() || !v2Running.Load() || !v3Running.Load() || !v4Running.Load() || !classroomsRunning.Load() {
+			if !v1Running.Load() || !v2Running.Load() || !v3Running.Load() || !v4Running.Load() || !classroomsRunning.Load() || !assessmentsRunning.Load() || !enrollmentsRunning.Load() || !dueRunning.Load() || !usersRunning.Load() {
 				return errors.New("a consumer is stopped")
 			}
 			return platform.KafkaReady(ctx)
@@ -31,6 +32,10 @@ func main() {
 		submissionsV3 := platform.Consumer{DB: a.DB, Group: "grading-submitted-v3"}
 		submissions := platform.Consumer{DB: a.DB, Group: "grading-submitted-v4"}
 		classrooms := platform.Consumer{DB: a.DB, Group: "grading-classrooms-v1"}
+		assessments := platform.Consumer{DB: a.DB, Group: "grading-assessments-v1"}
+		enrollments := platform.Consumer{DB: a.DB, Group: "grading-enrollments-v1"}
+		dueDates := platform.Consumer{DB: a.DB, Group: "grading-due-dates-v1"}
+		users := platform.Consumer{DB: a.DB, Group: "grading-users-v1"}
 		marking := marker{a.DB, aiSuggester{platform.NewAICore()}}
 		return []func(context.Context){
 			platform.Outbox{DB: a.DB}.Run,
@@ -43,6 +48,14 @@ func main() {
 			func(ctx context.Context) {
 				classrooms.Consume(ctx, platform.TopicClassroomDeleted, purge, &classroomsRunning)
 			},
+			func(ctx context.Context) {
+				assessments.Consume(ctx, topicAssessmentDeleted, purgeAssessment, &assessmentsRunning)
+			},
+			func(ctx context.Context) {
+				enrollments.Consume(ctx, platform.TopicEnrollmentRemoved, removeStudent, &enrollmentsRunning)
+			},
+			func(ctx context.Context) { dueDates.Consume(ctx, topicDueChanged, changeDue, &dueRunning) },
+			func(ctx context.Context) { users.Consume(ctx, platform.TopicUserDeleted, purgeUser, &usersRunning) },
 		}, nil
 	})
 }

@@ -37,6 +37,7 @@ func (s server) routes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /v1/documents/{id}/original", s.original)
 	mux.HandleFunc("GET /v1/documents/{id}/figures/{image}", s.figure)
 	mux.HandleFunc("POST /v1/documents/{id}/reindex", s.reindex)
+	mux.HandleFunc("DELETE /v1/documents/{id}", s.remove)
 	mux.HandleFunc("POST /v1/search", s.search)
 }
 
@@ -157,7 +158,7 @@ func extractFile(file *os.File, kind string) ([]Chunk, string, error) {
 }
 
 // uploadFields reads an upload's title and document type from the query string (the body is the file itself).
-// problem is set when either is invalid.
+// problem is set when either is invalid. The type is optional and only teaching_material is accepted.
 func uploadFields(r *http.Request) (title, docType, problem string) {
 	title = strings.TrimSpace(r.URL.Query().Get("title"))
 	if title == "" || utf8.RuneCountInString(title) > maxTitle {
@@ -167,8 +168,8 @@ func uploadFields(r *http.Request) (title, docType, problem string) {
 	if docType == "" {
 		docType = docTeachingMaterial
 	}
-	if !docTypes[docType] {
-		return "", "", "doc_type must be teaching_material, rubric or marking_scheme."
+	if docType != docTeachingMaterial {
+		return "", "", "Only teaching materials can be uploaded; doc_type must be teaching_material."
 	}
 	return title, docType, ""
 }
@@ -299,6 +300,38 @@ func (s server) reindex(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	platform.JSON(w, http.StatusAccepted, v)
+}
+
+// remove deletes a document for good: its row with its chunks, vectors and indexing job, its original and figure
+// crops in object storage, and emits content.deleted.v1. An indexing run still under way loses its job and stores
+// nothing. Questions that cite the document keep the passages they copied.
+func (s server) remove(w http.ResponseWriter, r *http.Request) {
+	// The role check comes first so a student is refused before any lookup; TeacherOf decides below.
+	if !platform.Teacher(w, r) {
+		return
+	}
+	org := platform.Actor(r).Org
+	v, ok := lookupDocument(w, r, "Document", func(org string) (Document, error) {
+		doc, _, err := s.store.findDocument(r.Context(), org, r.PathValue("id"))
+		return doc, err
+	})
+	if !ok {
+		return
+	}
+	if !platform.TeacherOf(s.access, w, r, v.Classroom) {
+		return
+	}
+	// The objects go before the row commits, so a request cut short leaves nothing half deleted that a retry can't
+	// finish; it gets its own deadline rather than the client's.
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(r.Context()), removeDeadline)
+	defer cancel()
+	err := s.store.deleteDocument(ctx, org, v.ID, func(ctx context.Context) error {
+		return s.files.removeAll(ctx, org+"/"+v.ID+"/")
+	})
+	if !platform.Found(w, err, "Document not found.") {
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
 }
 
 // send streams a stored object to the caller. A 50 MiB original on a slow link takes longer than the request

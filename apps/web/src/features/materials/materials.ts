@@ -6,6 +6,7 @@ import { ClassroomContext, onClassroomChange } from '../../core/classroom-contex
 import { Session } from '../../core/session';
 import { UnsavedChanges } from '../../core/unsaved-changes';
 import { ActionState } from '../../shared/action-state';
+import { ConfirmDialogComponent } from '../../shared/confirm-dialog';
 import { messageOf } from '../../shared/errors';
 import { FieldComponent, FieldControlDirective } from '../../shared/field';
 import { isPdf } from '../../shared/files';
@@ -24,11 +25,13 @@ const FAILURES: Record<FailureReason, string> = {
   AI_UNAVAILABLE: 'the AI service was unavailable after several attempts',
   INTERNAL: 'an internal error occurred',
 };
-export const DOC_TYPES: { value: DocType; label: string }[] = [
-  { value: 'teaching_material', label: 'Teaching material' },
-  { value: 'rubric', label: 'Rubric' },
-  { value: 'marking_scheme', label: 'Marking scheme' },
-];
+/** Teachers upload teaching material only; rubrics and marking schemes uploaded before ADR 0009 keep their label
+ * and stay teacher-only until deleted. */
+export const DOC_TYPES: Record<DocType, string> = {
+  teaching_material: 'Teaching material',
+  rubric: 'Rubric',
+  marking_scheme: 'Marking scheme',
+};
 
 const count = (n: number | undefined, noun: string) => `${n ?? 0} ${noun}${n === 1 ? '' : 's'}`;
 
@@ -69,6 +72,7 @@ export function describe(doc: DocumentRecord): { label: string; detail: string }
     FieldControlDirective,
     StatusComponent,
     SectionStateComponent,
+    ConfirmDialogComponent,
   ],
   templateUrl: './materials.html',
 })
@@ -77,15 +81,18 @@ export class MaterialsComponent implements OnDestroy {
   private readonly content = inject(ContentApi);
   readonly classroomId = inject(ClassroomContext).classroomId;
   readonly state = new ActionState();
+  /** Deleting a document, in its confirmation dialog. */
+  readonly deleteState = new ActionState();
+  /** The document waiting for its deletion to be confirmed. */
+  readonly deleting = signal<DocumentRecord | null>(null);
+  @ViewChild('deleteDialog') deleteDialog?: ConfirmDialogComponent;
   readonly documents = new Section<DocumentRecord[]>();
   readonly file = signal<File | null>(null);
   readonly polling = signal(false);
-  readonly types = DOC_TYPES;
   @ViewChild('fileInput') fileInput?: ElementRef<HTMLInputElement>;
   private timer: ReturnType<typeof setTimeout> | undefined;
   readonly form = new FormGroup({
     title: new FormControl('', { nonNullable: true, validators: requiredText(160) }),
-    doc_type: new FormControl<DocType>('teaching_material', { nonNullable: true }),
   });
 
   constructor() {
@@ -115,7 +122,7 @@ export class MaterialsComponent implements OnDestroy {
     if (!this.polling()) return;
     const id = this.classroomId();
     this.timer = setTimeout(() => {
-      if (this.documents.loading() || this.state.busy()) return this.schedule();
+      if (this.documents.loading() || this.state.busy() || this.deleteState.busy()) return this.schedule();
       void this.documents
         .poll(() => this.content.documents(id))
         .then((read) => (read ? this.schedule() : this.polling.set(false)));
@@ -149,7 +156,7 @@ export class MaterialsComponent implements OnDestroy {
       });
   }
   typeLabel(type: DocType): string {
-    return DOC_TYPES.find((t) => t.value === type)?.label || type;
+    return DOC_TYPES[type] ?? type;
   }
   selectFile(event: Event): void {
     const input = event.target as HTMLInputElement;
@@ -176,11 +183,11 @@ export class MaterialsComponent implements OnDestroy {
       return;
     }
     const pdf = isPdf(file);
-    const { title, doc_type } = this.form.getRawValue();
+    const { title } = this.form.getRawValue();
     const classroomId = this.classroomId();
     void this.state.run(
       async () => {
-        await this.content.upload(classroomId, title, doc_type, file);
+        await this.content.upload(classroomId, title, file);
         this.form.reset();
         this.file.set(null);
         if (this.fileInput) this.fileInput.nativeElement.value = '';
@@ -197,5 +204,37 @@ export class MaterialsComponent implements OnDestroy {
       await this.content.reindex(doc.id);
       await this.reread(classroomId);
     }, 'Indexing has started.');
+  }
+  confirmDelete(doc: DocumentRecord): void {
+    this.deleting.set(doc);
+    this.deleteDialog?.show();
+  }
+  closeDelete(): void {
+    this.deleting.set(null);
+    this.deleteDialog?.close();
+  }
+  /** Deletes the document for good. The keyboard goes back to the library's heading, since its row is gone. */
+  remove(): void {
+    const doc = this.deleting();
+    const classroomId = this.classroomId();
+    if (!doc) return;
+    void this.deleteState.run(async () => {
+      await this.content.remove(doc.id);
+      this.closeDelete();
+      this.state.error.set('');
+      this.state.message.set(`${doc.title} deleted.`);
+      setTimeout(() => document.getElementById('library-title')?.focus());
+      try {
+        await this.reread(classroomId);
+      } catch (error) {
+        // The dialog is closed, so the page says the library is out of date, without the deleted document.
+        const list = this.documents.value();
+        if (list && this.classroomId() === classroomId)
+          this.documents.set(list.filter((d) => d.id !== doc.id));
+        this.state.error.set(
+          `The library could not be refreshed. ${messageOf(error, 'Choose Refresh materials to try again.')}`,
+        );
+      }
+    });
   }
 }

@@ -178,7 +178,8 @@
   @if (removing(); as student) {
     <p>
       {{ studentName(student) || student.id }} will lose access to {{ classroomName() || 'this classroom' }}.
-      Their submissions and grades are kept, and you can enroll them again later.
+      Their submissions and grades are kept but leave your grading review and counts, and AI marking of their
+      work stops. Enroll them again to bring it back.
     </p>
   }
 </app-confirm-dialog>

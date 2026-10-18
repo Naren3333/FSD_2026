@@ -1,7 +1,9 @@
 """Actual gateway, PostgreSQL, object storage, Kafka and authorization integration.
 
 Creates uniquely named test data; never drops databases or deletes user data.
-Requires the local Compose stack, .env and httpx. Assertions are never mocked.
+Runs against the disposable test stack (`python scripts/stack_tests.py integration` starts it, runs this and removes
+it); --dev runs it against the development stack's data instead. Requires .env and httpx. Assertions are never
+mocked.
 
 main() runs the steps below in order, printing each one as it goes. Each step takes the signed-in users and what
 earlier steps created. Without provider keys the AI paths may answer "unavailable"; `--live-ai` requires every one
@@ -28,11 +30,14 @@ from local_stack import (
     BASE,
     ROOT,
     TOKEN_URL,
+    admin_client,
     delete_topics,
+    ensure_person,
     env,
     password_token,
     psql,
     psql_value,
+    require_test_stack,
     sse_events,
 )
 from setup import AI_CLIENTS, SERVICES, client_secret_key
@@ -228,6 +233,7 @@ def classroom(u: Users) -> dict[str, Any]:
     room = request(
         u.teacher, "POST", "/identity/classrooms", 201, json={"name": f"Integration {uuid4().hex[:8]}"}
     )
+    CREATED_CLASSROOMS.append(room["id"])
     request(u.student, "POST", "/identity/classrooms", 403, json={"name": "Forbidden"})
     request(u.other, "GET", f"/identity/classrooms/{room['id']}/access", 403)
 
@@ -254,7 +260,7 @@ def classroom(u: Users) -> dict[str, Any]:
 
 
 def documents(u: Users, room_id: str) -> None:
-    """Uploads, extraction, PDF indexing jobs and teacher-only rubrics."""
+    """Uploads, extraction, PDF indexing jobs, teaching material only, and deleting a document."""
     documents = f"/content/documents?classroom_id={room_id}"
     text = b"A fraction is a part of a whole."
     doc = request(u.teacher, "POST", f"{documents}&title=Integration", 201, content=text, headers=TEXT)
@@ -293,16 +299,29 @@ def documents(u: Users, room_id: str) -> None:
     request(u.teacher, "POST", f"/content/documents/{doc['id']}/reindex", 409)
     request(u.teacher, "GET", f"{pdf_path}/figures/0123456789abcdef.png", 404)
 
-    # Rubrics and marking schemes are for teachers only.
-    rubric = request(
-        u.teacher, "POST", f"{documents}&title=Rubric&doc_type=rubric", 201,
-        content=b"Band 4: explains clearly.", headers=TEXT,
-    )  # fmt: skip
-    request(u.teacher, "POST", f"{documents}&title=Bad&doc_type=answers", 422, content=b"x", headers=TEXT)
-    assert rubric["id"] in [d["id"] for d in request(u.teacher, "GET", documents)]
-    assert rubric["id"] not in [d["id"] for d in request(u.student, "GET", documents)]
-    request(u.student, "GET", f"/content/documents/{rubric['id']}", 404)
-    assert u.student.get(f"/content/documents/{rubric['id']}/original").status_code == 404
+    # Teachers upload teaching material only: rubrics and marking schemes are retired (ADR 0009).
+    for doc_type in ["rubric", "marking_scheme", "answers"]:
+        request(
+            u.teacher, "POST", f"{documents}&title=Bad&doc_type={doc_type}", 422, content=b"x", headers=TEXT
+        )
+
+    # Deleting needs the classroom's teacher; it removes the row, its chunks and indexing job, and the original, and
+    # emits content.deleted.v1 once. Its indexing job may still be retrying. (Question generation uses "PDF" later.)
+    doomed = request(u.teacher, "POST", f"{documents}&title=Doomed", 201, content=b"%PDF-1.7\n", headers=PDF)
+    pdf_path = f"/content/documents/{doomed['id']}"
+    request(u.student, "DELETE", pdf_path, 403)
+    request(u.other, "DELETE", pdf_path, 403)
+    request(u.teacher, "DELETE", pdf_path, 204)
+    request(u.teacher, "GET", pdf_path, 404)
+    assert u.teacher.get(f"{pdf_path}/original").status_code == 404
+    assert doomed["id"] not in [d["id"] for d in request(u.teacher, "GET", documents)]
+    left = sql_value(
+        "content",
+        f"SELECT (SELECT count(*) FROM index_jobs WHERE document_id='{UUID(doomed['id'])}')||' '||"
+        f"(SELECT count(*) FROM outbox WHERE topic='content.deleted.v1' AND partition_key='{UUID(doomed['id'])}')",
+    )
+    assert left == "0 1", f"jobs and deleted events after the delete: {left}"
+    request(u.teacher, "DELETE", pdf_path, 404)
 
     # PDFs may be up to 50 MiB through the gateway; text stays at 5 MiB, refused by Content itself.
     request(u.teacher, "POST", f"{documents}&title=Big", 413, content=b"a" * (7 << 20), headers=TEXT)
@@ -554,8 +573,8 @@ class Late:
 
 
 def lifecycle(u: Users, room_id: str) -> Late:
-    """Drafts stay with the teacher until published, and a published assessment cannot change. Students save work,
-    and submit after the due date, flagged late."""
+    """Drafts stay with the teacher until published. A published assessment changes or is deleted only until a student
+    submits it; then only its details change. Students save work, and submit after the due date, flagged late."""
     # Fresh sessions start with Kong's full allowance, so no rate-limit wait can pass the due date early.
     u = dataclasses.replace(
         u, teacher=login("teacher", "TEACHER_PASSWORD"), student=login("student", "STUDENT_PASSWORD")
@@ -629,8 +648,8 @@ def lifecycle(u: Users, room_id: str) -> Late:
     published = request(u.teacher, "POST", f"{path}/publish")
     assert published["status"] == "published"
     request(u.teacher, "POST", f"{path}/publish", 409)
-    request(u.teacher, "PUT", path, 409, json=draft)
-    request(u.teacher, "DELETE", path, 409)
+    request(u.teacher, "PUT", path, 409, json=draft)  # never a draft again
+    renamed = still_changeable(u, path, {**draft, "status": "published", "due_at": timestamp(due)}, published)
     public = request(u.student, "GET", path)
     secrets = ["answer", "accepted_answers", "rubric", "marking_scheme"]
     assert all(k not in q for q in public["questions"] for k in secrets)
@@ -648,7 +667,35 @@ def lifecycle(u: Users, room_id: str) -> Late:
     submission = request(u.student, "POST", f"{path}/submissions", 201, json={"answers": answers})
     assert submission["late"] is True
     assert request(u.student, "GET", saved)["answers"] == {}
+    only_details_change(u, path, {**draft, "status": "published"}, due, renamed)
     return Late(created["id"], topic["id"], short, free, answers)
+
+
+def still_changeable(u: Users, path: str, again: dict[str, Any], published: dict[str, Any]) -> dict[str, Any]:
+    """Until a student submits, a published assessment can still be replaced (unchanged questions keep their ids) or
+    deleted. Returns it as replaced."""
+    renamed = request(u.teacher, "PUT", path, json={**again, "title": "Photosynthesis"})
+    assert renamed["status"] == "published" and renamed["published_at"]
+    assert [q["id"] for q in renamed["questions"]] == [q["id"] for q in published["questions"]]
+    gone = request(u.teacher, "POST", "/assessment/assessments", 201, json={**again, "title": "Deleted"})
+    request(u.teacher, "DELETE", f"/assessment/assessments/{gone['id']}")
+    request(u.student, "GET", f"/assessment/assessments/{gone['id']}", 404)
+    return renamed
+
+
+def only_details_change(
+    u: Users, path: str, again: dict[str, Any], due: float, renamed: dict[str, Any]
+) -> None:
+    """A submission fixes the questions and grading settings: only the title, due date and late policy change now."""
+    request(u.teacher, "PUT", path, 409, json={**again, "title": "Too late"})
+    request(u.teacher, "DELETE", path, 409)
+    request(
+        u.teacher, "PATCH", path, 422, json={"title": "Photosynthesis", "due_at": timestamp(time.time() - 60)}
+    )
+    details = {"title": "Photosynthesis (marked)", "due_at": timestamp(due), "late_policy": "accept_flagged"}
+    changed = request(u.teacher, "PATCH", path, json=details)
+    assert changed["title"] == details["title"] and changed["questions"] == renamed["questions"]
+    request(u.student, "PATCH", path, 403, json=details)
 
 
 def timestamp(seconds: float) -> str:
@@ -745,7 +792,11 @@ def marking(u: Users, room_id: str, late: Late) -> None:
 
 
 def unenroll(u: Users, room_id: str) -> None:
-    """Removing a student keeps their grades but ends their access to the classroom."""
+    """Removing a student keeps their grades but ends their access to the classroom. Their work leaves the teacher's
+    review list and counts, and Grading records the removal so their queued AI marking stops."""
+    room = str(UUID(room_id))  # returned by a verified API
+    student = u.student_id
+    assert student.replace("-", "").isalnum(), student  # an account id, safe in SQL
     remove = f"/identity/classrooms/{room_id}/enrollments/{u.student_id}"
     request(u.other, "DELETE", remove, 403)
     request(u.student, "DELETE", remove, 403)
@@ -754,7 +805,94 @@ def unenroll(u: Users, room_id: str) -> None:
     assert request(u.teacher, "GET", f"/identity/classrooms/{room_id}/students") == []
     request(u.student, "GET", f"/grading/evaluations/mine?classroom_id={room_id}", 403)
     assert room_id not in [r["id"] for r in request(u.student, "GET", "/identity/classrooms")]
-    assert len(request(u.teacher, "GET", f"/grading/evaluations?classroom_id={room_id}")) == 2
+    removed = (
+        f"SELECT count(*) FROM removed_enrollments WHERE classroom_id='{room}' AND student_id='{student}'"
+    )
+    eventually(
+        functools.partial(sql_value, "grading", removed), lambda value: value == "1", "removal recorded"
+    )
+    assert request(u.teacher, "GET", f"/grading/evaluations?classroom_id={room_id}") == []
+    kept = f"SELECT count(*) FROM evaluations WHERE classroom_id='{room}' AND student_id='{student}'"
+    assert sql_value("grading", kept) == "2"
+    progress = request(u.teacher, "GET", f"/assessment/assessments/progress?classroom_id={room_id}")
+    assert all(a["submissions"] == 0 for a in progress), progress
+
+
+def delete_account(u: Users, room_id: str) -> None:
+    """A user deletes their own account (ADR 0011). A teacher with classrooms is refused. A throwaway student, with
+    a chat thread in the classroom, deletes theirs: Identity refuses it from then on and removes its sign-in from
+    Keycloak, and Assessment, Grading, Analytics and the chatbot purge it and remember it."""
+    teacher = request(u.teacher, "DELETE", "/identity/me", 409)
+    assert teacher["error"]["code"] == "OWNS_CLASSROOMS", teacher
+    username, password = f"deleted-{uuid4().hex[:8]}", uuid4().hex
+    with admin_client() as admin:
+        ensure_person(admin, username, "Deleted", "Student", password)
+    token = password_token(username, password)
+    gone = httpx.Client(base_url=BASE, headers={"Authorization": "Bearer " + token}, timeout=25)
+    user_id = request(gone, "POST", "/identity/me", json={})["id"]
+    user = str(UUID(user_id))  # Keycloak ids are UUIDs, so safe in SQL
+    request(u.teacher, "POST", f"/identity/classrooms/{room_id}/enrollments", json={"username": username})
+    request(gone, "POST", "/chatbot/threads", 201, json={"classroom_id": room_id})
+    assert sql_value("chatbot", f"SELECT count(*) FROM threads WHERE user_id='{user}'") == "1"
+
+    assert httpx.delete(BASE + "/identity/me").status_code == 401
+    gone.request("DELETE", "/identity/me").raise_for_status()
+    assert request(gone, "POST", "/identity/me", 403, json={})["error"]["code"] == "ACCOUNT_DELETED"
+    request(gone, "DELETE", "/identity/me", 404)
+    request(gone, "POST", "/chatbot/threads", 403, json={"classroom_id": room_id})
+    assert sql_value("identity", f"SELECT count(*) FROM enrollments WHERE student_id='{user}'") == "0"
+    assert sql_value("identity", f"SELECT coalesce(username,'') FROM users WHERE id='{user}'") == ""
+    for service in ["assessment", "grading", "analytics", "chatbot"]:
+        tombstone = f"SELECT count(*) FROM deleted_users WHERE user_id='{user}'"
+        eventually(functools.partial(sql_value, service, tombstone), lambda v: v == "1", f"{service} purge")
+    assert sql_value("chatbot", f"SELECT count(*) FROM threads WHERE user_id='{user}'") == "0"
+    # Identity removes the sign-in account from Keycloak shortly after, so the password no longer signs in.
+    signin = {
+        "client_id": "learning-e2e",
+        "grant_type": "password",
+        "username": username,
+        "password": password,
+    }
+    eventually(
+        lambda: httpx.post(TOKEN_URL, data=signin, timeout=15).status_code,
+        lambda code: code == 401,
+        "sign-in",
+    )
+    removed = f"SELECT count(*) FROM users WHERE id='{user}' AND signin_removed_at IS NOT NULL"
+    assert sql_value("identity", removed) == "1"
+
+
+def delete_graded_assessment(u: Users, room_id: str, late: Late) -> None:
+    """Deleting an assessment students submitted needs the teacher to confirm it also deletes their grades. Then
+    Grading and Analytics purge it, and its submission arriving again grades nothing."""
+    assessment = str(UUID(late.assessment_id))  # returned by a verified API
+    kept = {
+        "assessment": f"SELECT count(*) FROM submissions WHERE assessment_id='{assessment}'",
+        "grading": f"SELECT count(*) FROM evaluations WHERE assessment_id='{assessment}'",
+        "analytics": f"SELECT count(*) FROM evidence WHERE assessment_id='{assessment}'",
+    }
+    for service, sql in kept.items():
+        assert sql_value(service, sql) != "0", service
+    submitted_sql = (
+        "SELECT body FROM outbox WHERE topic='assessment.submitted.v4' "
+        f"AND body->'data'->>'assessment_id'='{assessment}' LIMIT 1"
+    )
+    submitted = json.loads(sql_value("assessment", submitted_sql))
+    path = f"/assessment/assessments/{assessment}"
+    request(u.student, "DELETE", f"{path}?with_submissions=true", 403)
+    request(u.teacher, "DELETE", path, 409)
+    request(u.teacher, "DELETE", f"{path}?with_submissions=true")
+    request(u.teacher, "DELETE", f"{path}?with_submissions=true", 404)
+    for service, sql in kept.items():
+        eventually(functools.partial(sql_value, service, sql), lambda value: value == "0", f"{service} purge")
+    graded = request(u.teacher, "GET", f"/grading/evaluations?classroom_id={room_id}")
+    assert assessment not in [e["assessment_id"] for e in graded], graded
+
+    late_id = str(uuid4())
+    publish("assessment.submitted.v4", submitted["data"]["submission_id"], {**submitted, "event_id": late_id})
+    eventually(lambda: inbox_has("grading", late_id), bool, "late submission")
+    for service, sql in kept.items():
+        assert sql_value(service, sql) == "0", service
 
 
 def delete_classroom(u: Users, room_id: str, graded: Graded) -> None:
@@ -778,6 +916,7 @@ def delete_classroom(u: Users, room_id: str, graded: Graded) -> None:
     request(u.other, "DELETE", path, 403)
     request(u.student, "DELETE", path, 403)
     request(u.teacher, "DELETE", path)
+    CREATED_CLASSROOMS.remove(room_id)
     request(u.teacher, "DELETE", path, 403)
     for user in [u.teacher, u.student]:
         request(user, "GET", f"{path}/access", 403)
@@ -830,12 +969,12 @@ def databases() -> None:
     versions = "SELECT string_agg(version::text, ',' ORDER BY version) FROM schema_migrations"
     for service, expected in [
         ("content", "1,2,3,4"),
-        ("identity", "1,2,3,4,5,6"),
-        ("assessment", "1,2,3,4"),
-        ("grading", "1,2,3,4"),
-        ("analytics", "1,2,3,4"),
+        ("identity", "1,2,3,4,5,6,7"),
+        ("assessment", "1,2,3,4,5"),
+        ("grading", "1,2,3,4,5,6,7"),
+        ("analytics", "1,2,3,4,5,6"),
         ("curriculum", "1,2"),
-        ("chatbot", "1,2"),
+        ("chatbot", "1,2,3,4"),
         ("aicore", "1,2"),
     ]:
         migrations = sql_value(service, versions)
@@ -895,6 +1034,8 @@ def rate_limit_per_session() -> None:
 
 # The topics this run created, deleted when it ends so test topics never pile up in the local curriculum.
 CREATED_TOPICS: list[str] = []
+# The classroom this run created, until its deletion step deletes it; a failed run deletes it on the way out.
+CREATED_CLASSROOMS: list[str] = []
 
 
 def new_topic(teacher: httpx.Client, name: str) -> dict[str, Any]:
@@ -912,22 +1053,41 @@ def delete_test_topics(topic_ids: list[str]) -> None:
 
 
 def remove_topics() -> None:
-    """Archiving hides a topic from the curriculum list (a second archive is a 404); then the run's topics are
-    deleted."""
-    teacher = login("teacher", "TEACHER_PASSWORD")
+    """Archiving moves a topic from the curriculum list to the archived list (a second archive is a 404), where a
+    student can still read its name and only a teacher can restore it; then the run's topics are deleted."""
+    teacher, student = login("teacher", "TEACHER_PASSWORD"), login("student", "STUDENT_PASSWORD")
     first = CREATED_TOPICS[0]
+
+    def listed(archived: bool) -> set[str]:
+        path = "/curriculum/topics?archived=true" if archived else "/curriculum/topics"
+        return {t["id"] for t in request(teacher, "GET", path)}
+
     request(teacher, "DELETE", f"/curriculum/topics/{first}", 204)
-    assert first not in {t["id"] for t in request(teacher, "GET", "/curriculum/topics")}, (
-        "archived topic listed"
+    assert first not in listed(False) and first in listed(True), (
+        "archived topic not moved to the archived list"
     )
+    assert first in {t["id"] for t in request(student, "GET", "/curriculum/topics?archived=true")}
     request(teacher, "DELETE", f"/curriculum/topics/{first}", 404)
+    request(student, "POST", f"/curriculum/topics/{first}/restore", 403)
+    restored = request(teacher, "POST", f"/curriculum/topics/{first}/restore")
+    assert restored == {"id": first, "name": "Integration question generation"}, restored
+    assert first in listed(False) and first not in listed(True), "restored topic not active"
+    request(teacher, "POST", f"/curriculum/topics/{first}/restore", 404)
     delete_test_topics(CREATED_TOPICS)
     assert sql_value("curriculum", f"SELECT count(*) FROM topics WHERE id='{UUID(first)}'") == "0"
     CREATED_TOPICS.clear()
 
 
 def remove_leftovers() -> None:
-    """After a failed run, deletes what it created without checking, so the failure stays the one reported."""
+    """After a failed run, deletes what it created without checking, so the failure stays the one reported. The
+    classroom goes through Identity's API, so every service purges its data for it as for a teacher's deletion."""
+    if CREATED_CLASSROOMS:
+        with (
+            contextlib.suppress(httpx.HTTPError, SystemExit),
+            login("teacher", "TEACHER_PASSWORD") as teacher,
+        ):
+            for room_id in CREATED_CLASSROOMS:
+                teacher.delete(f"/identity/classrooms/{room_id}")
     with contextlib.suppress(subprocess.SubprocessError, ValueError):
         delete_test_topics(CREATED_TOPICS)
 
@@ -947,7 +1107,12 @@ def main() -> None:
         description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
     )
     parser.add_argument("--live-ai", action="store_true", help="require every AI path to work (paid calls)")
-    LIVE_AI = parser.parse_args().live_ai
+    parser.add_argument(
+        "--dev", action="store_true", help="run against the development stack, not the test stack"
+    )
+    args = parser.parse_args()
+    require_test_stack(dev=args.dev)
+    LIVE_AI = args.live_ai
     if LIVE_AI and not env().get("OPENAI_API_KEY"):
         raise SystemExit("--live-ai needs OPENAI_API_KEY in .env")
     started = time.monotonic()
@@ -957,8 +1122,8 @@ def main() -> None:
         remove_leftovers()
     print(f"Finished in {time.monotonic() - started:.0f}s{' with live AI' if LIVE_AI else ''}.")
     print(
-        "PASS: gateway auth, classroom isolation, enrollment by username, rosters, the school's student list, unenrollment, classroom deletion and its cross-service purge, curriculum, "
-        "S3 upload/extraction, PDF indexing jobs, teacher-only rubrics, search access, chat threads and streaming, "
+        "PASS: gateway auth, classroom isolation, enrollment by username, rosters, the school's student list, unenrollment, account deletion and its cross-service purge, classroom deletion and its cross-service purge, deleting a graded assessment with its grades, curriculum, "
+        "S3 upload/extraction, PDF indexing jobs, document deletion, search access, chat threads and streaming, "
         "teacher-only question generation and marking guidance, "
         "AI spend allowance, answer-key secrecy, submissions, draft grading, teacher finalization, students' own "
         "finalized results, the class dashboard's counts and class performance, Kafka analytics, consumer restart, duplicate event and business-key idempotency, "
@@ -982,6 +1147,8 @@ def run() -> None:
     late = step("Assessment lifecycle", lambda: lifecycle(users, room_id))
     step("Marking and release", lambda: marking(users, room_id, late))
     step("Unenrollment", lambda: unenroll(users, room_id))
+    step("Deleting an account", lambda: delete_account(users, room_id))
+    step("Deleting a graded assessment", lambda: delete_graded_assessment(users, room_id, late))
     step("Classroom deletion and purge", lambda: delete_classroom(users, room_id, graded))
     step("Database isolation and migrations", databases)
     step("AI service accounts", lambda: ai_service_accounts(users))

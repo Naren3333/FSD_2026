@@ -1,14 +1,14 @@
 import { test, expect } from '@playwright/test';
 import {
   createClassroom,
-  deleteTopicsAfterEach,
+  deleteTestDataAfterEach,
   env,
   expectNoHorizontalScroll,
   login,
   topicToDelete,
 } from './helpers';
 
-deleteTopicsAfterEach();
+deleteTestDataAfterEach();
 
 test('teacher and student complete a real assessment through Kong', async ({ browser }) => {
   const teacher = await browser.newPage(),
@@ -59,13 +59,13 @@ test('teacher and student complete a real assessment through Kong', async ({ bro
   await second.getByLabel('Criterion 1', { exact: true }).fill('Reasoning');
   await second.getByLabel('Criterion 1 levels').fill('0: Missing\n2: Explains rounding');
   await expect(second.getByLabel('Marks')).toHaveValue('2');
-  // A pasted marking-scheme passage, for AI suggestions only; this classroom has no indexed marking scheme.
-  const scheme = second.getByRole('group', { name: 'Marking scheme (optional)' });
-  await expect(scheme.getByText(/No indexed marking scheme or rubric in this classroom/)).toBeVisible();
-  await scheme.getByLabel('Paste a passage').fill('Full marks need rounding in binary named.');
-  await scheme.getByRole('button', { name: 'Add pasted passage to question 2' }).click();
-  await expect(scheme.getByText('Pasted passage', { exact: true })).toBeVisible();
-  await expect(scheme.getByRole('button', { name: 'Remove passage 1 from question 2' })).toBeVisible();
+  // A marking point the teacher writes, for AI suggestions only.
+  const points = second.getByRole('group', { name: 'Marking points (optional)' });
+  await expect(points.getByText(/No marking points yet/)).toBeVisible();
+  await points.getByLabel('Add a marking point').fill('Full marks need rounding in binary named.');
+  await points.getByRole('button', { name: 'Add marking point to question 2' }).click();
+  await expect(points.getByText('Written by you', { exact: true })).toBeVisible();
+  await expect(points.getByRole('button', { name: 'Remove marking point 1 from question 2' })).toBeVisible();
   await teacher.screenshot({ path: 'test-results/editor-desktop.png', fullPage: true });
   // A draft stays with the teacher until it is published.
   await teacher.getByRole('button', { name: 'Create draft', exact: true }).click();
@@ -99,8 +99,10 @@ test('teacher and student complete a real assessment through Kong', async ({ bro
   await teacher.getByRole('link', { name: 'Grading review', exact: true }).click();
   await expect(async () => {
     await teacher.getByRole('button', { name: 'Refresh grades' }).click();
-    await expect(teacher.getByRole('button', { name: 'Review grade', exact: true })).toBeVisible();
-  }).toPass({ timeout: 30000 });
+    await expect(teacher.getByRole('button', { name: 'Review grade', exact: true })).toBeVisible({
+      timeout: 5000,
+    });
+  }).toPass({ timeout: 60000 });
   // The review shows names, not ids: the student, the assessment, the question and its topic.
   await expect(teacher.getByRole('heading', { name: 'Student Local', exact: true })).toBeVisible();
   await expect(

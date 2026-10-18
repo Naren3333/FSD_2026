@@ -19,7 +19,12 @@ import (
 // submittedSchema is the published contract of the submission event.
 func submittedSchema(t *testing.T) map[string]any {
 	t.Helper()
-	data, err := os.ReadFile("../../contracts/events/assessment.submitted.v4.schema.json")
+	return eventSchema(t, topicSubmitted)
+}
+
+func eventSchema(t *testing.T, topic string) map[string]any {
+	t.Helper()
+	data, err := os.ReadFile("../../contracts/events/" + topic + ".schema.json")
 	if err != nil {
 		t.Fatal(err)
 	}

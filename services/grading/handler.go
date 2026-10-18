@@ -12,6 +12,7 @@ import (
 type server struct {
 	store  store
 	access platform.ClassroomAccess
+	roster platform.ClassroomRoster
 }
 
 func (s server) routes(mux *http.ServeMux) {
@@ -23,7 +24,8 @@ func (s server) routes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /v1/evaluations/{id}/finalize", s.finalize)
 }
 
-// list is, for the classroom's teacher only, its evaluations with the students' answers, or one assessment's.
+// list is, for the classroom's teacher only, its evaluations with the students' answers, or one assessment's. Only
+// enrolled students' are listed: a removed student's evaluations are kept, and come back if they are enrolled again.
 func (s server) list(w http.ResponseWriter, r *http.Request) {
 	classroom := r.URL.Query().Get("classroom_id")
 	assessment := r.URL.Query().Get("assessment_id")
@@ -34,7 +36,11 @@ func (s server) list(w http.ResponseWriter, r *http.Request) {
 	if !platform.TeacherOf(s.access, w, r, classroom) {
 		return
 	}
-	result, err := s.store.listEvaluations(r.Context(), platform.Actor(r).Org, classroom, assessment)
+	students, ok := s.roster.Roster(w, r, classroom)
+	if !ok {
+		return
+	}
+	result, err := s.store.listEvaluations(r.Context(), platform.Actor(r).Org, classroom, assessment, students)
 	if err != nil {
 		platform.Fail(w, err)
 		return
@@ -42,13 +48,18 @@ func (s server) list(w http.ResponseWriter, r *http.Request) {
 	platform.JSON(w, http.StatusOK, result)
 }
 
-// counts is, for the classroom's teacher only, how many of its evaluations need grading and how many are final.
+// counts is, for the classroom's teacher only, how many of its enrolled students' evaluations need grading and how
+// many are final.
 func (s server) counts(w http.ResponseWriter, r *http.Request) {
 	classroom := r.URL.Query().Get("classroom_id")
 	if !platform.TeacherOf(s.access, w, r, classroom) {
 		return
 	}
-	result, err := s.store.countEvaluations(r.Context(), platform.Actor(r).Org, classroom)
+	students, ok := s.roster.Roster(w, r, classroom)
+	if !ok {
+		return
+	}
+	result, err := s.store.countEvaluations(r.Context(), platform.Actor(r).Org, classroom, students)
 	if err != nil {
 		platform.Fail(w, err)
 		return

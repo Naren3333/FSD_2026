@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"learning/platform"
@@ -21,8 +22,9 @@ const (
 	maxPoints    = 100 // per question
 )
 
-// Assessment statuses. A draft is the teacher's to edit and invisible to students; a published assessment is
-// immutable and opens to the classroom's students at OpensAt (or at once).
+// Assessment statuses. A draft is the teacher's to edit and invisible to students; a published assessment opens to
+// the classroom's students at OpensAt (or at once). The teacher may still replace or delete a published assessment
+// until a student submits it; after that only its Details change.
 const (
 	statusDraft     = "draft"
 	statusPublished = "published"
@@ -118,6 +120,15 @@ type Summary struct {
 	LatePolicy string     `json:"late_policy"`
 	Questions  int        `json:"question_count"`
 	Points     int        `json:"points"`
+	// Submissions is how many students have submitted it, for the classroom's teacher only.
+	Submissions *int `json:"submissions,omitempty"`
+}
+
+// Details are what a teacher may change after students have submitted: nothing their grades depend on.
+type Details struct {
+	Title      string     `json:"title"`
+	DueAt      *time.Time `json:"due_at"`
+	LatePolicy string     `json:"late_policy"`
 }
 
 // Progress is how many students have submitted an assessment, for its classroom's teacher.
@@ -268,6 +279,59 @@ func (q Question) validate() error {
 	return nil
 }
 
+// validateDetails checks new details for v: a title, a known late policy, and a due date after the opening date and,
+// when the due date changes on a published assessment, not already past.
+func (v Assessment) validateDetails(d Details, now time.Time) error {
+	changed := v
+	changed.Title, changed.DueAt, changed.LatePolicy = d.Title, d.DueAt, d.LatePolicy
+	if strings.TrimSpace(d.Title) == "" || utf8.RuneCountInString(d.Title) > maxTitle {
+		return errors.New("provide a title of at most 160 characters")
+	}
+	if err := changed.validateSettings(); err != nil {
+		return err
+	}
+	if v.Status == statusPublished && !sameTime(v.DueAt, d.DueAt) {
+		return changed.publishable(now)
+	}
+	return nil
+}
+
+func sameTime(a, b *time.Time) bool {
+	return (a == nil) == (b == nil) && (a == nil || a.Equal(*b))
+}
+
+// sameMarking reports whether a and b have the same questions and marking settings: whether answers to one are
+// graded as answers to the other.
+func sameMarking(a, b Assessment) bool {
+	x, err1 := json.Marshal(a.Questions)
+	y, err2 := json.Marshal(b.Questions)
+	return a.Status == b.Status && a.ReleasePolicy == b.ReleasePolicy && a.AIMarking == b.AIMarking &&
+		err1 == nil && err2 == nil && string(x) == string(y)
+}
+
+// keepQuestionIDs gives each of v's questions that is unchanged from one of before's the id it had, so the work
+// students saved on it still answers it; changed and new questions keep the new ids prepare gave them.
+func (v *Assessment) keepQuestionIDs(before []Question) {
+	used := map[string]bool{}
+	for i := range v.Questions {
+		for _, old := range before {
+			candidate := v.Questions[i]
+			candidate.ID = old.ID
+			if !used[old.ID] && sameJSON(candidate, old) {
+				v.Questions[i].ID, used[old.ID] = old.ID, true
+				break
+			}
+		}
+	}
+}
+
+// sameJSON compares questions as stored, so an empty list and a missing one are alike where the JSON omits both.
+func sameJSON(a, b Question) bool {
+	x, err1 := json.Marshal(a)
+	y, err2 := json.Marshal(b)
+	return err1 == nil && err2 == nil && string(x) == string(y)
+}
+
 // teacherMarked reports whether any question can need a teacher (or an AI suggestion) to mark it.
 func (v Assessment) teacherMarked() bool {
 	return slices.ContainsFunc(v.Questions, func(q Question) bool {
@@ -314,6 +378,17 @@ func validateAnswers(v Assessment, answers map[string]string) bool {
 		answer, exists := answers[q.ID]
 		kind, known := questionKinds[q.Type]
 		if !exists || !known || !kind.accepts(q, answer) {
+			return false
+		}
+	}
+	return true
+}
+
+// answersCurrent reports whether every answer is to one of v's questions. An answer to any other question was made
+// against a version the teacher has since changed, since a changed question gets a new id.
+func answersCurrent(v Assessment, answers map[string]string) bool {
+	for id := range answers {
+		if !slices.ContainsFunc(v.Questions, func(q Question) bool { return q.ID == id }) {
 			return false
 		}
 	}

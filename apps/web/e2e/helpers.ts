@@ -24,14 +24,20 @@ export async function login(page: Page, user: string, password: string): Promise
   await expect(page.getByRole('button', { name: 'Sign out' })).toBeVisible();
 }
 
-/** Creates a classroom from the Classrooms page and makes it the current one. */
+/** Creates a classroom from the Classrooms page and makes it the current one. It is deleted after the test (see
+ * deleteTestDataAfterEach). */
 export async function createClassroom(page: Page, name: string): Promise<void> {
   await page
     .getByRole('navigation', { name: 'Workspace' })
     .getByRole('link', { name: 'Classrooms', exact: true })
     .click();
   await page.getByLabel('Classroom name', { exact: true }).fill(name);
+  const created = page.waitForResponse(
+    (r) => r.request().method() === 'POST' && new URL(r.url()).pathname === '/api/identity/classrooms',
+  );
   await page.getByRole('button', { name: 'Create classroom', exact: true }).click();
+  const response = await created;
+  if (response.status() === 201) createdClassrooms.push(((await response.json()) as { id: string }).id);
   await expect(page.getByText('Classroom created.', { exact: true })).toBeVisible();
   await page.getByLabel('Current classroom').selectOption({ label: name });
 }
@@ -60,6 +66,15 @@ export async function archiveTopic(page: Page, name: string): Promise<void> {
   await page.getByRole('dialog').getByRole('button', { name: 'Archive', exact: true }).click();
   await expect(page.getByText(name + ' archived.', { exact: true })).toBeVisible();
   await expect(page.getByRole('button', { name: 'Archive topic ' + name, exact: true })).toHaveCount(0);
+  await expect(page.getByRole('button', { name: 'Restore topic ' + name, exact: true })).toBeVisible();
+}
+
+/** Restores an archived topic from the Curriculum page, which must be open. */
+export async function restoreTopic(page: Page, name: string): Promise<void> {
+  await page.getByRole('button', { name: 'Restore topic ' + name, exact: true }).click();
+  await expect(page.getByText(name + ' restored.', { exact: true })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Restore topic ' + name, exact: true })).toHaveCount(0);
+  await expect(page.getByRole('button', { name: 'Archive topic ' + name, exact: true })).toBeVisible();
 }
 
 /** Deletes a topic a test created, archived or not, straight from Curriculum's own database in the local stack, so
@@ -90,7 +105,38 @@ export function deleteTestTopic(name: string): void {
   );
 }
 
-/** Topics the running test created, deleted after it whether it passed or failed (see deleteTopicsAfterEach). */
+/** The stack's Kong gateway and Keycloak, on the ports scripts/local_stack.py reads (stack_tests.py sets the test
+ * stack's). Node resolves localhost to ::1 first on Windows, but Compose publishes on 127.0.0.1 only. */
+const GATEWAY = `http://127.0.0.1:${process.env['KONG_PORT'] || '8000'}/api`;
+const KEYCLOAK = `http://127.0.0.1:${process.env['KEYCLOAK_PORT'] || '8081'}`;
+
+/** Deletes a classroom a test created through Identity's API, as the seeded teacher who created it, so every
+ * service purges its data for it as for a teacher's deletion and test classrooms never pile up. A classroom that is
+ * already deleted answers 403. */
+export async function deleteTestClassroom(id: string): Promise<void> {
+  const signIn = await fetch(`${KEYCLOAK}/realms/learning/protocol/openid-connect/token`, {
+    method: 'POST',
+    body: new URLSearchParams({
+      client_id: 'learning-e2e',
+      grant_type: 'password',
+      username: 'teacher',
+      password: env.TEACHER_PASSWORD,
+    }),
+  });
+  if (!signIn.ok) throw new Error(`Teacher sign-in to delete classroom ${id} failed: ${signIn.status}`);
+  const { access_token } = (await signIn.json()) as { access_token: string };
+  const deleted = await fetch(`${GATEWAY}/identity/classrooms/${encodeURIComponent(id)}`, {
+    method: 'DELETE',
+    headers: { Authorization: 'Bearer ' + access_token },
+  });
+  if (!deleted.ok && deleted.status !== 403) {
+    throw new Error(`Deleting classroom ${id} failed: ${deleted.status} ${await deleted.text()}`);
+  }
+}
+
+/** Classrooms (by id) and topics (by name) the running test created, deleted after it whether it passed or failed
+ * (see deleteTestDataAfterEach). */
+const createdClassrooms: string[] = [];
 const createdTopics: string[] = [];
 
 /** Records a topic the test is about to create, so it is deleted after the test even if the test fails. */
@@ -99,9 +145,11 @@ export function topicToDelete(name: string): string {
   return name;
 }
 
-/** Call once at the top of a spec that creates topics. */
-export function deleteTopicsAfterEach(): void {
-  test.afterEach(() => {
+/** Call once at the top of a spec that creates classrooms or topics. Classrooms go first, so nothing still uses
+ * the topics when they are deleted. */
+export function deleteTestDataAfterEach(): void {
+  test.afterEach(async () => {
+    for (const id of createdClassrooms.splice(0)) await deleteTestClassroom(id);
     for (const name of createdTopics.splice(0)) deleteTestTopic(name);
   });
 }

@@ -1,7 +1,7 @@
 import json
 from uuid import uuid4
 
-from purge import purge
+from purge import handle, purge, purge_user, redact
 
 
 def test_malformed_classroom_deletions_are_dead_lettered() -> None:
@@ -53,3 +53,41 @@ def test_a_purge_locks_the_classroom_and_leaves_a_tombstone() -> None:
     assert purge(Conn(), json.dumps(deletion).encode()) is True  # type: ignore[arg-type]
     assert statements[0] == LOCK
     assert "purged_classrooms" in statements[1] and statements[2].startswith("DELETE FROM threads")
+
+
+def test_malformed_document_deletions_are_dead_lettered() -> None:
+    document = str(uuid4())
+    deletion = {
+        "event_id": str(uuid4()),
+        "event_type": "content.deleted.v1",
+        "schema_version": 1,
+        "timestamp": "2026-10-18T00:00:00Z",
+        "correlation_id": str(uuid4()),
+        "resource_id": str(uuid4()),  # not the deleted document
+        "data": {"document_id": document, "classroom_id": str(uuid4()), "org_id": "o"},
+    }
+    assert redact(None, json.dumps(deletion).encode()) is False  # type: ignore[arg-type]
+    assert redact(None, b"{}") is False  # type: ignore[arg-type]
+    # A classroom deletion on the document topic is not a document deletion, and the other way round.
+    deletion["resource_id"] = document
+    assert handle(None, "identity.classroom.deleted.v1", json.dumps(deletion).encode()) is False  # type: ignore[arg-type]
+
+
+def test_malformed_account_deletions_are_dead_lettered() -> None:
+    user = str(uuid4())
+    deletion = {
+        "event_id": str(uuid4()),
+        "event_type": "identity.user.deleted.v1",
+        "schema_version": 1,
+        "timestamp": "2026-10-18T00:00:00Z",
+        "correlation_id": str(uuid4()),
+        "resource_id": str(uuid4()),  # not the deleted user
+        "data": {"user_id": user, "org_id": "o", "role": "student"},
+    }
+    assert purge_user(None, json.dumps(deletion).encode()) is False  # type: ignore[arg-type]
+    deletion["resource_id"] = user
+    deletion["data"] = {"user_id": user, "org_id": "o", "role": "admin"}
+    assert purge_user(None, json.dumps(deletion).encode()) is False  # type: ignore[arg-type]
+    # An account deletion on the classroom topic is not a classroom deletion.
+    deletion["data"] = {"user_id": user, "org_id": "o", "role": "student"}
+    assert handle(None, "identity.classroom.deleted.v1", json.dumps(deletion).encode()) is False  # type: ignore[arg-type]

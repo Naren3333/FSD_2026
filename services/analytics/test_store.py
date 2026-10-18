@@ -14,8 +14,8 @@ from learning_transport.db import LOCK_CLASSROOM, lock, migrations
 from psycopg.rows import dict_row
 from psycopg_pool import ConnectionPool
 
-from consumer import process, purge
-from domain import ClassroomDeletedEvent, Event
+from consumer import process, purge, purge_assessment, purge_user
+from domain import AssessmentDeletedEvent, ClassroomDeletedEvent, Event, UserDeletedEvent
 from main import MIGRATIONS
 from test_domain import finalized
 
@@ -64,6 +64,40 @@ def deletion(classroom: str) -> ClassroomDeletedEvent:
     )
 
 
+def assessment_deletion(event: Event) -> AssessmentDeletedEvent:
+    """The deletion of the assessment a finalized grade is for."""
+    assessment = str(event.data.assessment_id)
+    return AssessmentDeletedEvent.model_validate(
+        {
+            "event_id": str(uuid4()),
+            "event_type": "assessment.deleted.v1",
+            "schema_version": 1,
+            "timestamp": "2026-10-18T00:00:00Z",
+            "correlation_id": str(uuid4()),
+            "resource_id": assessment,
+            "data": {
+                "assessment_id": assessment,
+                "classroom_id": str(event.data.classroom_id),
+                "org_id": "org",
+            },
+        }
+    )
+
+
+def user_deletion(student: str) -> UserDeletedEvent:
+    return UserDeletedEvent.model_validate(
+        {
+            "event_id": str(uuid4()),
+            "event_type": "identity.user.deleted.v1",
+            "schema_version": 1,
+            "timestamp": "2026-10-18T00:00:00Z",
+            "correlation_id": str(uuid4()),
+            "resource_id": student,
+            "data": {"user_id": student, "org_id": "org", "role": "student"},
+        }
+    )
+
+
 def count(pool: ConnectionPool[Any], sql: str, *params: object) -> int:
     with pool.connection() as conn:
         row = conn.execute(sql, params).fetchone()
@@ -104,6 +138,42 @@ def test_purging_removes_the_classrooms_evidence_only(pool):
     purge(pool, deletion(room))  # a repeated deletion changes nothing
     assert (evidence_of(pool, room), evidence_of(pool, other)) == (0, 1)
     assert count(pool, "SELECT count(*) FROM evaluations") == 1
+
+
+def test_a_deleted_assessments_evidence_goes_and_stays_gone(pool):
+    room = str(uuid4())
+    deleted, kept = grade(room), grade(room)
+    process(pool, deleted)
+    process(pool, kept)
+    purge_assessment(pool, assessment_deletion(deleted))
+    purge_assessment(pool, assessment_deletion(deleted))  # a repeated deletion changes nothing
+    assert evidence_of(pool, room) == 1
+    assert count(pool, "SELECT count(*) FROM evaluations") == 1
+    # Another grade for the deleted assessment, published before the deletion but consumed after it.
+    late = grade(room)
+    late.data.assessment_id = deleted.data.assessment_id
+    process(pool, late)
+    assert evidence_of(pool, room) == 1
+    assert count(pool, "SELECT count(*) FROM inbox WHERE event_id=%s", late.event_id) == 1
+
+
+def test_a_deleted_accounts_evidence_goes_and_stays_gone(pool):
+    room = str(uuid4())
+    deleted, kept = grade(room), grade(room)
+    student = str(uuid4())
+    deleted.data.student_id = student
+    process(pool, deleted)
+    process(pool, kept)
+    purge_user(pool, user_deletion(student))
+    purge_user(pool, user_deletion(student))  # a repeated deletion changes nothing
+    assert evidence_of(pool, room) == 1
+    assert count(pool, "SELECT count(*) FROM evaluations") == 1
+    # Another of the student's grades, published before the deletion but consumed after it.
+    late = grade(room)
+    late.data.student_id = student
+    process(pool, late)
+    assert count(pool, "SELECT count(*) FROM evidence WHERE student_id=%s", student) == 0
+    assert count(pool, "SELECT count(*) FROM inbox WHERE event_id=%s", late.event_id) == 1
 
 
 def wait_for_lock(pool: ConnectionPool[Any], done: threading.Event) -> None:
@@ -160,3 +230,16 @@ def test_a_purge_waits_for_a_grade_of_its_classroom_in_progress(pool):
         )
     thread.join(5)
     assert done.is_set() and evidence_of(pool, room) == 0
+
+
+def test_the_consumer_routes_an_assessment_deletion_to_its_purge(pool):
+    from consumer import ASSESSMENT_DELETED, handler
+
+    room = str(uuid4())
+    deleted, kept = grade(room), grade(room)
+    process(pool, deleted)
+    process(pool, kept)
+    message = assessment_deletion(deleted).model_dump_json().encode()
+    assert handler(pool)(ASSESSMENT_DELETED, message) is True
+    assert evidence_of(pool, room) == 1
+    assert count(pool, "SELECT count(*) FROM deleted_assessments") == 1

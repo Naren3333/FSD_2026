@@ -3,7 +3,7 @@
 Adds missing secrets to .env (it never changes an existing line), creates missing service databases and roles in
 the running Compose PostgreSQL (for example `chatbot`, added in ADR 0002 stage 4, and `aicore`, ai-core's usage
 ledger from ADR 0003), and creates missing AI service-account clients in the running Keycloak (for example
-`grading-marker`, ADR 0004). Existing clients, users and databases are left as they are. Safe to run again.
+`grading-marker`, ADR 0004) and Identity's `identity-accounts` client (ADR 0011). Existing clients, users and databases are left as they are. Safe to run again.
 It also rewrites the generated realm import from .env, for the next fresh Keycloak volume. Other realm changes to
 a running Keycloak still need a fresh volume (see operations.md).
 """
@@ -13,9 +13,12 @@ from pathlib import Path
 
 from local_stack import ROOT, admin_client, check, psql, psql_value, read_env
 from setup import (
+    ACCOUNTS_CLIENT,
+    ACCOUNTS_ROLE,
     AI_CLIENTS,
     PEOPLE,
     SERVICES,
+    accounts_client,
     client_secret_key,
     generate_secrets,
     password_key,
@@ -74,6 +77,22 @@ def add_missing_clients(env: dict[str, str]) -> None:
             print(f"Created Keycloak client {client}")
 
 
+def add_missing_accounts_client(env: dict[str, str]) -> None:
+    """Creates Identity's identity-accounts client if Keycloak lacks it, with .env's secret, and gives its service
+    account realm-management's manage-users role."""
+    with admin_client() as admin:
+        if check(admin.get("/clients", params={"clientId": ACCOUNTS_CLIENT})).json():
+            return
+        check(admin.post("/clients", json=accounts_client(env[client_secret_key(ACCOUNTS_CLIENT)])))
+        client_id = check(admin.get("/clients", params={"clientId": ACCOUNTS_CLIENT})).json()[0]["id"]
+        account = check(admin.get(f"/clients/{client_id}/service-account-user")).json()
+        owner, role_name = ACCOUNTS_ROLE
+        management = check(admin.get("/clients", params={"clientId": owner})).json()[0]["id"]
+        role = check(admin.get(f"/clients/{management}/roles/{role_name}")).json()
+        check(admin.post(f"/users/{account['id']}/role-mappings/clients/{management}", json=[role]))
+        print(f"Created Keycloak client {ACCOUNTS_CLIENT}")
+
+
 def refresh_realm_import(env: dict[str, str]) -> None:
     """Rewrites the generated realm import from .env, so a fresh Keycloak volume gets the current clients too."""
     path = ROOT / ".local" / "learning-realm.json"
@@ -95,6 +114,7 @@ def main() -> None:
         )
     add_missing_databases(env)
     add_missing_clients(env)
+    add_missing_accounts_client(env)
     print("Local setup is up to date. Run: docker compose up -d --build")
 
 

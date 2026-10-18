@@ -203,13 +203,116 @@ func TestRostersAndRemoval(t *testing.T) {
 	if err != nil || len(roster) != 2 || roster[0].ID != "student-a" || roster[1].Name != "bea" {
 		t.Fatalf("roster = %v, %v", roster, err)
 	}
-	if removed, err := s.removeEnrollment(ctx, id, "student-a"); err != nil || !removed {
+	if removed, err := s.removeEnrollment(ctx, id, "org-a", "student-a"); err != nil || !removed {
 		t.Fatalf("remove = %v, %v", removed, err)
 	}
-	if removed, err := s.removeEnrollment(ctx, id, "student-a"); err != nil || removed {
+	if removed, err := s.removeEnrollment(ctx, id, "org-a", "student-a"); err != nil || removed {
 		t.Fatalf("remove twice = %v, %v", removed, err)
+	}
+	// Announced once, for the classroom, naming the student.
+	var events int
+	var student, org string
+	if err = s.db.QueryRow(ctx, "SELECT count(*) OVER (), body->'data'->>'student_id', body->'data'->>'org_id' FROM outbox WHERE topic=$1 AND partition_key=$2", platform.TopicEnrollmentRemoved, id).Scan(&events, &student, &org); err != nil || events != 1 || student != "student-a" || org != "org-a" {
+		t.Fatalf("event = %d %s %s, %v", events, student, org, err)
 	}
 	if students, total, err := s.listOrgStudents(ctx, "org-a", "BE", 0, 10); err != nil || total != 1 || students[0].ID != "student-b" {
 		t.Fatalf("search = %v, %d, %v", students, total, err)
+	}
+}
+
+func TestADeletedAccountIsClearedAnnouncedAndNeverReturns(t *testing.T) {
+	ctx, s := context.Background(), testStore(t)
+	student, teacher := uuid.NewString(), uuid.NewString()
+	register(t, s, "org-a", teacher, "teacher", "t")
+	register(t, s, "org-a", student, "student", "ada")
+	id := classroom(t, s, "org-a", teacher)
+	if err := s.insertEnrollment(ctx, id, student); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.deleteAccount(ctx, "org-b", student); !errors.Is(err, platform.ErrNotFound) {
+		t.Fatalf("deleted from another organization: %v", err)
+	}
+	if err := s.deleteAccount(ctx, "org-a", teacher); !errors.Is(err, errOwnsClassrooms) {
+		t.Fatalf("a teacher with a classroom: %v", err)
+	}
+	if err := s.deleteAccount(ctx, "org-a", student); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.deleteAccount(ctx, "org-a", student); !errors.Is(err, platform.ErrNotFound) {
+		t.Fatalf("deleted twice: %v", err)
+	}
+	if v := user(t, s, student); v[2] != "" || v[3] != "" {
+		t.Errorf("names kept: %v", v)
+	}
+	if enrolled, err := s.isEnrolled(ctx, id, student); err != nil || enrolled {
+		t.Errorf("still enrolled: %v %v", enrolled, err)
+	}
+	if err := s.registerUser(ctx, "org-a", student, "student", "ada", "Ada"); !errors.Is(err, errAccountDeleted) {
+		t.Errorf("registered again: %v", err)
+	}
+	if err := s.insertEnrollment(ctx, id, student); !errors.Is(err, errStudentDeleted) {
+		t.Errorf("enrolled again: %v", err)
+	}
+	if exists, err := s.studentExists(ctx, student, "org-a"); err != nil || exists {
+		t.Errorf("still found: %v %v", exists, err)
+	}
+	var topic, key, data string
+	if err := s.db.QueryRow(ctx, "SELECT topic,partition_key,body->>'data' FROM outbox WHERE topic=$1", platform.TopicUserDeleted).Scan(&topic, &key, &data); err != nil {
+		t.Fatal(err)
+	}
+	if v, err := platform.DecodeUserDeleted(platform.Event{Resource: key, Data: []byte(data)}); err != nil || v.User != student || v.Org != "org-a" || v.Role != "student" {
+		t.Fatalf("event %+v %v", v, err)
+	}
+
+	// Once the teacher's classroom is gone, the teacher can go too, and cannot create another.
+	if err := s.deleteClassroom(ctx, id, "org-a"); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.deleteAccount(ctx, "org-a", teacher); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.insertClassroom(ctx, uuid.NewString(), "Year 6", "org-a", teacher); !errors.Is(err, errProfileRequired) {
+		t.Errorf("a deleted teacher created a classroom: %v", err)
+	}
+}
+
+// fakeKeycloak records the sign-in accounts removed, failing for those in fail.
+type fakeKeycloak struct {
+	removed []string
+	fail    map[string]bool
+}
+
+func (f *fakeKeycloak) remove(_ context.Context, user string) error {
+	if f.fail[user] {
+		return errors.New("keycloak down")
+	}
+	f.removed = append(f.removed, user)
+	return nil
+}
+
+func TestDeletedAccountsLoseTheirSignInOnce(t *testing.T) {
+	ctx, s := context.Background(), testStore(t)
+	first, second, kept := uuid.NewString(), uuid.NewString(), uuid.NewString()
+	for _, id := range []string{first, second, kept} {
+		register(t, s, "org-a", id, "student", "s")
+	}
+	for _, id := range []string{first, second} {
+		if err := s.deleteAccount(ctx, "org-a", id); err != nil {
+			t.Fatal(err)
+		}
+	}
+	keycloak := &fakeKeycloak{fail: map[string]bool{second: true}}
+	remover := signInCleanup{s.db, keycloak}
+	if n, err := remover.removePending(ctx); err == nil || n != 1 {
+		t.Fatalf("removed %d, %v", n, err)
+	}
+	keycloak.fail = nil
+	for range 2 {
+		if _, err := remover.removePending(ctx); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if len(keycloak.removed) != 2 || keycloak.removed[0] != first || keycloak.removed[1] != second {
+		t.Fatalf("removed %v", keycloak.removed)
 	}
 }

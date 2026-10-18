@@ -1,5 +1,11 @@
 import { test, expect, Page } from '@playwright/test';
-import { env, expectNoHorizontalScroll, login, teacherWithClassroom } from './helpers';
+import {
+  deleteTestDataAfterEach,
+  env,
+  expectNoHorizontalScroll,
+  login,
+  teacherWithClassroom,
+} from './helpers';
 const CHUNK = '11111111-1111-4111-8111-111111111111',
   FIGURE = '22222222-2222-4222-8222-222222222222',
   DOC = '33333333-3333-4333-8333-333333333333';
@@ -8,6 +14,8 @@ const PNG = Buffer.from(
   'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=',
   'base64',
 );
+
+deleteTestDataAfterEach();
 
 const sse = (events: [string, unknown][]) =>
   events.map(([e, d]) => `event: ${e}\ndata: ${JSON.stringify(d)}\n\n`).join('');
@@ -36,26 +44,37 @@ test('teacher uploads materials and an enrolled student asks the real assistant'
   ).toBeVisible();
   const notes = page.locator('.record').filter({ hasText: 'Notes ' + suffix });
   await expect(notes.locator('.badge').first()).toHaveText('Text extracted');
-  await page.getByLabel('Document title').fill('Rubric ' + suffix);
-  await page.getByLabel('Document type').selectOption({ label: 'Rubric' });
+  await page.getByLabel('Document title').fill('Slides ' + suffix);
+  await expect(page.getByLabel('Document type')).toHaveCount(0);
   await page.getByLabel('Educational file').setInputFiles({
-    name: 'rubric.pdf',
+    name: 'slides.pdf',
     mimeType: 'application/pdf',
     buffer: Buffer.from('%PDF-1.4\n%%EOF\n'),
   });
   await page.getByRole('button', { name: 'Upload document', exact: true }).click();
   await expect(page.getByText('Document uploaded. Indexing has started.', { exact: true })).toBeVisible();
-  const rubric = page.locator('.record').filter({ hasText: 'Rubric ' + suffix });
-  await expect(rubric.locator('.badge').first()).toHaveText(/^Indexing( failed)?$/);
-  await expect(rubric.getByText('Rubric', { exact: true })).toBeVisible();
+  const slides = page.locator('.record').filter({ hasText: 'Slides ' + suffix });
+  await expect(slides.locator('.badge').first()).toHaveText(/^Indexing( failed)?$/);
 
-  // The student sees teaching material only, and asks with their own access.
+  // Deleting a material asks first, with Cancel focused, and then removes it for everyone.
+  await notes.getByRole('button', { name: 'Delete Notes ' + suffix }).click();
+  const confirm = page.getByRole('dialog', { name: 'Delete this document?' });
+  await expect(confirm.getByRole('button', { name: 'Cancel' })).toBeFocused();
+  await confirm.getByRole('button', { name: 'Cancel' }).click();
+  await expect(notes).toBeVisible();
+  await notes.getByRole('button', { name: 'Delete Notes ' + suffix }).click();
+  await confirm.getByRole('button', { name: 'Delete document' }).click();
+  await expect(page.getByText('Notes ' + suffix + ' deleted.', { exact: true })).toBeVisible();
+  await expect(notes).toHaveCount(0);
+  await expect(page.getByRole('heading', { name: 'Classroom library' })).toBeFocused();
+
+  // The student sees what is left, and asks with their own access.
   await student.getByRole('button', { name: 'Refresh classrooms' }).click();
   await student.getByLabel('Current classroom').selectOption({ label: 'Chat ' + suffix });
   await student.getByRole('link', { name: 'Teaching materials', exact: true }).click();
-  await expect(student.locator('.record').filter({ hasText: 'Notes ' + suffix })).toBeVisible();
-  await expect(student.getByText('Rubric ' + suffix)).toHaveCount(0);
-  await expect(student.getByRole('button', { name: /Index document|Retry indexing/ })).toHaveCount(0);
+  await expect(student.locator('.record').filter({ hasText: 'Slides ' + suffix })).toBeVisible();
+  await expect(student.getByText('Notes ' + suffix)).toHaveCount(0);
+  await expect(student.getByRole('button', { name: /Index document|Retry indexing|Delete/ })).toHaveCount(0);
   await page.close();
   await answerHonestly(student);
   await student.close();

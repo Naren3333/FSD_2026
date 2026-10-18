@@ -5,6 +5,7 @@ Scripts in scripts/ import this directly (`python scripts/<name>.py` puts script
 adds scripts/ to the path first."""
 
 import json
+import os
 import subprocess
 from collections.abc import Iterable, Iterator
 from functools import cache
@@ -17,11 +18,21 @@ if TYPE_CHECKING:
     import httpx
 
 ROOT = Path(__file__).resolve().parents[1]
-BASE = "http://localhost:8000/api"
-KEYCLOAK = "http://localhost:8081"
+# The published ports, as docker-compose.yml reads them: the development stack's unless the environment names others
+# (scripts/stack_tests.py sets TEST_PORTS for the test stack).
+KONG_PORT = os.environ.get("KONG_PORT") or "8000"
+KEYCLOAK_PORT = os.environ.get("KEYCLOAK_PORT") or "8081"
+BASE = f"http://localhost:{KONG_PORT}/api"
+KEYCLOAK = f"http://localhost:{KEYCLOAK_PORT}"
 TOKEN_URL = f"{KEYCLOAK}/realms/learning/protocol/openid-connect/token"
 ADMIN_TOKEN_URL = f"{KEYCLOAK}/realms/master/protocol/openid-connect/token"
 PSQL_TIMEOUT = 90  # seconds
+# Compose projects of docker-compose.yml. The development stack is the file's own name; the test stack is a second
+# project with its own containers, network, volumes and published ports, made fresh for each run by
+# scripts/stack_tests.py, so it runs beside the development stack.
+DEV_PROJECT = "learning-foundation"
+TEST_PROJECT = "learning-test"
+TEST_PORTS = {"KONG_PORT": "18000", "KEYCLOAK_PORT": "18081", "WEB_PORT": "14200"}
 
 
 def read_env(path: Path = ROOT / ".env") -> dict[str, str]:
@@ -34,6 +45,37 @@ def read_env(path: Path = ROOT / ".env") -> dict[str, str]:
 def env() -> dict[str, str]:
     """The repository's .env, made by scripts/setup.py, read once."""
     return read_env()
+
+
+def project() -> str:
+    """The Compose project that `docker compose` acts on here: COMPOSE_PROJECT_NAME, which Compose itself reads
+    first, or else the development stack."""
+    return os.environ.get("COMPOSE_PROJECT_NAME") or DEV_PROJECT
+
+
+def require_test_stack(*, dev: bool) -> None:
+    """Stops a script that creates and deletes data unless it is aimed at the running test stack, or `dev` (the
+    script's --dev flag) says to use the development stack's data anyway."""
+    if dev:
+        return
+    if project() != TEST_PROJECT:
+        raise SystemExit(
+            "This creates and deletes data, so it runs against the disposable test stack: "
+            "python scripts/stack_tests.py. Pass --dev to run it against the development stack instead."
+        )
+    running = subprocess.run(
+        ["docker", "compose", "ps", "--status", "running", "--quiet", "postgres"],
+        cwd=ROOT,
+        text=True,
+        encoding="utf-8",
+        capture_output=True,
+        check=False,
+        timeout=PSQL_TIMEOUT,
+    )
+    if not running.stdout.strip():
+        raise SystemExit(
+            f"The {TEST_PROJECT} stack is not running. Start it with python scripts/stack_tests.py."
+        )
 
 
 def check(response: "httpx.Response") -> "httpx.Response":

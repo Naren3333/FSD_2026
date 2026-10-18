@@ -24,6 +24,8 @@ export interface Topic {
   id: string;
   name: string;
 }
+/** Teachers upload teaching material only; rubrics and marking schemes uploaded before ADR 0009 keep their type and
+ * stay teacher-only. */
 export type DocType = 'teaching_material' | 'rubric' | 'marking_scheme';
 export type DocumentStatus = 'extracted' | 'extraction_unsupported' | 'indexing' | 'indexed' | 'failed';
 /** Why indexing a PDF failed. */
@@ -47,24 +49,7 @@ export interface DocumentRecord {
   indexed_at?: string;
   failure_reason?: FailureReason;
 }
-/** One passage Content's search found, with the document it is from. */
-export interface SearchHit {
-  chunk_id: string;
-  document_id: string;
-  title: string;
-  doc_type: DocType;
-  section_path: string | null;
-  page_start: number;
-  page_end: number;
-  content: string;
-}
-export interface SearchRequest {
-  classroom_id: string;
-  query: string;
-  top_k?: number;
-  document_ids?: string[];
-  doc_types?: DocType[];
-}
+/** One of the user's conversations with the classroom assistant. */
 export interface Thread {
   id: string;
   classroom_id: string;
@@ -83,6 +68,8 @@ export interface Citation {
   source: 'pdf' | 'vision';
   content: string;
   image: string | null;
+  /** The material was deleted after this answer: the passage and figure are gone and only the title is kept. */
+  removed?: boolean;
 }
 export type Outcome = 'answered' | 'no_results' | 'error' | 'interrupted';
 export interface ChatMessage {
@@ -114,15 +101,16 @@ export interface Rubric {
   criteria: Criterion[];
   model_answer?: string;
 }
-/** A passage of the classroom's marking scheme the teacher attached to a question, for AI marking suggestions only.
- * Picked from search it names its document, chunk and page; pasted by the teacher it may name none. */
+/** A passage on a question: a marking point for AI marking suggestions only, or a source of a generated question.
+ * A source names its document, chunk and page; a marking point written by the teacher or AI names none (one copied
+ * from an uploaded marking scheme before ADR 0009 may still name its document). */
 export interface Excerpt {
   document_id?: string;
   chunk_id?: string;
   page?: number;
   text: string;
 }
-/** A question. Answer keys, accepted answers, rubrics and marking-scheme passages come only to the classroom's
+/** A question. Answer keys, accepted answers, rubrics and marking points come only to the classroom's
  * teacher. */
 export interface Question {
   /** Assigned by Assessment. */
@@ -136,7 +124,7 @@ export interface Question {
   accepted_answers?: string[];
   case_sensitive?: boolean;
   rubric?: Rubric;
-  /** Short answers and free responses only: up to five passages. */
+  /** Short answers and free responses only: up to five marking points. */
   marking_scheme?: Excerpt[];
   /** A free response's character limit. */
   max_length?: number;
@@ -169,11 +157,17 @@ export interface Assessment extends Partial<AssessmentSettings> {
   questions: Question[];
   published_at?: string | null;
 }
-/** What a teacher sends to create or replace a draft; Assessment assigns the ids. */
+/** What a teacher sends to create or replace an assessment; Assessment assigns the ids. */
 export interface NewAssessment extends AssessmentSettings {
   classroom_id: string;
   title: string;
   questions: Omit<Question, 'id'>[];
+}
+/** What a teacher may still change once students have submitted: nothing their grades depend on. */
+export interface AssessmentDetails {
+  title: string;
+  due_at: string | null;
+  late_policy: LatePolicy;
 }
 /** A recorded submission; its grade starts as a draft for the teacher. */
 export interface Submission {
@@ -207,7 +201,7 @@ export interface Suggestion {
   model?: string;
   /** Why it failed or still waits, such as the teacher's daily AI allowance. */
   reason?: string;
-  /** How many of the question's marking-scheme passages the AI was given. */
+  /** How many of the question's marking points the AI was given. */
   scheme_passages?: number;
 }
 export interface Evidence {
@@ -291,6 +285,8 @@ export interface AssessmentSummary {
   late_policy: LatePolicy;
   question_count: number;
   points: number;
+  /** How many students have submitted it; for the classroom's teacher only. */
+  submissions?: number;
 }
 /** How many students have submitted an assessment. */
 export interface AssessmentProgress {
@@ -353,7 +349,7 @@ export interface Guidance {
   type: 'short_answer' | 'free_response';
   accepted_answers: string[];
   rubric: Rubric | null;
-  /** What earns each mark, as a marking-scheme passage the teacher wrote (no document). */
+  /** What earns each mark, as a marking point (no document). */
   marking_points: Excerpt;
   sources: Excerpt[];
   evidence: string;

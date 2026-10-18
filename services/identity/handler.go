@@ -16,6 +16,7 @@ type server struct{ store store }
 
 func (s server) routes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /v1/me", s.register)
+	mux.HandleFunc("DELETE /v1/me", s.deleteAccount)
 	mux.HandleFunc("GET /v1/classrooms", s.list)
 	mux.HandleFunc("POST /v1/classrooms", s.create)
 	mux.HandleFunc("DELETE /v1/classrooms/{id}", s.remove)
@@ -43,6 +44,10 @@ func (s server) register(w http.ResponseWriter, r *http.Request) {
 	}
 	username, name := strings.TrimSpace(c.Username), displayName(c.Name, c.Username)
 	err := s.store.registerUser(r.Context(), c.Org, c.Subject, role, username, name)
+	if errors.Is(err, errAccountDeleted) {
+		platform.Error(w, http.StatusForbidden, "ACCOUNT_DELETED", "This account was deleted and cannot be used again.")
+		return
+	}
 	if errors.Is(err, errRoleChanged) {
 		platform.Error(w, http.StatusConflict, "ROLE_CONFLICT", "This account is registered with another role; a teacher stays a teacher and a student stays a student.")
 		return
@@ -159,7 +164,12 @@ func (s server) enroll(w http.ResponseWriter, r *http.Request) {
 		platform.Error(w, http.StatusUnprocessableEntity, "INVALID_STUDENT", problem)
 		return
 	}
-	if err = s.store.insertEnrollment(r.Context(), id, student); !platform.Found(w, err, "Classroom not found.") {
+	err = s.store.insertEnrollment(r.Context(), id, student)
+	if errors.Is(err, errStudentDeleted) {
+		platform.Error(w, http.StatusUnprocessableEntity, "INVALID_STUDENT", "That student deleted their account.")
+		return
+	}
+	if !platform.Found(w, err, "Classroom not found.") {
 		return
 	}
 	platform.JSON(w, http.StatusOK, map[string]string{"student_id": student, "classroom_id": id})
@@ -196,7 +206,7 @@ func (s server) unenroll(w http.ResponseWriter, r *http.Request) {
 	if !s.owner(w, r, id, "remove students") {
 		return
 	}
-	removed, err := s.store.removeEnrollment(r.Context(), id, student)
+	removed, err := s.store.removeEnrollment(r.Context(), id, platform.Actor(r).Org, student)
 	if err != nil {
 		platform.Fail(w, err)
 		return
@@ -259,4 +269,23 @@ func number(value string, fallback int) (int, bool) {
 	}
 	n, err := strconv.Atoi(value)
 	return n, err == nil && n >= 0
+}
+
+// deleteAccount deletes the caller's own account (ADR 0011): it can never sign in or register again, and every
+// service deletes the user's data. A teacher deletes their classrooms first (409 OWNS_CLASSROOMS).
+func (s server) deleteAccount(w http.ResponseWriter, r *http.Request) {
+	c := platform.Actor(r)
+	if !platform.ID(c.Subject) { // every Keycloak account id is a UUID, and the event's resource must be one
+		platform.NotFound(w, "This account is not registered or was already deleted.")
+		return
+	}
+	err := s.store.deleteAccount(r.Context(), c.Org, c.Subject)
+	if errors.Is(err, errOwnsClassrooms) {
+		platform.Error(w, http.StatusConflict, "OWNS_CLASSROOMS", "Delete your classrooms first; deleting one also deletes its students' work.")
+		return
+	}
+	if !platform.Found(w, err, "This account is not registered or was already deleted.") {
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
 }

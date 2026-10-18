@@ -1,4 +1,4 @@
-.PHONY: setup upgrade_local up down wait_ready test lint build check integration db_tests e2e contracts
+.PHONY: setup upgrade_local up down wait_ready test lint build check stack_tests integration db_tests e2e contracts
 PYTHON ?= python
 setup:
 	$(PYTHON) scripts/setup.py
@@ -15,11 +15,14 @@ test check lint:
 	$(PYTHON) scripts/check.py
 build:
 	docker compose build
-integration: wait_ready
-	$(PYTHON) scripts/integration.py
-db_tests: wait_ready
-	$(PYTHON) scripts/db_tests.py
-e2e: wait_ready
-	cd apps/web && npm run test:e2e
+# The stack tests run in a fresh, disposable learning-test stack, never against the development stack's data.
+stack_tests:
+	$(PYTHON) scripts/stack_tests.py
+integration:
+	$(PYTHON) scripts/stack_tests.py integration
+db_tests:
+	$(PYTHON) scripts/stack_tests.py db
+e2e:
+	$(PYTHON) scripts/stack_tests.py e2e
 contracts:
 	$(PYTHON) scripts/export_contracts.py

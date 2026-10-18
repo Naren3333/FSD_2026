@@ -82,6 +82,25 @@ func (s storage) removeAll(ctx context.Context, prefix string) error {
 	return nil
 }
 
+// list is every object in the bucket with when it was written, for the sweeper.
+func (s storage) list(ctx context.Context) ([]storedObject, error) {
+	ctx, cancel := context.WithCancel(ctx) // stops the listing if it fails part way
+	defer cancel()
+	var objects []storedObject
+	for object := range s.client.ListObjects(ctx, s.bucket, minio.ListObjectsOptions{Recursive: true}) {
+		if object.Err != nil {
+			return nil, object.Err
+		}
+		objects = append(objects, storedObject{object.Key, object.LastModified})
+	}
+	return objects, nil
+}
+
+// remove deletes one object; removing one that is already gone succeeds.
+func (s storage) remove(ctx context.Context, key string) error {
+	return s.client.RemoveObject(ctx, s.bucket, key, minio.RemoveObjectOptions{})
+}
+
 // open returns the object stream and its size. The caller must Close it.
 func (s storage) open(ctx context.Context, key string) (io.ReadCloser, int64, error) {
 	object, err := s.client.GetObject(ctx, s.bucket, key, minio.GetObjectOptions{})

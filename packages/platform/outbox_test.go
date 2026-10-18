@@ -194,3 +194,30 @@ type writerFunc func(context.Context, ...kafka.Message) error
 func (f writerFunc) WriteMessages(ctx context.Context, msgs ...kafka.Message) error {
 	return f(ctx, msgs...)
 }
+
+func TestOutboxPrunesOnlyEventsPublishedLongAgo(t *testing.T) {
+	db := eventDB(t)
+	ctx := context.Background()
+	emit(t, db, "a/1", "b/1", "c/1")
+	// a/1 was published long ago, b/1 just now, and c/1 never was, however old.
+	for _, sql := range []string{
+		"UPDATE outbox SET published_at=now()-interval '8 days' WHERE body->'data'->>'name'='a/1'",
+		"UPDATE outbox SET published_at=now() WHERE body->'data'->>'name'='b/1'",
+		"UPDATE outbox SET created_at=now()-interval '30 days' WHERE body->'data'->>'name'='c/1'",
+	} {
+		if _, err := db.Exec(ctx, sql); err != nil {
+			t.Fatal(err)
+		}
+	}
+	pruned, err := pruneOutbox(ctx, db, OutboxRetention)
+	if err != nil || pruned != 1 {
+		t.Fatalf("pruned %d, %v", pruned, err)
+	}
+	var left []string
+	if err = db.QueryRow(ctx, "SELECT array_agg(body->'data'->>'name' ORDER BY body->'data'->>'name') FROM outbox").Scan(&left); err != nil {
+		t.Fatal(err)
+	}
+	if !slices.Equal(left, []string{"b/1", "c/1"}) {
+		t.Fatalf("left %v", left)
+	}
+}

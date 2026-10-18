@@ -106,7 +106,7 @@ describe('assessment conversion', () => {
     expect(sent.questions[1]).not.toHaveProperty('marking_scheme');
   });
 
-  it('sends marking-scheme passages only with the questions a teacher marks', () => {
+  it('sends marking points only with the questions a teacher marks', () => {
     const form = assessmentForm();
     form.controls.title.setValue('Plants');
     const [q] = form.controls.questions.controls;
@@ -114,13 +114,13 @@ describe('assessment conversion', () => {
     q.patchValue({ prompt: 'Gas?', topic_id: 's1', type: 'short_answer', accepted: 'oxygen' });
     q.controls.marking_scheme.setValue([passage]);
     expect(toAssessment(form, 'c1', 'draft').questions[0].marking_scheme).toEqual([passage]);
-    // A numerical question keeps no passages, even ones added while it was a short answer.
+    // A numerical question keeps no marking points, even ones added while it was a short answer.
     q.patchValue({ type: 'numerical', answer: '1' });
     expect(q.controls.marking_scheme.enabled).toBe(false);
     expect(toAssessment(form, 'c1', 'draft').questions[0]).not.toHaveProperty('marking_scheme');
   });
 
-  it('allows five passages a question and twenty an assessment', () => {
+  it('allows five marking points a question and twenty an assessment', () => {
     const form = assessmentForm();
     const q = form.controls.questions.at(0);
     q.controls.type.setValue('free_response');

@@ -24,6 +24,17 @@ export interface RequestOptions {
   timeout?: number;
 }
 
+/** A failure the API answered: its readable message, its status and, when it named one, its error code. */
+export class ApiError extends Error {
+  constructor(
+    message: string,
+    readonly status: number,
+    readonly code = '',
+  ) {
+    super(message);
+  }
+}
+
 /** Authenticated calls to the backends through Kong, with their failures turned into readable messages. */
 @Injectable({ providedIn: 'root' })
 export class Gateway {
@@ -86,7 +97,7 @@ export class Gateway {
       throw new Error(unreachable(signal));
     });
     if (response.status === 401) this.auth.expired.set(true);
-    if (!response.ok) throw new Error(await failure(response));
+    if (!response.ok) throw await failure(response);
     return response;
   }
 }
@@ -97,13 +108,14 @@ function unreachable(signal: AbortSignal): string {
     : 'The service could not be reached. Check your connection and retry.';
 }
 
-/** The API's own message, or one for the status. */
-async function failure(response: Response): Promise<string> {
-  const detail: { error?: { message?: string } } = await response.json().catch(() => ({}));
-  if (detail.error?.message) return detail.error.message;
-  if (response.status === 401) return 'Your session expired. Sign in again.';
-  if (response.status === 403) return 'You do not have access to this resource.';
-  if (response.status === 413) return 'This is too large to send. Shorten it and try again.';
-  if (response.status === 504) return 'The service took too long to answer. Retry later.';
-  return `The operation failed (${response.status}). Retry later.`;
+/** The API's own message and code, or a message for the status. */
+async function failure(response: Response): Promise<ApiError> {
+  const detail: { error?: { code?: string; message?: string } } = await response.json().catch(() => ({}));
+  const fail = (message: string) => new ApiError(message, response.status, detail.error?.code ?? '');
+  if (detail.error?.message) return fail(detail.error.message);
+  if (response.status === 401) return fail('Your session expired. Sign in again.');
+  if (response.status === 403) return fail('You do not have access to this resource.');
+  if (response.status === 413) return fail('This is too large to send. Shorten it and try again.');
+  if (response.status === 504) return fail('The service took too long to answer. Retry later.');
+  return fail(`The operation failed (${response.status}). Retry later.`);
 }

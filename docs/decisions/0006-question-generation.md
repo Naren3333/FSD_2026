@@ -27,8 +27,8 @@ A teacher who has uploaded a classroom's PDFs still writes every question, accep
 **The editor keeps the teacher in charge.**
 
 - "Generate questions from teaching materials" lists drafts with their key, evidence, explanation and sources. "Add to assessment" puts a draft into the editor as an ordinary, editable question; "Discard" drops it.
-- "Draft marking guidance" on a short answer or written response shows the guidance first. "Use this" adds the accepted answers, or replaces the rubric and model answer, and adds the marking points as a passage when there is room.
-- "Match scheme to questions" searches one uploaded marking scheme once per teacher-marked question and adds the best passage, within five per question and twenty per assessment. It runs in the browser through Content's search; pasting and searching passages by hand still work.
+- "Draft marking guidance" on a short answer or written response shows the guidance first. "Use this" adds the accepted answers, or replaces the rubric and model answer, and adds the marking points to the question's when there is room.
+- Retired by ADR 0009 (2026-10-18): "Match scheme to questions" searched one uploaded marking scheme once per teacher-marked question and added the best passage, within five per question and twenty per assessment, in the browser through Content's search. Marking points are now written by the teacher or kept from drafted guidance.
 - Marking stays per question: the whole scheme PDF is never sent to a marking call.
 
 ## Consequences

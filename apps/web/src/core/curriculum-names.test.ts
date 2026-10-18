@@ -15,12 +15,19 @@ const topic = (id: string, name: string): Topic => ({ id, name });
 function setup() {
   const profile = signal<Pick<Profile, 'id'> | null>({ id: 'teacher-1' });
   let curriculum = [topic('k1', 'Fractions')];
+  const archived = [topic('k0', 'Halves')];
   let reads = 0;
   TestBed.resetTestingModule();
   TestBed.configureTestingModule({
     providers: [
       { provide: Session, useValue: { profile } },
-      { provide: CurriculumApi, useValue: { topics: () => (reads++, Promise.resolve(curriculum)) } },
+      {
+        provide: CurriculumApi,
+        useValue: {
+          topics: () => (reads++, Promise.resolve(curriculum)),
+          archivedTopics: () => Promise.resolve(archived),
+        },
+      },
     ],
   });
   return {
@@ -43,6 +50,15 @@ describe('CurriculumNames', () => {
     expect(t.reads()).toBe(2);
     expect(t.names.topicName('k2')).toBe('Decimals');
     expect(t.names.topicName('gone')).toBe('');
+  });
+
+  it('names archived topics without offering them as active ones', async () => {
+    const t = setup();
+    await t.names.need(['k0']);
+    expect(t.reads()).toBe(1);
+    expect(t.names.topicName('k0')).toBe('Halves');
+    expect(t.names.topics().map((s) => s.id)).toEqual(['k1']);
+    expect(t.names.archived().map((s) => s.id)).toEqual(['k0']);
   });
 
   it('shares what the curriculum page reads, and never shows one user the names read for another', async () => {

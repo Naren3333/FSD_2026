@@ -28,6 +28,22 @@
       } @empty {
         <p class="empty">No topics yet. Add a topic to begin authoring an assessment.</p>
       }
+      @if (session.isTeacher()) {
+        <h3>Archived topics</h3>
+        <p class="caption">Not offered for new questions. Up to 200 archived topics</p>
+        @for (topic of archived(); track topic.id) {
+          <article class="record">
+            <strong>{{ topic.name }}</strong>
+            <span class="button-row">
+              <button class="secondary" (click)="restore(topic)" [disabled]="state.busy()">
+                Restore<span class="visually-hidden"> topic {{ topic.name }}</span>
+              </button>
+            </span>
+          </article>
+        } @empty {
+          <p class="empty">No archived topics. Archiving a topic moves it here, where you can restore it.</p>
+        }
+      }
     }
   </section>
   @if (session.isTeacher()) {
@@ -62,8 +78,9 @@
 >
   @if (archiving(); as topic) {
     <p>
-      <strong>{{ topic.name }}</strong> will no longer be listed or offered for new questions. Nothing is
-      deleted: assessments and evidence that already use it keep it, shown by its id instead of its name.
+      <strong>{{ topic.name }}</strong> will no longer be offered for new questions. It moves to Archived
+      topics, where you can restore it. Nothing is deleted: assessments and evidence that already use it keep
+      it.
     </p>
   }
 </app-confirm-dialog>

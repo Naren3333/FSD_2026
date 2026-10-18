@@ -15,10 +15,10 @@ var errAlreadyFinalized = errors.New("evaluation already finalized")
 
 // store is a classroom's draft and finalized evaluations, with their audit trail.
 type store interface {
-	// listEvaluations is the classroom's evaluations, or one assessment's when assessment is set.
-	listEvaluations(ctx context.Context, org, classroom, assessment string) ([]Evaluation, error)
+	// listEvaluations is the classroom's evaluations of the given students, or one assessment's when assessment is set.
+	listEvaluations(ctx context.Context, org, classroom, assessment string, students []string) ([]Evaluation, error)
 	listReleased(ctx context.Context, org, classroom, student string) ([]Evaluation, error)
-	countEvaluations(ctx context.Context, org, classroom string) (Counts, error)
+	countEvaluations(ctx context.Context, org, classroom string, students []string) (Counts, error)
 	findClassroom(ctx context.Context, org, id string) (string, error)
 	assessmentClassroom(ctx context.Context, org, assessment string) (string, error)
 	saveMarks(ctx context.Context, org, id, actor string, marks map[string]Mark) (Evaluation, error)
@@ -37,9 +37,9 @@ type Counts struct {
 	Unreleased int `json:"unreleased"`
 }
 
-func (p pgStore) countEvaluations(ctx context.Context, org, classroom string) (Counts, error) {
+func (p pgStore) countEvaluations(ctx context.Context, org, classroom string, students []string) (Counts, error) {
 	var c Counts
-	err := p.db.QueryRow(ctx, "SELECT count(*) FILTER (WHERE status='draft'),count(*) FILTER (WHERE status='finalized'),count(*) FILTER (WHERE status='finalized' AND released_at IS NULL) FROM evaluations WHERE classroom_id=$1 AND org_id=$2", classroom, org).Scan(&c.Drafts, &c.Finalized, &c.Unreleased)
+	err := p.db.QueryRow(ctx, "SELECT count(*) FILTER (WHERE status='draft'),count(*) FILTER (WHERE status='finalized'),count(*) FILTER (WHERE status='finalized' AND released_at IS NULL) FROM evaluations WHERE classroom_id=$1 AND org_id=$2 AND student_id=ANY($3::text[])", classroom, org, students).Scan(&c.Drafts, &c.Finalized, &c.Unreleased)
 	return c, err
 }
 
@@ -62,9 +62,23 @@ func insertEvaluation(ctx context.Context, tx pgx.Tx, v Submitted, evidence []Ev
 	if v.marking() {
 		teacher = &v.Teacher
 	}
+	// Shared with other submissions to the assessment, exclusive against its purge (purgeAssessment), and likewise
+	// with the student's other work against the purge of their deleted account (purgeUser).
+	if err = platform.LockShared(ctx, tx, platform.LockAssessment, v.Assessment); err != nil {
+		return err
+	}
+	if err = platform.LockShared(ctx, tx, platform.LockUser, v.Student); err != nil {
+		return err
+	}
+	// A due date changed since the student submitted (changeDue) decides whether the work is late.
 	result, err := tx.Exec(ctx, `INSERT INTO evaluations(id,assessment_id,classroom_id,org_id,student_id,evidence,questions,answers,late,submitted_at,release_policy,teacher_id)
-		SELECT $1::uuid,$2::uuid,$3::uuid,$4::text,$5::text,$6::jsonb,$7::jsonb,$8::jsonb,$9::boolean,$10::timestamptz,$11::text,$12::text
-		WHERE NOT EXISTS(SELECT 1 FROM purged_classrooms WHERE classroom_id=$3) ON CONFLICT(id) DO NOTHING`,
+		SELECT $1::uuid,$2::uuid,$3::uuid,$4::text,$5::text,$6::jsonb,$7::jsonb,$8::jsonb,
+			CASE WHEN d.assessment_id IS NULL OR $10::timestamptz IS NULL THEN $9::boolean ELSE coalesce($10::timestamptz>d.due_at,false) END,
+			$10::timestamptz,$11::text,$12::text
+		FROM (SELECT 1) one LEFT JOIN assessment_due d ON d.assessment_id=$2::uuid
+		WHERE NOT EXISTS(SELECT 1 FROM purged_classrooms WHERE classroom_id=$3) AND NOT EXISTS(SELECT 1 FROM deleted_assessments WHERE assessment_id=$2)
+			AND NOT EXISTS(SELECT 1 FROM deleted_users WHERE user_id=$5)
+		ON CONFLICT(id) DO NOTHING`,
 		v.Submission, v.Assessment, v.Classroom, v.Org, v.Student, data, questions, answers, v.Late, v.SubmittedAt, v.ReleasePolicy, teacher)
 	if err != nil || result.RowsAffected() == 0 {
 		return err
@@ -106,12 +120,13 @@ func (p pgStore) collect(rows pgx.Rows, err error) ([]Evaluation, error) {
 	})
 }
 
-// listEvaluations is the classroom's 100 newest evaluations, or up to 500 of one assessment's, oldest first.
-func (p pgStore) listEvaluations(ctx context.Context, org, classroom, assessment string) ([]Evaluation, error) {
+// listEvaluations is the classroom's 100 newest evaluations of the given students, or up to 500 of one assessment's,
+// oldest first.
+func (p pgStore) listEvaluations(ctx context.Context, org, classroom, assessment string, students []string) ([]Evaluation, error) {
 	if assessment != "" {
-		return p.collect(p.db.Query(ctx, "SELECT "+evaluationColumns+" FROM evaluations WHERE classroom_id=$1 AND org_id=$2 AND assessment_id=$3 ORDER BY created_at LIMIT 500", classroom, org, assessment))
+		return p.collect(p.db.Query(ctx, "SELECT "+evaluationColumns+" FROM evaluations WHERE classroom_id=$1 AND org_id=$2 AND student_id=ANY($3::text[]) AND assessment_id=$4 ORDER BY created_at LIMIT 500", classroom, org, students, assessment))
 	}
-	return p.collect(p.db.Query(ctx, "SELECT "+evaluationColumns+" FROM evaluations WHERE classroom_id=$1 AND org_id=$2 ORDER BY created_at DESC LIMIT 100", classroom, org))
+	return p.collect(p.db.Query(ctx, "SELECT "+evaluationColumns+" FROM evaluations WHERE classroom_id=$1 AND org_id=$2 AND student_id=ANY($3::text[]) ORDER BY created_at DESC LIMIT 100", classroom, org, students))
 }
 
 // listReleased is one student's released results in a classroom, newest first. Drafts and unreleased grades never

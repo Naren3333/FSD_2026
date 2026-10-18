@@ -43,6 +43,8 @@ class Citation(Contract):
     source: Literal["pdf", "vision"]
     content: str
     image: str | None  # GET /api/content/documents/{document_id}/figures/{image}
+    # The teacher deleted the document: its passage and figure are gone (content and image are empty).
+    removed: bool = False
 
 
 class Message(Contract):

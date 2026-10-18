@@ -2,6 +2,8 @@ package main
 
 import (
 	"context"
+	"errors"
+	"learning/platform"
 	"learning/platform/platformtest"
 	"net/http"
 	"testing"
@@ -66,7 +68,7 @@ func TestPrerequisitesStayInTheOrganizationAndBetweenActiveTopics(t *testing.T) 
 	}
 }
 
-func TestOtherOrganizationsTopicsCannotBeReadRenamedOrArchived(t *testing.T) {
+func TestOtherOrganizationsTopicsCannotBeReadRenamedArchivedOrRestored(t *testing.T) {
 	ctx, s := context.Background(), testStore(t)
 	id := topic(t, s, "org")
 	if _, err := s.findTopic(ctx, "elsewhere", id); err == nil {
@@ -84,7 +86,7 @@ func TestOtherOrganizationsTopicsCannotBeReadRenamedOrArchived(t *testing.T) {
 	if v, err := s.findTopic(ctx, "org", id); err != nil || v.Name != "Halves" {
 		t.Fatalf("topic = %v, %v", v, err)
 	}
-	if list, err := s.listTopics(ctx, "org"); err != nil || len(list) != 1 || list[0].ID != id {
+	if list, err := s.listTopics(ctx, "org", false); err != nil || len(list) != 1 || list[0].ID != id {
 		t.Fatalf("list = %v, %v", list, err)
 	}
 	if ok, err := s.archiveTopic(ctx, "org", id); err != nil || !ok {
@@ -92,5 +94,64 @@ func TestOtherOrganizationsTopicsCannotBeReadRenamedOrArchived(t *testing.T) {
 	}
 	if _, err := s.findTopic(ctx, "org", id); err == nil {
 		t.Fatal("an archived topic is still found")
+	}
+	if list, err := s.listTopics(ctx, "org", false); err != nil || len(list) != 0 {
+		t.Fatalf("active list after archiving = %v, %v", list, err)
+	}
+	if list, err := s.listTopics(ctx, "elsewhere", true); err != nil || len(list) != 0 {
+		t.Fatalf("another organization's archived list = %v, %v", list, err)
+	}
+	if list, err := s.listTopics(ctx, "org", true); err != nil || len(list) != 1 || list[0] != (Topic{id, "Halves"}) {
+		t.Fatalf("archived list = %v, %v", list, err)
+	}
+	if _, err := s.restoreTopic(ctx, "elsewhere", id); !errors.Is(err, platform.ErrNotFound) {
+		t.Fatalf("restored another organization's topic: %v", err)
+	}
+	if v, err := s.restoreTopic(ctx, "org", id); err != nil || v != (Topic{id, "Halves"}) {
+		t.Fatalf("restore = %v, %v", v, err)
+	}
+	if _, err := s.findTopic(ctx, "org", id); err != nil {
+		t.Fatalf("a restored topic is not found: %v", err)
+	}
+	if _, err := s.restoreTopic(ctx, "org", id); !errors.Is(err, platform.ErrNotFound) {
+		t.Fatalf("restored an active topic: %v", err)
+	}
+}
+
+// A topic's prerequisites list only active topics of its organization; a link to an archived one is kept and comes
+// back with it, and either can be removed.
+func TestPrerequisitesCanBeReadAndRemoved(t *testing.T) {
+	ctx, s := context.Background(), testStore(t)
+	a, b, c := topic(t, s, "org"), topic(t, s, "org"), topic(t, s, "org")
+	for _, edge := range [][2]string{{a, b}, {a, c}} {
+		if got, err := s.insertPrerequisite(ctx, "org", edge[0], edge[1]); err != nil || got != prerequisiteAdded {
+			t.Fatal(got, err)
+		}
+	}
+	if ok, err := s.archiveTopic(ctx, "org", c); err != nil || !ok {
+		t.Fatal(ok, err)
+	}
+	if got, err := s.listPrerequisites(ctx, "org", a); err != nil || len(got) != 1 || got[0].ID != b {
+		t.Fatalf("%+v %v", got, err)
+	}
+	if got, err := s.listPrerequisites(ctx, "elsewhere", a); err != nil || len(got) != 0 {
+		t.Fatalf("another organization read %+v %v", got, err)
+	}
+	if _, err := s.restoreTopic(ctx, "org", c); err != nil {
+		t.Fatal(err)
+	}
+	if got, err := s.listPrerequisites(ctx, "org", a); err != nil || len(got) != 2 {
+		t.Fatalf("after restoring: %+v %v", got, err)
+	}
+	if removed, err := s.deletePrerequisite(ctx, "elsewhere", a, b); err != nil || removed {
+		t.Fatalf("another organization removed one: %v %v", removed, err)
+	}
+	for want := range 2 { // removed once, then gone
+		if removed, err := s.deletePrerequisite(ctx, "org", a, b); err != nil || removed != (want == 0) {
+			t.Fatalf("remove %d: %v %v", want, removed, err)
+		}
+	}
+	if got, err := s.listPrerequisites(ctx, "org", a); err != nil || len(got) != 1 || got[0].ID != c {
+		t.Fatalf("after removing: %+v %v", got, err)
 	}
 }

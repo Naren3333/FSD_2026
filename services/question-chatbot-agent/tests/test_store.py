@@ -1,13 +1,17 @@
 """PostgresStore against a real PostgreSQL. Needs CHATBOT_TEST_DATABASE_URL, a scratch database (the tests add
 rows under unique users and leave them); skipped without it. See docs/development/operations.md."""
 
+import json
 import os
 from collections.abc import AsyncIterator
+from typing import Any
 from uuid import uuid4
 
 import pytest
+from learning_transport.db import open_pool
 
-from store import PostgresStore
+from purge import purge_user, redact
+from store import MIGRATIONS, PostgresStore
 
 pytestmark = pytest.mark.anyio
 URL = os.environ.get("CHATBOT_TEST_DATABASE_URL")
@@ -88,3 +92,65 @@ async def test_no_thread_in_a_purged_classroom(store: PostgresStore) -> None:
     async with store.pool.connection() as conn:
         await conn.execute("INSERT INTO purged_classrooms(classroom_id, org_id) VALUES (%s, 'org')", (room,))
     assert await store.create_thread("org", str(uuid4()), "student", room) is None
+
+
+def deletion(document: str, room: str) -> bytes:
+    return json.dumps({
+        "event_id": str(uuid4()), "event_type": "content.deleted.v1", "schema_version": 1,
+        "timestamp": "2026-10-18T00:00:00Z", "correlation_id": str(uuid4()), "resource_id": document,
+        "data": {"document_id": document, "classroom_id": room, "org_id": "org"},
+    }).encode()  # fmt: skip
+
+
+async def test_a_deleted_documents_passages_leave_past_and_later_answers(store: PostgresStore) -> None:
+    assert URL is not None
+    room = str(uuid4())
+    tid = str((await store.create_thread("org", str(uuid4()), "student", room))["id"])
+    deleted, kept = str(uuid4()), str(uuid4())
+
+    def cite(document: str) -> dict[str, Any]:
+        return {"chunk_id": str(uuid4()), "document_id": document, "title": "Bio", "page_start": 1, "page_end": 1,
+                "kind": "figure", "source": "vision", "content": "Light.", "image": "0123456789abcdef.png"}  # fmt: skip
+
+    async def answer(*documents: str) -> None:
+        await store.start_turn(tid, "q", 6)
+        await store.save_answer(
+            tid, {"content": "A.", "outcome": "answered", "citations": [cite(d) for d in documents]}
+        )
+
+    await answer(deleted, kept)
+    pool = open_pool(URL, MIGRATIONS)
+    try:
+        for _ in range(2):  # a repeated event changes nothing more
+            assert redact(pool, deletion(deleted, room)) is True
+    finally:
+        pool.close()
+    await answer(deleted)  # written while the document was being deleted, saved after
+    citations = [m["citations"] for m in await store.messages(tid, 200) if m["role"] == "assistant"]
+    removed = {"content": "", "image": None, "removed": True}
+    first, later = citations
+    assert {k: first[0][k] for k in removed} == removed and first[0]["title"] == "Bio"  # what was cited stays
+    assert first[1]["content"] == "Light." and not first[1].get("removed")  # another document is untouched
+    assert {k: later[0][k] for k in removed} == removed
+
+
+async def test_a_deleted_accounts_threads_go_and_none_is_created_for_it(store: PostgresStore) -> None:
+    assert URL is not None
+    gone, kept = str(uuid4()), str(uuid4())
+    for user in (gone, kept):
+        tid = str((await store.create_thread("org", user, "student", ROOM))["id"])
+        await store.start_turn(tid, "q", 6)
+    deletion = json.dumps({
+        "event_id": str(uuid4()), "event_type": "identity.user.deleted.v1", "schema_version": 1,
+        "timestamp": "2026-10-18T00:00:00Z", "correlation_id": str(uuid4()), "resource_id": gone,
+        "data": {"user_id": gone, "org_id": "org", "role": "student"},
+    }).encode()  # fmt: skip
+    pool = open_pool(URL, MIGRATIONS)
+    try:
+        for _ in range(2):  # a repeated event changes nothing more
+            assert purge_user(pool, deletion) is True
+    finally:
+        pool.close()
+    assert await store.list_threads("org", gone, None) == []
+    assert len(await store.list_threads("org", kept, None)) == 1
+    assert await store.create_thread("org", gone, "student", ROOM) is None

@@ -29,7 +29,7 @@ func main() {
 		classrooms := platform.Consumer{DB: a.DB, Group: "content-classrooms-v1", Timeout: purgeTimeout}
 		purge := purger{files}.purge
 		return []func(context.Context){
-			platform.Outbox{DB: a.DB}.Run, x.run, x.run,
+			platform.Outbox{DB: a.DB}.Run, x.run, x.run, sweeper{a.DB, files}.run,
 			func(ctx context.Context) { classrooms.Consume(ctx, platform.TopicClassroomDeleted, purge, nil) },
 		}, nil
 	})

@@ -19,6 +19,11 @@ const (
 	OutboxMaxAttempts = 300
 )
 
+// OutboxRetention is how long a published event stays in the outbox, the same as Kafka keeps the topics that carry
+// students' answers and grades (docker-compose.yml). Replays read Kafka, never the outbox, so an older published row
+// is only a further copy of the data: it is pruned, and deletions and purges scan a bounded table.
+const OutboxRetention = 7 * 24 * time.Hour
+
 type outboxRow struct {
 	id, topic, key string
 	body           []byte
@@ -59,6 +64,7 @@ func (o Outbox) Run(ctx context.Context) {
 		if time.Since(reported) >= time.Minute {
 			reported = time.Now()
 			o.reportOutbox(ctx)
+			o.prune(ctx)
 		}
 	}
 }
@@ -189,4 +195,20 @@ func (o Outbox) reportOutbox(ctx context.Context) {
 	if waiting > 0 || abandoned > 0 {
 		slog.Error("outbox_backlog", "waiting_over_5_minutes", waiting, "abandoned", abandoned)
 	}
+}
+
+// prune deletes published events older than OutboxRetention, a batch at a time so a large first prune never holds
+// a long lock. Unpublished rows are never touched, however old.
+func (o Outbox) prune(ctx context.Context) {
+	pruneCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
+	if _, err := pruneOutbox(pruneCtx, o.DB, OutboxRetention); err != nil {
+		slog.Error("outbox_prune_failed", "error_category", fmt.Sprintf("%T", err))
+	}
+}
+
+// pruneOutbox deletes up to 1000 rows published more than retention ago and reports how many it deleted.
+func pruneOutbox(ctx context.Context, db *pgxpool.Pool, retention time.Duration) (int64, error) {
+	tag, err := db.Exec(ctx, "DELETE FROM outbox WHERE id IN (SELECT id FROM outbox WHERE published_at<now()-make_interval(secs=>$1) LIMIT 1000)", retention.Seconds())
+	return tag.RowsAffected(), err
 }

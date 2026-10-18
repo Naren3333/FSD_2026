@@ -202,7 +202,8 @@ func TestTitleLimitCountsCharacters(t *testing.T) {
 }
 
 func TestUploadValidatesItsFields(t *testing.T) {
-	for _, query := range []string{"&title=", "&title=Notes&doc_type=lesson"} {
+	// Marking schemes and rubrics are no longer uploaded (ADR 0009).
+	for _, query := range []string{"&title=", "&title=Notes&doc_type=lesson", "&title=Notes&doc_type=rubric", "&title=Notes&doc_type=marking_scheme"} {
 		if w := upload(t, uploadStore{inserted: &newDocument{}}, &fileStore{}, query); w.Code != http.StatusUnprocessableEntity {
 			t.Errorf("%s: %d", query, w.Code)
 		}
@@ -257,6 +258,87 @@ func TestReindexNeedsTheClassroomsTeacherAndAPDF(t *testing.T) {
 		if w := platformtest.Serve(s.routes, http.MethodPost, "/v1/documents/"+tc.id+"/reindex", "", "user", tc.roles...); w.Code != tc.status {
 			t.Errorf("%s: %d %s", tc.name, w.Code, w.Body.String())
 		}
+	}
+}
+
+// deletingStore records which document was deleted and passes removeFiles' error on, as the database store does.
+type deletingStore struct {
+	documentStore
+	deleted *string
+	err     error
+}
+
+func (d deletingStore) deleteDocument(ctx context.Context, _, id string, removeFiles func(context.Context) error) error {
+	if d.err != nil {
+		return d.err
+	}
+	if err := removeFiles(ctx); err != nil {
+		return err
+	}
+	*d.deleted = id
+	return nil
+}
+
+// removedFiles records the prefixes removed, or fails every removal.
+type removedFiles struct {
+	documentFiles
+	prefixes []string
+	err      error
+}
+
+func (f *removedFiles) removeAll(_ context.Context, prefix string) error {
+	if f.err != nil {
+		return f.err
+	}
+	f.prefixes = append(f.prefixes, prefix)
+	return nil
+}
+
+func TestDeletingADocumentNeedsTheClassroomsTeacher(t *testing.T) {
+	cases := []struct {
+		name, relation, id string
+		roles              []string
+		status             int
+	}{
+		{"malformed id", platform.RelationTeacher, "not-a-uuid", []string{"teacher"}, http.StatusNotFound},
+		{"unknown document", platform.RelationTeacher, classID, []string{"teacher"}, http.StatusNotFound},
+		{"a student", platform.RelationStudent, teachingID, []string{"student"}, http.StatusForbidden},
+		{"teacher token, student relation", platform.RelationStudent, teachingID, []string{"teacher"}, http.StatusForbidden},
+		{"another classroom's teacher", "", teachingID, []string{"teacher"}, http.StatusForbidden},
+	}
+	for _, tc := range cases {
+		var deleted string
+		files := &removedFiles{}
+		s := server{store: deletingStore{deleted: &deleted}, access: platformtest.Access(tc.relation), files: files}
+		if w := platformtest.Serve(s.routes, http.MethodDelete, "/v1/documents/"+tc.id, "", "user", tc.roles...); w.Code != tc.status || deleted != "" || len(files.prefixes) != 0 {
+			t.Errorf("%s: %d, deleted %q, removed %v", tc.name, w.Code, deleted, files.prefixes)
+		}
+	}
+}
+
+func TestDeletingADocumentRemovesItsRowAndObjects(t *testing.T) {
+	// A retired rubric is deleted like teaching material.
+	for _, id := range []string{teachingID, rubricID} {
+		var deleted string
+		files := &removedFiles{}
+		s := server{store: deletingStore{deleted: &deleted}, access: platformtest.Access(platform.RelationTeacher), files: files}
+		w := platformtest.Serve(s.routes, http.MethodDelete, "/v1/documents/"+id, "", "user", "teacher")
+		if w.Code != http.StatusNoContent || deleted != id || len(files.prefixes) != 1 || files.prefixes[0] != "org/"+id+"/" {
+			t.Errorf("%s: %d, deleted %q, removed %v", id, w.Code, deleted, files.prefixes)
+		}
+	}
+}
+
+func TestADeleteThatCannotRemoveTheObjectsKeepsTheRow(t *testing.T) {
+	var deleted string
+	s := server{store: deletingStore{deleted: &deleted}, access: platformtest.Access(platform.RelationTeacher), files: &removedFiles{err: errors.New("storage down")}}
+	if w := platformtest.Serve(s.routes, http.MethodDelete, "/v1/documents/"+teachingID, "", "user", "teacher"); w.Code != http.StatusInternalServerError || deleted != "" {
+		t.Fatalf("%d, deleted %q", w.Code, deleted)
+	}
+	// Deleted meanwhile by another request.
+	s = server{store: deletingStore{deleted: &deleted, err: platform.ErrNotFound}, access: platformtest.Access(platform.RelationTeacher), files: &removedFiles{}}
+	if w := platformtest.Serve(s.routes, http.MethodDelete, "/v1/documents/"+teachingID, "", "user", "teacher"); w.Code != http.StatusNotFound {
+		t.Fatalf("already gone: %d", w.Code)
 	}
 }
 

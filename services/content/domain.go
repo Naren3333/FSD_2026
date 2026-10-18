@@ -8,7 +8,9 @@ import (
 	"unicode/utf8"
 )
 
-// Document types. Students see teaching material only; rubrics and marking schemes stay with teachers.
+// Document types. Teachers upload teaching material only. Rubrics and marking schemes uploaded before they were
+// retired (docs/decisions/0009-retire-marking-scheme-uploads.md) keep their type and stay with teachers: students
+// never see them.
 const (
 	docTeachingMaterial = "teaching_material"
 	docRubric           = "rubric"
@@ -43,6 +45,8 @@ const (
 
 	// uploadDeadline is how long one upload may take: a 50 MiB PDF at about 1.5 Mbit/s, matching the web app.
 	uploadDeadline = 5 * time.Minute
+	// removeDeadline is how long deleting a document's objects and row may take.
+	removeDeadline = time.Minute
 	// downloadDeadline is how long sending an original or a figure may take, on the same reckoning.
 	downloadDeadline = uploadDeadline
 )

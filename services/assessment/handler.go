@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/json"
 	"errors"
 	"learning/platform"
 	"net/http"
@@ -14,6 +15,7 @@ import (
 type server struct {
 	store  store
 	access platform.ClassroomAccess
+	roster platform.ClassroomRoster
 	topics topics
 	clock  func() time.Time // time.Now unless a test sets it
 }
@@ -31,6 +33,7 @@ func (s server) routes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /v1/assessments/progress", s.progress)
 	mux.HandleFunc("GET /v1/assessments/{id}", s.get)
 	mux.HandleFunc("PUT /v1/assessments/{id}", s.update)
+	mux.HandleFunc("PATCH /v1/assessments/{id}", s.details)
 	mux.HandleFunc("DELETE /v1/assessments/{id}", s.remove)
 	mux.HandleFunc("POST /v1/assessments/{id}/publish", s.publish)
 	mux.HandleFunc("POST /v1/assessments/{id}/submissions", s.submit)
@@ -39,11 +42,13 @@ func (s server) routes(mux *http.ServeMux) {
 }
 
 // prepare fills in and checks an assessment a teacher sent, then checks its topics with Curriculum. On failure the
-// response is written. Questions get new ids: nothing refers to a draft's questions yet.
-func (s server) prepare(w http.ResponseWriter, r *http.Request, v *Assessment) bool {
+// response is written. Questions get new ids, except those unchanged from the published assessment it replaces
+// (before), on which students may have saved work. Publishing needs a due date in the future, and so does a new due
+// date on an assessment already published.
+func (s server) prepare(w http.ResponseWriter, r *http.Request, v *Assessment, before *Assessment) bool {
 	v.normalize()
 	err := v.Validate()
-	if err == nil && v.Status == statusPublished {
+	if err == nil && v.Status == statusPublished && (before == nil || before.Status != statusPublished || !sameTime(before.DueAt, v.DueAt)) {
 		err = v.publishable(s.now())
 	}
 	if err != nil {
@@ -62,7 +67,11 @@ func (s server) prepare(w http.ResponseWriter, r *http.Request, v *Assessment) b
 		v.Questions[i].ID = uuid.NewString()
 	}
 	v.PublishedAt = nil
-	if v.Status == statusPublished {
+	switch {
+	case before != nil && before.Status == statusPublished:
+		v.keepQuestionIDs(before.Questions)
+		v.PublishedAt = before.PublishedAt
+	case v.Status == statusPublished:
 		at := s.now().UTC()
 		v.PublishedAt = &at
 	}
@@ -82,7 +91,7 @@ func (s server) create(w http.ResponseWriter, r *http.Request) {
 		platform.Invalid(w, "provide a classroom, title, and 1–50 questions")
 		return
 	}
-	if !platform.TeacherOf(s.access, w, r, v.Classroom) || !s.prepare(w, r, &v) {
+	if !platform.TeacherOf(s.access, w, r, v.Classroom) || !s.prepare(w, r, &v, nil) {
 		return
 	}
 	v.ID = uuid.NewString()
@@ -99,8 +108,9 @@ func (s server) create(w http.ResponseWriter, r *http.Request) {
 	platform.JSON(w, http.StatusCreated, v)
 }
 
-// update replaces a draft, and publishes it when the new version says so; without a status it stays a draft. A
-// published assessment is immutable.
+// update replaces an assessment until a student submits it, and publishes a draft when the new version says so;
+// without a status it keeps the one it has. A published assessment stays published, and once a student has submitted
+// it only its details change (PATCH).
 func (s server) update(w http.ResponseWriter, r *http.Request) {
 	if !platform.Teacher(w, r) {
 		return
@@ -117,20 +127,64 @@ func (s server) update(w http.ResponseWriter, r *http.Request) {
 		platform.Invalid(w, "An assessment cannot move to another classroom.")
 		return
 	}
-	if existing.Status != statusDraft {
-		notDraft(w)
-		return
-	}
 	if v.Status == "" {
 		v.Status = existing.Status // publishing is irreversible, so only an explicit status publishes
 	}
-	if !s.prepare(w, r, &v) {
+	if existing.Status == statusPublished && v.Status != statusPublished {
+		notDraft(w)
+		return
+	}
+	if !s.prepare(w, r, &v, &existing) {
 		return
 	}
 	v.ID, v.CreatedBy = existing.ID, existing.CreatedBy
-	if !s.draftResult(w, s.store.updateDraft(r.Context(), platform.Actor(r).Org, v)) {
+	if !s.changeResult(w, s.store.updateAssessment(r.Context(), platform.Actor(r).Org, existing, v)) {
 		return
 	}
+	platform.JSON(w, http.StatusOK, v)
+}
+
+// details changes an assessment's title, due date and late policy. Unlike a replacement it is allowed after students
+// have submitted: grading does not depend on them. A field left out keeps its value; a due_at of null removes the due
+// date.
+func (s server) details(w http.ResponseWriter, r *http.Request) {
+	if !platform.Teacher(w, r) {
+		return
+	}
+	v, ok := s.findAssessment(w, r)
+	if !ok || !platform.TeacherOf(s.access, w, r, v.Classroom) {
+		return
+	}
+	var change struct {
+		Title      *string         `json:"title"`
+		DueAt      json.RawMessage `json:"due_at"` // nil when left out, "null" to remove the due date
+		LatePolicy *string         `json:"late_policy"`
+	}
+	if !platform.Decode(w, r, &change) {
+		return
+	}
+	d := Details{Title: v.Title, DueAt: v.DueAt, LatePolicy: v.LatePolicy}
+	if change.Title != nil {
+		d.Title = *change.Title
+	}
+	if change.LatePolicy != nil {
+		d.LatePolicy = *change.LatePolicy
+	}
+	if change.DueAt != nil {
+		d.DueAt = nil // a fresh value, so decoding never writes through to v's
+		if json.Unmarshal(change.DueAt, &d.DueAt) != nil {
+			platform.Invalid(w, "Provide the due date as a date-time, or null for none.")
+			return
+		}
+	}
+	if err := v.validateDetails(d, s.now()); err != nil {
+		platform.Invalid(w, err.Error())
+		return
+	}
+	if !platform.Found(w, s.store.updateDetails(r.Context(), platform.Actor(r).Org, v.ID, d), "Assessment not found.") {
+		return
+	}
+	v.Title, v.DueAt, v.LatePolicy = d.Title, d.DueAt, d.LatePolicy
 	platform.JSON(w, http.StatusOK, v)
 }
 
@@ -158,7 +212,9 @@ func (s server) publish(w http.ResponseWriter, r *http.Request) {
 	platform.JSON(w, http.StatusOK, v)
 }
 
-// remove deletes a draft. Published assessments are kept: students may have submitted them.
+// remove deletes an assessment. Once a student has submitted it, only when the teacher confirms with
+// ?with_submissions=true that its submissions and every grade for them go too (ADR 0008); without it the request is
+// refused, so a deletion never takes students' grades by accident.
 func (s server) remove(w http.ResponseWriter, r *http.Request) {
 	if !platform.Teacher(w, r) {
 		return
@@ -167,7 +223,13 @@ func (s server) remove(w http.ResponseWriter, r *http.Request) {
 	if !ok || !platform.TeacherOf(s.access, w, r, v.Classroom) {
 		return
 	}
-	if !s.draftResult(w, s.store.deleteDraft(r.Context(), platform.Actor(r).Org, v.ID)) {
+	withSubmissions := r.URL.Query().Get("with_submissions") == "true"
+	err := s.store.deleteAssessment(r.Context(), platform.Actor(r).Org, v.ID, withSubmissions)
+	if errors.Is(err, errHasSubmissions) {
+		platform.Error(w, http.StatusConflict, "HAS_SUBMISSIONS", "Students have submitted this assessment. Deleting it also deletes their submissions and grades; confirm that to delete it.")
+		return
+	}
+	if !s.draftResult(w, err) {
 		return
 	}
 	platform.JSON(w, http.StatusOK, map[string]string{"id": v.ID})
@@ -183,8 +245,22 @@ func (s server) draftResult(w http.ResponseWriter, err error) bool {
 	return platform.Found(w, err, "Assessment not found.")
 }
 
+// changeResult writes the response for a failed replacement: 409 once a student has submitted it, once published
+// (when it would unpublish it) or when another change landed first, 404 when it is gone.
+func (s server) changeResult(w http.ResponseWriter, err error) bool {
+	if errors.Is(err, errAssessmentChanged) {
+		platform.Error(w, http.StatusConflict, "ASSESSMENT_CHANGED", "This assessment changed while you were saving. Open it again and make your changes to it as it is now.")
+		return false
+	}
+	if errors.Is(err, errHasSubmissions) {
+		platform.Error(w, http.StatusConflict, "HAS_SUBMISSIONS", "Students have submitted this assessment, so its questions and grading settings can no longer change. You can still change its title, due date and late policy.")
+		return false
+	}
+	return s.draftResult(w, err)
+}
+
 func notDraft(w http.ResponseWriter) {
-	platform.Error(w, http.StatusConflict, "NOT_DRAFT", "A published assessment cannot be changed.")
+	platform.Error(w, http.StatusConflict, "NOT_DRAFT", "A published assessment cannot be published again or go back to being a draft.")
 }
 
 // list is the classroom's assessments: all of them for its teacher; for a student, those published and open.
@@ -195,7 +271,15 @@ func (s server) list(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	actor := platform.Actor(r)
-	result, err := s.store.listAssessments(r.Context(), actor.Org, id, actor.Subject, relation == platform.RelationTeacher, s.now())
+	teacher := relation == platform.RelationTeacher
+	var enrolled []string
+	if teacher {
+		// The teacher sees how many enrolled students submitted: work kept for students since removed isn't counted.
+		if enrolled, ok = s.roster.Roster(w, r, id); !ok {
+			return
+		}
+	}
+	result, err := s.store.listAssessments(r.Context(), actor.Org, id, actor.Subject, teacher, enrolled, s.now())
 	if err != nil {
 		platform.Fail(w, err)
 		return
@@ -203,13 +287,18 @@ func (s server) list(w http.ResponseWriter, r *http.Request) {
 	platform.JSON(w, http.StatusOK, result)
 }
 
-// progress is, for the classroom's teacher only, each assessment with how many students have submitted it.
+// progress is, for the classroom's teacher only, each assessment with how many of its enrolled students have
+// submitted it.
 func (s server) progress(w http.ResponseWriter, r *http.Request) {
 	id := r.URL.Query().Get("classroom_id")
 	if !platform.TeacherOf(s.access, w, r, id) {
 		return
 	}
-	result, err := s.store.listProgress(r.Context(), platform.Actor(r).Org, id)
+	enrolled, ok := s.roster.Roster(w, r, id)
+	if !ok {
+		return
+	}
+	result, err := s.store.listProgress(r.Context(), platform.Actor(r).Org, id, enrolled)
 	if err != nil {
 		platform.Fail(w, err)
 		return
@@ -283,6 +372,10 @@ func (s server) submit(w http.ResponseWriter, r *http.Request) {
 	if !platform.Decode(w, r, &input) {
 		return
 	}
+	if !answersCurrent(v, input.Answers) {
+		assessmentChanged(w) // answers to questions the teacher has since replaced
+		return
+	}
 	if !validateAnswers(v, input.Answers) {
 		platform.Invalid(w, "Provide one valid answer for every question.")
 		return
@@ -299,7 +392,17 @@ func (s server) submit(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	inserted, err := s.store.insertSubmission(r.Context(), v, sub)
-	if err != nil {
+	switch {
+	case errors.Is(err, errAccountDeleted):
+		platform.Forbidden(w, "This account was deleted.")
+		return
+	case errors.Is(err, errAssessmentChanged):
+		assessmentChanged(w)
+		return
+	case errors.Is(err, platform.ErrNotFound):
+		platform.NotFound(w, "Assessment not found.") // deleted while the student was answering
+		return
+	case err != nil:
 		platform.Fail(w, err)
 		return
 	}
@@ -308,6 +411,10 @@ func (s server) submit(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	platform.JSON(w, http.StatusCreated, map[string]any{"id": sub.ID, "status": "submitted", "late": sub.Late})
+}
+
+func assessmentChanged(w http.ResponseWriter) {
+	platform.Error(w, http.StatusConflict, "ASSESSMENT_CHANGED", "Your teacher changed this assessment while you were answering it. Open it again to see the questions as they are now; your answers to questions that did not change are kept.")
 }
 
 func alreadySubmitted(w http.ResponseWriter) {
@@ -324,6 +431,12 @@ func (s server) saved(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		platform.Fail(w, err)
 		return
+	}
+	// Work saved on questions the teacher has since changed or removed no longer answers anything.
+	for id, answer := range result.Answers {
+		if !validateSaved(v, map[string]string{id: answer}) {
+			delete(result.Answers, id)
+		}
 	}
 	platform.JSON(w, http.StatusOK, result)
 }
@@ -351,8 +464,12 @@ func (s server) save(w http.ResponseWriter, r *http.Request) {
 	}
 	at, err := s.store.saveAnswers(r.Context(), v.ID, platform.Actor(r).Subject, input.Answers)
 	switch {
+	case errors.Is(err, errAccountDeleted):
+		platform.Forbidden(w, "This account was deleted.")
 	case errors.Is(err, errAlreadySubmitted):
 		alreadySubmitted(w)
+	case errors.Is(err, platform.ErrNotFound):
+		platform.NotFound(w, "Assessment not found.") // deleted while the student was answering
 	case err != nil:
 		platform.Fail(w, err)
 	default:

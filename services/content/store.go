@@ -19,6 +19,7 @@ type store interface {
 	findOriginal(ctx context.Context, org, id string) (storedDocument, error)
 	findIndexed(ctx context.Context, org, id, image string) (Document, error)
 	queueIndex(ctx context.Context, org, id string) (bool, error)
+	deleteDocument(ctx context.Context, org, id string, removeFiles func(context.Context) error) error
 	vectorLeg(ctx context.Context, f filter, vector []float32, model string) ([]hit, error)
 	keywordLeg(ctx context.Context, f filter, query string) ([]hit, error)
 	attachRelated(ctx context.Context, f filter, hits []hit) error
@@ -129,6 +130,28 @@ func (p pgStore) queueIndex(ctx context.Context, org, id string) (bool, error) {
 		return false, err
 	}
 	return true, tx.Commit(ctx)
+}
+
+// deleteDocument deletes the document's row (its chunks, vectors and indexing job go with it) and emits
+// content.deleted.v1 in one transaction, after removeFiles has removed its objects: a failure leaves the row, and a
+// retry removes whatever is left. pgx.ErrNoRows reports a document that is already gone.
+func (p pgStore) deleteDocument(ctx context.Context, org, id string, removeFiles func(context.Context) error) error {
+	tx, err := p.db.Begin(ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback(ctx)
+	var classroom string
+	if err = tx.QueryRow(ctx, "DELETE FROM documents WHERE id=$1 AND org_id=$2 RETURNING classroom_id::text", id, org).Scan(&classroom); err != nil {
+		return err
+	}
+	if err = platform.Emit(ctx, tx, "content.deleted.v1", id, map[string]any{"document_id": id, "classroom_id": classroom, "org_id": org}); err != nil {
+		return err
+	}
+	if err = removeFiles(ctx); err != nil {
+		return err
+	}
+	return tx.Commit(ctx)
 }
 
 // vectorLeg compares only vectors from the query's embedding model. relaxed_order lets the filtered HNSW scan

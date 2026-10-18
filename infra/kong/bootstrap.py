@@ -1,6 +1,7 @@
 """Render reproducible Kong OSS configuration with Keycloak's local RSA public key."""
 
 import json
+import os
 import time
 import urllib.request
 from pathlib import Path
@@ -11,6 +12,9 @@ TIMEOUT_MS = 20_000
 # Content gives an upload 5 minutes (uploadDeadline in services/content/domain.go); Kong waits a little longer, so a
 # slow 50 MiB upload gets Content's answer instead of a gateway 504 while the document still commits.
 CONTENT_TIMEOUT_MS = 310_000
+# The token issuer and the web app's origin, on the ports the Compose stack publishes (docker-compose.yml).
+ISSUER = os.environ.get("KEYCLOAK_ISSUER", "http://localhost:8081/realms/learning")
+WEB_ORIGIN = os.environ.get("WEB_ORIGIN", "http://localhost:4200")
 
 
 def business_service(name: str) -> dict[str, Any]:
@@ -75,7 +79,7 @@ PLUGINS = [
     {
         "name": "cors",
         "config": {
-            "origins": ["http://localhost:4200"],
+            "origins": [WEB_ORIGIN],
             "methods": ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
             "headers": ["Authorization", "Content-Type", "X-Correlation-ID"],
             "exposed_headers": ["X-Correlation-ID", "X-Request-ID"],
@@ -108,7 +112,7 @@ def main() -> None:
                 "username": "keycloak",
                 "jwt_secrets": [
                     {
-                        "key": "http://localhost:8081/realms/learning",
+                        "key": ISSUER,
                         "algorithm": "RS256",
                         "rsa_public_key": public_key,
                     }

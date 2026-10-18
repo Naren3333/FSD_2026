@@ -31,6 +31,8 @@ export class CurriculumComponent implements OnInit {
   private readonly curriculum = inject(CurriculumApi);
   /** Shares what this page reads and adds with every page that names topics. */
   private readonly names = inject(CurriculumNames);
+  /** The archived topics, read with the active ones. */
+  readonly archived = this.names.archived;
   readonly state = new ActionState();
   /** Archiving a topic, in its confirmation dialog. */
   readonly archiveState = new ActionState();
@@ -85,5 +87,12 @@ export class CurriculumComponent implements OnInit {
         this.topics.set(await this.names.refresh());
       }, `${topic.name} archived.`);
     });
+  }
+
+  restore(topic: Topic): void {
+    void this.state.run(async () => {
+      await this.curriculum.restoreTopic(topic.id);
+      this.topics.set(await this.names.refresh());
+    }, `${topic.name} restored.`);
   }
 }

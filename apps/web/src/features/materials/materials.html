@@ -13,15 +13,15 @@
 </div>
 @if (session.isTeacher()) {
   <p>
-    Upload original teaching documents. PDFs are indexed so the assistant can answer from them with sources;
-    text files are kept as extracted text only.
+    Upload original teaching documents. PDFs are indexed so the assistant and AI question generation can draw
+    on them with sources; text files are kept as extracted text only.
   </p>
 } @else {
   <p>Teaching materials shared in this classroom. Open one to read the original document.</p>
 }
 <div class="split">
   <section class="panel">
-    <h3>Classroom library</h3>
+    <h3 id="library-title" tabindex="-1">Classroom library</h3>
     <p class="caption">Up to 100 most recent documents</p>
     <app-section-state [section]="documents" loading="Loading materials…" />
     @if (documents.ready()) {
@@ -33,10 +33,18 @@
               <span class="badge" [class.badge-danger]="doc.status === 'failed'">{{
                 status(doc).label
               }}</span>
-              <span class="badge badge-plain">{{ typeLabel(doc.doc_type) }}</span>
+              @if (doc.doc_type !== 'teaching_material') {
+                <span class="badge badge-plain">{{ typeLabel(doc.doc_type) }}</span>
+              }
             </span>
             <small>{{ status(doc).detail }}</small>
             <small>Revision {{ doc.revision }} · {{ doc.mime_type }}</small>
+            @if (doc.doc_type !== 'teaching_material') {
+              <small>
+                Uploaded before marking schemes were retired. Students never see it, and new questions and
+                marking guidance are not drafted from it. Delete it when you no longer need it.
+              </small>
+            }
           }
           <button class="secondary" (click)="view(doc)">
             {{ isPdf(doc) ? 'View PDF' : 'View document' }}
@@ -46,6 +54,15 @@
             <button class="secondary" (click)="reindex(doc)" [disabled]="state.busy()">
               {{ doc.status === 'failed' ? 'Retry indexing' : 'Index document' }}
               <span class="visually-hidden">{{ doc.title }}</span>
+            </button>
+          }
+          @if (session.isTeacher()) {
+            <button
+              class="secondary"
+              (click)="confirmDelete(doc)"
+              [disabled]="state.busy() || deleteState.busy()"
+            >
+              Delete<span class="visually-hidden"> {{ doc.title }}</span>
             </button>
           }
         </article>
@@ -77,17 +94,6 @@
           <input appFieldControl id="document-title" formControlName="title" maxlength="160" />
         </app-field>
         <app-field
-          controlId="document-type"
-          label="Document type"
-          hint="Students never see rubrics or marking schemes, and the assistant does not use them in their answers."
-        >
-          <select appFieldControl id="document-type" formControlName="doc_type">
-            @for (type of types; track type.value) {
-              <option [value]="type.value">{{ type.label }}</option>
-            }
-          </select>
-        </app-field>
-        <app-field
           controlId="document-file"
           label="Educational file"
           hint="PDF up to 50 MiB, or UTF-8 .txt up to 5 MiB."
@@ -113,3 +119,19 @@
   }
 </div>
 <app-status [state]="state" />
+<app-confirm-dialog
+  #deleteDialog
+  dialogId="delete-document"
+  heading="Delete this document?"
+  confirmLabel="Delete document"
+  [state]="deleteState"
+  (confirm)="remove()"
+  (closed)="closeDelete()"
+>
+  @if (deleting(); as doc) {
+    <p>
+      {{ doc.title }} is permanently deleted with its original file. The assistant and AI question generation
+      stop using it. Questions already made from it keep the passages they quote. This cannot be undone.
+    </p>
+  }
+</app-confirm-dialog>

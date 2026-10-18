@@ -11,8 +11,6 @@
 10-Software Testing.pdf: {title: "Software Testing", doc_type: teaching_material, class_ids: [C1], topic_ids: [testing]}
 11-Code Review, Refactoring, Pair Programming.pdf: {title: "Code Review, Refactoring and Pair Programming", doc_type: teaching_material, class_ids: [C1], topic_ids: [review]}
 12-Automation and Deployment.pdf: {title: "Automation and Deployment", doc_type: teaching_material, class_ids: [C2], topic_ids: [deployment]}
-gen-C1 Project Rubric.pdf: {title: "CSD Team Project Rubric", doc_type: rubric, class_ids: [C1], topic_ids: [project]}
-gen-C1 Testing Quiz Marking Scheme.pdf: {title: "Quiz 3 Marking Scheme", doc_type: marking_scheme, class_ids: [C1], topic_ids: [testing]}
 gen-C1 Git Workflow Handout.pdf: {title: "Git Workflow Handout", doc_type: teaching_material, class_ids: [C1], topic_ids: [git]}
 gen-Scanned Sprint Planning.pdf: {title: "Scanned Sprint Planning", doc_type: teaching_material, class_ids: [C1], topic_ids: [planning]}
 # Prose PDFs (your pure_pdfs/ folder)

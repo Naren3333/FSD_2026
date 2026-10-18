@@ -48,3 +48,15 @@ func (a Access) Relation(w http.ResponseWriter, _ *http.Request, _, _ string) (s
 	}
 	return string(a), true
 }
+
+// Roster answers every roster request with the same enrolled students; nil denies it.
+type Roster []string
+
+// Roster implements platform.ClassroomRoster.
+func (s Roster) Roster(w http.ResponseWriter, _ *http.Request, _ string) ([]string, bool) {
+	if s == nil {
+		platform.Forbidden(w, "Only the classroom's teacher may do this.")
+		return nil, false
+	}
+	return s, true
+}

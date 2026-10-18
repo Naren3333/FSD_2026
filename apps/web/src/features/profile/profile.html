@@ -1,0 +1,81 @@
+<div class="section-heading">
+  <div>
+    <p class="eyebrow">Your account</p>
+    <h2>Profile</h2>
+  </div>
+</div>
+@if (profile(); as p) {
+  <section class="panel" aria-labelledby="profile-details-title">
+    <h3 id="profile-details-title">Your details</h3>
+    <dl class="profile-details">
+      <dt>Name</dt>
+      <dd>{{ p.display_name || 'Not given by your sign-in' }}</dd>
+      <dt>Username</dt>
+      <dd>
+        @if (p.username) {
+          <code>{{ p.username }}</code>
+        } @else {
+          Not given by your sign-in
+        }
+      </dd>
+      <dt>Role</dt>
+      <dd>{{ p.role === 'teacher' ? 'Teacher' : 'Student' }}</dd>
+      <dt>Organization</dt>
+      <dd>{{ p.org_id }}</dd>
+      <dt>Account ID</dt>
+      <dd>
+        <code>{{ p.id }}</code>
+      </dd>
+    </dl>
+    <p class="caption">These come from your sign-in. Your school's administrator changes them.</p>
+  </section>
+  <section class="panel danger-zone" aria-labelledby="delete-account-title">
+    <h3 id="delete-account-title">Delete your account</h3>
+    @if (session.isTeacher()) {
+      <p>
+        Deleting your account removes your sign-in and your chat history for good. The classrooms you teach,
+        with their materials, assessments and grades, are deleted separately from Classrooms first.
+      </p>
+      @if (classroomCount() > 0) {
+        <p class="error" id="delete-account-blocked">
+          You still have {{ classroomCount() }} {{ classroomCount() === 1 ? 'classroom' : 'classrooms' }}.
+          Delete {{ classroomCount() === 1 ? 'it' : 'them' }} from Classrooms before deleting your account.
+        </p>
+      }
+    } @else {
+      <p>
+        Deleting your account removes your sign-in, your submissions and saved answers, your grades and
+        progress, and your chat history, in every classroom, for good.
+      </p>
+    }
+    <button
+      type="button"
+      class="danger"
+      (click)="confirmDelete()"
+      [disabled]="state.busy() || classroomCount() > 0"
+      [attr.aria-describedby]="classroomCount() > 0 ? 'delete-account-blocked' : null"
+    >
+      Delete account
+    </button>
+    <app-status [state]="state" />
+  </section>
+}
+<app-confirm-dialog
+  #deleteDialog
+  dialogId="delete-account"
+  heading="Delete your account?"
+  confirmLabel="Delete my account"
+  [state]="state"
+  (confirm)="deleteAccount()"
+  (closed)="state.error.set('')"
+>
+  <p>
+    @if (session.isTeacher()) {
+      Your sign-in and your chat history are deleted, and you are signed out.
+    } @else {
+      Your sign-in, submissions, saved answers, grades, progress and chat history are deleted, and you are
+      signed out.
+    }
+    It cannot be undone, and this account cannot be used again.
+  </p>
+</app-confirm-dialog>

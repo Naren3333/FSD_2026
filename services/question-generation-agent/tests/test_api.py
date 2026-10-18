@@ -45,11 +45,13 @@ def test_a_teacher_gets_checked_questions_from_their_own_search(api, fakes: Fake
     assert data["questions"][0]["question"]["sources"][0] == {
         "document_id": DOC, "chunk_id": CHUNK_1, "page": 3, "text": fakes.results[0]["content"],
     }  # fmt: skip
-    # The search ran with the teacher's own token, limited to the chosen document, for the topic and focus.
+    # The search ran with the teacher's own token, limited to the chosen teaching material, for the topic and focus.
     (search,) = fakes.calls("/v1/search")
     assert fakes.headers("/v1/search")[0]["authorization"] == "Bearer t1"
     assert (
-        search["document_ids"] == [DOC] and search["query"] == "Software testing. unit tests and boundaries"
+        search["document_ids"] == [DOC]
+        and search["doc_types"] == ["teaching_material"]
+        and search["query"] == "Software testing. unit tests and boundaries"
     )
     assert fakes.headers("/v1/topics/" + TOPIC)[0]["authorization"] == "Bearer t1"
     # One structured call, as the agent, paid by the teacher.

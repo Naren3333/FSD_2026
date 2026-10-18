@@ -93,10 +93,14 @@ export function suggestionReason(suggestion: Suggestion): string {
     AI_PROVIDER_FAILED: 'The AI provider failed; it will be tried again.',
     AI_OUTPUT_REJECTED:
       "The AI's reply could not be used, so there is no suggestion. Mark this question yourself.",
+    CONTRADICTED:
+      'The AI gave marks while quoting parts of the answer that count against them, such as competing answers, so there is no suggestion. Mark this question yourself.',
     MARKED_BY_TEACHER: 'You have already marked this question, so no suggestion was made.',
     MARKING_INTERRUPTED: 'Preparing the suggestion was interrupted. Mark this question yourself.',
     BLANK_ANSWER: 'The answer is blank, so there is nothing to suggest.',
     NOT_MARKABLE: 'This question cannot have a suggestion.',
+    STUDENT_REMOVED:
+      'The student was removed from the classroom before this was marked, so no suggestion was made. Mark this question yourself.',
   };
   if (suggestion.status === 'pending')
     return suggestion.reason

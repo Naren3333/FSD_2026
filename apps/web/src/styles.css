@@ -915,6 +915,30 @@ dialog::backdrop {
 .cell-value {
   font-weight: 600;
 }
+/* The Profile page: the account's details, and deleting the account (ADR 0011). */
+.profile-details {
+  display: grid;
+  grid-template-columns: max-content minmax(0, 1fr);
+  gap: 8px 24px;
+  margin: 0 0 12px;
+}
+.profile-details dt {
+  font-weight: 600;
+}
+.profile-details dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+.danger-zone {
+  border-color: var(--danger);
+  margin-top: 24px;
+}
+button.danger {
+  background: var(--danger);
+}
+button.danger:hover:not(:disabled) {
+  background: #7f1f29;
+}
 /* Breakpoints last, so they override every base rule above. */
 @media (max-width: 1000px) {
   main {
@@ -937,6 +961,13 @@ dialog::backdrop {
   }
 }
 @media (max-width: 700px) {
+  .profile-details {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 2px;
+  }
+  .profile-details dd {
+    margin-bottom: 8px;
+  }
   .app-shell {
     grid-template-columns: minmax(0, 1fr);
   }

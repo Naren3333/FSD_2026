@@ -1,0 +1,65 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:learning:identity.user.deleted.v1",
+  "description": "A user deleted their own account (ADR 0011); the resource is the user. Assessment, Grading, Analytics and the chatbot delete the user's submissions, saved work, grades, evidence and chats, and refuse new ones for them. A teacher deletes their classrooms first.",
+  "type": "object",
+  "properties": {
+    "event_id": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "event_type": {
+      "const": "identity.user.deleted.v1"
+    },
+    "schema_version": {
+      "const": 1
+    },
+    "timestamp": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "correlation_id": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "resource_id": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "data": {
+      "type": "object",
+      "properties": {
+        "user_id": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "org_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "role": {
+          "enum": [
+            "teacher",
+            "student"
+          ]
+        }
+      },
+      "required": [
+        "user_id",
+        "org_id",
+        "role"
+      ],
+      "additionalProperties": false
+    }
+  },
+  "required": [
+    "event_id",
+    "event_type",
+    "schema_version",
+    "timestamp",
+    "correlation_id",
+    "resource_id",
+    "data"
+  ],
+  "additionalProperties": false
+}

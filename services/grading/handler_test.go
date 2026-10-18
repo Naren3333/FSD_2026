@@ -24,9 +24,11 @@ type memoryStore struct {
 	finalized   []string // reasons
 	marks       map[string]Mark
 	released    []string // assessments
+	students    []string // the roster the last list or count was given
 }
 
-func (m *memoryStore) listEvaluations(_ context.Context, _, _, assessment string) ([]Evaluation, error) {
+func (m *memoryStore) listEvaluations(_ context.Context, _, _, assessment string, students []string) ([]Evaluation, error) {
+	m.students = students
 	if assessment != "" && assessment != assessmentID {
 		return []Evaluation{}, nil
 	}
@@ -43,7 +45,8 @@ func (m *memoryStore) listReleased(_ context.Context, _, _, student string) ([]E
 	return []Evaluation{{ID: evaluationID, Student: student, Status: statusFinalized, Evidence: evidence}}, nil
 }
 
-func (m *memoryStore) countEvaluations(context.Context, string, string) (Counts, error) {
+func (m *memoryStore) countEvaluations(_ context.Context, _, _ string, students []string) (Counts, error) {
+	m.students = students
 	return Counts{Drafts: 1 - len(m.finalized), Finalized: len(m.finalized)}, nil
 }
 
@@ -85,7 +88,7 @@ func (m *memoryStore) release(_ context.Context, _, assessment, _ string) (int, 
 
 func finalize(t *testing.T, store *memoryStore, relation, id, body string, roles ...string) *httptest.ResponseRecorder {
 	t.Helper()
-	s := server{store: store, access: platformtest.Access(relation)}
+	s := server{store: store, access: platformtest.Access(relation), roster: platformtest.Roster{"student-1"}}
 	return platformtest.Serve(s.routes, http.MethodPost, "/v1/evaluations/"+id+"/finalize", body, "teacher-1", roles...)
 }
 
@@ -116,7 +119,7 @@ func TestFinalizeMapsEachOutcome(t *testing.T) {
 
 func TestOnlyTheClassroomTeacherListsEvaluations(t *testing.T) {
 	for relation, status := range map[string]int{platform.RelationTeacher: 200, platform.RelationStudent: 403} {
-		s := server{store: &memoryStore{}, access: platformtest.Access(relation)}
+		s := server{store: &memoryStore{}, access: platformtest.Access(relation), roster: platformtest.Roster{"student-1"}}
 		w := platformtest.Serve(s.routes, http.MethodGet, "/v1/evaluations?classroom_id="+room, "", "teacher-1", "teacher")
 		if w.Code != status {
 			t.Errorf("%s: %d", relation, w.Code)
@@ -136,7 +139,7 @@ func TestOnlyAnEnrolledStudentReadsTheirOwnResults(t *testing.T) {
 		{"", "student-2", []string{"student"}, 403, ""},
 	}
 	for _, tc := range cases {
-		s := server{store: &memoryStore{}, access: platformtest.Access(tc.relation)}
+		s := server{store: &memoryStore{}, access: platformtest.Access(tc.relation), roster: platformtest.Roster{"student-1"}}
 		w := platformtest.Serve(s.routes, http.MethodGet, "/v1/evaluations/mine?classroom_id="+room, "", tc.subject, tc.roles...)
 		if w.Code != tc.status || !strings.Contains(w.Body.String(), tc.body) {
 			t.Errorf("%s: %d %s", tc.subject, w.Code, w.Body.String())
@@ -155,11 +158,11 @@ func TestPurgeRejectsMalformedDeletions(t *testing.T) {
 
 func TestOnlyTheTeacherSeesGradingCounts(t *testing.T) {
 	path := "/v1/evaluations/counts?classroom_id=" + room
-	student := server{store: &memoryStore{}, access: platformtest.Access(platform.RelationStudent)}
+	student := server{store: &memoryStore{}, access: platformtest.Access(platform.RelationStudent), roster: platformtest.Roster{"student-1"}}
 	if w := platformtest.Serve(student.routes, http.MethodGet, path, "", "student-1", "student"); w.Code != http.StatusForbidden {
 		t.Fatalf("a student saw grading counts: %d", w.Code)
 	}
-	teacher := server{store: &memoryStore{}, access: platformtest.Access(platform.RelationTeacher)}
+	teacher := server{store: &memoryStore{}, access: platformtest.Access(platform.RelationTeacher), roster: platformtest.Roster{"student-1"}}
 	w := platformtest.Serve(teacher.routes, http.MethodGet, path, "", "teacher-1", "teacher")
 	if w.Code != http.StatusOK || w.Body.String() != `{"drafts":1,"finalized":0,"unreleased":0}`+"\n" {
 		t.Fatalf("%d %q", w.Code, w.Body.String())
@@ -167,7 +170,7 @@ func TestOnlyTheTeacherSeesGradingCounts(t *testing.T) {
 }
 
 func TestStudentsNeverSeeSuggestionsOrRubricMarks(t *testing.T) {
-	s := server{store: &memoryStore{}, access: platformtest.Access(platform.RelationStudent)}
+	s := server{store: &memoryStore{}, access: platformtest.Access(platform.RelationStudent), roster: platformtest.Roster{"student-1"}}
 	w := platformtest.Serve(s.routes, http.MethodGet, "/v1/evaluations/mine?classroom_id="+room, "", "student-1", "student")
 	if w.Code != http.StatusOK || !strings.Contains(w.Body.String(), "Good start.") {
 		t.Fatalf("%d %s", w.Code, w.Body.String())
@@ -180,13 +183,28 @@ func TestStudentsNeverSeeSuggestionsOrRubricMarks(t *testing.T) {
 }
 
 func TestTheTeacherListsOneAssessmentWithAnswers(t *testing.T) {
-	s := server{store: &memoryStore{}, access: platformtest.Access(platform.RelationTeacher)}
+	s := server{store: &memoryStore{}, access: platformtest.Access(platform.RelationTeacher), roster: platformtest.Roster{"student-1"}}
 	w := platformtest.Serve(s.routes, http.MethodGet, "/v1/evaluations?classroom_id="+room+"&assessment_id="+assessmentID, "", "teacher-1", "teacher")
 	if w.Code != http.StatusOK || !strings.Contains(w.Body.String(), "an answer") || !strings.Contains(w.Body.String(), "AI words") {
 		t.Fatalf("%d %s", w.Code, w.Body.String())
 	}
 	if w = platformtest.Serve(s.routes, http.MethodGet, "/v1/evaluations?classroom_id="+room+"&assessment_id=nope", "", "teacher-1", "teacher"); w.Code != http.StatusUnprocessableEntity {
 		t.Fatalf("a malformed assessment id: %d", w.Code)
+	}
+}
+
+func TestTeacherListsAndCountsOnlyEnrolledStudents(t *testing.T) {
+	for _, path := range []string{"/v1/evaluations?classroom_id=" + room, "/v1/evaluations/counts?classroom_id=" + room} {
+		store := &memoryStore{}
+		s := server{store: store, access: platformtest.Access(platform.RelationTeacher), roster: platformtest.Roster{"student-1", "student-2"}}
+		if w := platformtest.Serve(s.routes, http.MethodGet, path, "", "teacher-1", "teacher"); w.Code != http.StatusOK || strings.Join(store.students, ",") != "student-1,student-2" {
+			t.Errorf("%s: %d, store given %v", path, w.Code, store.students)
+		}
+		// Without the roster nothing is listed rather than everyone.
+		s.roster = platformtest.Roster(nil)
+		if w := platformtest.Serve(s.routes, http.MethodGet, path, "", "teacher-1", "teacher"); w.Code != http.StatusForbidden {
+			t.Errorf("%s without a roster: %d", path, w.Code)
+		}
 	}
 }
 
@@ -207,7 +225,7 @@ func TestOnlyTheClassroomTeacherSavesMarks(t *testing.T) {
 	}
 	for _, tc := range cases {
 		store := &memoryStore{finalizeErr: tc.err}
-		s := server{store: store, access: platformtest.Access(tc.relation)}
+		s := server{store: store, access: platformtest.Access(tc.relation), roster: platformtest.Roster{"student-1"}}
 		w := platformtest.Serve(s.routes, http.MethodPost, "/v1/evaluations/"+evaluationID+"/marks", tc.body, "teacher-1", tc.roles...)
 		if w.Code != tc.status {
 			t.Errorf("%s: %d %s", tc.name, w.Code, w.Body.String())
@@ -235,7 +253,7 @@ func TestOnlyTheClassroomTeacherReleasesResults(t *testing.T) {
 	body := `{"assessment_id":"` + assessmentID + `"}`
 	for relation, status := range map[string]int{platform.RelationTeacher: 200, platform.RelationStudent: 403} {
 		store := &memoryStore{}
-		s := server{store: store, access: platformtest.Access(relation)}
+		s := server{store: store, access: platformtest.Access(relation), roster: platformtest.Roster{"student-1"}}
 		w := platformtest.Serve(s.routes, http.MethodPost, "/v1/evaluations/release", body, "teacher-1", "teacher")
 		if w.Code != status {
 			t.Errorf("%s: %d", relation, w.Code)
@@ -244,7 +262,7 @@ func TestOnlyTheClassroomTeacherReleasesResults(t *testing.T) {
 			t.Errorf("%s: %v %s", relation, store.released, w.Body.String())
 		}
 	}
-	s := server{store: &memoryStore{}, access: platformtest.Access(platform.RelationTeacher)}
+	s := server{store: &memoryStore{}, access: platformtest.Access(platform.RelationTeacher), roster: platformtest.Roster{"student-1"}}
 	unknown := `{"assessment_id":"` + room + `"}`
 	if w := platformtest.Serve(s.routes, http.MethodPost, "/v1/evaluations/release", unknown, "teacher-1", "teacher"); w.Code != http.StatusNotFound {
 		t.Fatalf("an assessment without grades: %d", w.Code)

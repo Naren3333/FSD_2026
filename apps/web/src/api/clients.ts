@@ -3,12 +3,12 @@ import { Gateway } from '../core/gateway';
 import { isPdf } from '../shared/files';
 import type {
   Assessment,
+  AssessmentDetails,
   AssessmentProgress,
   AssessmentSummary,
   ChatMessage,
   ClassPerformance,
   Classroom,
-  DocType,
   DocumentRecord,
   Enrollment,
   Evaluation,
@@ -22,8 +22,6 @@ import type {
   Performance,
   Profile,
   SavedAnswers,
-  SearchHit,
-  SearchRequest,
   StreamEvent,
   Student,
   Submission,
@@ -43,6 +41,10 @@ export class IdentityApi {
   /** Registers the signed-in user (idempotent) and returns their profile. */
   register(): Promise<Profile> {
     return this.gateway.request('identity', '/me', { method: 'POST', body: {} });
+  }
+  /** Deletes the signed-in user's own account for good (ADR 0011). A teacher deletes their classrooms first. */
+  deleteAccount(): Promise<void> {
+    return this.gateway.request('identity', '/me', { method: 'DELETE' });
   }
   classrooms(): Promise<Classroom[]> {
     return this.gateway.request('identity', '/classrooms');
@@ -88,9 +90,17 @@ export class CurriculumApi {
   createTopic(topic: { name: string }): Promise<Topic> {
     return this.gateway.request('curriculum', '/topics', { method: 'POST', body: topic });
   }
-  /** Hides the topic from every list; nothing is deleted. */
+  /** The organization's archived topics, by name; up to 200. Older questions and evidence still name them. */
+  archivedTopics(): Promise<Topic[]> {
+    return this.gateway.request('curriculum', '/topics?archived=true');
+  }
+  /** Hides the topic from every list and from new questions; nothing is deleted. */
   archiveTopic(topicId: string): Promise<void> {
     return this.gateway.request('curriculum', `/topics/${id(topicId)}`, { method: 'DELETE' });
+  }
+  /** Makes an archived topic active again. */
+  restoreTopic(topicId: string): Promise<Topic> {
+    return this.gateway.request('curriculum', `/topics/${id(topicId)}/restore`, { method: 'POST' });
   }
 }
 
@@ -104,8 +114,9 @@ export class ContentApi {
   documents(classroomId: string): Promise<DocumentRecord[]> {
     return this.gateway.request('content', `/documents?classroom_id=${id(classroomId)}`);
   }
-  upload(classroomId: string, title: string, docType: DocType, file: File): Promise<DocumentRecord> {
-    const query = `classroom_id=${id(classroomId)}&title=${id(title)}&doc_type=${id(docType)}`;
+  /** Uploads a teaching material, the only kind of document teachers add (ADR 0009). */
+  upload(classroomId: string, title: string, file: File): Promise<DocumentRecord> {
+    const query = `classroom_id=${id(classroomId)}&title=${id(title)}`;
     return this.gateway.request('content', `/documents?${query}`, {
       method: 'POST',
       body: file,
@@ -119,13 +130,9 @@ export class ContentApi {
       body: {},
     });
   }
-  /** The passages of the classroom's indexed PDFs that best match the query, within what the caller may read. */
-  async search(request: SearchRequest): Promise<SearchHit[]> {
-    const found = await this.gateway.request<{ results: SearchHit[] }>('content', '/search', {
-      method: 'POST',
-      body: request,
-    });
-    return found.results;
+  /** Deletes the document for good, with its passages and stored files, for the classroom's teacher. */
+  remove(documentId: string): Promise<void> {
+    return this.gateway.request('content', `/documents/${id(documentId)}`, { method: 'DELETE' });
   }
   /** Object URLs the caller revokes. */
   figure(documentId: string, image: string): Promise<string> {
@@ -156,7 +163,7 @@ export class AssessmentApi {
   create(assessment: NewAssessment): Promise<Assessment> {
     return this.gateway.request('assessment', '/assessments', { method: 'POST', body: assessment });
   }
-  /** Replaces a draft; a published assessment cannot change. */
+  /** Replaces an assessment until a student submits it; a published one stays published. */
   update(assessmentId: string, assessment: NewAssessment): Promise<Assessment> {
     return this.gateway.request('assessment', `/assessments/${id(assessmentId)}`, {
       method: 'PUT',
@@ -169,9 +176,20 @@ export class AssessmentApi {
       body: {},
     });
   }
-  /** Deletes a draft; published assessments are kept. */
-  remove(assessmentId: string): Promise<{ id: string }> {
-    return this.gateway.request('assessment', `/assessments/${id(assessmentId)}`, { method: 'DELETE' });
+  /** Changes the title, due date and late policy, also after students have submitted. */
+  details(assessmentId: string, details: AssessmentDetails): Promise<Assessment> {
+    return this.gateway.request('assessment', `/assessments/${id(assessmentId)}`, {
+      method: 'PATCH',
+      body: details,
+    });
+  }
+  /** Deletes an assessment. Once students have submitted it, only `withSubmissions` deletes it, and their
+   * submissions and grades with it. */
+  remove(assessmentId: string, withSubmissions = false): Promise<{ id: string }> {
+    const query = withSubmissions ? '?with_submissions=true' : '';
+    return this.gateway.request('assessment', `/assessments/${id(assessmentId)}${query}`, {
+      method: 'DELETE',
+    });
   }
   /** The signed-in student's unsubmitted work. */
   saved(assessmentId: string): Promise<SavedAnswers> {

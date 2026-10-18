@@ -521,6 +521,11 @@
               }
             ],
             "title": "Image"
+          },
+          "removed": {
+            "type": "boolean",
+            "title": "Removed",
+            "default": false
           }
         },
         "additionalProperties": false,

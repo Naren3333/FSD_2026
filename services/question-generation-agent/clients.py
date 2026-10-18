@@ -62,11 +62,13 @@ class Services:
         correlation: str,
     ) -> tuple[list[dict[str, Any]], bool]:  # fmt: skip
         """The chosen documents' passages that best match the query, reranked, and whether the rerank fell back (then
-        `score` is an RRF score, not comparable to the relevance floor)."""
+        `score` is an RRF score, not comparable to the relevance floor). Only teaching materials are searched: a
+        rubric or marking scheme uploaded before they were retired (ADR 0009) is never drafted from."""
         body = {
             "classroom_id": classroom_id,
             "query": query,
             "document_ids": document_ids,
+            "doc_types": ["teaching_material"],
             "top_k": top_k,
             "rerank": True,
         }

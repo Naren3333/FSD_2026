@@ -146,29 +146,37 @@
                             </small>
                           </span>
                         </summary>
-                        @if (source.source === 'vision') {
-                          <p class="caption">This passage was written by a model from the page image.</p>
-                        }
-                        @if (source.page_end > source.page_start) {
+                        @if (source.removed) {
                           <p class="caption">
-                            The assistant was given this whole passage from {{ pageText(source) }}; the cited
-                            point can be on any of these pages.
+                            The teacher deleted this material, so its passage is no longer shown.
                           </p>
-                        }
-                        <!-- One line: the passage keeps its own line breaks (pre-wrap), so no whitespace around it. -->
-                        <!-- prettier-ignore -->
-                        <div class="passage" tabindex="0" [attr.aria-label]="'Passage from ' + source.title + ', ' + pageText(source)">{{ source.content }}</div>
-                        <button type="button" class="secondary open-page" (click)="openPage(source)">
-                          Open the PDF at page {{ source.page_start }}
-                        </button>
-                        @if (source.image) {
-                          @if (figures()[source.chunk_id]; as url) {
-                            <img
-                              [src]="url"
-                              [alt]="'Figure from ' + source.title + ', ' + pageText(source)"
-                            />
-                          } @else {
-                            <p class="caption">{{ figureErrors()[source.chunk_id] || 'Loading figure…' }}</p>
+                        } @else {
+                          @if (source.source === 'vision') {
+                            <p class="caption">This passage was written by a model from the page image.</p>
+                          }
+                          @if (source.page_end > source.page_start) {
+                            <p class="caption">
+                              The assistant was given this whole passage from {{ pageText(source) }}; the
+                              cited point can be on any of these pages.
+                            </p>
+                          }
+                          <!-- One line: the passage keeps its own line breaks (pre-wrap), so no whitespace around it. -->
+                          <!-- prettier-ignore -->
+                          <div class="passage" tabindex="0" [attr.aria-label]="'Passage from ' + source.title + ', ' + pageText(source)">{{ source.content }}</div>
+                          <button type="button" class="secondary open-page" (click)="openPage(source)">
+                            Open the PDF at page {{ source.page_start }}
+                          </button>
+                          @if (source.image) {
+                            @if (figures()[source.chunk_id]; as url) {
+                              <img
+                                [src]="url"
+                                [alt]="'Figure from ' + source.title + ', ' + pageText(source)"
+                              />
+                            } @else {
+                              <p class="caption">
+                                {{ figureErrors()[source.chunk_id] || 'Loading figure…' }}
+                              </p>
+                            }
                           }
                         }
                       </details>

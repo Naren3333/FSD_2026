@@ -24,6 +24,7 @@ type memoryStore struct {
 	submitted   map[string]Submission // by assessment/student
 	saved       map[string]map[string]string
 	events      []map[string]any // what each stored submission would publish, from what the handler passed
+	deleted     []string         // the published assessments whose deletion would be announced
 }
 
 func (m *memoryStore) findAssessment(_ context.Context, _, id string) (Assessment, error) {
@@ -39,8 +40,34 @@ func (m *memoryStore) insertAssessment(_ context.Context, _ string, v Assessment
 	return nil
 }
 
-// change applies a draft-only change, as pgStore.draftChange decides.
-func (m *memoryStore) change(id string, apply func(v Assessment)) error {
+// change applies a change allowed until a student submits, as pgStore.changeUnsubmitted decides.
+func (m *memoryStore) change(id string, apply func(v Assessment) error) error {
+	v, ok := m.assessments[id]
+	if !ok {
+		return platform.ErrNotFound
+	}
+	for key := range m.submitted {
+		if strings.HasPrefix(key, id+"/") {
+			return errHasSubmissions
+		}
+	}
+	return apply(v)
+}
+
+func (m *memoryStore) updateAssessment(_ context.Context, _ string, before, v Assessment) error {
+	return m.change(v.ID, func(old Assessment) error {
+		if !sameMarking(old, before) {
+			return errAssessmentChanged
+		}
+		if old.Status == statusPublished && v.Status != statusPublished {
+			return errNotDraft
+		}
+		m.assessments[v.ID] = v
+		return nil
+	})
+}
+
+func (m *memoryStore) publishDraft(_ context.Context, _, id string, at time.Time) error {
 	v, ok := m.assessments[id]
 	switch {
 	case !ok:
@@ -48,42 +75,78 @@ func (m *memoryStore) change(id string, apply func(v Assessment)) error {
 	case v.Status != statusDraft:
 		return errNotDraft
 	}
-	apply(v)
+	v.Status, v.PublishedAt = statusPublished, &at
+	m.assessments[id] = v
 	return nil
 }
 
-func (m *memoryStore) updateDraft(_ context.Context, _ string, v Assessment) error {
-	return m.change(v.ID, func(Assessment) { m.assessments[v.ID] = v })
+func (m *memoryStore) updateDetails(_ context.Context, _, id string, d Details) error {
+	v, ok := m.assessments[id]
+	if !ok {
+		return platform.ErrNotFound
+	}
+	v.Title, v.DueAt, v.LatePolicy = d.Title, d.DueAt, d.LatePolicy
+	m.assessments[id] = v
+	return nil
 }
 
-func (m *memoryStore) publishDraft(_ context.Context, _, id string, at time.Time) error {
-	return m.change(id, func(v Assessment) {
-		v.Status, v.PublishedAt = statusPublished, &at
-		m.assessments[id] = v
+func (m *memoryStore) deleteAssessment(_ context.Context, _, id string, submissions bool) error {
+	change := m.change
+	if submissions {
+		change = func(id string, apply func(v Assessment) error) error {
+			v, ok := m.assessments[id]
+			if !ok {
+				return platform.ErrNotFound
+			}
+			return apply(v)
+		}
+	}
+	return change(id, func(v Assessment) error {
+		for key := range m.submitted {
+			if strings.HasPrefix(key, id+"/") {
+				delete(m.submitted, key)
+			}
+		}
+		if v.Status == statusPublished {
+			m.deleted = append(m.deleted, id)
+		}
+		delete(m.assessments, id)
+		for key := range m.saved {
+			if strings.HasPrefix(key, id+"/") {
+				delete(m.saved, key)
+			}
+		}
+		return nil
 	})
 }
 
-func (m *memoryStore) deleteDraft(_ context.Context, _, id string) error {
-	return m.change(id, func(Assessment) { delete(m.assessments, id) })
-}
-
-func (m *memoryStore) listAssessments(_ context.Context, _, _, student string, all bool, now time.Time) ([]Summary, error) {
+func (m *memoryStore) listAssessments(_ context.Context, _, _, student string, all bool, enrolled []string, now time.Time) ([]Summary, error) {
 	result := []Summary{}
 	for _, v := range m.assessments {
 		if all || v.visibleToStudents(now) {
 			_, done := m.submitted[v.ID+"/"+student]
-			result = append(result, Summary{ID: v.ID, Title: v.Title, Submitted: done, Status: v.Status, DueAt: v.DueAt})
+			summary := Summary{ID: v.ID, Title: v.Title, Submitted: done, Status: v.Status, DueAt: v.DueAt}
+			if all {
+				n := 0
+				for key := range m.submitted {
+					if strings.HasPrefix(key, v.ID+"/") && slices.Contains(enrolled, strings.TrimPrefix(key, v.ID+"/")) {
+						n++
+					}
+				}
+				summary.Submissions = &n
+			}
+			result = append(result, summary)
 		}
 	}
 	return result, nil
 }
 
-func (m *memoryStore) listProgress(context.Context, string, string) ([]Progress, error) {
+func (m *memoryStore) listProgress(_ context.Context, _, _ string, enrolled []string) ([]Progress, error) {
 	result := []Progress{}
 	for _, v := range m.assessments {
 		n := 0
 		for key := range m.submitted {
-			if strings.HasPrefix(key, v.ID+"/") {
+			if strings.HasPrefix(key, v.ID+"/") && slices.Contains(enrolled, strings.TrimPrefix(key, v.ID+"/")) {
 				n++
 			}
 		}
@@ -93,6 +156,13 @@ func (m *memoryStore) listProgress(context.Context, string, string) ([]Progress,
 }
 
 func (m *memoryStore) insertSubmission(_ context.Context, v Assessment, sub Submission) (bool, error) {
+	current, ok := m.assessments[v.ID]
+	if !ok {
+		return false, platform.ErrNotFound
+	}
+	if !sameMarking(current, v) {
+		return false, errAssessmentChanged
+	}
 	key := v.ID + "/" + sub.Student
 	if _, done := m.submitted[key]; done {
 		return false, nil
@@ -113,6 +183,9 @@ func (m *memoryStore) findSaved(_ context.Context, assessment, student string) (
 }
 
 func (m *memoryStore) saveAnswers(_ context.Context, assessment, student string, answers map[string]string) (time.Time, error) {
+	if _, ok := m.assessments[assessment]; !ok {
+		return time.Time{}, platform.ErrNotFound
+	}
 	key := assessment + "/" + student
 	if _, done := m.submitted[key]; done {
 		return time.Time{}, errAlreadySubmitted
@@ -127,7 +200,7 @@ func (s fixedTopics) check(*http.Request, string) topicStatus { return topicStat
 
 func newServer(relation string, topicAnswer topicStatus) (server, *memoryStore) {
 	store := &memoryStore{assessments: map[string]Assessment{}, submitted: map[string]Submission{}, saved: map[string]map[string]string{}}
-	return server{store: store, access: platformtest.Access(relation), topics: fixedTopics(topicAnswer)}, store
+	return server{store: store, access: platformtest.Access(relation), roster: platformtest.Roster{"user"}, topics: fixedTopics(topicAnswer)}, store
 }
 
 func call(t *testing.T, s server, method, path, body string, roles ...string) *httptest.ResponseRecorder {
@@ -197,6 +270,13 @@ func TestOnlyTheTeacherSeesSubmissionCounts(t *testing.T) {
 	w := call(t, s, http.MethodGet, progress, "", "teacher")
 	if w.Code != http.StatusOK || !strings.Contains(w.Body.String(), `"submissions":1`) {
 		t.Fatalf("%d %s", w.Code, w.Body.String())
+	}
+	// Once the student is removed from the classroom, their kept submission is not counted.
+	s.roster = platformtest.Roster{}
+	for _, path := range []string{progress, "/v1/assessments?classroom_id=" + room} {
+		if w = call(t, s, http.MethodGet, path, "", "teacher"); w.Code != http.StatusOK || !strings.Contains(w.Body.String(), `"submissions":0`) {
+			t.Fatalf("%s after removal: %d %s", path, w.Code, w.Body.String())
+		}
 	}
 }
 
@@ -272,14 +352,155 @@ func TestADraftIsTheTeachersUntilPublished(t *testing.T) {
 	if w = call(t, student, http.MethodGet, path, "", "student"); w.Code != http.StatusOK {
 		t.Fatalf("a student could not open it once published: %d", w.Code)
 	}
-	for _, tc := range []struct{ method, path, body string }{{http.MethodPut, path, edited}, {http.MethodPost, path + "/publish", ""}, {http.MethodDelete, path, ""}} {
+	for _, tc := range []struct{ method, path, body string }{{http.MethodPut, path, edited}, {http.MethodPost, path + "/publish", ""}} {
 		if w = call(t, s, tc.method, tc.path, tc.body, "teacher"); w.Code != http.StatusConflict {
 			t.Errorf("%s %s once published: %d", tc.method, tc.path, w.Code)
 		}
 	}
 }
 
-func TestOnlyADraftIsDeleted(t *testing.T) {
+// twoQuestions is a published assessment of two questions, as a teacher would send it again with changes.
+const twoQuestions = `{"classroom_id":"` + room + `","title":"Fractions","status":"published","questions":[` +
+	`{"prompt":"1/2 + 1/2?","type":"numerical","options":[],"answer":"1","tolerance":"0","topic_id":"` + topic + `"},` +
+	`{"prompt":"1/4 + 1/4?","type":"numerical","options":[],"answer":"0.5","tolerance":"0","topic_id":"` + topic + `"}]}`
+
+func TestAPublishedAssessmentChangesUntilAStudentSubmits(t *testing.T) {
+	s, store := newServer(platform.RelationTeacher, topicValid)
+	w := call(t, s, http.MethodPost, "/v1/assessments", twoQuestions, "teacher")
+	var v Assessment
+	if w.Code != http.StatusCreated || json.Unmarshal(w.Body.Bytes(), &v) != nil {
+		t.Fatalf("%d %s", w.Code, w.Body.String())
+	}
+	path := "/v1/assessments/" + v.ID
+	student := s
+	student.access = platformtest.Access(platform.RelationStudent)
+	first, second := v.Questions[0].ID, v.Questions[1].ID
+	saved := `{"answers":{"` + first + `":"1","` + second + `":"0.5"}}`
+	if w = call(t, student, http.MethodPut, path+"/saved-answers", saved, "student"); w.Code != http.StatusOK {
+		t.Fatalf("save: %d %s", w.Code, w.Body.String())
+	}
+
+	// The teacher renames it and rewrites the second question: the first keeps its id and the work saved on it.
+	changed := strings.Replace(strings.Replace(twoQuestions, "Fractions", "Halves", 1), "1/4 + 1/4?", "1/4 + 1/4 =", 1)
+	var got Assessment
+	if w = call(t, s, http.MethodPut, path, changed, "teacher"); w.Code != http.StatusOK || json.Unmarshal(w.Body.Bytes(), &got) != nil {
+		t.Fatalf("edit: %d %s", w.Code, w.Body.String())
+	}
+	if got.Status != statusPublished || got.PublishedAt == nil || !got.PublishedAt.Equal(*v.PublishedAt) || got.Title != "Halves" {
+		t.Fatalf("the edit did not keep it published as it was: %+v", got)
+	}
+	if got.Questions[0].ID != first || got.Questions[1].ID == second {
+		t.Fatalf("question ids: %s %s, were %s %s", got.Questions[0].ID, got.Questions[1].ID, first, second)
+	}
+	w = call(t, student, http.MethodGet, path+"/saved-answers", "", "student")
+	if !strings.Contains(w.Body.String(), first) || strings.Contains(w.Body.String(), second) {
+		t.Fatalf("saved work after the edit: %s", w.Body.String())
+	}
+	// A student who opened it before the edit answers the old second question: they are told to open it again.
+	if w = call(t, student, http.MethodPost, path+"/submissions", saved, "student"); w.Code != http.StatusConflict || !strings.Contains(w.Body.String(), "ASSESSMENT_CHANGED") {
+		t.Fatalf("answers to a replaced question: %d %s", w.Code, w.Body.String())
+	}
+	unchanged := strings.Replace(changed, `"status":"published",`, "", 1)
+	if w = call(t, s, http.MethodPut, path, unchanged, "teacher"); w.Code != http.StatusOK || !strings.Contains(w.Body.String(), `"status":"published"`) {
+		t.Fatalf("an edit without a status: %d %s", w.Code, w.Body.String())
+	}
+
+	// A student submits: the questions and grading settings are now fixed, and the assessment is kept.
+	got = store.assessments[v.ID]
+	answers := `{"answers":{"` + got.Questions[0].ID + `":"1","` + got.Questions[1].ID + `":"0.5"}}`
+	if w = call(t, student, http.MethodPost, path+"/submissions", answers, "student"); w.Code != http.StatusCreated {
+		t.Fatalf("submit: %d %s", w.Code, w.Body.String())
+	}
+	for _, tc := range []struct{ method, body string }{{http.MethodPut, twoQuestions}, {http.MethodDelete, ""}} {
+		if w = call(t, s, tc.method, path, tc.body, "teacher"); w.Code != http.StatusConflict || !strings.Contains(w.Body.String(), "HAS_SUBMISSIONS") {
+			t.Errorf("%s after a submission: %d %s", tc.method, w.Code, w.Body.String())
+		}
+	}
+	if !sameMarking(store.assessments[v.ID], got) {
+		t.Fatal("a refused change changed the assessment")
+	}
+
+	// Its details still change: a new title, and a due date that is not already past.
+	due := time.Now().Add(48 * time.Hour).UTC().Truncate(time.Second)
+	details := `{"title":"Halves and quarters","due_at":` + stamp(due) + `,"late_policy":"reject"}`
+	if w = call(t, s, http.MethodPatch, path, details, "teacher"); w.Code != http.StatusOK || !strings.Contains(w.Body.String(), `"title":"Halves and quarters"`) {
+		t.Fatalf("details: %d %s", w.Code, w.Body.String())
+	}
+	if v := store.assessments[v.ID]; v.DueAt == nil || !v.DueAt.Equal(due) || v.LatePolicy != lateReject || !sameMarking(v, got) {
+		t.Fatalf("details stored: %+v", v)
+	}
+	// Fields left out keep their values.
+	if w = call(t, s, http.MethodPatch, path, `{"title":"Only the title"}`, "teacher"); w.Code != http.StatusOK {
+		t.Fatalf("title only: %d %s", w.Code, w.Body.String())
+	}
+	if v := store.assessments[v.ID]; v.Title != "Only the title" || v.DueAt == nil || !v.DueAt.Equal(due) || v.LatePolicy != lateReject {
+		t.Fatalf("a title-only change changed the rest: %+v", v)
+	}
+	past := `{"title":"Halves","due_at":` + stamp(time.Now().Add(-time.Hour)) + `}`
+	for name, body := range map[string]string{"a past due date": past, "no title": `{"title":" "}`, "a bad late policy": `{"title":"x","late_policy":"never"}`} {
+		if w = call(t, s, http.MethodPatch, path, body, "teacher"); w.Code != http.StatusUnprocessableEntity {
+			t.Errorf("%s: %d %s", name, w.Code, w.Body.String())
+		}
+	}
+	if w = call(t, student, http.MethodPatch, path, details, "student"); w.Code != http.StatusForbidden {
+		t.Errorf("a student changed the details: %d", w.Code)
+	}
+}
+
+func TestDeletingASubmittedAssessmentNeedsConfirming(t *testing.T) {
+	s, v := scheduled(t, "")
+	store := s.store.(*memoryStore)
+	path := "/v1/assessments/" + v.ID
+	if w := call(t, s, http.MethodPost, path+"/submissions", `{"answers":{"`+v.Questions[0].ID+`":"1"}}`, "student"); w.Code != http.StatusCreated {
+		t.Fatalf("submit: %d %s", w.Code, w.Body.String())
+	}
+	if w := call(t, s, http.MethodDelete, path+"?with_submissions=true", "", "student"); w.Code != http.StatusForbidden {
+		t.Fatalf("a student deleted it: %d", w.Code)
+	}
+	s.access = platformtest.Access(platform.RelationTeacher)
+	for _, query := range []string{"", "?with_submissions=false"} {
+		if w := call(t, s, http.MethodDelete, path+query, "", "teacher"); w.Code != http.StatusConflict || !strings.Contains(w.Body.String(), "HAS_SUBMISSIONS") {
+			t.Fatalf("%q: %d %s", query, w.Code, w.Body.String())
+		}
+	}
+	if w := call(t, s, http.MethodDelete, path+"?with_submissions=true", "", "teacher"); w.Code != http.StatusOK {
+		t.Fatalf("%d %s", w.Code, w.Body.String())
+	}
+	if len(store.assessments)+len(store.submitted) != 0 || !slices.Equal(store.deleted, []string{v.ID}) {
+		t.Fatalf("left %v %v, announced %v", store.assessments, store.submitted, store.deleted)
+	}
+}
+
+func TestTheTeacherSeesHowManySubmittedEach(t *testing.T) {
+	s, v := scheduled(t, "")
+	answer := `{"answers":{"` + v.Questions[0].ID + `":"1"}}`
+	if w := call(t, s, http.MethodPost, "/v1/assessments/"+v.ID+"/submissions", answer, "student"); w.Code != http.StatusCreated {
+		t.Fatalf("submit: %d %s", w.Code, w.Body.String())
+	}
+	list := "/v1/assessments?classroom_id=" + room
+	if w := call(t, s, http.MethodGet, list, "", "student"); strings.Contains(w.Body.String(), "submissions") {
+		t.Fatalf("a student saw the submission count: %s", w.Body.String())
+	}
+	s.access = platformtest.Access(platform.RelationTeacher)
+	if w := call(t, s, http.MethodGet, list, "", "teacher"); !strings.Contains(w.Body.String(), `"submissions":1`) {
+		t.Fatalf("the teacher's list: %s", w.Body.String())
+	}
+}
+
+func TestAPublishedAssessmentIsDeletedWithItsSavedWork(t *testing.T) {
+	s, v := scheduled(t, "")
+	store := s.store.(*memoryStore)
+	path := "/v1/assessments/" + v.ID
+	if w := call(t, s, http.MethodPut, path+"/saved-answers", `{"answers":{"`+v.Questions[0].ID+`":"1"}}`, "student"); w.Code != http.StatusOK {
+		t.Fatalf("save: %d %s", w.Code, w.Body.String())
+	}
+	s.access = platformtest.Access(platform.RelationTeacher)
+	if w := call(t, s, http.MethodDelete, path, "", "teacher"); w.Code != http.StatusOK || len(store.assessments) != 0 || len(store.saved) != 0 {
+		t.Fatalf("%d %v %v", w.Code, store.assessments, store.saved)
+	}
+}
+
+func TestADraftIsDeleted(t *testing.T) {
 	s, store := newServer(platform.RelationTeacher, topicValid)
 	w := call(t, s, http.MethodPost, "/v1/assessments", draftQuiz, "teacher")
 	var v Assessment

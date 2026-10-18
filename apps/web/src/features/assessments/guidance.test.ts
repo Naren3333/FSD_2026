@@ -7,7 +7,7 @@ import type { DocumentRecord, Guidance } from '../../api/models';
 import { AiUsage } from '../../core/ai-usage';
 import { Section } from '../../shared/section';
 import { excerptLabel, questionForm } from './editor';
-import { MarkingGuidanceComponent, guidanceDocuments, mergeAccepted } from './guidance';
+import { MarkingGuidanceComponent, mergeAccepted } from './guidance';
 
 beforeAll(() => TestBed.initTestEnvironment(BrowserTestingModule, platformBrowserTesting()));
 
@@ -76,15 +76,6 @@ function setup(type: 'short_answer' | 'free_response', answer: Guidance) {
 }
 
 describe('guidance helpers', () => {
-  it('offers indexed documents, teaching materials first', () => {
-    const docs = [
-      doc({ id: 'scheme', doc_type: 'marking_scheme' }),
-      doc({}),
-      doc({ id: 'x', status: 'failed' }),
-    ];
-    expect(guidanceDocuments(docs).map((d) => d.id)).toEqual(['d1', 'scheme']);
-  });
-
   it('adds suggested answers after the teacher’s own, without repeats', () => {
     expect(mergeAccepted('unit test\n', ['unit test', ' a unit test '])).toBe('unit test\na unit test');
     expect(
@@ -128,7 +119,7 @@ describe('drafting marking guidance', () => {
     expect(component.used()).toBe(true);
     expect(
       excerptLabel(question.controls.marking_scheme.value[0], [], question.controls.marking_scheme),
-    ).toBe('AI-written marking points');
+    ).toBe('Written by AI');
     expect(component.source(shortGuidance.sources[0])).toBe('Testing slides, page 2');
   });
 

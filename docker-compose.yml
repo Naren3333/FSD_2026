@@ -24,11 +24,11 @@ services:
     environment:
       KC_BOOTSTRAP_ADMIN_USERNAME: admin
       KC_BOOTSTRAP_ADMIN_PASSWORD: ${KEYCLOAK_ADMIN_PASSWORD:?Run scripts/setup.py or scripts/upgrade_local.py}
-      KC_HOSTNAME: http://localhost:8081
+      KC_HOSTNAME: http://localhost:${KEYCLOAK_PORT:-8081}
       KC_HOSTNAME_BACKCHANNEL_DYNAMIC: 'true'
       KC_HEALTH_ENABLED: 'true'
     ports:
-    - 127.0.0.1:8081:8080
+    - 127.0.0.1:${KEYCLOAK_PORT:-8081}:8080
     volumes:
     - ./.local/learning-realm.json:/opt/keycloak/data/import/learning-realm.json:ro
     - keycloak-data:/opt/keycloak/data
@@ -81,14 +81,24 @@ services:
     - /bin/sh
     - -ec
     command:
-    - for topic in content.uploaded.v1 content.indexed.v1 assessment.submitted.v1 grading.finalized.v1
+    - for topic in content.uploaded.v1 content.indexed.v1 content.deleted.v1 assessment.submitted.v1 grading.finalized.v1
       assessment.submitted.v2 assessment.submitted.v3 assessment.submitted.v4 grading.finalized.v2
-      grading.finalized.v3 identity.classroom.deleted.v1
+      grading.finalized.v3 identity.classroom.deleted.v1 assessment.deleted.v1
+      identity.enrollment.removed.v1 assessment.due_changed.v1 identity.user.deleted.v1
       assessment.submitted.v1.dlq grading.finalized.v1.dlq assessment.submitted.v2.dlq
       assessment.submitted.v3.dlq assessment.submitted.v4.dlq grading.finalized.v2.dlq grading.finalized.v3.dlq
-      identity.classroom.deleted.v1.dlq; do /opt/kafka/bin/kafka-topics.sh
+      identity.classroom.deleted.v1.dlq assessment.deleted.v1.dlq content.deleted.v1.dlq
+      identity.enrollment.removed.v1.dlq assessment.due_changed.v1.dlq identity.user.deleted.v1.dlq; do /opt/kafka/bin/kafka-topics.sh
       --bootstrap-server kafka:9092 --create --if-not-exists --topic $$topic --partitions
-      3 --replication-factor 1; done
+      3 --replication-factor 1; done;
+      for topic in assessment.submitted.v1 assessment.submitted.v2 assessment.submitted.v3 assessment.submitted.v4
+      grading.finalized.v1 grading.finalized.v2 grading.finalized.v3
+      assessment.submitted.v1.dlq assessment.submitted.v2.dlq assessment.submitted.v3.dlq assessment.submitted.v4.dlq
+      grading.finalized.v1.dlq grading.finalized.v2.dlq grading.finalized.v3.dlq
+      identity.classroom.deleted.v1.dlq assessment.deleted.v1.dlq content.deleted.v1.dlq
+      identity.enrollment.removed.v1.dlq assessment.due_changed.v1.dlq identity.user.deleted.v1.dlq;
+      do /opt/kafka/bin/kafka-configs.sh --bootstrap-server kafka:9092 --alter --entity-type topics
+      --entity-name $$topic --add-config retention.ms=604800000; done
   # S3-compatible document storage. MinIO's images stopped being publicly downloadable, so this is
   # SeaweedFS. The S3 identities are written from .env at start: an admin, and a content-service
   # user that can only read, write and list the documents bucket. The S3 API is not published.
@@ -132,6 +142,10 @@ services:
     depends_on:
       keycloak:
         condition: service_healthy
+    environment:
+      # The issuer Kong accepts and the origin it allows, on the ports this stack publishes.
+      KEYCLOAK_ISSUER: http://localhost:${KEYCLOAK_PORT:-8081}/realms/learning
+      WEB_ORIGIN: http://localhost:${WEB_PORT:-4200}
     volumes:
     - ./infra/kong/bootstrap.py:/bootstrap.py:ro
     - kong-config:/output
@@ -152,7 +166,7 @@ services:
       KONG_DNS_VALID_TTL: '5'  # re-resolve services every 5 s, so a recreated container is found without restarting Kong
       KONG_DNS_STALE_TTL: '0'  # never route to a cached address after it expires; a restarted container's old IP may now belong to another service
     ports:
-    - 127.0.0.1:8000:8000
+    - 127.0.0.1:${KONG_PORT:-8000}:8000
     volumes:
     - kong-config:/config:ro
     healthcheck:
@@ -168,11 +182,14 @@ services:
       context: .
       dockerfile: services/identity/Dockerfile
     environment:
-      OIDC_ISSUER: http://localhost:8081/realms/learning
+      OIDC_ISSUER: http://localhost:${KEYCLOAK_PORT:-8081}/realms/learning
       OIDC_JWKS_URL: http://keycloak:8080/realms/learning/protocol/openid-connect/certs
       OIDC_AUDIENCE: learning
       DATABASE_URL: postgresql://identity:${IDENTITY_DB_PASSWORD:?Run scripts/setup.py or scripts/upgrade_local.py}@postgres:5432/identity?sslmode=disable
       KAFKA_BROKERS: kafka:9092
+      # Removes a deleted account's sign-in from Keycloak (ADR 0011).
+      KEYCLOAK_URL: http://keycloak:8080
+      ACCOUNTS_CLIENT_SECRET: ${IDENTITY_ACCOUNTS_CLIENT_SECRET:?Run scripts/upgrade_local.py}
     depends_on:
       keycloak:
         condition: service_started
@@ -188,7 +205,7 @@ services:
       context: .
       dockerfile: services/curriculum/Dockerfile
     environment:
-      OIDC_ISSUER: http://localhost:8081/realms/learning
+      OIDC_ISSUER: http://localhost:${KEYCLOAK_PORT:-8081}/realms/learning
       OIDC_JWKS_URL: http://keycloak:8080/realms/learning/protocol/openid-connect/certs
       OIDC_AUDIENCE: learning
       DATABASE_URL: postgresql://curriculum:${CURRICULUM_DB_PASSWORD:?Run scripts/setup.py or scripts/upgrade_local.py}@postgres:5432/curriculum?sslmode=disable
@@ -206,7 +223,7 @@ services:
       context: .
       dockerfile: services/content/Dockerfile
     environment:
-      OIDC_ISSUER: http://localhost:8081/realms/learning
+      OIDC_ISSUER: http://localhost:${KEYCLOAK_PORT:-8081}/realms/learning
       OIDC_JWKS_URL: http://keycloak:8080/realms/learning/protocol/openid-connect/certs
       OIDC_AUDIENCE: learning
       DATABASE_URL: postgresql://content:${CONTENT_DB_PASSWORD:?Run scripts/setup.py or scripts/upgrade_local.py}@postgres:5432/content?sslmode=disable
@@ -239,7 +256,7 @@ services:
       context: .
       dockerfile: services/assessment/Dockerfile
     environment:
-      OIDC_ISSUER: http://localhost:8081/realms/learning
+      OIDC_ISSUER: http://localhost:${KEYCLOAK_PORT:-8081}/realms/learning
       OIDC_JWKS_URL: http://keycloak:8080/realms/learning/protocol/openid-connect/certs
       OIDC_AUDIENCE: learning
       DATABASE_URL: postgresql://assessment:${ASSESSMENT_DB_PASSWORD:?Run scripts/setup.py or scripts/upgrade_local.py}@postgres:5432/assessment?sslmode=disable
@@ -261,7 +278,7 @@ services:
       context: .
       dockerfile: services/grading/Dockerfile
     environment:
-      OIDC_ISSUER: http://localhost:8081/realms/learning
+      OIDC_ISSUER: http://localhost:${KEYCLOAK_PORT:-8081}/realms/learning
       OIDC_JWKS_URL: http://keycloak:8080/realms/learning/protocol/openid-connect/certs
       OIDC_AUDIENCE: learning
       DATABASE_URL: postgresql://grading:${GRADING_DB_PASSWORD:?Run scripts/setup.py or scripts/upgrade_local.py}@postgres:5432/grading?sslmode=disable
@@ -287,7 +304,7 @@ services:
       context: .
       dockerfile: services/analytics/Dockerfile
     environment:
-      OIDC_ISSUER: http://localhost:8081/realms/learning
+      OIDC_ISSUER: http://localhost:${KEYCLOAK_PORT:-8081}/realms/learning
       OIDC_JWKS_URL: http://keycloak:8080/realms/learning/protocol/openid-connect/certs
       OIDC_AUDIENCE: learning
       DATABASE_URL: postgresql://analytics:${ANALYTICS_DB_PASSWORD:?Run scripts/setup.py or scripts/upgrade_local.py}@postgres:5432/analytics?sslmode=disable
@@ -310,7 +327,7 @@ services:
       context: .
       dockerfile: services/ai-core/Dockerfile
     environment:
-      OIDC_ISSUER: http://localhost:8081/realms/learning
+      OIDC_ISSUER: http://localhost:${KEYCLOAK_PORT:-8081}/realms/learning
       OIDC_JWKS_URL: http://keycloak:8080/realms/learning/protocol/openid-connect/certs
       OIDC_AUDIENCE: learning
       # Provider keys exist only in ai-core (ADR 0002). Unset: ai-core answers 503 AI_PROVIDER_NOT_CONFIGURED.
@@ -342,7 +359,7 @@ services:
       context: .
       dockerfile: services/question-generation-agent/Dockerfile
     environment:
-      OIDC_ISSUER: http://localhost:8081/realms/learning
+      OIDC_ISSUER: http://localhost:${KEYCLOAK_PORT:-8081}/realms/learning
       OIDC_JWKS_URL: http://keycloak:8080/realms/learning/protocol/openid-connect/certs
       OIDC_AUDIENCE: learning
       # Stateless (ADR 0006). Identity, Curriculum and Content get the teacher's own token; ai-core gets this
@@ -365,7 +382,7 @@ services:
       context: .
       dockerfile: services/student-performance-agent/Dockerfile
     environment:
-      OIDC_ISSUER: http://localhost:8081/realms/learning
+      OIDC_ISSUER: http://localhost:${KEYCLOAK_PORT:-8081}/realms/learning
       OIDC_JWKS_URL: http://keycloak:8080/realms/learning/protocol/openid-connect/certs
       OIDC_AUDIENCE: learning
     depends_on:
@@ -379,7 +396,7 @@ services:
       context: .
       dockerfile: services/question-chatbot-agent/Dockerfile
     environment:
-      OIDC_ISSUER: http://localhost:8081/realms/learning
+      OIDC_ISSUER: http://localhost:${KEYCLOAK_PORT:-8081}/realms/learning
       OIDC_JWKS_URL: http://keycloak:8080/realms/learning/protocol/openid-connect/certs
       OIDC_AUDIENCE: learning
       # Threads and messages only (ADR 0002). Run scripts/upgrade_local.py if .env predates this database.
@@ -407,8 +424,12 @@ services:
     build:
       context: .
       dockerfile: apps/web/Dockerfile
+    environment:
+      # Served to the app as /config.json and allowed by its Content-Security-Policy (apps/web/nginx.conf).
+      GATEWAY_URL: http://localhost:${KONG_PORT:-8000}
+      KEYCLOAK_URL: http://localhost:${KEYCLOAK_PORT:-8081}
     ports:
-    - 127.0.0.1:4200:80
+    - 127.0.0.1:${WEB_PORT:-4200}:80
     depends_on:
       kong:
         condition: service_healthy

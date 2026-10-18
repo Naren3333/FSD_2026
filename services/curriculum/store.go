@@ -10,19 +10,23 @@ import (
 
 // store is an organization's curriculum topics and their prerequisites.
 type store interface {
-	listTopics(ctx context.Context, org string) ([]Topic, error)
+	listTopics(ctx context.Context, org string, archived bool) ([]Topic, error)
 	findTopic(ctx context.Context, org, id string) (Topic, error)
 	insertTopic(ctx context.Context, id, org, name string) error
 	renameTopic(ctx context.Context, org, id, name string) (bool, error)
 	archiveTopic(ctx context.Context, org, id string) (bool, error)
+	restoreTopic(ctx context.Context, org, id string) (Topic, error)
 	insertPrerequisite(ctx context.Context, org, id, prerequisite string) (prerequisiteResult, error)
+	listPrerequisites(ctx context.Context, org, id string) ([]Topic, error)
+	deletePrerequisite(ctx context.Context, org, id, prerequisite string) (bool, error)
 }
 
 // pgStore is the store in the service's own Postgres database.
 type pgStore struct{ db *pgxpool.Pool }
 
-func (p pgStore) listTopics(ctx context.Context, org string) ([]Topic, error) {
-	rows, err := p.db.Query(ctx, "SELECT id,name FROM topics WHERE org_id=$1 AND NOT archived ORDER BY name,id LIMIT 200", org)
+// listTopics is the organization's active topics, or its archived ones, by name; up to 200.
+func (p pgStore) listTopics(ctx context.Context, org string, archived bool) ([]Topic, error) {
+	rows, err := p.db.Query(ctx, "SELECT id,name FROM topics WHERE org_id=$1 AND archived=$2 ORDER BY name,id LIMIT 200", org, archived)
 	if err != nil {
 		return nil, err
 	}
@@ -61,6 +65,12 @@ func (p pgStore) archiveTopic(ctx context.Context, org, id string) (bool, error)
 		return false, err
 	}
 	return res.RowsAffected() != 0, nil
+}
+
+// restoreTopic makes an archived topic in the organization active again; pgx.ErrNoRows when there is none.
+func (p pgStore) restoreTopic(ctx context.Context, org, id string) (Topic, error) {
+	return scanTopic(p.db.QueryRow(ctx,
+		"UPDATE topics SET archived=false WHERE id=$1 AND org_id=$2 AND archived RETURNING id,name", id, org))
 }
 
 type prerequisiteResult int
@@ -106,4 +116,19 @@ func (p pgStore) insertPrerequisite(ctx context.Context, org, id, prerequisite s
 		return prerequisiteAdded, err
 	}
 	return prerequisiteAdded, nil
+}
+
+// listPrerequisites is the topic's active prerequisites in the organization, by name; up to 200.
+func (p pgStore) listPrerequisites(ctx context.Context, org, id string) ([]Topic, error) {
+	rows, err := p.db.Query(ctx, "SELECT t.id,t.name FROM prerequisites p JOIN topics t ON t.id=p.prerequisite_id WHERE p.topic_id=$1 AND t.org_id=$2 AND NOT t.archived ORDER BY t.name,t.id LIMIT 200", id, org)
+	if err != nil {
+		return nil, err
+	}
+	return pgx.CollectRows(rows, func(row pgx.CollectableRow) (Topic, error) { return scanTopic(row) })
+}
+
+// deletePrerequisite reports whether the organization's topic had that prerequisite.
+func (p pgStore) deletePrerequisite(ctx context.Context, org, id, prerequisite string) (bool, error) {
+	tag, err := p.db.Exec(ctx, "DELETE FROM prerequisites p USING topics t WHERE p.topic_id=$1 AND p.prerequisite_id=$2 AND t.id=p.topic_id AND t.org_id=$3", id, prerequisite, org)
+	return tag.RowsAffected() == 1, err
 }

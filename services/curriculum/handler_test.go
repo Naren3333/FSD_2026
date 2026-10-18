@@ -8,6 +8,8 @@ import (
 	"learning/platform/platformtest"
 	"net/http"
 	"net/http/httptest"
+	"slices"
+	"strings"
 	"testing"
 )
 
@@ -18,9 +20,10 @@ const (
 
 // memoryStore keeps topics by id and prerequisite edges; it answers a cycle when the reverse edge exists.
 type memoryStore struct {
-	topics map[string]Topic
-	edges  map[[2]string]bool
-	broken bool // every call fails as if the database were down
+	topics   map[string]Topic
+	archived map[string]Topic
+	edges    map[[2]string]bool
+	broken   bool // every call fails as if the database were down
 }
 
 func newMemoryStore() *memoryStore {
@@ -29,13 +32,25 @@ func newMemoryStore() *memoryStore {
 			topicA: {topicA, "Add fractions"},
 			topicB: {topicB, "Compare fractions"},
 		},
-		edges: map[[2]string]bool{},
+		archived: map[string]Topic{},
+		edges:    map[[2]string]bool{},
 	}
 }
 
 var errDown = errors.New("connection refused")
 
-func (m *memoryStore) listTopics(context.Context, string) ([]Topic, error) { return nil, nil }
+func (m *memoryStore) listTopics(_ context.Context, _ string, archived bool) ([]Topic, error) {
+	from := m.topics
+	if archived {
+		from = m.archived
+	}
+	result := []Topic{}
+	for _, v := range from {
+		result = append(result, v)
+	}
+	slices.SortFunc(result, func(a, b Topic) int { return strings.Compare(a.Name, b.Name) })
+	return result, nil
+}
 
 func (m *memoryStore) findTopic(_ context.Context, _, id string) (Topic, error) {
 	if m.broken {
@@ -68,8 +83,19 @@ func (m *memoryStore) archiveTopic(_ context.Context, _, id string) (bool, error
 	if _, ok := m.topics[id]; !ok {
 		return false, nil
 	}
+	m.archived[id] = m.topics[id]
 	delete(m.topics, id)
 	return true, nil
+}
+
+func (m *memoryStore) restoreTopic(_ context.Context, _, id string) (Topic, error) {
+	v, ok := m.archived[id]
+	if !ok {
+		return Topic{}, platform.ErrNotFound
+	}
+	delete(m.archived, id)
+	m.topics[id] = v
+	return v, nil
 }
 
 func (m *memoryStore) insertPrerequisite(_ context.Context, _, id, prerequisite string) (prerequisiteResult, error) {
@@ -78,6 +104,23 @@ func (m *memoryStore) insertPrerequisite(_ context.Context, _, id, prerequisite 
 	}
 	m.edges[[2]string{id, prerequisite}] = true
 	return prerequisiteAdded, nil
+}
+
+func (m *memoryStore) listPrerequisites(_ context.Context, _, id string) ([]Topic, error) {
+	result := []Topic{}
+	for edge := range m.edges {
+		if v, ok := m.topics[edge[1]]; ok && edge[0] == id {
+			result = append(result, v)
+		}
+	}
+	return result, nil
+}
+
+func (m *memoryStore) deletePrerequisite(_ context.Context, _, id, prerequisite string) (bool, error) {
+	edge := [2]string{id, prerequisite}
+	found := m.edges[edge]
+	delete(m.edges, edge)
+	return found, nil
 }
 
 func call(t *testing.T, store store, method, path, body string, roles ...string) *httptest.ResponseRecorder {
@@ -165,6 +208,50 @@ func TestArchive(t *testing.T) {
 	}
 }
 
+func TestAnArchivedTopicIsListedApartAndCanBeRestored(t *testing.T) {
+	store := newMemoryStore()
+	if w := call(t, store, http.MethodDelete, "/v1/topics/"+topicA, "", "teacher"); w.Code != http.StatusNoContent {
+		t.Fatalf("archive: %d", w.Code)
+	}
+	list := func(query string, role string) string {
+		t.Helper()
+		w := call(t, store, http.MethodGet, "/v1/topics"+query, "", role)
+		if w.Code != http.StatusOK {
+			t.Fatalf("list %q: %d %s", query, w.Code, w.Body.String())
+		}
+		return strings.TrimSpace(w.Body.String())
+	}
+	archived := `[{"id":"` + topicA + `","name":"Add fractions"}]`
+	if got := list("?archived=true", "student"); got != archived {
+		t.Fatalf("archived list for a student: %s", got)
+	}
+	if got := list("", "teacher"); strings.Contains(got, topicA) {
+		t.Fatalf("archived topic in the active list: %s", got)
+	}
+	if got := list("?archived=false", "teacher"); got != list("", "teacher") {
+		t.Fatalf("archived=false differs from the default: %s", got)
+	}
+	if w := call(t, store, http.MethodGet, "/v1/topics?archived=yes", "", "teacher"); w.Code != http.StatusUnprocessableEntity {
+		t.Fatalf("archived=yes: %d", w.Code)
+	}
+
+	if w := call(t, store, http.MethodPost, "/v1/topics/"+topicA+"/restore", "", "student"); w.Code != http.StatusForbidden {
+		t.Fatalf("student restore: %d", w.Code)
+	}
+	w := call(t, store, http.MethodPost, "/v1/topics/"+topicA+"/restore", "", "teacher")
+	if w.Code != http.StatusOK || strings.TrimSpace(w.Body.String()) != `{"id":"`+topicA+`","name":"Add fractions"}` {
+		t.Fatalf("restore: %d %s", w.Code, w.Body.String())
+	}
+	if got := list("?archived=true", "teacher"); got != "[]" {
+		t.Fatalf("restored topic still archived: %s", got)
+	}
+	for _, id := range []string{topicA, topicB, "not-a-uuid"} { // now active, never archived, malformed
+		if w := call(t, store, http.MethodPost, "/v1/topics/"+id+"/restore", "", "teacher"); w.Code != http.StatusNotFound {
+			t.Errorf("restore %s: %d", id, w.Code)
+		}
+	}
+}
+
 func TestAMalformedPathIDIsNotFoundBeforeTheBodyIsRead(t *testing.T) {
 	for _, tc := range [][2]string{{http.MethodPatch, "/v1/topics/x"}, {http.MethodPost, "/v1/topics/x/prerequisites"}} {
 		if w := call(t, newMemoryStore(), tc[0], tc[1], "not json", "teacher"); w.Code != http.StatusNotFound {
@@ -203,5 +290,31 @@ func TestStudentsCannotChangeTheCurriculum(t *testing.T) {
 	}
 	if _, ok := store.topics[topicA]; !ok || len(store.edges) != 0 || store.topics[topicB].Name != "Compare fractions" {
 		t.Fatalf("the curriculum changed: %v %v", store.topics, store.edges)
+	}
+}
+
+func TestPrerequisitesAreListedAndOnlyATeacherRemovesThem(t *testing.T) {
+	store := newMemoryStore()
+	if w := call(t, store, http.MethodPost, "/v1/topics/"+topicA+"/prerequisites", `{"prerequisite_id":"`+topicB+`"}`, "teacher"); w.Code != http.StatusOK {
+		t.Fatalf("add: %d %s", w.Code, w.Body.String())
+	}
+	list := "/v1/topics/" + topicA + "/prerequisites"
+	if w := call(t, store, http.MethodGet, list, "", "student"); w.Code != http.StatusOK || !strings.Contains(w.Body.String(), "Compare fractions") {
+		t.Fatalf("list: %d %s", w.Code, w.Body.String())
+	}
+	edge := list + "/" + topicB
+	if w := call(t, store, http.MethodDelete, edge, "", "student"); w.Code != http.StatusForbidden {
+		t.Fatalf("a student removed a prerequisite: %d", w.Code)
+	}
+	if w := call(t, store, http.MethodDelete, edge, "", "teacher"); w.Code != http.StatusNoContent {
+		t.Fatalf("remove: %d %s", w.Code, w.Body.String())
+	}
+	for _, path := range []string{edge, list + "/not-an-id"} {
+		if w := call(t, store, http.MethodDelete, path, "", "teacher"); w.Code != http.StatusNotFound {
+			t.Errorf("%s: %d", path, w.Code)
+		}
+	}
+	if w := call(t, store, http.MethodGet, "/v1/topics/"+topicB+"0/prerequisites", "", "teacher"); w.Code != http.StatusNotFound {
+		t.Errorf("an unknown topic's prerequisites: %d", w.Code)
 	}
 }

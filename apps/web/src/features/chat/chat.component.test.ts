@@ -4,7 +4,7 @@ import { TestBed } from '@angular/core/testing';
 import { BrowserTestingModule, platformBrowserTesting } from '@angular/platform-browser/testing';
 import { beforeAll, describe, expect, it, vi } from 'vitest';
 import { ChatApi, ContentApi } from '../../api/clients';
-import type { StreamEvent, Thread } from '../../api/models';
+import type { Citation, StreamEvent, Thread } from '../../api/models';
 import { AiUsage } from '../../core/ai-usage';
 import { ClassroomContext } from '../../core/classroom-context';
 import { resetTime } from '../../shared/format';
@@ -154,5 +154,43 @@ describe('a chat answer that fails', () => {
     expect(page.form.dirty).toBe(true);
     expect(page.messages.value()).toEqual([]);
     expect(usage.refresh).toHaveBeenCalled();
+  });
+});
+
+describe('a source whose material was deleted', () => {
+  it('loads no figure for it', async () => {
+    const content = { figure: vi.fn(() => Promise.resolve('blob:figure')) };
+    TestBed.resetTestingModule();
+    TestBed.configureTestingModule({
+      providers: [
+        {
+          provide: ChatApi,
+          useValue: { threads: () => Promise.resolve({ threads: [] as Thread[] }) },
+        },
+        { provide: ContentApi, useValue: content },
+        { provide: AiUsage, useValue: { refresh: () => undefined } },
+        { provide: ClassroomContext, useValue: { classroomId: signal('c1') } },
+      ],
+    });
+    TestBed.overrideComponent(ChatComponent, { set: { template: '', imports: [] } });
+    const page = TestBed.createComponent(ChatComponent).componentInstance;
+    const source: Citation = {
+      chunk_id: 'k1',
+      document_id: 'd1',
+      title: 'Notes',
+      page_start: 1,
+      page_end: 1,
+      kind: 'figure',
+      source: 'pdf',
+      content: '',
+      image: null,
+      removed: true,
+    };
+    const opened = { target: { open: true } } as unknown as Event;
+    page.reveal(opened, source);
+    page.reveal(opened, { ...source, image: 'figure.png' });
+    expect(content.figure).not.toHaveBeenCalled();
+    page.reveal(opened, { ...source, image: 'figure.png', removed: false });
+    expect(content.figure).toHaveBeenCalledWith('d1', 'figure.png');
   });
 });

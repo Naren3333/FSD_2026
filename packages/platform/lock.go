@@ -14,6 +14,8 @@ const (
 	LockClassroom     = "classroom"     // a classroom's purge against new rows in it
 	LockPrerequisites = "prerequisites" // an organization's prerequisite inserts, against cycles
 	LockStudentWork   = "student-work"  // one student's saving and submitting of one assessment
+	LockAssessment    = "assessment"    // a deleted assessment's purge against new rows for it
+	LockUser          = "user"          // a deleted account's purge against new rows for it
 )
 
 const (

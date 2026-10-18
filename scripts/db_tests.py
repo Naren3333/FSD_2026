@@ -8,17 +8,18 @@
 Each suite gets its own scratch database, created once and owned by a service's role (`identity_test`,
 `grading_test`, ...), so no service's real data is touched; every test then works in a throwaway schema of it. The
 tests run in containers on the Compose network because PostgreSQL is not published to the host. ai-core is faked
-inside the tests.
+inside the tests. They use the stack that COMPOSE_PROJECT_NAME names (the development one if unset);
+scripts/stack_tests.py runs them in the disposable test stack.
 """
 
 import os
 import subprocess
 
-from local_stack import ROOT, env, psql_value
+from local_stack import ROOT, env, project, psql_value
 from setup import password_key
 
 GO_IMAGE = "golang:1.25.7-alpine"
-NETWORK = "learning-foundation_default"
+NETWORK = f"{project()}_default"
 PYTEST = "pytest==8.4.1"  # the version in requirements-dev.lock
 
 # Go module directory, its tests' environment variable, the role owning its scratch database, extensions.

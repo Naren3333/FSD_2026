@@ -1,0 +1,43 @@
+@let id = 'question-' + index + '-points';
+<div class="scheme" role="group" [attr.aria-labelledby]="id + '-heading'">
+  <h4 [id]="id + '-heading'">Marking points (optional)</h4>
+  <p class="caption">
+    Up to {{ maxExcerpts }} notes on what earns the marks. AI suggestions read them with the
+    {{ freeResponse ? 'rubric' : 'accepted answers' }} when they suggest marks for this question; students
+    never see them.
+  </p>
+
+  @for (excerpt of excerpts(); track $index; let p = $index) {
+    <div class="scheme-passage">
+      <p class="caption">{{ source(excerpt) }}</p>
+      <p class="passage">{{ excerpt.text }}</p>
+      <button type="button" class="secondary" (click)="remove(p)" [disabled]="disabled">
+        Remove marking point {{ p + 1 }}<span class="visually-hidden"> from question {{ index + 1 }}</span>
+      </button>
+    </div>
+  } @empty {
+    <p class="empty">No marking points yet. Write one below if it helps.</p>
+  }
+
+  @if (!full()) {
+    <app-field
+      [controlId]="id + '-new'"
+      label="Add a marking point"
+      [hint]="writtenLength() + ' of ' + maxText + ' characters'"
+      [error]="'A marking point has at most ' + maxText + ' characters.'"
+      [invalid]="writtenLength() > maxText"
+    >
+      <textarea appFieldControl [id]="id + '-new'" [formControl]="written" rows="3"></textarea>
+    </app-field>
+    <button
+      type="button"
+      class="secondary"
+      (click)="add()"
+      [disabled]="disabled || !written.value.trim() || writtenLength() > maxText"
+    >
+      Add marking point<span class="visually-hidden"> to question {{ index + 1 }}</span>
+    </button>
+  } @else {
+    <p class="caption">This question has the most marking points it can take. Remove one to add another.</p>
+  }
+</div>

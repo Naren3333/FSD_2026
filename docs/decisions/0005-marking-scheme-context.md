@@ -1,6 +1,6 @@
 # ADR 0005: Marking-scheme passages as context for AI marking suggestions
 
-Status: accepted 2026-10-17. The project owner chose the teacher-picked passages option over Grading fetching them at marking time and Assessment fetching them at publish.
+Status: accepted 2026-10-17. The project owner chose the teacher-picked passages option over Grading fetching them at marking time and Assessment fetching them at publish. Partly superseded 2026-10-18 by ADR 0009: marking schemes are no longer uploaded or searched; the passages stay as marking points the teacher writes, and the event and Grading parts below still hold.
 
 ## Context
 
