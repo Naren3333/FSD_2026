@@ -45,6 +45,7 @@ def test_no_unguarded_secret_in_compose() -> None:
         *("GO_DB_POOL_MAX", "PYTHON_DB_POOL_MAX", "DB_POOL_MIN"),
         *("SELECTIVE_VISION", "CHUNK_TOKENS", "CHUNK_OVERLAP", "SLIDE_CHUNKS"),
         *("ADAPTIVE_REWRITE", "ADAPTIVE_SEARCH", "CHAT_CONTEXT_TOKENS"),
+        "AI_TOTAL_SPEND_LIMIT_USD",
     }
 
 

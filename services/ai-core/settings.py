@@ -1,6 +1,7 @@
 """ai-core settings, read once from the environment. Provider keys exist only here (ADR 0002)."""
 
 import json
+import math
 import os
 from dataclasses import dataclass, field
 from functools import lru_cache
@@ -46,8 +47,7 @@ class Settings:
     spend_limit_student_usd: float = SPEND_LIMIT_STUDENT_USD
     spend_limit_teacher_usd: float = SPEND_LIMIT_TEACHER_USD
     spend_timezone: str = SPEND_TIMEZONE
-    # Paid calls one user may have running at once (inference and rerank). The allowance is checked before a call
-    # and charged after it, so this bounds how far calls already running can take a user past it.
+    # Running requests per user, shared across replicas through PostgreSQL reservations (including ingest).
     user_concurrency: int = USER_CONCURRENCY
     ingest_max_pages: int = INGEST_MAX_PAGES
     ingest_max_chunks: int = INGEST_MAX_CHUNKS
@@ -57,8 +57,14 @@ class Settings:
     chunk_tokens: int = 600
     chunk_overlap: int = 90
     slide_chunks: bool = True
+    # Optional operational ceiling across every user and all usage retained in this ledger; never a daily reset.
+    total_spend_limit_usd: float | None = None
 
     def __post_init__(self) -> None:
+        if self.total_spend_limit_usd is not None and (
+            not math.isfinite(self.total_spend_limit_usd) or self.total_spend_limit_usd <= 0
+        ):
+            raise ValueError("AI_TOTAL_SPEND_LIMIT_USD must be finite and positive")
         if not 200 <= self.chunk_tokens <= 2000 or not 0 <= self.chunk_overlap < self.chunk_tokens // 2:
             raise ValueError("CHUNK_TOKENS must be 200–2000; CHUNK_OVERLAP must be less than half of it")
         if not 1 <= self.user_concurrency <= 100:
@@ -103,4 +109,5 @@ def get_settings() -> Settings:
         chunk_tokens=int(env("CHUNK_TOKENS") or 600),
         chunk_overlap=int(env("CHUNK_OVERLAP") or 90),
         slide_chunks=_flag("SLIDE_CHUNKS", True),
+        total_spend_limit_usd=float(total) if (total := env("AI_TOTAL_SPEND_LIMIT_USD")) else None,
     )

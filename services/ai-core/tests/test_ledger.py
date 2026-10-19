@@ -98,6 +98,31 @@ async def test_shared_concurrency_and_organisation_isolation(pinned: Pinned) -> 
     await pinned.ledger.reserve(str(uuid4()), who, 1.0, 1)
 
 
+async def test_total_ceiling_is_shared_by_different_users_and_keeps_recorded_usage(
+    pinned: Pinned, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    settings = configured(total_spend_limit_usd=4.0)
+    monkeypatch.setattr("spend.get_settings", lambda: settings)
+    first, second = billed(str(uuid4())), billed(str(uuid4()), "org-b")
+    ids = str(uuid4()), str(uuid4())
+    results = await asyncio.gather(
+        pinned.ledger.reserve(ids[0], first, 3.0, 10),
+        pinned.ledger.reserve(ids[1], second, 3.0, 10),
+        return_exceptions=True,
+    )
+    assert sum(r is None for r in results) == 1
+    [blocked] = [r for r in results if isinstance(r, HTTPException)]
+    assert blocked.detail["code"] == "AI_TOTAL_SPEND_LIMIT"
+    winner = 0 if results[0] is None else 1
+    await pinned.ledger.record_reserved(
+        ids[winner], (first, second)[winner], spend.Charge("embed", "m", 1, 0, 3.0), "test"
+    )
+    await pinned.ledger.release(ids[winner])
+    with pytest.raises(HTTPException) as exc:
+        await pinned.ledger.reserve(str(uuid4()), billed(str(uuid4())), 2.0, 10)
+    assert exc.value.detail["code"] == "AI_TOTAL_SPEND_LIMIT"
+
+
 async def test_usage_and_reservation_settle_in_one_transaction(pinned: Pinned) -> None:
     who = billed(str(uuid4()))
     reservation = str(uuid4())

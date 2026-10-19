@@ -135,6 +135,21 @@ class PostgresLedger(AsyncPooled):
 
     async def reserve(self, reservation: str, billed: Billed, amount: float, concurrency: int) -> None:
         async with self.pool.connection() as conn, conn.transaction():
+            total_limit = get_settings().total_spend_limit_usd
+            if total_limit is not None:
+                # Lock before the per-user lock so users and replicas cannot spend the same global allowance.
+                await lock_async(conn, "ai-budget", "all-users")
+                total = await (
+                    await conn.execute(
+                        """SELECT (SELECT coalesce(sum(cost_usd),0) FROM usage)
+                        +(SELECT coalesce(sum(amount),0) FROM budget_reservations) AS committed"""
+                    )
+                ).fetchone()
+                assert total is not None
+                if float(total["committed"]) + amount > total_limit:
+                    raise failure(
+                        429, "AI_TOTAL_SPEND_LIMIT", "The shared AI spend ceiling has been reached."
+                    )
             await lock_async(conn, "ai-budget", billed.org_id + ":" + billed.user_id)
             cur = await conn.execute(
                 """SELECT

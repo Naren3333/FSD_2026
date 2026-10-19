@@ -72,5 +72,12 @@ def test_the_scan_finds_provider_code(tmp_path: Path) -> None:
     }
     for name, text in planted.items():
         (tmp_path / name).write_text(text, encoding="utf-8")
-    assert provider_code([tmp_path]) == ["a.py", "b.py", "c.go", "d.ts", "requirements.txt"]
+    # Scratch files can live inside the workspace on Windows, where the scanner reports repo-relative paths.
+    assert [Path(name).name for name in provider_code([tmp_path])] == [
+        "a.py",
+        "b.py",
+        "c.go",
+        "d.ts",
+        "requirements.txt",
+    ]
     assert provider_code([ROOT / "services" / "ai-core"]) != []

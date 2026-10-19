@@ -112,7 +112,7 @@ async def embed(texts: list[str], tally: Tally | None = None) -> tuple[list[list
         batch = texts[start : start + EMBED_BATCH]
         # encoding_format left unset: the SDK then requests base64 and decodes it to floats itself.
         create = functools.partial(client.embeddings.create, model=model, input=batch, timeout=TIMEOUT)
-        result = await call(lambda create=create, batch=batch: budget.guarded(create, model, batch))
+        result = await call(functools.partial(budget.guarded, create, model, batch))
         # Place by OpenAI's index rather than trusting the order of `data`.
         placed: list[list[float]] = [[] for _ in batch]
         for item in result.data:

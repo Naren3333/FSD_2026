@@ -209,7 +209,7 @@ export class AssessmentApi {
       `/assessments/page?classroom_id=${id(classroomId)}&offset=${offset}&limit=${limit}`,
     );
   }
-  /** For the classroom's teacher: its 100 newest assessments with how many students submitted each. */
+  /** For the classroom's teacher: complete progress metadata read through bounded pages. */
   progress(classroomId: string): Promise<AssessmentProgress[]> {
     return allPages((offset, limit) =>
       this.gateway.request<{ items: AssessmentProgress[]; total: number }>(
