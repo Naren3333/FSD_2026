@@ -31,7 +31,7 @@ import local_cache
 import openai_client
 import pdf
 from ingest import costs, rescue, reuse, vision
-from ingest.chunker import PATH_SEPARATOR, Chunk, chunk_paras
+from ingest.chunker import PATH_SEPARATOR, Chunk, chunk_paras, encoding
 from ingest.headings import outline
 from ingest.parse import Document, IngestError, open_checked, read_pages
 from ingest.select import select_pages
@@ -100,6 +100,7 @@ async def ingest(path: Path, title: str, vision_cfg: VisionConfig | None) -> Ing
         raise IngestError(
             "TOO_LARGE", f"{len(chunks)} chunks, more than the {settings.ingest_max_chunks} allowed"
         )
+    chunks = await asyncio.to_thread(_storage_chunks, chunks)
     texts = [embed_text(title, c) for c in chunks]
     tally = openai_client.Tally()
     with costs.stage("embed"):
@@ -234,6 +235,37 @@ async def _prepared(path: Path, cfg: VisionConfig | None) -> tuple[int, int, lis
         log.info("prepared_cache", extra={"hit": False})
         increment("learning_prepared_cache_misses_total")
         return len(document.pages), len(document.ocr_pages), chunks, crops
+
+
+def _storage_chunks(chunks: list[Chunk]) -> list[Chunk]:
+    """Normalize missing PDF glyphs before embedding and storage, including older prepared-cache entries.
+
+    PostgreSQL text cannot contain NUL. Keep an explicit replacement glyph instead of silently joining words.
+    Exact embedding keys change only for affected chunks, so retrying need not pay for vision again.
+    """
+
+    def optional(text: str | None) -> str | None:
+        return text.replace("\x00", "\ufffd") if text is not None else None
+
+    cleaned = []
+    for chunk in chunks:
+        values = (chunk.content, chunk.embed_body, chunk.section_path, chunk.label, *chunk.cites)
+        if not any(text is not None and "\x00" in text for text in values):
+            cleaned.append(chunk)
+            continue
+        content = chunk.content.replace("\x00", "\ufffd")
+        cleaned.append(
+            replace(
+                chunk,
+                content=content,
+                embed_body=optional(chunk.embed_body),
+                section_path=optional(chunk.section_path),
+                label=optional(chunk.label),
+                cites=tuple(s.replace("\x00", "\ufffd") for s in chunk.cites),
+                token_count=len(encoding().encode(content, disallowed_special=())),
+            )
+        )
+    return cleaned
 
 
 def embed_text(title: str, chunk: Chunk) -> str:

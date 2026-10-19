@@ -10,7 +10,7 @@ from fastapi.testclient import TestClient
 
 import budget
 import spend
-from ingest.chunker import chunk_paras
+from ingest.chunker import Chunk, chunk_paras, encoding
 from ingest.headings import Para
 from ingest.select import select_pages
 
@@ -44,6 +44,28 @@ def test_slide_boundaries_and_zero_overlap_are_explicit() -> None:
     assert [c.ordinal for c in chunks] == [0, 1]
     with pytest.raises(ValueError):
         chunk_paras(paras, max_tokens=200, overlap=150)
+
+
+def test_cached_pdf_nul_glyphs_are_normalized_before_embedding_and_storage(
+    api: TestClient, embeddings: FakeOpenAI, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    async def prepared(*_args: object) -> tuple[int, int, list[Chunk], dict[str, bytes]]:
+        chunk = Chunk(
+            0, "Missing \x00 glyph", 1, 1, 0,
+            section_path="Heading\x00", embed_body="Body\x00", label="figure\x00", cites=("table\x00",),
+        )  # fmt: skip
+        return 1, 0, [chunk], {}
+
+    monkeypatch.setattr("ingest._prepared", prepared)
+    result = ingested(api, make_pdf(text_="A readable document for ingestion."))
+    [chunk] = result["chunks"]
+    assert chunk["content"] == "Missing \ufffd glyph"
+    assert chunk["token_count"] == len(encoding().encode(chunk["content"]))
+    assert chunk["section_path"] == "Heading\ufffd" and chunk["cites"] == ["table\ufffd"]
+    assert chunk["label"] == "figure\ufffd"
+    assert all("\x00" not in text for text in (chunk["content"], chunk["embed_text"], *chunk["cites"]))
+    assert embeddings.requests[-1]["input"] == [chunk["embed_text"]]
+    assert "Body\ufffd" in chunk["embed_text"]
 
 
 @pytest.mark.anyio
