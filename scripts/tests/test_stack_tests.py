@@ -4,15 +4,18 @@ tests needs Docker."""
 
 import importlib
 import json
+import os
 import re
 import subprocess
 from pathlib import Path
 
 import local_stack
 import pytest
+import scale_demo
 import setup
 import stack_tests
 import wait_ready
+import yaml
 
 ROOT = Path(__file__).resolve().parents[2]
 
@@ -170,3 +173,25 @@ def test_rejects_an_unknown_suite(monkeypatch: pytest.MonkeyPatch) -> None:
     with pytest.raises(SystemExit) as stopped:
         stack_tests.main()
     assert stopped.value.code == 2
+
+
+def test_the_scale_demo_runs_only_when_named(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A run without suites leaves the load test out; naming it adds its Compose file after any already set."""
+    assert "scale" in stack_tests.SUITES and "scale" not in stack_tests.DEFAULT_SUITES
+    monkeypatch.setitem(stack_tests.TEST_ENV, "COMPOSE_FILE", "docker-compose.yml")
+    stack_tests.with_scale_file()
+    assert stack_tests.TEST_ENV["COMPOSE_FILE"].split(os.pathsep) == [
+        "docker-compose.yml",
+        "docker-compose.scale.yml",
+    ]
+
+
+def test_the_scaled_services_can_run_as_replicas() -> None:
+    """docker-compose.scale.yml replicates the services scale_demo.py measures, and none of them fixes a container
+    name or a host port, which only one replica could hold."""
+    base = yaml.safe_load((ROOT / "docker-compose.yml").read_text(encoding="utf-8"))["services"]
+    scaled = yaml.safe_load((ROOT / "docker-compose.scale.yml").read_text(encoding="utf-8"))["services"]
+    replicated = {name for name, service in scaled.items() if "replicas" in service.get("deploy", {})}
+    assert replicated == set(scale_demo.SCALED)
+    for name in replicated:
+        assert "container_name" not in base[name] and "ports" not in base[name], name

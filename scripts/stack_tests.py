@@ -9,6 +9,7 @@ its volumes; --keep leaves it running to look at afterwards (the next run replac
     python scripts/stack_tests.py                     # integration, db and e2e
     python scripts/stack_tests.py integration --live-ai
     python scripts/stack_tests.py e2e --keep
+    python scripts/stack_tests.py scale               # the scale-out load test (scripts/scale_demo.py), only when named
 """
 
 import argparse
@@ -28,7 +29,12 @@ SUITES: dict[str, tuple[list[str], Path]] = {
     "integration": ([sys.executable, "scripts/integration.py"], ROOT),
     "db": ([sys.executable, "scripts/db_tests.py"], ROOT),
     "e2e": ([NPM, "run", "test:e2e"], ROOT / "apps/web"),
+    "scale": ([sys.executable, "scripts/scale_demo.py"], ROOT),
 }
+# The suites a run without any named runs. The scale demo is a load test, not a check, so it runs only when named.
+DEFAULT_SUITES = ["integration", "db", "e2e"]
+# Compose files the scale demo adds: its replicas, CPU caps and the k6 load generator.
+SCALE_FILE = "docker-compose.scale.yml"
 READY_TIMEOUT = 600  # seconds: a fresh stack imports the realm and runs every migration before it answers
 # The test stack's PostgreSQL init script and realm import, beside the development stack's in .local (relative to
 # the repository, as docker-compose.yml's LOCAL_CONFIG_DIR reads it).
@@ -67,6 +73,13 @@ def refresh_local_files() -> None:
     (local / "learning-realm.json").write_text(json.dumps(import_, indent=2), encoding="utf-8")
 
 
+def with_scale_file() -> None:
+    """Adds docker-compose.scale.yml to the Compose files every command of this run uses, after any COMPOSE_FILE
+    already names (Compose separates them with the platform's path separator)."""
+    files = TEST_ENV.get("COMPOSE_FILE") or "docker-compose.yml"
+    TEST_ENV["COMPOSE_FILE"] = os.pathsep.join([files, SCALE_FILE])
+
+
 def run_suite(name: str, live_ai: bool) -> bool:
     command, cwd = SUITES[name]
     if name == "integration" and live_ai:
@@ -83,7 +96,10 @@ def main() -> None:
         description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
     )
     parser.add_argument(
-        "suites", nargs="*", metavar="suite", help=f"any of {', '.join(SUITES)} (default: all)"
+        "suites",
+        nargs="*",
+        metavar="suite",
+        help=f"any of {', '.join(SUITES)} (default: {', '.join(DEFAULT_SUITES)})",
     )
     parser.add_argument("--keep", action="store_true", help="leave the test stack running afterwards")
     parser.add_argument("--no-build", action="store_true", help="reuse the images the last run built")
@@ -94,7 +110,9 @@ def main() -> None:
     unknown = [s for s in args.suites if s not in SUITES]
     if unknown:
         parser.error(f"unknown suite {', '.join(unknown)}; choose from {', '.join(SUITES)}")
-    suites = [s for s in SUITES if s in args.suites] if args.suites else list(SUITES)
+    suites = [s for s in SUITES if s in args.suites] if args.suites else DEFAULT_SUITES
+    if "scale" in suites:
+        with_scale_file()
 
     refresh_local_files()
     # Whatever an earlier --keep or interrupted run left, volumes included: every run starts from empty.

@@ -1,0 +1,35 @@
+# Horizontal scaling (docs/architecture/scalability.md): three replicas of each service on the submission path, each
+# capped at REPLICA_CPUS (default a quarter of a CPU) as if it ran on its own small node. On one computer more
+# replicas only share the same CPUs; the cap is what lets the load test show added replicas adding capacity.
+#
+#   python scripts/stack_tests.py scale        # the load test on the disposable test stack (scripts/scale_demo.py)
+#   docker compose -f docker-compose.yml -f docker-compose.scale.yml up -d     # the development stack, scaled
+#
+# Kong finds every replica through Compose's DNS (it re-resolves every 5 s), outbox relays and job workers share their
+# tables with FOR UPDATE SKIP LOCKED, and each service's Kafka consumers form one group, so a replica added or lost
+# needs no other change.
+x-replicated: &replicated
+  deploy:
+    replicas: 3
+    resources:
+      limits:
+        cpus: ${REPLICA_CPUS:-0.25}
+
+services:
+  postgres:
+    # Each replica opens a pool of up to 10 connections (packages/platform/db.go), so three replicas of three
+    # services need more than PostgreSQL's default of 100.
+    command: [postgres, -c, max_connections=300]
+  identity: *replicated
+  assessment: *replicated
+  grading: *replicated
+  # The load generator (scripts/load/deadline.js). Its profile keeps it out of `up`; scripts/scale_demo.py runs it
+  # with `docker compose run`, on the stack's own network, so it reaches Kong as kong:8000.
+  k6:
+    image: grafana/k6:1.0.0
+    profiles: [load]
+    environment:
+      BASE_URL: http://kong:8000/api
+    volumes:
+    - ./scripts/load:/scripts:ro
+    - ./.local/scale-demo:/work:ro
