@@ -8,7 +8,7 @@ from pathlib import Path
 
 # The daily AI allowance defaults (ADR 0003), in USD per user per day, and the zone whose midnight starts the day.
 SPEND_LIMIT_STUDENT_USD, SPEND_LIMIT_TEACHER_USD, SPEND_TIMEZONE = 5.0, 10.0, "Asia/Singapore"
-USER_CONCURRENCY = 4
+USER_CONCURRENCY = 10
 # The largest PDF ingest takes, in pages and in chunks: past either it fails TOO_LARGE. Pages are checked before any
 # model call; chunks before the embeddings.
 INGEST_MAX_PAGES, INGEST_MAX_CHUNKS = 500, 5000

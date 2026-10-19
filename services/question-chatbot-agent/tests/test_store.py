@@ -57,6 +57,7 @@ async def test_turns_keep_history_title_and_answers(store: PostgresStore) -> Non
                 "kind": "text", "source": "pdf", "content": "Light.", "image": None}  # fmt: skip
     answer_id = await store.save_answer(tid, {
         "content": f"Light [doc:{chunk}].", "outcome": "answered", "rewritten_query": "photosynthesis",
+        "sub_queries": ["light reactions", "Calvin cycle"],
         "is_on_topic": True, "retrieved_chunk_ids": [chunk], "citations": [citation],
         "prompt_version": "teacher.v1", "model": "gpt-test", "usage_tokens": 42, "latency_ms": 900,
     })  # fmt: skip
@@ -69,6 +70,9 @@ async def test_turns_keep_history_title_and_answers(store: PostgresStore) -> Non
         ("user", None),
     ]
     assert str(messages[1]["id"]) == answer_id and messages[1]["citations"] == [citation]
+    async with store.pool.connection() as conn:
+        cur = await conn.execute("SELECT sub_queries FROM messages WHERE id=%s", (answer_id,))
+        assert await cur.fetchone() == {"sub_queries": ["light reactions", "Calvin cycle"]}
     thread = await store.thread("org", user, tid)
     assert thread is not None and thread["title"] == ("What is photosynthesis? " * 10)[:80]
 
@@ -195,3 +199,33 @@ async def test_a_deleted_accounts_threads_go_and_none_is_created_for_it(store: P
     assert await store.list_threads("org", gone, None) == []
     assert len(await store.list_threads("org", kept, None)) == 1
     assert await store.create_thread("org", gone, "student", ROOM) is None
+
+
+async def test_one_answer_at_a_time_per_user(store: PostgresStore) -> None:
+    user = str(uuid4())
+    first, second = [str((await store.create_thread("org", user, "student", ROOM))["id"]) for _ in range(2)]
+    other = str((await store.create_thread("org", str(uuid4()), "student", ROOM))["id"])
+    # Two tabs at once: exactly one gets the answer slot, in either thread.
+    assert sorted(await asyncio.gather(store.claim_turn(first), store.claim_turn(second))) == [False, True]
+    assert await store.claim_turn(other) is True  # another user isn't held up
+    assert await store.claim_turn(first) is False
+    for tid in (first, second):  # the answer in progress is saved, in whichever thread it was
+        await store.save_answer(tid, {"content": "A.", "outcome": "answered"})
+    assert await store.claim_turn(second) is True  # the saved answer ended it
+
+
+async def test_a_lost_answer_stops_holding_the_user_up(store: PostgresStore) -> None:
+    assert URL is not None
+    user = str(uuid4())
+    tid = str((await store.create_thread("org", user, "student", ROOM))["id"])
+    assert await store.claim_turn(tid) is True
+    assert await store.claim_turn(tid) is False
+    pool = open_pool(URL, MIGRATIONS)
+    try:
+        with pool.connection() as conn:
+            conn.execute(
+                "UPDATE active_turns SET started_at = now() - interval '4 minutes' WHERE user_id=%s", (user,)
+            )
+    finally:
+        pool.close()
+    assert await store.claim_turn(tid) is True

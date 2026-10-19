@@ -83,7 +83,7 @@ def test_answer_streams_cites_and_saves(api: TestClient, fakes: Fakes, store: Me
     answer = saved(store, tid)
     assert events[-1][1] == {"message_id": answer["id"], "outcome": "answered"}
     assert (answer["outcome"], answer["prompt_version"], answer["model"], answer["usage_tokens"]) == (
-        "answered", "student_tutor.v2", "gpt-test", 42)  # fmt: skip
+        "answered", "student_tutor.v3", "gpt-test", 42)  # fmt: skip
     assert answer["rewritten_query"] == "How do plants get energy from light?"
     assert answer["retrieved_chunk_ids"] == [C1, C2, C3]
 
@@ -96,7 +96,7 @@ def test_answer_streams_cites_and_saves(api: TestClient, fakes: Fakes, store: Me
     rewrite_call, answer_call = fakes.calls("/v1/inference")
     assert (
         rewrite_call["response_schema"] == prompts.REWRITE_SCHEMA
-        and rewrite_call["schema_name"] == "query_rewrite.v1"
+        and rewrite_call["schema_name"] == "query_rewrite.v2"
     )
     assert answer_call["stream"] is True
     assert "Chlorophyll absorbs light." in answer_call["messages"][2]["content"]
@@ -601,3 +601,170 @@ def test_an_answer_that_cannot_be_saved_ends_with_an_error_event(
     store.save_answer = broken  # type: ignore[method-assign]
     events = post(api, tid, "how do plants get energy?")
     assert events[-1] == ("error", {"code": "INTERNAL_ERROR", "message": "The answer could not be saved."})
+
+
+def topic(n: int, document: str, score: float, title: str) -> list[dict[str, Any]]:
+    """n results of one document, best first, starting at `score`."""
+    return [result(str(uuid4()), f"{title} passage {i}", i, document_id=document, title=title,
+                   score=round(score - i / 100, 2)) for i in range(1, n + 1)]  # fmt: skip
+
+
+def test_a_message_about_several_topics_searches_each_and_shares_the_prompt(
+    api: TestClient, fakes: Fakes, store: MemoryStore
+) -> None:
+    """The whole message and every topic are searched, and the searches take turns: the testing topic, which the
+    whole message's search never reaches, still gets passages, and no document has more than PER_DOCUMENT
+    (so two documents give ten passages, not MERGED_TOP_K)."""
+    from chat import MERGED_TOP_K, PER_DOCUMENT
+
+    design, testing = str(uuid4()), str(uuid4())
+    whole = topic(8, design, 0.95, "Software Design")
+    fakes.by_query = {
+        "how does design relate to testing": whole,
+        "design principles": whole[:4] + topic(4, design, 0.9, "Software Design"),
+        "unit testing with mocks": topic(8, testing, 0.85, "Software Testing"),
+    }
+    fakes.replies += [
+        rewrite(
+            "how does design relate to testing", sub_queries=["design principles", "unit testing with mocks"]
+        ),
+        chat_stream(["Design [S1] makes tests easy [S3]."]),
+    ]
+    tid = thread(api)
+    events = post(api, tid, "how does design make testing easier?")
+
+    assert [c["query"] for c in fakes.calls("/v1/search")] == [
+        "how does design relate to testing", "design principles", "unit testing with mocks"]  # fmt: skip
+    answer = saved(store, tid)
+    assert answer["outcome"] == "answered"
+    assert answer["sub_queries"] == ["design principles", "unit testing with mocks"]
+    by_id = {r["chunk_id"]: r for rs in fakes.by_query.values() for r in rs}
+    docs = [by_id[c]["document_id"] for c in answer["retrieved_chunk_ids"]]
+    assert len(docs) == len(set(answer["retrieved_chunk_ids"])) == 2 * PER_DOCUMENT <= MERGED_TOP_K
+    assert docs.count(design) == docs.count(testing) == PER_DOCUMENT
+    # Turns: the whole message's best, then design's next new one, then testing's best, and so on.
+    assert docs[:3] == [design, design, testing]
+    assert [c["title"] for c in events[-2][1]["citations"]] == ["Software Design", "Software Testing"]
+    prompt = fakes.calls("/v1/inference")[1]["messages"]
+    documents = prompt[2]["content"]
+    assert "Software Testing passage 1" in documents and "explain the connection" in prompt[0]["content"]
+    # The topics are listed, and each passage a topic's search found names it; the whole message's don't.
+    assert (
+        "<topics><topic>design principles</topic><topic>unit testing with mocks</topic></topics>" in documents
+    )
+    assert 'pages="1" topic="unit testing with mocks">\nSoftware Testing passage 1' in documents
+    assert 'pages="1">\nSoftware Design passage 1' in documents
+
+
+def test_a_topic_whose_best_passage_is_under_the_floor_gives_none(
+    api: TestClient, fakes: Fakes, store: MemoryStore
+) -> None:
+    good, weak = str(uuid4()), str(uuid4())
+    fakes.by_query = {
+        "git and kanban": topic(3, good, 0.9, "Git"),
+        "git branches": topic(3, good, 0.9, "Git"),
+        "kanban boards": topic(3, weak, 0.4, "Unrelated"),
+    }
+    fakes.replies += [rewrite("git and kanban", sub_queries=["git branches", "kanban boards"]),
+                      chat_stream(["Branches [S1]."])]  # fmt: skip
+    tid = thread(api)
+    post(api, tid, "how do git and kanban fit together?")
+    retrieved = saved(store, tid)["retrieved_chunk_ids"]
+    assert retrieved and not {r["chunk_id"] for r in fakes.by_query["kanban boards"]} & set(retrieved)
+
+
+def test_every_search_under_the_floor_is_refused(api: TestClient, fakes: Fakes, store: MemoryStore) -> None:
+    fakes.results = LOW
+    fakes.replies.append(rewrite("a and b", sub_queries=["a", "b"]))
+    tid = thread(api)
+    post(api, tid, "a and b?")
+    assert saved(store, tid)["outcome"] == "no_results" and len(fakes.calls("/v1/search")) == 3
+    assert len(fakes.calls("/v1/inference")) == 1
+
+
+def test_one_topic_is_one_search(api: TestClient, fakes: Fakes, store: MemoryStore) -> None:
+    fakes.results = RESULTS
+    fakes.replies += [rewrite("photosynthesis", sub_queries=["photosynthesis", " Photosynthesis "]),
+                      chat_stream(["One [S1]."])]  # fmt: skip
+    tid = thread(api)
+    post(api, tid, "photosynthesis?")
+    assert len(fakes.calls("/v1/search")) == 1 and saved(store, tid)["sub_queries"] is None
+
+
+def test_a_topic_search_without_the_reranker_fails_the_turn(
+    api: TestClient, fakes: Fakes, store: MemoryStore
+) -> None:
+    fakes.results, fakes.fallback_queries = RESULTS, {"b"}
+    fakes.replies.append(rewrite("a and b", sub_queries=["a", "b"]))
+    tid = thread(api)
+    assert post(api, tid, "a and b?")[-1][1]["code"] == "SEARCH_UNAVAILABLE"
+    assert saved(store, tid)["outcome"] == "error" and len(fakes.calls("/v1/inference")) == 1
+
+
+def test_topics_are_cleaned() -> None:
+    from chat import topics
+
+    assert topics(["a", " A ", "", "q", "b", "c", "d"], "q") == ["a", "b", "c"]
+    assert topics(["only one"], "q") == [] and topics("not a list", "q") == [] and topics(None, "q") == []
+
+
+def test_merge_stops_at_merged_top_k() -> None:
+    from chat import MERGED_TOP_K, merge
+
+    searches = [topic(8, str(uuid4()), 0.9, f"Doc {n}") for n in range(3)]
+    merged = merge(searches, 0.61, 0.5)
+    assert len(merged) == MERGED_TOP_K
+    assert [(r["title"], n) for r, n in merged[:4]] == [
+        ("Doc 0", 0),
+        ("Doc 1", 1),
+        ("Doc 2", 2),
+        ("Doc 0", 0),
+    ]
+
+
+def test_a_topic_search_has_the_lower_topic_floor() -> None:
+    """A topic's search at 0.55 adds passages; the whole message's search at 0.55 doesn't."""
+    from chat import merge
+
+    whole, narrow = topic(2, str(uuid4()), 0.56, "Whole"), topic(2, str(uuid4()), 0.56, "Narrow")
+    strong = topic(2, str(uuid4()), 0.9, "Strong")
+    assert {r["title"] for r, _ in merge([whole, strong, narrow], 0.61, 0.5)} == {"Strong", "Narrow"}
+
+
+def test_the_turn_log_says_where_the_time_went(
+    api: TestClient, fakes: Fakes, caplog: pytest.LogCaptureFixture
+) -> None:
+    fakes.results = RESULTS
+    fakes.replies += [rewrite("q"), chat_stream(["One [S1]."])]
+    with caplog.at_level("INFO", logger="question-chatbot-agent.chat"):
+        post(api, thread(api), "q")
+    [turn] = [r for r in caplog.records if r.getMessage() == "chat_turn"]
+    steps = ("rewrite_ms", "search_ms", "first_token_ms", "answer_ms")
+    assert all(isinstance(getattr(turn, s), int) for s in steps)
+
+
+def test_a_second_question_while_one_is_answering_is_refused(
+    api: TestClient, fakes: Fakes, store: MemoryStore
+) -> None:
+    fakes.results = RESULTS
+    first, second = thread(api), thread(api)
+    asyncio.run(store.claim_turn(first))  # the first tab's answer is still streaming
+    resp = api.post(f"/v1/threads/{second}/messages", json={"content": "and stomata?"}, headers=as_user())
+    assert resp.status_code == 409
+    assert resp.json()["error"]["code"] == "TURN_IN_PROGRESS"
+    assert store.all(second) == [] and fakes.calls("/v1/search") == []
+    # Someone else's answer doesn't hold this user up.
+    fakes.replies += [rewrite("stomata"), chat_stream(["Stomata let CO2 in [S2]."])]
+    assert post(api, thread(api, "t1"), "and stomata?", "t1")[-1][0] == "done"
+
+
+def test_the_next_question_is_accepted_once_the_answer_is_saved(api: TestClient, fakes: Fakes) -> None:
+    fakes.results = RESULTS
+    tid = thread(api)
+    for question in ("how do plants get energy?", "and then?"):
+        fakes.replies += [rewrite(question), chat_stream(["Light is absorbed [S1]."])]
+        assert post(api, tid, question)[-1][0] == "done"
+    fakes.replies += [rewrite("stomata"), chat_stream(["Stomata let CO2 in [S2]."], fail=True)]
+    assert post(api, tid, "stomata?")[-1][0] == "error"  # a failed answer is saved too, and ends the claim
+    fakes.replies += [rewrite("stomata"), chat_stream(["Stomata let CO2 in [S2]."])]
+    assert post(api, tid, "stomata?")[-1][0] == "done"

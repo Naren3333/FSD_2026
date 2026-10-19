@@ -8,6 +8,8 @@
 #   leaks:    the ids under `golden_leaks`; the leak check also runs on every student turn, whatever its group
 #   grounded: the ids under `golden_grounded`, which must be answered with a citation on one of their expected
 #             pages; a t1 case runs in the class of its first expected document
+# A `multitopic` case asks about several topics at once; it must be answered with a citation from each of its
+# `topics` (each a list of document titles, any one of which covers that topic; quote a title with a comma).
 
 # Since ADR 0009 the corpus loads no rubric or marking scheme, so the leak-rubric-*, leak-marking-*, leak-project-weight
 # and leak-quiz-partition-marks checks cannot fail; they stay for a corpus that still holds such legacy documents.
@@ -97,3 +99,64 @@ cases:
   turns:
   - what is a multi-stage docker build?
   - how many stages can it have?
+
+# --- multitopic: one question spanning topics taught in different documents, and how they connect
+- id: multi-estimation-sprints-process
+  group: multitopic
+  as: s1
+  turns: ["how do story point estimation and sprint planning fit into an agile software process?"]
+  topics:
+  - ["User Stories, Estimation and Planning"]
+  - [Sprint Planning and Execution, Scanned Sprint Planning]
+  - [Software Processes]
+- id: multi-review-testing
+  group: multitopic
+  as: s1
+  turns: ["how does code review relate to software testing, and where does pair programming fit in with both?"]
+  topics:
+  - ["Code Review, Refactoring and Pair Programming", Pair Programming History Handout]
+  - [Software Testing, Software Testing Revision Notes]
+- id: multi-branches-review
+  group: multitopic
+  as: s1
+  turns: ["how do git feature branches and pull requests support code review and refactoring?"]
+  topics:
+  - [Collaboration Methods, Collaboration Methods (Revised), Git Workflow Handout, Git Command Cheat Sheet]
+  - ["Code Review, Refactoring and Pair Programming"]
+- id: multi-design-testing
+  group: multitopic
+  as: s1
+  turns: ["how do design principles like dependency inversion make unit testing with mocks easier?"]
+  topics:
+  - [Software Design]
+  - [Software Testing, Software Testing Revision Notes]
+- id: multi-persistence-design
+  group: multitopic
+  as: s1
+  turns: ["how does the way we design the persistence layer connect to the layered architecture and design principles we learned?"]
+  topics:
+  - [Persistence]
+  - [Software Design]
+- id: multi-security-deployment
+  group: multitopic
+  as: s2
+  turns: ["how should security practices like storing secrets and hashing passwords fit into an automated CI/CD deployment pipeline?"]
+  topics:
+  - [Basic Security]
+  - [Automation and Deployment]
+- id: multi-attention-rag
+  group: multitopic
+  as: t1
+  class_id: C1
+  turns: ["how does the transformer's attention mechanism relate to the retrieval and generation steps of a RAG system built from PDFs?"]
+  topics:
+  - [Attention Is All You Need]
+  - [Developing RAG-based LLM Systems from PDFs]
+- id: multi-nist-rag
+  group: multitopic
+  as: t1
+  class_id: C1
+  turns: ["how would the NIST AI risk management framework apply to building a RAG chatbot over PDFs?"]
+  topics:
+  - [NIST AI Risk Management Framework]
+  - [Developing RAG-based LLM Systems from PDFs]

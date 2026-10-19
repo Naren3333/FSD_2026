@@ -37,6 +37,7 @@ class MemoryStore:
         self.rows: list[dict[str, Any]] = []
         self.purged: set[str] = set()
         self.gone: set[str] = set()  # threads purged since a turn read them
+        self.active: dict[str, str] = {}  # user → the thread whose answer is in progress
 
     async def create_thread(self, org: str, user: str, role: str, classroom_id: str) -> dict[str, Any] | None:
         if classroom_id in self.purged:
@@ -65,6 +66,15 @@ class MemoryStore:
         keys = ("id", "role", "content", "outcome", "citations", "created_at")
         return [{k: r.get(k) for k in keys} for r in self.all(thread_id)][-limit:]
 
+    async def claim_turn(self, thread_id: str) -> bool:
+        if thread_id in self.gone:
+            return True
+        user = self.threads[thread_id]["user"]
+        if user in self.active:
+            return False
+        self.active[user] = thread_id
+        return True
+
     async def start_turn(
         self, thread_id: str, content: str, history_turns: int
     ) -> list[dict[str, str]] | None:
@@ -80,6 +90,7 @@ class MemoryStore:
     async def save_answer(self, thread_id: str, answer: dict[str, Any]) -> str | None:
         if thread_id in self.gone:
             return None
+        self.active = {u: t for u, t in self.active.items() if t != thread_id}
         row = {"id": str(uuid4()), "thread_id": thread_id, "role": "assistant", "created_at": datetime.now(UTC),
                **answer}  # fmt: skip
         self.rows.append(row)
@@ -95,8 +106,17 @@ def chat_stream(deltas: list[str], fail: bool = False) -> str:
     return "".join(events)
 
 
-def rewrite(query: str, on_topic: bool = True, small_talk: bool = False) -> httpx.Response:
-    output = json.dumps({"query": query, "is_on_topic": on_topic, "is_small_talk": small_talk})
+def rewrite(
+    query: str, on_topic: bool = True, small_talk: bool = False, sub_queries: list[str] | None = None
+) -> httpx.Response:
+    output = json.dumps(
+        {
+            "query": query,
+            "is_on_topic": on_topic,
+            "is_small_talk": small_talk,
+            "sub_queries": sub_queries or [],
+        }
+    )
     return httpx.Response(200, json={"output": output, "model_version": "gpt-test", "usage_tokens": 9})
 
 
@@ -107,7 +127,10 @@ class Fakes:
     def __init__(self) -> None:
         self.access = {("Bearer s1", ROOM), ("Bearer t1", ROOM)}
         self.results: list[dict[str, Any]] = []
+        self.by_query: dict[str, list[dict[str, Any]]] = {}  # a search's results by its query; else `results`
         self.fallback = False
+        # Searches whose rerank fell back, besides all when `fallback`.
+        self.fallback_queries: set[str] = set()
         self.search_status = 200
         self.search_error: dict[str, Any] = {"error": {"code": "X", "message": "x"}}
         self.replies: list[httpx.Response | str] = []
@@ -137,7 +160,9 @@ class Fakes:
         if path == "/v1/search":
             if self.search_status != 200:
                 return httpx.Response(self.search_status, json=self.search_error)
-            return httpx.Response(200, json={"results": self.results, "rerank_fallback": self.fallback})
+            results = self.by_query.get(body["query"], self.results)
+            fallback = self.fallback or body["query"] in self.fallback_queries
+            return httpx.Response(200, json={"results": results, "rerank_fallback": fallback})
         if path == "/v1/inference":
             assert request.headers["authorization"] == "Bearer service-token", (
                 "ai-core must get the agent's token"

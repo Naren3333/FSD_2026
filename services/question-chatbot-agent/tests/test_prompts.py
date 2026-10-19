@@ -15,11 +15,11 @@ RESULTS = [
 def test_layout_order_and_tags() -> None:
     history = [{"role": "user", "content": "Hi"}, {"role": "assistant", "content": "Hello [doc:0a-1b] there"}]
     messages, version, tags = prompts.build_messages("student", RESULTS, history, "What is chlorophyll?")
-    assert version == "student_tutor.v2"
+    assert version == "student_tutor.v3"
     assert tags == {"S1": "c-1", "S2": "c-2"}
     assert [m["role"] for m in messages] == ["system", "system", "user", "user", "assistant", "user"]
     assert messages[0]["content"] == prompts.POLICY
-    assert messages[1]["content"] == prompts.INSTRUCTIONS["student_tutor.v2"]
+    assert messages[1]["content"] == prompts.INSTRUCTIONS["student_tutor.v3"]
     docs = messages[2]["content"]
     assert '<document id="S1" title="Bio &quot;Week 3&quot; &lt;slides&gt;" pages="12-13">' in docs
     assert '<document id="S2" title="Bio" pages="4">' in docs
@@ -36,8 +36,8 @@ def test_our_delimiters_are_stripped_from_chunk_text() -> None:
 
 def test_teacher_prompt() -> None:
     messages, version, _ = prompts.build_messages("teacher", RESULTS, [], "q")
-    assert version == "teacher.v1"
-    assert messages[1]["content"] == prompts.INSTRUCTIONS["teacher.v1"]
+    assert version == "teacher.v2"
+    assert messages[1]["content"] == prompts.INSTRUCTIONS["teacher.v2"]
 
 
 def test_no_results_is_an_empty_documents_block() -> None:
@@ -67,8 +67,12 @@ def test_rewrite_messages_tag_the_conversation_and_escape_it() -> None:
 
 
 def test_rewrite_schema() -> None:
-    assert set(prompts.REWRITE_SCHEMA["properties"]) == {"query", "is_on_topic", "is_small_talk"}
-    assert prompts.REWRITE_SCHEMA["required"] == ["query", "is_on_topic", "is_small_talk"]
+    fields = ["query", "is_on_topic", "is_small_talk", "sub_queries"]
+    assert list(prompts.REWRITE_SCHEMA["properties"]) == prompts.REWRITE_SCHEMA["required"] == fields
+    assert prompts.REWRITE_SCHEMA["properties"]["sub_queries"] == {
+        "type": "array",
+        "items": {"type": "string"},
+    }
 
 
 def test_small_talk_prompt_has_no_documents() -> None:
@@ -87,3 +91,11 @@ def test_small_talk_prompt_has_no_documents() -> None:
 def test_refusal_is_per_role() -> None:
     assert "asking your teacher" in prompts.refusal("student")
     assert "asking your teacher" not in prompts.refusal("teacher")
+
+
+def test_topics_are_listed_and_escaped() -> None:
+    chunk = RESULTS[0]["chunk_id"]
+    docs = prompts.build_messages("teacher", RESULTS, [], "q", {chunk: 'a "b" <c>'})[0][2]["content"]
+    assert "<topics><topic>a &quot;b&quot; &lt;c&gt;</topic></topics>" in docs
+    assert 'topic="a &quot;b&quot; &lt;c&gt;"' in docs
+    assert "<topics>" not in prompts.build_messages("teacher", RESULTS, [], "q")[0][2]["content"]

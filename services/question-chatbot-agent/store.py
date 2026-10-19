@@ -15,6 +15,8 @@ LOCK_DOCUMENT = "document"
 TITLE_CHARS = 80
 THREAD_COLUMNS = "id, classroom_id, role, title, created_at, last_message_at"
 MESSAGE_COLUMNS = "id, role, content, outcome, citations, created_at"
+# An answer still marked in progress after this was lost (its process died before saving it), so a new one may start.
+TURN_STALE = "3 minutes"
 
 
 class Store(Protocol):
@@ -30,6 +32,12 @@ class Store(Protocol):
         """The thread's latest `limit` messages, oldest first."""
         ...
 
+    async def claim_turn(self, thread_id: str) -> bool:
+        """Marks an answer in progress for the thread's user, until save_answer saves it. False when another of
+        their answers, in any thread, is still in progress; True too when the thread is gone, which start_turn
+        then reports."""
+        ...
+
     async def start_turn(
         self, thread_id: str, content: str, history_turns: int
     ) -> list[dict[str, str]] | None:
@@ -38,7 +46,7 @@ class Store(Protocol):
         ...
 
     async def save_answer(self, thread_id: str, answer: dict[str, Any]) -> str | None:
-        """The saved answer's id; None, saving nothing, when the thread is gone."""
+        """The saved answer's id; None, saving nothing, when the thread is gone. Ends the thread's claim_turn."""
         ...
 
 
@@ -87,6 +95,19 @@ class PostgresStore(AsyncPooled):
             )
             return [dict(r) for r in await cur.fetchall()][::-1]
 
+    async def claim_turn(self, thread_id: str) -> bool:
+        async with self.pool.connection() as conn, conn.transaction():
+            if not await _hold_thread(conn, thread_id):
+                return True
+            # A concurrent claim for the same user waits on the primary key, then sees this one and is refused.
+            cur = await conn.execute(
+                "INSERT INTO active_turns (user_id, thread_id) SELECT user_id, id FROM threads WHERE id=%s"
+                " ON CONFLICT (user_id) DO UPDATE SET thread_id=excluded.thread_id, started_at=now()"
+                f" WHERE active_turns.started_at < now() - interval '{TURN_STALE}' RETURNING 1",
+                (thread_id,),
+            )
+            return await cur.fetchone() is not None
+
     async def start_turn(
         self, thread_id: str, content: str, history_turns: int
     ) -> list[dict[str, str]] | None:
@@ -131,14 +152,15 @@ class PostgresStore(AsyncPooled):
                     for c in citations
                 ]
             cur = await conn.execute(
-                "INSERT INTO messages (thread_id, role, content, outcome, rewritten_query, is_on_topic,"
+                "INSERT INTO messages (thread_id, role, content, outcome, rewritten_query, sub_queries, is_on_topic,"
                 " retrieved_chunk_ids, citations, prompt_version, model, usage_tokens, latency_ms)"
-                " VALUES (%s, 'assistant', %s, %s, %s, %s, %s::uuid[], %s, %s, %s, %s, %s) RETURNING id",
+                " VALUES (%s, 'assistant', %s, %s, %s, %s, %s, %s::uuid[], %s, %s, %s, %s, %s) RETURNING id",
                 (
                     thread_id,
                     answer["content"],
                     answer["outcome"],
                     answer.get("rewritten_query"),
+                    answer.get("sub_queries"),
                     answer.get("is_on_topic"),
                     answer.get("retrieved_chunk_ids"),
                     None if citations is None else Jsonb(citations, dumps=json.dumps),
@@ -150,6 +172,8 @@ class PostgresStore(AsyncPooled):
             )
             row = await cur.fetchone()
             await conn.execute("UPDATE threads SET last_message_at=now() WHERE id=%s", (thread_id,))
+            # In the answer's own transaction, so the user's next question is accepted once this one is saved.
+            await conn.execute("DELETE FROM active_turns WHERE thread_id=%s", (thread_id,))
             assert row is not None
             return str(row["id"])
 

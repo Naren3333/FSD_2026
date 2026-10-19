@@ -163,7 +163,7 @@ async def list_messages(
 
 @app.post(
     "/v1/threads/{thread_id}/messages",
-    responses={**ERRORS, 200: {"description": "The answer as server-sent events: token, citations, done or error",
+    responses={**ERRORS, 409: {"model": ErrorResponse}, 200: {"description": "The answer as server-sent events: token, citations, done or error",
                                "content": {"text/event-stream": {}}}},
 )  # fmt: skip
 async def post_message(
@@ -173,6 +173,14 @@ async def post_message(
     thread, relation = await accessible_thread(request, claims, thread_id)
     # The relation now decides the prompt, so a thread from before the caller's relation changed follows it.
     thread = {**thread, "role": relation}
+    # One answer at a time per user: each holds several of their ai-core slots (AI_USER_CONCURRENCY) while it
+    # searches, so questions from several tabs at once would fail as busy midway instead.
+    if not await store.claim_turn(str(thread_id)):
+        raise failure(
+            409,
+            "TURN_IN_PROGRESS",
+            "Your other question is still being answered. Ask again once it finishes.",
+        )
     history = await store.start_turn(str(thread_id), body.content, HISTORY_TURNS)
     if history is None:  # purged with its classroom or its user since it was read
         raise failure(404, "NOT_FOUND", "Thread not found.")

@@ -1,6 +1,10 @@
 """One chat turn, ported from fsd_test's assistant: rewrite the question, search the class materials with the
 user's own token, and stream a cited answer from ai-core.
 
+A message about several topics is searched once whole and once per topic (the rewrite's sub_queries), and the
+searches take turns filling the prompt, so no topic crowds out another; one answer then sees every passage and can
+explain how they connect.
+
 Everything that can fail with a plain HTTP status (the user, the body, the thread's owner, the database) happens
 before the stream starts, and the user's message is saved then. After that, failures arrive as an `error` event,
 and the assistant message is saved whatever happens: `answered`, `no_results` (the fixed refusal), `error` with
@@ -47,6 +51,9 @@ CITATION_FIELDS = (
 THREAD_GONE = ("NOT_FOUND", "This conversation was deleted.")
 MAX_DOCUMENTS_CHARS = 55000  # ai-core takes messages of up to 60000 characters
 PASSAGE_OVERHEAD = 200  # characters each passage adds to the prompt besides its content: tag, title, pages
+MAX_SUB_QUERIES = 3
+MERGED_TOP_K = 12  # passages a split message is answered from (one search gives SEARCH_TOP_K)
+PER_DOCUMENT = 5  # of those, at most this many from one document
 
 
 class SSEResponse(StreamingResponse):
@@ -120,6 +127,8 @@ class Turn:
         )
         self.content, self.history = request.content, request.history
         self.started = time.perf_counter()
+        # The ms each step took, for the chat_turn log: where a slow turn spent its time.
+        self.timings: dict[str, int] = {}
         self.parts: list[str] = []
         self.results: list[dict[str, Any]] = []
         self.rewriter: CitationRewriter | None = None
@@ -128,6 +137,8 @@ class Turn:
         self.usage_tokens: int | None = None
         self.outcome = "answered"
         self.rewritten_query: str | None = None  # None when the rewrite failed
+        self.sub_queries: list[str] = []  # the topics of a message about several, each searched on its own
+        self.topic_of: dict[str, str] = {}  # chunk id → the topic whose search found it, for a split message
         self.is_on_topic: bool | None = None
         self.small_talk = False
         self.searched = False
@@ -191,23 +202,17 @@ class Turn:
         """Small talk gets a short reply without documents; an off-topic message, no results, or a top score under
         the floor gets the fixed refusal without a model call; anything else is answered from the results."""
         role = self.thread["role"]
+        step = time.perf_counter()
         await self._rewrite()
+        step = self._took("rewrite_ms", step)
         if self.small_talk:
             self.version = prompts.SMALL_TALK
             messages = prompts.build_small_talk_messages(role, self.history, self.content)
             tag_map: dict[str, str] = {}  # no documents, so any tag the model writes is dropped
         else:
             if self.is_on_topic is not False:
-                self.results, fallback = await self.services.search(
-                    self.authorization, str(self.thread["classroom_id"]), self.rewritten_query or self.content,
-                    self.correlation,
-                )  # fmt: skip
-                self.searched = True
-                if fallback and self.results:
-                    # Without the reranker the results are in RRF order and the floor can't be applied, so an
-                    # answer would rest on unchecked passages. Fail the turn instead; the user can ask again.
-                    raise UpstreamError("content", 503, "RERANK_UNAVAILABLE")
-                self.top_score = max((float(r["score"]) for r in self.results), default=None)
+                await self._search()
+                step = self._took("search_ms", step)
             if (
                 self.is_on_topic is False
                 or self.top_score is None
@@ -219,12 +224,14 @@ class Turn:
                 yield sse_event("token", {"text": reply})
                 return
             messages, self.version, tag_map = prompts.build_messages(
-                role, self._fitting(), self.history, self.content
+                role, self._fitting(), self.history, self.content, self.topic_of
             )
         self.rewriter = CitationRewriter(tag_map)
         async for item in self.services.stream(
             messages, self.settings.answer_max_tokens, self.correlation, self.billed_to
         ):
+            if "first_token_ms" not in self.timings:
+                self._took("first_token_ms", step)
             if isinstance(item, Done):
                 self.model, self.usage_tokens = item.model, item.usage_tokens
             elif out := self.rewriter.feed(item):
@@ -233,6 +240,44 @@ class Turn:
         if out := self.rewriter.flush():
             self.parts.append(out)
             yield sse_event("token", {"text": out})
+        self._took("answer_ms", step)
+
+    def _took(self, name: str, since: float) -> float:
+        """Records the ms since `since` as `name` and returns now, the next step's start."""
+        now = time.perf_counter()
+        self.timings[name] = round((now - since) * 1000)
+        return now
+
+    async def _search(self) -> None:
+        """Searches the whole message and, when it spans topics, each topic, all at once, then merges what came
+        back. Each search holds one of the user's AI_USER_CONCURRENCY slots in ai-core while it embeds or reranks,
+        so a split turn holds up to 1 + MAX_SUB_QUERIES."""
+        queries = [self.rewritten_query or self.content, *self.sub_queries]
+        classroom = str(self.thread["classroom_id"])
+        # Every search finishes before a failure is raised, so none is left running after the turn.
+        outcomes = await asyncio.gather(
+            *(self.services.search(self.authorization, classroom, q, self.correlation) for q in queries),
+            return_exceptions=True,
+        )
+        self.searched = True
+        searches: list[list[dict[str, Any]]] = []
+        for outcome in outcomes:
+            if isinstance(outcome, BaseException):
+                raise outcome
+            results, fallback = outcome
+            if fallback and results:
+                # Without the reranker the results are in RRF order and the floor can't be applied, so an
+                # answer would rest on unchecked passages. Fail the turn instead; the user can ask again.
+                raise UpstreamError("content", 503, "RERANK_UNAVAILABLE")
+            searches.append(results)
+        self.top_score = max((float(r["score"]) for rs in searches for r in rs), default=None)
+        if len(searches) == 1:
+            self.results = searches[0]
+            return
+        merged = merge(searches, self.settings.relevance_floor, self.settings.topic_floor)
+        self.results = [r for r, _ in merged]
+        # Passages the whole message's search found carry no topic; the others name theirs.
+        self.topic_of = {str(r["chunk_id"]): self.sub_queries[n - 1] for r, n in merged if n > 0}
 
     def _fitting(self) -> list[dict[str, Any]]:
         """The results, best first, that fit in one prompt message."""
@@ -247,9 +292,9 @@ class Turn:
         return kept
 
     async def _rewrite(self) -> None:
-        """A standalone search query and the two flags (query_rewrite.v1). If the model fails or its reply is
-        unusable the turn goes on: the raw message is searched and only the floor can refuse. ai-core being down or
-        not configured fails the turn, as the answer would too."""
+        """A standalone search query, the two flags and the topics (query_rewrite.v2). If the model fails or its
+        reply is unusable the turn goes on: the raw message is searched and only the floor can refuse. ai-core being
+        down or not configured fails the turn, as the answer would too."""
         try:
             output = await self.services.generate(
                 prompts.rewrite_messages(self.history, self.content),
@@ -275,6 +320,7 @@ class Turn:
             return
         self.rewritten_query = query.strip()[:MAX_MESSAGE] or self.content
         self.is_on_topic, self.small_talk = on_topic, small_talk
+        self.sub_queries = topics(out.get("sub_queries"), self.rewritten_query)
 
     def _citations(self) -> list[dict[str, Any]]:
         """The cited chunks, in citation order. The rewriter only maps tags that were in the prompt, so each one is
@@ -292,6 +338,7 @@ class Turn:
             "content": "".join(self.parts),
             "outcome": outcome,
             "rewritten_query": self.rewritten_query,
+            "sub_queries": self.sub_queries or None,
             "is_on_topic": self.is_on_topic,
             "retrieved_chunk_ids": [str(r["chunk_id"]) for r in self.results] if decided else None,
             "citations": self._citations() if decided else None,
@@ -310,11 +357,13 @@ class Turn:
                 "thread_id": str(self.thread["id"]),
                 "outcome": outcome,
                 "prompt_version": self.version,
+                "sub_queries": len(self.sub_queries),
                 "retrieved": len(self.results),
                 "top_score": self.top_score,
                 "cited": len(self.rewriter.cited if self.rewriter else []),
                 "usage_tokens": self.usage_tokens,
                 "latency_ms": answer["latency_ms"],
+                **self.timings,
             },
         )
         return message_id
@@ -326,6 +375,55 @@ class Turn:
         task.add_done_callback(self.pending.discard)
         task.add_done_callback(_log_failure)
         return task
+
+
+def topics(value: Any, query: str) -> list[str]:
+    """The rewrite's sub_queries, cleaned: distinct, not the whole query, at most MAX_SUB_QUERIES. A single topic
+    is no split, so it gives none."""
+    if not isinstance(value, list):
+        return []
+    seen = {query.casefold()}
+    out: list[str] = []
+    for item in value:
+        text = str(item).strip()[:MAX_MESSAGE]
+        if text and text.casefold() not in seen:
+            seen.add(text.casefold())
+            out.append(text)
+    out = out[:MAX_SUB_QUERIES]
+    return out if len(out) > 1 else []
+
+
+def merge(
+    searches: list[list[dict[str, Any]]], floor: float, topic_floor: float
+) -> list[tuple[dict[str, Any], int]]:
+    """One list from several searches, each best first, as (result, the index of the search that found it): they
+    take turns giving their next passage, so each topic gets its share. The whole message's search (the first)
+    gives none if its best passage is under `floor`, a topic's search if under `topic_floor`: it found nothing on
+    its topic. A passage already taken, or from a document that already has PER_DOCUMENT, is skipped. At most
+    MERGED_TOP_K."""
+    queues = [
+        (n, list(rs))
+        for n, rs in enumerate(searches)
+        if rs and max(float(r["score"]) for r in rs) >= (floor if n == 0 else topic_floor)
+    ]
+    taken: set[str] = set()
+    per_document: dict[str, int] = {}
+    out: list[tuple[dict[str, Any], int]] = []
+    while queues and len(out) < MERGED_TOP_K:
+        for n, queue in queues:
+            while queue:
+                r = queue.pop(0)
+                chunk, document = str(r["chunk_id"]), str(r.get("document_id"))
+                if chunk in taken or per_document.get(document, 0) >= PER_DOCUMENT:
+                    continue
+                taken.add(chunk)
+                per_document[document] = per_document.get(document, 0) + 1
+                out.append((r, n))
+                break
+            if len(out) == MERGED_TOP_K:
+                break
+        queues = [(n, q) for n, q in queues if q]
+    return out
 
 
 def _log_failure(task: asyncio.Task[Any]) -> None:
