@@ -11,6 +11,7 @@ from typing import Any
 from fastapi import HTTPException
 from learning_transport import failure
 
+import budget
 import openai_client
 import spend
 from ingest import costs
@@ -62,8 +63,7 @@ class Billing:
         self._running: dict[tuple[str, str], int] = {}
 
     def claim(self, billed: spend.Billed) -> Slot:
-        """A slot for one paid call, taken before its allowance check so a user's calls in flight never exceed
-        AI_USER_CONCURRENCY: the most they can overshoot the allowance by. Counted per ai-core process."""
+        """An extra process-local slot; PostgreSQL reservations enforce the shared limit across replicas."""
         key = (billed.org_id, billed.user_id)
         if self._running.get(key, 0) >= get_settings().user_concurrency:
             raise busy()
@@ -80,23 +80,35 @@ class Billing:
         if spend.over_limit(usage):
             raise spend.limit_reached(usage)
 
-    async def charge(self, billed: spend.Billed, correlation: str, *charges: spend.Charge) -> None:
+    async def charge(
+        self,
+        billed: spend.Billed,
+        correlation: str,
+        *charges: spend.Charge,
+        reservation: budget.Budget | None = None,
+    ) -> None:
         """Record what a call cost before its response ends, so the caller's next call is checked against it.
         The write runs as its own task so a caller hanging up (a closed stream, a cancelled request) cannot
         cancel it; a failed write is logged, since the money is already spent."""
         if not charges:
             return
+        active = reservation or budget.current.get()
 
         async def write() -> None:
             for c in charges:
                 try:
-                    await self.ledger.record(billed, c, correlation)
+                    if active:
+                        await self.ledger.record_reserved(active.id, billed, c, correlation)
+                    else:
+                        await self.ledger.record(billed, c, correlation)
                 except Exception:
+                    if active:
+                        active.failed_accounting = True
                     log.error("ledger_write_failed", extra={"operation": c.operation, "cost_usd": c.cost_usd})
 
         await self._unless_cancelled(write())
 
-    async def charge_timeout(
+    async def charge_timeout(  # noqa: PLR0913 - explicit accounting context and bounded provider request
         self,
         billed: spend.Billed,
         correlation: str,
@@ -104,16 +116,23 @@ class Billing:
         model: str,
         messages: Sequence[dict[str, Any]],
         max_tokens: int,
+        reservation: budget.Budget | None = None,
     ) -> None:
         """Record timeout_charge for a call the provider did not answer in time. Counting the prompt's tokens
         runs in a thread, and like the write it survives the caller hanging up."""
 
         async def count_then_charge() -> None:
             await self.charge(
-                billed, correlation, await timeout_charge(operation, model, messages, max_tokens)
+                billed,
+                correlation,
+                await timeout_charge(operation, model, messages, max_tokens),
+                reservation=reservation,
             )
 
         await self._unless_cancelled(count_then_charge())
+        active = reservation or budget.current.get()
+        if active and not active.failed_accounting:
+            active.uncertain = False  # the timeout's full output allowance was durably charged
 
     async def _unless_cancelled(self, work: Coroutine[Any, Any, None]) -> None:
         """Run `work` as its own task, which drain() waits for, so cancelling the caller cannot cancel it."""
@@ -228,18 +247,25 @@ class StreamBill:
         self.prompt = "".join(str(m.get("content", "")) for m in self.messages)
         self.text: list[str] = []
         self.done = False
+        self.reservation = budget.current.get()
 
     async def close(self, usage: openai_client.Usage | None = None) -> None:
         if self.done:
             return
         self.done = True
         charge = reply_charge("stream", self.model, self.prompt, "".join(self.text), usage)
-        await self.billing.charge(self.billed, self.correlation, charge)
+        await self.billing.charge(self.billed, self.correlation, charge, reservation=self.reservation)
 
     async def timed_out(self) -> None:
         if self.done:
             return
         self.done = True
         await self.billing.charge_timeout(
-            self.billed, self.correlation, "stream", self.model, self.messages, self.max_tokens
+            self.billed,
+            self.correlation,
+            "stream",
+            self.model,
+            self.messages,
+            self.max_tokens,
+            self.reservation,
         )

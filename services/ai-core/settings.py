@@ -53,6 +53,18 @@ class Settings:
     ingest_max_chunks: int = INGEST_MAX_CHUNKS
     # USD per million tokens (input, cached input, output) that override or add to spend.DEFAULT_PRICES.
     model_prices: dict[str, tuple[float, float, float]] = field(default_factory=dict)
+    selective_vision: bool = True
+    chunk_tokens: int = 600
+    chunk_overlap: int = 90
+    slide_chunks: bool = True
+
+    def __post_init__(self) -> None:
+        if not 200 <= self.chunk_tokens <= 2000 or not 0 <= self.chunk_overlap < self.chunk_tokens // 2:
+            raise ValueError("CHUNK_TOKENS must be 200–2000; CHUNK_OVERLAP must be less than half of it")
+        if not 1 <= self.user_concurrency <= 100:
+            raise ValueError("AI_USER_CONCURRENCY must be 1–100")
+        if not 1 <= self.ingest_max_pages <= 500 or not 1 <= self.ingest_max_chunks <= 5000:
+            raise ValueError("Ingest limits must be 1–500 pages and 1–5000 chunks")
 
 
 def _prices(raw: str) -> dict[str, tuple[float, float, float]]:
@@ -87,4 +99,8 @@ def get_settings() -> Settings:
         ingest_max_pages=int(env("INGEST_MAX_PAGES") or INGEST_MAX_PAGES),
         ingest_max_chunks=int(env("INGEST_MAX_CHUNKS") or INGEST_MAX_CHUNKS),
         model_prices=_prices(env("MODEL_PRICES") or ""),
+        selective_vision=_flag("SELECTIVE_VISION", True),
+        chunk_tokens=int(env("CHUNK_TOKENS") or 600),
+        chunk_overlap=int(env("CHUNK_OVERLAP") or 90),
+        slide_chunks=_flag("SLIDE_CHUNKS", True),
     )

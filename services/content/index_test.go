@@ -272,7 +272,7 @@ func (f *fixture) purgeClassroom() {
 		f.t.Fatal(err)
 	}
 	defer tx.Rollback(ctx)
-	if err = (purger{f.store}).purge(ctx, tx, platform.Event{Resource: f.room, Data: data}); err != nil {
+	if err = (purger{}).purge(ctx, tx, platform.Event{Resource: f.room, Data: data}); err != nil {
 		f.t.Fatal(err)
 	}
 	if err = tx.Commit(ctx); err != nil {

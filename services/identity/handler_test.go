@@ -70,7 +70,7 @@ func (m *memoryStore) insertClassroom(_ context.Context, id, name, _, teacher st
 	return nil
 }
 
-func (m *memoryStore) listClassrooms(context.Context, string, string, bool) ([]Classroom, error) {
+func (m *memoryStore) listClassrooms(context.Context, string, string, bool, ...platform.ListWindow) ([]Classroom, error) {
 	return []Classroom{}, nil
 }
 
@@ -412,4 +412,9 @@ func TestKeycloakRemovesASignInOnceAndTreatsAMissingOneAsRemoved(t *testing.T) {
 	if calls[0] != "POST /realms/learning/protocol/openid-connect/token" {
 		t.Fatalf("calls %v", calls)
 	}
+}
+
+func (m *memoryStore) countClassrooms(ctx context.Context, org, subject string, teacher bool) (int, error) {
+	items, err := m.listClassrooms(ctx, org, subject, teacher)
+	return len(items), err
 }

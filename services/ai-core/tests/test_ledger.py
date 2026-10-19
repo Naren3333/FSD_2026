@@ -5,6 +5,7 @@ AICORE_TEST_DATABASE_URL, a scratch database; each test migrates and then drops 
 The clock is pinned without touching spend.py: the test schema comes before pg_catalog on the search_path and
 holds its own now(), which reads a one-row `clock` table (the real now() when it is empty)."""
 
+import asyncio
 import os
 from collections.abc import AsyncIterator
 from datetime import datetime, timedelta
@@ -14,6 +15,7 @@ from zoneinfo import ZoneInfo
 import psycopg
 import pytest
 from conftest import configured
+from fastapi import HTTPException
 from learning_transport import db
 
 import spend
@@ -69,6 +71,46 @@ async def pinned(monkeypatch: pytest.MonkeyPatch) -> AsyncIterator[Pinned]:
 
 def billed(user: str, org: str = "org-a", role: spend.Role = "student") -> spend.Billed:
     return spend.Billed(user_id=user, org_id=org, role=role)
+
+
+async def test_concurrent_reservations_cannot_both_spend_the_same_allowance(pinned: Pinned) -> None:
+    who = billed(str(uuid4()))
+    ids = [str(uuid4()), str(uuid4())]
+    outcomes = await asyncio.gather(
+        *(pinned.ledger.reserve(i, who, 3.0, 10) for i in ids), return_exceptions=True
+    )
+    assert sum(o is None for o in outcomes) == 1
+    assert sum(isinstance(o, HTTPException) and o.status_code == 429 for o in outcomes) == 1
+    for i in ids:
+        await pinned.ledger.release(i)
+    await pinned.ledger.reserve(str(uuid4()), who, 4.0, 10)
+
+
+async def test_shared_concurrency_and_organisation_isolation(pinned: Pinned) -> None:
+    who = billed(str(uuid4()))
+    first, second = str(uuid4()), str(uuid4())
+    await pinned.ledger.reserve(first, who, 1.0, 1)
+    with pytest.raises(HTTPException) as exc:
+        await pinned.ledger.reserve(second, who, 0, 1)
+    assert exc.value.detail["code"] == "AI_BUSY"
+    await pinned.ledger.reserve(second, billed(who.user_id, "another-org"), 1.0, 1)
+    await pinned.ledger.release(first)
+    await pinned.ledger.reserve(str(uuid4()), who, 1.0, 1)
+
+
+async def test_usage_and_reservation_settle_in_one_transaction(pinned: Pinned) -> None:
+    who = billed(str(uuid4()))
+    reservation = str(uuid4())
+    await pinned.ledger.reserve(reservation, who, 4.0, 10)
+    await pinned.ledger.record_reserved(reservation, who, spend.Charge("embed", "m", 1, 0, 1.0), "test")
+    async with pinned.ledger.pool.connection() as conn:
+        row = await (
+            await conn.execute("SELECT amount FROM budget_reservations WHERE id=%s", (reservation,))
+        ).fetchone()
+    assert row and float(row["amount"]) == 3.0
+    assert (await pinned.ledger.today(who)).spent_usd == 1.0
+    await pinned.ledger.release(reservation)
+    assert (await pinned.ledger.today(who)).spent_usd == 1.0
 
 
 async def test_the_day_starts_at_local_midnight(pinned: Pinned) -> None:

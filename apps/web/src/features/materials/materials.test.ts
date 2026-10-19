@@ -1,4 +1,5 @@
 // @vitest-environment jsdom
+import { PagerComponent } from '../../shared/pager';
 import { signal } from '@angular/core';
 import { TestBed } from '@angular/core/testing';
 import { BrowserTestingModule, platformBrowserTesting } from '@angular/platform-browser/testing';
@@ -47,7 +48,18 @@ function render(
         provide: Session,
         useValue: { isTeacher: signal(role === 'teacher'), isStudent: signal(role === 'student') },
       },
-      { provide: ContentApi, useValue: { documents: () => documents, original, remove } },
+      {
+        provide: ContentApi,
+        useValue: {
+          documents: () => documents,
+          async documentPage() {
+            const items = await this.documents();
+            return { items, total: items.length };
+          },
+          original,
+          remove,
+        },
+      },
       {
         provide: ClassroomContext,
         useValue: {
@@ -61,6 +73,7 @@ function render(
   });
   TestBed.overrideComponent(MaterialsComponent, { set: { template: template('./materials.html') } });
   for (const [component, path] of [
+    [PagerComponent, '../../shared/pager.html'],
     [SectionStateComponent, '../../shared/section-state.html'],
     [FieldComponent, '../../shared/field.html'],
     [StatusComponent, '../../shared/status.html'],

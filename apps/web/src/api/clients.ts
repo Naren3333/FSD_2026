@@ -3,6 +3,10 @@ import { Gateway } from '../core/gateway';
 import { isPdf } from '../shared/files';
 import type {
   Assessment,
+  AssessmentPage,
+  ClassroomPage,
+  DocumentPage,
+  TopicPage,
   AssessmentDetails,
   AssessmentProgress,
   AssessmentSummary,
@@ -41,6 +45,18 @@ const id = encodeURIComponent;
 /** The most students one page of a classroom's roster holds. */
 const ROSTER_PAGE = 500;
 
+/** Full metadata reads for pickers/counts still use bounded server pages; visible lists request a single page. */
+async function allPages<T>(
+  fetch: (offset: number, limit: number) => Promise<{ items: T[]; total: number }>,
+): Promise<T[]> {
+  const items: T[] = [];
+  for (;;) {
+    const page = await fetch(items.length, 100);
+    items.push(...page.items);
+    if (!page.items.length || items.length >= page.total) return items;
+  }
+}
+
 @Injectable({ providedIn: 'root' })
 export class IdentityApi {
   private readonly gateway = inject(Gateway);
@@ -54,7 +70,10 @@ export class IdentityApi {
     return this.gateway.request('identity', '/me', { method: 'DELETE' });
   }
   classrooms(): Promise<Classroom[]> {
-    return this.gateway.request('identity', '/classrooms');
+    return allPages((offset, limit) => this.classroomPage(offset, limit));
+  }
+  classroomPage(offset: number, limit: number): Promise<ClassroomPage> {
+    return this.gateway.request('identity', `/classrooms/page?offset=${offset}&limit=${limit}`);
   }
   createClassroom(name: string): Promise<Classroom> {
     return this.gateway.request('identity', '/classrooms', { method: 'POST', body: { name } });
@@ -106,14 +125,20 @@ export class CurriculumApi {
 
   /** The organization's active topics, by name; up to 200. */
   topics(): Promise<Topic[]> {
-    return this.gateway.request('curriculum', '/topics');
+    return allPages((offset, limit) => this.topicPage(offset, limit));
+  }
+  topicPage(offset: number, limit: number, archived = false): Promise<TopicPage> {
+    return this.gateway.request(
+      'curriculum',
+      `/topics/page?offset=${offset}&limit=${limit}&archived=${archived}`,
+    );
   }
   createTopic(topic: { name: string }): Promise<Topic> {
     return this.gateway.request('curriculum', '/topics', { method: 'POST', body: topic });
   }
   /** The organization's archived topics, by name; up to 200. Older questions and evidence still name them. */
   archivedTopics(): Promise<Topic[]> {
-    return this.gateway.request('curriculum', '/topics?archived=true');
+    return allPages((offset, limit) => this.topicPage(offset, limit, true));
   }
   /** Hides the topic from every list and from new questions; nothing is deleted. */
   archiveTopic(topicId: string): Promise<void> {
@@ -133,7 +158,13 @@ export class ContentApi {
   private readonly gateway = inject(Gateway);
 
   documents(classroomId: string): Promise<DocumentRecord[]> {
-    return this.gateway.request('content', `/documents?classroom_id=${id(classroomId)}`);
+    return allPages((offset, limit) => this.documentPage(classroomId, offset, limit));
+  }
+  documentPage(classroomId: string, offset: number, limit: number): Promise<DocumentPage> {
+    return this.gateway.request(
+      'content',
+      `/documents/page?classroom_id=${id(classroomId)}&offset=${offset}&limit=${limit}`,
+    );
   }
   /** Uploads a teaching material, the only kind of document teachers add (ADR 0009). */
   upload(classroomId: string, title: string, file: File): Promise<DocumentRecord> {
@@ -170,15 +201,68 @@ export class AssessmentApi {
 
   /** The classroom's 100 newest assessments, each saying whether the signed-in user has submitted it. */
   list(classroomId: string): Promise<AssessmentSummary[]> {
-    return this.gateway.request('assessment', `/assessments?classroom_id=${id(classroomId)}`);
+    return allPages((offset, limit) => this.assessmentPage(classroomId, offset, limit));
+  }
+  assessmentPage(classroomId: string, offset: number, limit: number): Promise<AssessmentPage> {
+    return this.gateway.request(
+      'assessment',
+      `/assessments/page?classroom_id=${id(classroomId)}&offset=${offset}&limit=${limit}`,
+    );
   }
   /** For the classroom's teacher: its 100 newest assessments with how many students submitted each. */
   progress(classroomId: string): Promise<AssessmentProgress[]> {
-    return this.gateway.request('assessment', `/assessments/progress?classroom_id=${id(classroomId)}`);
+    return allPages((offset, limit) =>
+      this.gateway.request<{ items: AssessmentProgress[]; total: number }>(
+        'assessment',
+        `/assessments/progress/page?classroom_id=${id(classroomId)}&offset=${offset}&limit=${limit}`,
+      ),
+    );
   }
   /** With answer keys for the classroom's teacher only. */
+  private readonly queued = new Map<
+    string,
+    { promise: Promise<Assessment>; resolve: (value: Assessment) => void; reject: (error: unknown) => void }
+  >();
+
   get(assessmentId: string): Promise<Assessment> {
-    return this.gateway.request('assessment', `/assessments/${id(assessmentId)}`);
+    const existing = this.queued.get(assessmentId);
+    if (existing) return existing.promise;
+    let resolve!: (value: Assessment) => void;
+    let reject!: (error: unknown) => void;
+    const promise = new Promise<Assessment>((yes, no) => {
+      resolve = yes;
+      reject = no;
+    });
+    const pending = { promise, resolve, reject };
+    if (!this.queued.size) queueMicrotask(() => void this.flushReads());
+    this.queued.set(assessmentId, pending);
+    return pending.promise;
+  }
+
+  private async flushReads(): Promise<void> {
+    const entries = [...this.queued];
+    this.queued.clear();
+    // Bound request count as well as each batch's size; no unbounded Promise.all fan-out.
+    for (let start = 0; start < entries.length; start += 50) {
+      const batch = entries.slice(start, start + 50);
+      try {
+        const items =
+          batch.length === 1
+            ? [await this.gateway.request<Assessment>('assessment', `/assessments/${id(batch[0][0])}`)]
+            : await this.gateway.request<Assessment[]>('assessment', '/assessments/batch', {
+                method: 'POST',
+                body: { ids: batch.map(([key]) => key) },
+              });
+        const byId = new Map(items.map((item) => [item.id, item]));
+        for (const [key, pending] of batch) {
+          const item = byId.get(key);
+          if (item) pending.resolve(item);
+          else pending.reject(new Error('The assessment could not be loaded.'));
+        }
+      } catch (error) {
+        for (const [, pending] of batch) pending.reject(error);
+      }
+    }
   }
   /** Creates a draft, or publishes at once when its status says so. */
   create(assessment: NewAssessment): Promise<Assessment> {

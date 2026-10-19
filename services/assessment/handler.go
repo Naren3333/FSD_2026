@@ -30,7 +30,10 @@ func (s server) now() time.Time {
 func (s server) routes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /v1/assessments", s.create)
 	mux.HandleFunc("GET /v1/assessments", s.list)
+	mux.HandleFunc("POST /v1/assessments/batch", s.batch)
+	mux.HandleFunc("GET /v1/assessments/page", s.list)
 	mux.HandleFunc("GET /v1/assessments/progress", s.progress)
+	mux.HandleFunc("GET /v1/assessments/progress/page", s.progress)
 	mux.HandleFunc("GET /v1/assessments/{id}", s.get)
 	mux.HandleFunc("PUT /v1/assessments/{id}", s.update)
 	mux.HandleFunc("PATCH /v1/assessments/{id}", s.details)
@@ -40,6 +43,61 @@ func (s server) routes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /v1/assessments/{id}/submission", s.submission)
 	mux.HandleFunc("GET /v1/assessments/{id}/saved-answers", s.saved)
 	mux.HandleFunc("PUT /v1/assessments/{id}/saved-answers", s.save)
+}
+
+// batch reads at most 50 snapshots with one SQL query and one access check per classroom. Each record has
+// exactly the projection GET would return. Nothing is sent until every requested resource is authorized.
+func (s server) batch(w http.ResponseWriter, r *http.Request) {
+	var input struct {
+		IDs []string `json:"ids"`
+	}
+	if !platform.Decode(w, r, &input) {
+		return
+	}
+	if len(input.IDs) < 1 || len(input.IDs) > 50 {
+		platform.Invalid(w, "Provide 1–50 assessment ids.")
+		return
+	}
+	seen := map[string]bool{}
+	for _, id := range input.IDs {
+		if !platform.ID(id) || seen[id] {
+			platform.Invalid(w, "Provide distinct UUID assessment ids.")
+			return
+		}
+		seen[id] = true
+	}
+	items, err := s.store.findAssessments(r.Context(), platform.Actor(r).Org, input.IDs)
+	if err != nil {
+		platform.Fail(w, err)
+		return
+	}
+	if len(items) != len(input.IDs) {
+		platform.NotFound(w, "Assessment not found.")
+		return
+	}
+	relations := map[string]string{}
+	result := make([]any, 0, len(items))
+	for _, item := range items {
+		relation, found := relations[item.Classroom]
+		if !found {
+			var ok bool
+			relation, ok = s.access.Relation(w, r, item.Classroom, "")
+			if !ok {
+				return
+			}
+			relations[item.Classroom] = relation
+		}
+		switch {
+		case relation == platform.RelationTeacher:
+			result = append(result, item)
+		case item.visibleToStudents(s.now()):
+			result = append(result, item.Public())
+		default:
+			platform.NotFound(w, "Assessment not found.")
+			return
+		}
+	}
+	platform.JSON(w, http.StatusOK, result)
 }
 
 // prepare fills in and checks an assessment a teacher sent, then checks its topics with Curriculum. On failure the
@@ -283,9 +341,26 @@ func (s server) list(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	result, err := s.store.listAssessments(r.Context(), actor.Org, id, actor.Subject, teacher, enrolled, s.now())
+	var paging []platform.ListWindow
+	if r.URL.Path == "/v1/assessments/page" {
+		offset, limit, valid := platform.Page(w, r, 20, 100)
+		if !valid {
+			return
+		}
+		paging = []platform.ListWindow{{Offset: offset, Limit: limit}}
+	}
+	result, err := s.store.listAssessments(r.Context(), actor.Org, id, actor.Subject, teacher, enrolled, s.now(), paging...)
 	if err != nil {
 		platform.Fail(w, err)
+		return
+	}
+	if len(paging) > 0 {
+		total, err := s.store.countAssessments(r.Context(), actor.Org, id, teacher, s.now())
+		if err != nil {
+			platform.Fail(w, err)
+			return
+		}
+		platform.JSON(w, http.StatusOK, platform.ListPage[Summary]{Items: result, Total: total})
 		return
 	}
 	platform.JSON(w, http.StatusOK, result)
@@ -302,9 +377,26 @@ func (s server) progress(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	result, err := s.store.listProgress(r.Context(), platform.Actor(r).Org, id, enrolled)
+	var paging []platform.ListWindow
+	if r.URL.Path == "/v1/assessments/progress/page" {
+		offset, limit, valid := platform.Page(w, r, 20, 100)
+		if !valid {
+			return
+		}
+		paging = []platform.ListWindow{{Offset: offset, Limit: limit}}
+	}
+	result, err := s.store.listProgress(r.Context(), platform.Actor(r).Org, id, enrolled, paging...)
 	if err != nil {
 		platform.Fail(w, err)
+		return
+	}
+	if len(paging) > 0 {
+		total, err := s.store.countAssessments(r.Context(), platform.Actor(r).Org, id, true, s.now())
+		if err != nil {
+			platform.Fail(w, err)
+			return
+		}
+		platform.JSON(w, http.StatusOK, platform.ListPage[Progress]{Items: result, Total: total})
 		return
 	}
 	platform.JSON(w, http.StatusOK, result)

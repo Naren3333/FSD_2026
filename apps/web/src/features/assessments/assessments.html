@@ -24,6 +24,16 @@
   <section class="panel">
     <h3>Classroom assessments</h3>
     <p class="caption">Up to 100 most recent assessments</p>
+    <app-pager
+      label="Assessments pages"
+      [page]="assessments.page()"
+      (pageChange)="assessments.page.set($event)"
+      [pageSize]="assessments.pageSize"
+      [total]="assessments.total()"
+      noun="assessments"
+      [disabled]="assessments.loading() || state.busy()"
+      (go)="load()"
+    />
     <app-section-state [section]="assessments" loading="Loading assessments…" />
     @if (assessments.ready()) {
       @for (item of assessments.value() ?? []; track item.id) {

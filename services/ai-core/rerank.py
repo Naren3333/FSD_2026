@@ -6,7 +6,9 @@ RRF order when this fails. Failures are raised, never turned into made-up scores
 import logging
 
 import httpx2
+from fastapi import HTTPException
 
+import budget
 from settings import get_settings
 
 log = logging.getLogger("ai-core.rerank")
@@ -49,8 +51,12 @@ async def rerank(query: str, documents: list[str]) -> tuple[list[float], int | N
     """The relevance score of each document, in the documents' order, and the tokens Voyage counted."""
     client, model = get_client(), get_settings().reranker_model
     try:
-        resp = await client.post(
-            "/rerank", json={"query": query, "documents": documents, "model": model, "truncation": True}
+        resp = await budget.guarded(
+            lambda: client.post(
+                "/rerank", json={"query": query, "documents": documents, "model": model, "truncation": True}
+            ),
+            model,
+            [query + d for d in documents],
         )
         resp.raise_for_status()
         body = resp.json()
@@ -61,6 +67,8 @@ async def rerank(query: str, documents: list[str]) -> tuple[list[float], int | N
         raise RerankError(f"timed out after {RERANK_TIMEOUT:.1f}s") from None
     except httpx2.HTTPStatusError as e:
         raise RerankError(f"HTTP {e.response.status_code}") from None
+    except HTTPException:
+        raise
     except Exception as e:  # unreachable, or a body that isn't Voyage's shape
         raise RerankError(f"{type(e).__name__}") from None
     missing = scores.count(None)

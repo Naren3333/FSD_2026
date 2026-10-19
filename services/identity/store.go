@@ -12,11 +12,12 @@ import (
 
 // store is Identity's data: users, classrooms and enrollments.
 type store interface {
+	countClassrooms(ctx context.Context, org, subject string, teacher bool) (int, error)
 	registerUser(ctx context.Context, org, subject, role, username, name string) error
 	findClassroomOwner(ctx context.Context, classroom string) (org, teacher string, err error)
 	isEnrolled(ctx context.Context, classroom, student string) (bool, error)
 	insertClassroom(ctx context.Context, id, name, org, teacher string) error
-	listClassrooms(ctx context.Context, org, subject string, isTeacher bool) ([]Classroom, error)
+	listClassrooms(ctx context.Context, org, subject string, isTeacher bool, paging ...platform.ListWindow) ([]Classroom, error)
 	studentExists(ctx context.Context, student, org string) (bool, error)
 	studentsNamed(ctx context.Context, org, username string) ([]string, error)
 	insertEnrollment(ctx context.Context, classroom, student string) error
@@ -116,8 +117,9 @@ func (p pgStore) insertClassroom(ctx context.Context, id, name, org, teacher str
 	return tx.Commit(ctx)
 }
 
-func (p pgStore) listClassrooms(ctx context.Context, org, subject string, isTeacher bool) ([]Classroom, error) {
-	rows, err := p.db.Query(ctx, `SELECT c.id,c.name,c.teacher_id FROM classrooms c WHERE c.org_id=$1 AND c.deleted_at IS NULL AND ((c.teacher_id=$2 AND $3) OR EXISTS(SELECT 1 FROM enrollments e WHERE e.classroom_id=c.id AND e.student_id=$2)) ORDER BY c.created_at DESC LIMIT 100`, org, subject, isTeacher)
+func (p pgStore) listClassrooms(ctx context.Context, org, subject string, isTeacher bool, paging ...platform.ListWindow) ([]Classroom, error) {
+	window := platform.Window(paging, 100)
+	rows, err := p.db.Query(ctx, `SELECT c.id,c.name,c.teacher_id FROM classrooms c WHERE c.org_id=$1 AND c.deleted_at IS NULL AND ((c.teacher_id=$2 AND $3) OR EXISTS(SELECT 1 FROM enrollments e WHERE e.classroom_id=c.id AND e.student_id=$2)) ORDER BY c.created_at DESC,c.id DESC OFFSET $4 LIMIT $5`, org, subject, isTeacher, window.Offset, window.Limit)
 	if err != nil {
 		return nil, err
 	}
@@ -305,4 +307,10 @@ func (p pgStore) deleteAccount(ctx context.Context, org, subject string) error {
 		return err
 	}
 	return tx.Commit(ctx)
+}
+
+func (p pgStore) countClassrooms(ctx context.Context, org, subject string, teacher bool) (int, error) {
+	var total int
+	err := p.db.QueryRow(ctx, `SELECT count(*) FROM classrooms c WHERE c.org_id=$1 AND c.deleted_at IS NULL AND ((c.teacher_id=$2 AND $3) OR EXISTS(SELECT 1 FROM enrollments e WHERE e.classroom_id=c.id AND e.student_id=$2))`, org, subject, teacher).Scan(&total)
+	return total, err
 }

@@ -17,6 +17,7 @@ from typing import Any
 
 import openai
 
+import budget
 import openai_client
 from ingest import costs
 from ingest.prompts import PROMPT_VERSION
@@ -119,12 +120,19 @@ async def ask(
             if png is None:
                 assert not isinstance(image, bytes)
                 png = await image()
-            return await client.chat.completions.create(
-                model=model,
-                messages=_messages(prompt, png),
-                response_format={"type": "json_object"},
-                timeout=TIMEOUT,
-                **extra,
+            return await budget.guarded(
+                lambda: client.chat.completions.create(
+                    model=model,
+                    messages=_messages(prompt, png),
+                    response_format={"type": "json_object"},
+                    timeout=TIMEOUT,
+                    max_completion_tokens=8192,
+                    **extra,
+                ),
+                model,
+                prompt,
+                8192,
+                image_tokens=32768,
             )
 
     attempts = openai_client.Attempts()

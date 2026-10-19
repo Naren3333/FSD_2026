@@ -49,7 +49,17 @@ def configured(**overrides: Any) -> settings.Settings:
 def test_settings(monkeypatch: pytest.MonkeyPatch) -> settings.Settings:
     """Every module sees test settings: keys set, vision on, the cache in a fresh temp folder."""
     current = configured(cache_dir=Path(tempfile.mkdtemp(prefix="ai-core-cache-")))
-    for module in ("settings", "openai_client", "rerank", "ingest", "main", "spend", "billing"):
+    for module in (
+        "settings",
+        "openai_client",
+        "rerank",
+        "ingest",
+        "main",
+        "spend",
+        "billing",
+        "budget",
+        "ingest.reuse",
+    ):
         monkeypatch.setattr(f"{module}.get_settings", lambda: current)
     return current
 
@@ -67,6 +77,7 @@ class MemoryLedger:
         self.charges: list[tuple[spend.Billed, spend.Charge]] = []
         self.already: dict[str, float] = {}
         self.broken = False
+        self.reservations: dict[str, tuple[spend.Billed, float]] = {}
 
     async def today(self, billed: spend.Billed) -> spend.Usage:
         if self.broken:
@@ -77,6 +88,42 @@ class MemoryLedger:
         return spend.Usage(
             spent_usd=spent, limit_usd=spend.limit(billed.role), resets_at=datetime(2026, 10, 14, tzinfo=UTC)
         )
+
+    async def reserve(self, reservation: str, billed: spend.Billed, amount: float, concurrency: int) -> None:
+        if self.broken:
+            raise ConnectionError("ledger down")
+        same = [
+            (k, v)
+            for k, v in self.reservations.items()
+            if v[0].org_id == billed.org_id and v[0].user_id == billed.user_id
+        ]
+        if sum(k != reservation for k, _ in same) >= concurrency:
+            from learning_transport import failure
+
+            raise failure(429, "AI_BUSY", "Too many AI requests")
+        # Read the existing test ledger directly, so tests can independently observe preflight checks.
+        spent = self.already.get(billed.user_id, 0.0) + sum(
+            c.cost_usd for b, c in self.charges if b.user_id == billed.user_id
+        )
+        if spent + sum(v[1] for _, v in same) + amount > spend.limit(billed.role):
+            raise spend.limit_reached(await self.today(billed))
+        before = self.reservations.get(reservation, (billed, 0.0))[1]
+        self.reservations[reservation] = (billed, before + amount)
+
+    async def release(self, reservation: str) -> None:
+        self.reservations.pop(reservation, None)
+
+    async def adjust(self, reservation: str, unused: float) -> None:
+        who, amount = self.reservations[reservation]
+        self.reservations[reservation] = (who, max(0.0, amount - unused))
+
+    async def record_reserved(
+        self, reservation: str, billed: spend.Billed, charge: spend.Charge, correlation: str
+    ) -> None:
+        await self.record(billed, charge, correlation)
+        if reservation in self.reservations:
+            who, amount = self.reservations[reservation]
+            self.reservations[reservation] = (who, max(0.0, amount - charge.cost_usd))
 
     async def record(self, billed: spend.Billed, charge: spend.Charge, correlation_id: str) -> None:
         self.charges.append((billed, charge))

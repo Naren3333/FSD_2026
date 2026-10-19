@@ -52,6 +52,10 @@ export interface components {
       release_policy?: 'on_finalize' | 'manual';
       ai_marking?: boolean;
     };
+    AssessmentPage: {
+      items: components['schemas']['AssessmentSummary'][];
+      total: number;
+    };
     AssessmentProgress: {
       /** Format: uuid */
       id: string;

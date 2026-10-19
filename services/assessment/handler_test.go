@@ -119,7 +119,7 @@ func (m *memoryStore) deleteAssessment(_ context.Context, _, id string, submissi
 	})
 }
 
-func (m *memoryStore) listAssessments(_ context.Context, _, _, student string, all bool, enrolled []string, now time.Time) ([]Summary, error) {
+func (m *memoryStore) listAssessments(_ context.Context, _, _, student string, all bool, enrolled []string, now time.Time, paging ...platform.ListWindow) ([]Summary, error) {
 	result := []Summary{}
 	for _, v := range m.assessments {
 		if all || v.visibleToStudents(now) {
@@ -143,7 +143,7 @@ func (m *memoryStore) listAssessments(_ context.Context, _, _, student string, a
 	return result, nil
 }
 
-func (m *memoryStore) listProgress(_ context.Context, _, _ string, enrolled []string) ([]Progress, error) {
+func (m *memoryStore) listProgress(_ context.Context, _, _ string, enrolled []string, paging ...platform.ListWindow) ([]Progress, error) {
 	result := []Progress{}
 	for _, v := range m.assessments {
 		n := 0
@@ -831,4 +831,19 @@ func TestAnUpdateChecksItsTopics(t *testing.T) {
 			t.Errorf("%d: %d %s", topics, w.Code, w.Body.String())
 		}
 	}
+}
+
+func (m *memoryStore) countAssessments(ctx context.Context, org, classroom string, teacher bool, now time.Time) (int, error) {
+	items, err := m.listAssessments(ctx, org, classroom, "", teacher, nil, now)
+	return len(items), err
+}
+
+func (m *memoryStore) findAssessments(ctx context.Context, org string, ids []string) ([]Assessment, error) {
+	items := []Assessment{}
+	for _, id := range ids {
+		if item, ok := m.assessments[id]; ok {
+			items = append(items, item)
+		}
+	}
+	return items, nil
 }

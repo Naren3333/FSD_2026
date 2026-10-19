@@ -15,6 +15,7 @@ user deleted) keeps nothing more; the stream then ends with a NOT_FOUND `error` 
 import asyncio
 import json
 import logging
+import re
 import time
 from collections.abc import AsyncIterator, Callable
 from contextlib import aclosing
@@ -31,6 +32,7 @@ from clients import Done, Services
 from config import Settings
 from contracts import MAX_MESSAGE
 from store import Store
+from token_count import count as token_bound
 
 log = logging.getLogger("question-chatbot-agent.chat")
 
@@ -223,8 +225,15 @@ class Turn:
                 self.parts.append(reply)
                 yield sse_event("token", {"text": reply})
                 return
+            fitting = self._fitting()
+            if not fitting:
+                self.outcome = "no_results"
+                reply = prompts.refusal(role)
+                self.parts.append(reply)
+                yield sse_event("token", {"text": reply})
+                return
             messages, self.version, tag_map = prompts.build_messages(
-                role, self._fitting(), self.history, self.content, self.topic_of
+                role, fitting, self.history, self.content, self.topic_of
             )
         self.rewriter = CitationRewriter(tag_map)
         async for item in self.services.stream(
@@ -254,22 +263,54 @@ class Turn:
         so a split turn holds up to 1 + MAX_SUB_QUERIES."""
         queries = [self.rewritten_query or self.content, *self.sub_queries]
         classroom = str(self.thread["classroom_id"])
+
         # Every search finishes before a failure is raised, so none is left running after the turn.
-        outcomes = await asyncio.gather(
-            *(self.services.search(self.authorization, classroom, q, self.correlation) for q in queries),
-            return_exceptions=True,
-        )
+        async def lookup(q: str) -> list[dict[str, Any]]:
+            results, fallback = await self.services.search(self.authorization, classroom, q, self.correlation)
+            if fallback and results:
+                raise UpstreamError("content", 503, "RERANK_UNAVAILABLE")
+            return results
+
+        if self.settings.adaptive_search and len(queries) > 1:
+            primary = await lookup(queries[0])
+
+            async def topic(q: str) -> list[dict[str, Any]]:
+                terms = set(re.findall(r"[a-z0-9]+", q.lower())) - {
+                    "the",
+                    "a",
+                    "an",
+                    "of",
+                    "in",
+                    "to",
+                    "and",
+                    "for",
+                }
+                covered = [
+                    r
+                    for r in primary
+                    if terms
+                    and terms.issubset(
+                        set(
+                            re.findall(
+                                r"[a-z0-9]+",
+                                (str(r.get("title", "")) + " " + str(r.get("content", ""))).lower(),
+                            )
+                        )
+                    )
+                    and float(r["score"]) >= self.settings.relevance_floor
+                ]
+                return covered if covered else await lookup(q)
+
+            outcomes = await asyncio.gather(*(topic(q) for q in queries[1:]), return_exceptions=True)
+            searches = [primary]
+        else:
+            outcomes = await asyncio.gather(*(lookup(q) for q in queries), return_exceptions=True)
+            searches = []
         self.searched = True
-        searches: list[list[dict[str, Any]]] = []
         for outcome in outcomes:
             if isinstance(outcome, BaseException):
                 raise outcome
-            results, fallback = outcome
-            if fallback and results:
-                # Without the reranker the results are in RRF order and the floor can't be applied, so an
-                # answer would rest on unchecked passages. Fail the turn instead; the user can ask again.
-                raise UpstreamError("content", 503, "RERANK_UNAVAILABLE")
-            searches.append(results)
+            searches.append(outcome)
         self.top_score = max((float(r["score"]) for rs in searches for r in rs), default=None)
         if len(searches) == 1:
             self.results = searches[0]
@@ -283,10 +324,26 @@ class Turn:
         """The results, best first, that fit in one prompt message."""
         kept: list[dict[str, Any]] = []
         size = 0
+        # Count with the offline tokenizer and reserve space for markup, history and the current question.
+        budget = max(
+            0,
+            self.settings.context_tokens
+            - sum(token_bound(m["content"]) for m in self.history)
+            - token_bound(self.content)
+            - 1000,
+        )
         for r in self.results:
-            size += len(r.get("content") or "") + PASSAGE_OVERHEAD
-            if kept and size > MAX_DOCUMENTS_CHARS:
-                break
+            content = r.get("content") or ""
+            cost = token_bound(content) + token_bound(str(r.get("title") or "")) + PASSAGE_OVERHEAD
+            if (
+                size + cost > budget
+                or sum(len(k.get("content") or "") + PASSAGE_OVERHEAD for k in kept)
+                + len(content)
+                + PASSAGE_OVERHEAD
+                > MAX_DOCUMENTS_CHARS
+            ):
+                continue
+            size += cost
             kept.append(r)
         self.results = kept
         return kept
@@ -295,6 +352,10 @@ class Turn:
         """A standalone search query, the two flags and the topics (query_rewrite.v2). If the model fails or its
         reply is unusable the turn goes on: the raw message is searched and only the floor can refuse. ai-core being
         down or not configured fails the turn, as the answer would too."""
+        if self.settings.adaptive_rewrite and not needs_rewrite(self.content, self.history):
+            self.rewritten_query = self.content
+            self.is_on_topic = True  # Retrieval, never this heuristic, decides whether there is evidence.
+            return
         try:
             output = await self.services.generate(
                 prompts.rewrite_messages(self.history, self.content),
@@ -429,3 +490,31 @@ def merge(
 def _log_failure(task: asyncio.Task[Any]) -> None:
     if not task.cancelled() and task.exception() is not None:
         log.error("answer_save_failed", exc_info=task.exception())
+
+
+def needs_rewrite(content: str, history: list[dict[str, str]]) -> bool:
+    # Skip only explicit, short, single-subject definitions on a first turn. Ambiguity keeps the model route.
+    if history or not re.match(r"^(what (?:is|are)|define|explain)\s+", content.strip(), re.I):
+        return True
+    words = re.findall(r"[a-z0-9]+", content.lower())
+    ambiguous = {
+        "it",
+        "that",
+        "this",
+        "those",
+        "these",
+        "they",
+        "their",
+        "and",
+        "or",
+        "versus",
+        "vs",
+        "compare",
+        "apply",
+        "relate",
+        "ignore",
+        "instructions",
+        "system",
+        "prompt",
+    }
+    return len(words) > 16 or bool(ambiguous.intersection(words)) or content.count("?") > 1

@@ -39,6 +39,10 @@ export interface components {
         | 'AI_UNAVAILABLE'
         | 'INTERNAL';
     };
+    DocumentPage: {
+      items: components['schemas']['Document'][];
+      total: number;
+    };
     Error: {
       error: {
         code: string;

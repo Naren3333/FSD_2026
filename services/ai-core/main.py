@@ -25,6 +25,7 @@ from learning_transport import (
 )
 from starlette.types import Receive, Scope, Send
 
+import budget
 import openai_client
 import rerank
 import spend
@@ -60,6 +61,8 @@ async def lifespan(app: Any) -> AsyncIterator[None]:
         require_env("DATABASE_URL")
         app.state.ledger = await spend.PostgresLedger.open(os.environ["DATABASE_URL"])
     app.state.billing = Billing(app.state.ledger)
+    if isinstance(app.state.ledger, spend.PostgresLedger):
+        app.state.metric_gauges = app.state.ledger.metrics
     yield
     await rerank.aclose()
     await app.state.billing.drain()
@@ -145,6 +148,10 @@ async def usage_today(
 
 @app.post("/v1/inference", response_model=ResponseContract, responses=ERRORS)
 async def execute(request: RequestContract, http: Request, _caller: Claims = Depends(SERVICE)) -> Any:
+    return await budgeted(http, request.billed_to, lambda: execute_reserved(request, http))
+
+
+async def execute_reserved(request: RequestContract, http: Request) -> Any:
     slot = billing_of(http).claim(request.billed_to)
     try:
         result = await infer(request, http, slot)
@@ -277,6 +284,10 @@ async def events(
 async def rerank_documents(
     request: RerankRequest, http: Request, _caller: Claims = Depends(SERVICE)
 ) -> RerankResponse:
+    return await budgeted(http, request.billed_to, lambda: rerank_reserved(request, http))
+
+
+async def rerank_reserved(request: RerankRequest, http: Request) -> RerankResponse:
     billing = billing_of(http)
     slot = billing.claim(request.billed_to)
     try:
@@ -324,6 +335,10 @@ async def ingest_pdf(
     stores the result. A document problem is a `failed` outcome; a provider outage is an error to retry. The
     model calls are charged to `billed_user` (the teacher who uploaded the document), whatever the outcome."""
     billed = spend.Billed(user_id=billed_user, org_id=billed_org, role=billed_role)
+    return await budgeted(request, billed, lambda: ingest_reserved(request, title, billed))
+
+
+async def ingest_reserved(request: Request, title: str, billed: spend.Billed) -> IngestResponse:
     if request.headers.get("content-type", "").split(";")[0].strip() != "application/pdf":
         raise failure(415, "UNSUPPORTED_MEDIA_TYPE", "Send the PDF as application/pdf.")
     try:
@@ -362,6 +377,46 @@ async def ingest_pdf(
                 costs.write(record, None)
                 await billing.charge(billed, correlation_of(request), *ingest_charges(record))
     return indexed_response(result)
+
+
+async def budgeted(http: Request, billed: spend.Billed, work: Callable[[], Awaitable[Any]]) -> Any:
+    reservation = budget.Budget(billing_of(http).ledger, billed)
+    try:
+        await reservation.start()
+    except HTTPException:
+        raise
+    except Exception:
+        raise ledger_unavailable() from None
+    token = budget.current.set(reservation)
+    streamed = False
+
+    async def close() -> None:
+        try:
+            await reservation.close()
+        except Exception:
+            log.error("reservation_release_failed")
+
+    try:
+        result = await work()
+        if isinstance(result, ClosingStream):
+            streamed = True
+            finish = result.finish
+
+            async def finish_budget() -> None:
+                try:
+                    await finish()
+                finally:
+                    await close()
+
+            result.finish = finish_budget
+        return result
+    except asyncio.CancelledError:
+        reservation.failed_accounting = True  # provider work may have been paid before cancellation
+        raise
+    finally:
+        budget.current.reset(token)
+        if not streamed:
+            await asyncio.shield(close())
 
 
 def indexed_response(result: IngestResult) -> IngestResponse:

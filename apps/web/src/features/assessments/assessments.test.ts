@@ -57,6 +57,10 @@ function setup(
   saved: Record<string, string> = {},
 ) {
   const api = {
+    async assessmentPage() {
+      const items = await this.list();
+      return { items, total: items.length };
+    },
     list: vi.fn(() => Promise.resolve([summary])),
     get: vi.fn(() => Promise.resolve(open)),
     saved: vi.fn(() => Promise.resolve({ answers: saved, saved_at: null })),

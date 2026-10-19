@@ -33,6 +33,7 @@ type server struct {
 func (s server) routes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /v1/documents", s.upload)
 	mux.HandleFunc("GET /v1/documents", s.list)
+	mux.HandleFunc("GET /v1/documents/page", s.list)
 	mux.HandleFunc("GET /v1/documents/{id}", s.get)
 	mux.HandleFunc("GET /v1/documents/{id}/original", s.original)
 	mux.HandleFunc("GET /v1/documents/{id}/figures/{image}", s.figure)
@@ -180,9 +181,26 @@ func (s server) list(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	result, err := s.store.listDocuments(r.Context(), platform.Actor(r).Org, classroom, relation == platform.RelationTeacher)
+	var paging []platform.ListWindow
+	if r.URL.Path == "/v1/documents/page" {
+		offset, limit, valid := platform.Page(w, r, 20, 100)
+		if !valid {
+			return
+		}
+		paging = []platform.ListWindow{{Offset: offset, Limit: limit}}
+	}
+	result, err := s.store.listDocuments(r.Context(), platform.Actor(r).Org, classroom, relation == platform.RelationTeacher, paging...)
 	if err != nil {
 		platform.Fail(w, err)
+		return
+	}
+	if len(paging) > 0 {
+		total, err := s.store.countDocuments(r.Context(), platform.Actor(r).Org, classroom, relation == platform.RelationTeacher)
+		if err != nil {
+			platform.Fail(w, err)
+			return
+		}
+		platform.JSON(w, http.StatusOK, platform.ListPage[Document]{Items: result, Total: total})
 		return
 	}
 	platform.JSON(w, http.StatusOK, result)
@@ -321,13 +339,10 @@ func (s server) remove(w http.ResponseWriter, r *http.Request) {
 	if !platform.TeacherOf(s.access, w, r, v.Classroom) {
 		return
 	}
-	// The objects go before the row commits, so a request cut short leaves nothing half deleted that a retry can't
-	// finish; it gets its own deadline rather than the client's.
+	// Commit the logical deletion and cleanup job even if the caller disconnects.
 	ctx, cancel := context.WithTimeout(context.WithoutCancel(r.Context()), removeDeadline)
 	defer cancel()
-	err := s.store.deleteDocument(ctx, org, v.ID, func(ctx context.Context) error {
-		return s.files.removeAll(ctx, org+"/"+v.ID+"/")
-	})
+	err := s.store.deleteDocument(ctx, org, v.ID)
 	if !platform.Found(w, err, "Document not found.") {
 		return
 	}

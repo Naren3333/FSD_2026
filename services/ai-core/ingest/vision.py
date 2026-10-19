@@ -25,6 +25,7 @@ from dataclasses import dataclass, field, replace
 from pathlib import Path
 
 import pymupdf
+from fastapi import HTTPException
 
 import pdf
 from ingest.figure_context import figure_context, page_text
@@ -215,7 +216,7 @@ class VisionModels:
     ocr: str | None = None  # transcribes pages without a text layer
 
 
-async def see_pages(
+async def see_pages(  # noqa: PLR0913 - preserves the public vision options and selective page set
     path: Path,
     *,
     model: str,
@@ -223,6 +224,7 @@ async def see_pages(
     max_pages: int,
     figure_model: str | None = None,
     ocr_model: str | None = None,
+    selected_pages: set[int] | None = None,
 ) -> list[PageVision | None]:
     """Per page, what the model sees; None for a page it didn't look at. Pages are rendered only for a call
     the cache can't answer, in a worker thread, one at a time per vision slot. With `figure_model`, the
@@ -231,13 +233,17 @@ async def see_pages(
     sizes, words, keys, texts = await pdf.in_thread(_layout, path, max_pages)
     results: list[PageVision | None] = [None] * len(sizes)
     models = VisionModels(model, figure_model, ocr_model)
+    numbers = [n for n in range(min(max_pages, len(sizes))) if selected_pages is None or n in selected_pages]
     seen = await asyncio.gather(
         *(
             _see_page(PageRef(path, n, keys[n], cache_dir), sizes[n], words[n], models, texts)
-            for n in range(min(max_pages, len(sizes)))
-        )
+            for n in numbers
+        ),
+        return_exceptions=True,
     )
-    for number, page in enumerate(seen):
+    for number, page in zip(numbers, seen, strict=True):
+        if isinstance(page, BaseException):
+            raise page
         results[number] = page
     return results
 
@@ -289,6 +295,8 @@ async def _see_page(
             await _with_transcript(page, i, t, models.page) if _is_picture(t, words) else t
             for i, t in enumerate(tables)
         ]
+    except HTTPException:
+        raise
     except Exception as e:  # never fail the ingest over vision
         log.warning("vision_failed_using_lines", extra={"page": str(page), "error": str(e)})
         return None if transcript is None else PageVision(transcript=transcript)
@@ -324,6 +332,8 @@ async def _transcribed_page(page: PageRef, model: str) -> tuple[SeenText, ...] |
             ),
             "ocr",
         )
+    except HTTPException:
+        raise
     except Exception as e:
         log.warning("page_not_transcribed", extra={"page": str(page), "error": str(e)})
         return None
@@ -366,6 +376,8 @@ async def _described(
             lambda: ask(prompt, png, model, _semaphore("figure", FIGURE_CONCURRENCY)),
             "describe",
         )
+    except HTTPException:
+        raise
     except Exception as e:
         log.warning("figure_not_described", extra={"figure": i + 1, "page": str(page), "error": str(e)})
         return f

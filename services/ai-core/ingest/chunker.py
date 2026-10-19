@@ -25,6 +25,7 @@ Blocking (tiktoken): run it in a thread.
 
 import os
 import re
+from contextvars import ContextVar
 from dataclasses import dataclass, replace
 from functools import cache
 from itertools import zip_longest
@@ -102,7 +103,33 @@ def encoding() -> tiktoken.Encoding:
     return tiktoken.get_encoding("cl100k_base")
 
 
-def chunk_paras(paras: list[Para], vision_pages: frozenset[int] = frozenset()) -> list[Chunk]:
+_limits: ContextVar[tuple[int, int]] = ContextVar("chunk_limits", default=(MAX_TOKENS, OVERLAP_TOKENS))
+
+
+def chunk_paras(
+    paras: list[Para],
+    vision_pages: frozenset[int] = frozenset(),
+    *,
+    max_tokens: int = MAX_TOKENS,
+    overlap: int = OVERLAP_TOKENS,
+    page_boundaries: bool = False,
+) -> list[Chunk]:
+    if not 200 <= max_tokens <= 2000 or not 0 <= overlap < max_tokens // 2:
+        raise ValueError("CHUNK_TOKENS must be 200-2000 and CHUNK_OVERLAP less than half of it")
+    token = _limits.set((max_tokens, overlap))
+    try:
+        if not page_boundaries:
+            return _chunk_paras(paras, vision_pages)
+        pages: dict[int, list[Para]] = {}
+        for para in paras:
+            pages.setdefault(para.page, []).append(para)
+        chunks = [c for page in pages.values() for c in _chunk_paras(page, vision_pages)]
+        return [replace(c, ordinal=i) for i, c in enumerate(chunks)]
+    finally:
+        _limits.reset(token)
+
+
+def _chunk_paras(paras: list[Para], vision_pages: frozenset[int]) -> list[Chunk]:
     """`vision_pages`: pages whose text the vision model transcribed (OCR); a text chunk on one is source "vision"."""
     enc = encoding()
     chunks: list[Chunk] = []
@@ -182,7 +209,7 @@ def _table_chunks(enc: tiktoken.Encoding, para: Para) -> list[Chunk]:
     # A very wide header leaves no room under MAX_TOKENS: its chunks then run over it rather than lose rows.
     budget = max(
         MIN_ROW_TOKENS,
-        MAX_TOKENS
+        _limits.get()[0]
         - WINDOW_SLACK
         - _tokens(enc, f"{caption} {CONTINUED}")
         - sum(_tokens(enc, h) + 1 for h in head),
@@ -233,7 +260,7 @@ def _figure_chunks(enc: tiktoken.Encoding, para: Para) -> list[Chunk]:
     assert figure is not None
     head = SEPARATOR.join(x for x in (figure.caption, f"[{figure.type or 'figure'}, {DESCRIBED}]") if x)
     values = f"Key values (approximate): {'; '.join(figure.values)}" if figure.values else ""
-    budget = MAX_TOKENS - WINDOW_SLACK - _tokens(enc, head)
+    budget = _limits.get()[0] - WINDOW_SLACK - _tokens(enc, head)
     body = _clip(enc, "\n".join(x for x in (figure.description, values) if x), budget)
     content = f"{head}\n{body}"
     labels = _clip(enc, f"Labels: {figure.words}", MAX_LABEL_TOKENS) if figure.words.strip() else ""
@@ -298,16 +325,18 @@ def _pack(enc: tiktoken.Encoding, units: list[_Unit]) -> list[tuple[list[_Unit],
     current: list[_Unit] = []
     carried = 0
     for unit in units:
-        if len(current) > carried and _cost(current) + unit.cost > MAX_TOKENS:
+        if len(current) > carried and _cost(current) + unit.cost > _limits.get()[0]:
             moved: list[_Unit] = []  # a heading at the end of a chunk belongs with what follows it
             while len(current) > carried + 1 and current[-1].heading:
                 moved.insert(0, current.pop())
-            if _cost(moved) + unit.cost > MAX_TOKENS:  # rare: the heading would push the next chunk over
+            if (
+                _cost(moved) + unit.cost > _limits.get()[0]
+            ):  # rare: the heading would push the next chunk over
                 current += moved
                 moved = []
             groups.append((current, carried))
             current = _tail(enc, current)
-            if _cost(current) + _cost(moved) + unit.cost > MAX_TOKENS:
+            if _cost(current) + _cost(moved) + unit.cost > _limits.get()[0]:
                 current = []
             carried = len(current)
             current += moved
@@ -321,9 +350,9 @@ def _units(enc: tiktoken.Encoding, para: Para) -> list[_Unit]:
     """One unit per paragraph. One over MAX_TOKENS is split into sentence runs that fit, and a single
     sentence over it into token windows."""
     tokens = len(enc.encode(para.text))
-    if tokens < MAX_TOKENS:
+    if tokens < _limits.get()[0]:
         return [_Unit(para.page, para.text, tokens + 1, para.path, para.level is not None)]
-    size = MAX_TOKENS - WINDOW_SLACK
+    size = _limits.get()[0] - WINDOW_SLACK
     pieces: list[str] = []
     run: list[str] = []
     for sentence in SENTENCE_END.split(para.text):
@@ -359,16 +388,18 @@ def _common_prefix(paths: list[tuple[str, ...]]) -> tuple[str, ...]:
 
 def _tail(enc: tiktoken.Encoding, units: list[_Unit]) -> list[_Unit]:
     """The trailing units that fit in OVERLAP_TOKENS. If the last one alone is bigger (common: a
-    paragraph is often ~100 tokens), its last OVERLAP_TOKENS instead, from a sentence or word start."""
+    paragraph is often ~100 tokens), its last _limits.get()[1] instead, from a sentence or word start."""
+    if _limits.get()[1] == 0:
+        return []
     tail: list[_Unit] = []
     for unit in reversed(units):
-        if _cost(tail) + unit.cost > OVERLAP_TOKENS:
+        if _cost(tail) + unit.cost > _limits.get()[1]:
             break
         tail.insert(0, unit)
     if tail or not units:
         return tail
     last = units[-1]
-    piece = enc.decode(enc.encode(last.text)[-(OVERLAP_TOKENS - 1) :])
+    piece = enc.decode(enc.encode(last.text)[-(_limits.get()[1] - 1) :])
     sentence = piece.find(". ")
     piece = piece[sentence + 2 :] if 0 <= sentence < len(piece) // 2 else piece.partition(" ")[2]
     piece = piece.strip()

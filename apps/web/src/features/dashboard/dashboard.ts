@@ -39,6 +39,7 @@ export class DashboardComponent {
   private readonly names = computed(() => studentNames(this.roster.value() ?? []));
   /** The class topics table shows this many students at a time. */
   readonly pageSize = 20;
+  readonly enrolledTotal = signal<number | undefined>(undefined);
   readonly page = signal(0);
   /** The topics any student on this page has evidence for, sorted by name (or id, for a topic with none); `name` is
    * '' when the curriculum has none. */
@@ -65,7 +66,7 @@ export class DashboardComponent {
         this.roster,
         'Students enrolled',
         '/classrooms',
-        this.roster.value()?.length,
+        this.enrolledTotal(),
         'Manage students under Classrooms',
       ),
       {
@@ -102,7 +103,7 @@ export class DashboardComponent {
     for (const section of [this.roster, this.assessments, this.counts, this.performance]) section.clear();
     this.page.set(page);
     if (!classroomId) return;
-    void this.roster.load(() => this.identity.roster(classroomId));
+    this.enrolledTotal.set(undefined);
     // Students never see drafts, so a draft has no submissions to count.
     void this.assessments.load(async () =>
       (await this.assessmentApi.progress(classroomId)).filter((a) => a.status === 'published'),
@@ -113,22 +114,35 @@ export class DashboardComponent {
 
   /** Loads the class topics page on show; a page past the end, after students leave, falls back to the last one. */
   loadPerformance(classroomId = this.classroomId()): Promise<void> {
+    this.loadRoster(classroomId, this.page());
     return this.performance.load(async (current) => {
       let page = await this.analytics.classPerformance(
         classroomId,
         this.page() * this.pageSize,
         this.pageSize,
       );
-      if (!page.students.length && page.total && this.page() > 0) {
-        const last = pageCount(page.total, this.pageSize) - 1;
-        page = await this.analytics.classPerformance(classroomId, last * this.pageSize, this.pageSize);
-        if (current()) this.page.set(last);
+      if (!page.students.length && this.page() > 0) {
+        const last = Math.max(0, pageCount(page.total, this.pageSize) - 1);
+        if (page.total)
+          page = await this.analytics.classPerformance(classroomId, last * this.pageSize, this.pageSize);
+        if (current()) {
+          this.page.set(last);
+          this.loadRoster(classroomId, last);
+        }
       }
       // Without the curriculum, topics show their ids.
       await this.curriculum
         .need(page.students.flatMap((s) => s.topics.map((m) => m.topic_id)))
         .catch(() => undefined);
       return page;
+    });
+  }
+
+  private loadRoster(classroomId: string, page: number): void {
+    void this.roster.load(async (current) => {
+      const roster = await this.identity.rosterPage(classroomId, page * this.pageSize, this.pageSize);
+      if (current()) this.enrolledTotal.set(roster.total);
+      return roster.students;
     });
   }
 
@@ -142,7 +156,7 @@ export class DashboardComponent {
 
   /** "12 of 20 students submitted", or just the count when former students' submissions exceed the roster. */
   submitted(progress: AssessmentProgress): string {
-    const enrolled = this.roster.value()?.length;
+    const enrolled = this.enrolledTotal();
     const noun = progress.submissions === 1 ? 'student' : 'students';
     return enrolled !== undefined && progress.submissions <= enrolled
       ? `${progress.submissions} of ${enrolled} students submitted`

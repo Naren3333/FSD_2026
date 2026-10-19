@@ -13,13 +13,14 @@ import (
 
 // store is Content's documents, their index jobs and their indexed chunks.
 type store interface {
+	countDocuments(ctx context.Context, org, classroom string, teacher bool) (int, error)
 	insertDocument(ctx context.Context, d newDocument) (commitAttempted bool, err error)
-	listDocuments(ctx context.Context, org, classroom string, teacher bool) ([]Document, error)
+	listDocuments(ctx context.Context, org, classroom string, teacher bool, paging ...platform.ListWindow) ([]Document, error)
 	findDocument(ctx context.Context, org, id string) (Document, []byte, error)
 	findOriginal(ctx context.Context, org, id string) (storedDocument, error)
 	findIndexed(ctx context.Context, org, id, image string) (Document, error)
 	queueIndex(ctx context.Context, org, id string) (bool, error)
-	deleteDocument(ctx context.Context, org, id string, removeFiles func(context.Context) error) error
+	deleteDocument(ctx context.Context, org, id string) error
 	vectorLeg(ctx context.Context, f filter, vector []float32, model string) ([]hit, error)
 	keywordLeg(ctx context.Context, f filter, query string) ([]hit, error)
 	attachRelated(ctx context.Context, f filter, hits []hit) error
@@ -78,8 +79,9 @@ func scanDocument(row pgx.Row, v *Document, more ...any) error {
 }
 
 // listDocuments lists a classroom's documents; students get teaching material only.
-func (p pgStore) listDocuments(ctx context.Context, org, classroom string, teacher bool) ([]Document, error) {
-	rows, err := p.db.Query(ctx, "SELECT "+documentColumns+" FROM documents WHERE classroom_id=$1 AND org_id=$2 AND ($3 OR doc_type='teaching_material') ORDER BY created_at DESC LIMIT 100", classroom, org, teacher)
+func (p pgStore) listDocuments(ctx context.Context, org, classroom string, teacher bool, paging ...platform.ListWindow) ([]Document, error) {
+	window := platform.Window(paging, 100)
+	rows, err := p.db.Query(ctx, "SELECT "+documentColumns+" FROM documents WHERE classroom_id=$1 AND org_id=$2 AND ($3 OR doc_type='teaching_material') ORDER BY created_at DESC,id DESC OFFSET $4 LIMIT $5", classroom, org, teacher, window.Offset, window.Limit)
 	if err != nil {
 		return nil, err
 	}
@@ -132,10 +134,9 @@ func (p pgStore) queueIndex(ctx context.Context, org, id string) (bool, error) {
 	return true, tx.Commit(ctx)
 }
 
-// deleteDocument deletes the document's row (its chunks, vectors and indexing job go with it) and emits
-// content.deleted.v1 in one transaction, after removeFiles has removed its objects: a failure leaves the row, and a
-// retry removes whatever is left. pgx.ErrNoRows reports a document that is already gone.
-func (p pgStore) deleteDocument(ctx context.Context, org, id string, removeFiles func(context.Context) error) error {
+// deleteDocument atomically removes searchable data and records both the deletion event and durable object
+// cleanup. Object storage is never touched before commit. pgx.ErrNoRows means the document is already gone.
+func (p pgStore) deleteDocument(ctx context.Context, org, id string) error {
 	tx, err := p.db.Begin(ctx)
 	if err != nil {
 		return err
@@ -148,7 +149,7 @@ func (p pgStore) deleteDocument(ctx context.Context, org, id string, removeFiles
 	if err = platform.Emit(ctx, tx, "content.deleted.v1", id, map[string]any{"document_id": id, "classroom_id": classroom, "org_id": org}); err != nil {
 		return err
 	}
-	if err = removeFiles(ctx); err != nil {
+	if _, err = tx.Exec(ctx, "INSERT INTO object_cleanup_jobs(prefix) VALUES($1) ON CONFLICT DO NOTHING", org+"/"+id+"/"); err != nil {
 		return err
 	}
 	return tx.Commit(ctx)
@@ -218,4 +219,10 @@ ORDER BY src.id, c.page_start, c.label`, f.args(citing)...)
 		}
 	}
 	return nil
+}
+
+func (p pgStore) countDocuments(ctx context.Context, org, classroom string, teacher bool) (int, error) {
+	var total int
+	err := p.db.QueryRow(ctx, `SELECT count(*) FROM documents WHERE org_id=$1 AND classroom_id=$2 AND ($3 OR doc_type='teaching_material')`, org, classroom, teacher).Scan(&total)
+	return total, err
 }

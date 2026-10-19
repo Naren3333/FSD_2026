@@ -241,6 +241,8 @@ services:
       OIDC_JWKS_URL: http://keycloak:8080/realms/learning/protocol/openid-connect/certs
       OIDC_AUDIENCE: learning
       DATABASE_URL: postgresql://identity:${IDENTITY_DB_PASSWORD:?Run scripts/setup.py or scripts/upgrade_local.py}@postgres:5432/identity?sslmode=disable
+      DB_POOL_MAX: ${GO_DB_POOL_MAX:-10}
+      DB_POOL_MIN: ${DB_POOL_MIN:-1}
       KAFKA_BROKERS: kafka:9092
       # Removes a deleted account's sign-in from Keycloak (ADR 0011).
       KEYCLOAK_URL: http://keycloak:8080
@@ -265,6 +267,8 @@ services:
       OIDC_JWKS_URL: http://keycloak:8080/realms/learning/protocol/openid-connect/certs
       OIDC_AUDIENCE: learning
       DATABASE_URL: postgresql://curriculum:${CURRICULUM_DB_PASSWORD:?Run scripts/setup.py or scripts/upgrade_local.py}@postgres:5432/curriculum?sslmode=disable
+      DB_POOL_MAX: ${GO_DB_POOL_MAX:-10}
+      DB_POOL_MIN: ${DB_POOL_MIN:-1}
       IDENTITY_URL: http://identity:8080
     depends_on:
       keycloak:
@@ -284,6 +288,8 @@ services:
       OIDC_JWKS_URL: http://keycloak:8080/realms/learning/protocol/openid-connect/certs
       OIDC_AUDIENCE: learning
       DATABASE_URL: postgresql://content:${CONTENT_DB_PASSWORD:?Run scripts/setup.py or scripts/upgrade_local.py}@postgres:5432/content?sslmode=disable
+      DB_POOL_MAX: ${GO_DB_POOL_MAX:-10}
+      DB_POOL_MIN: ${DB_POOL_MIN:-1}
       IDENTITY_URL: http://identity:8080
       KAFKA_BROKERS: kafka:9092
       S3_ENDPOINT: seaweedfs:8333
@@ -318,6 +324,8 @@ services:
       OIDC_JWKS_URL: http://keycloak:8080/realms/learning/protocol/openid-connect/certs
       OIDC_AUDIENCE: learning
       DATABASE_URL: postgresql://assessment:${ASSESSMENT_DB_PASSWORD:?Run scripts/setup.py or scripts/upgrade_local.py}@postgres:5432/assessment?sslmode=disable
+      DB_POOL_MAX: ${GO_DB_POOL_MAX:-10}
+      DB_POOL_MIN: ${DB_POOL_MIN:-1}
       IDENTITY_URL: http://identity:8080
       KAFKA_BROKERS: kafka:9092
       CURRICULUM_URL: http://curriculum:8080
@@ -341,6 +349,8 @@ services:
       OIDC_JWKS_URL: http://keycloak:8080/realms/learning/protocol/openid-connect/certs
       OIDC_AUDIENCE: learning
       DATABASE_URL: postgresql://grading:${GRADING_DB_PASSWORD:?Run scripts/setup.py or scripts/upgrade_local.py}@postgres:5432/grading?sslmode=disable
+      DB_POOL_MAX: ${GO_DB_POOL_MAX:-10}
+      DB_POOL_MIN: ${DB_POOL_MIN:-1}
       IDENTITY_URL: http://identity:8080
       KAFKA_BROKERS: kafka:9092
       # AI marking suggestions (ADR 0004), billed to the assessment's teacher through ai-core.
@@ -368,6 +378,8 @@ services:
       OIDC_JWKS_URL: http://keycloak:8080/realms/learning/protocol/openid-connect/certs
       OIDC_AUDIENCE: learning
       DATABASE_URL: postgresql://analytics:${ANALYTICS_DB_PASSWORD:?Run scripts/setup.py or scripts/upgrade_local.py}@postgres:5432/analytics?sslmode=disable
+      DB_POOL_MAX: ${PYTHON_DB_POOL_MAX:-8}
+      DB_POOL_MIN: ${DB_POOL_MIN:-1}
       IDENTITY_URL: http://identity:8080
       KAFKA_BROKERS: kafka:9092
       # A new group re-reads every retained event, for rebuilding into a new database (operations.md).
@@ -400,8 +412,14 @@ services:
       FIGURE_MODEL: gpt-6-luna
       RERANKER_MODEL: rerank-3
       AI_CORE_CACHE_DIR: /var/cache/ai-core
+      SELECTIVE_VISION: ${SELECTIVE_VISION:-true}
+      CHUNK_TOKENS: ${CHUNK_TOKENS:-600}
+      CHUNK_OVERLAP: ${CHUNK_OVERLAP:-90}
+      SLIDE_CHUNKS: ${SLIDE_CHUNKS:-true}
       # Per-user daily AI spend (ADR 0003). Run scripts/upgrade_local.py if .env predates this database.
       DATABASE_URL: postgresql://aicore:${AICORE_DB_PASSWORD:?Run scripts/setup.py or scripts/upgrade_local.py}@postgres:5432/aicore?sslmode=disable
+      DB_POOL_MAX: ${PYTHON_DB_POOL_MAX:-8}
+      DB_POOL_MIN: ${DB_POOL_MIN:-1}
       SPEND_LIMIT_STUDENT_USD: '5'
       SPEND_LIMIT_TEACHER_USD: '10'
       SPEND_TIMEZONE: Asia/Singapore
@@ -465,6 +483,11 @@ services:
       OIDC_AUDIENCE: learning
       # Threads and messages only (ADR 0002). Run scripts/upgrade_local.py if .env predates this database.
       DATABASE_URL: postgresql://chatbot:${CHATBOT_DB_PASSWORD:?Run scripts/setup.py or scripts/upgrade_local.py}@postgres:5432/chatbot?sslmode=disable
+      DB_POOL_MAX: ${PYTHON_DB_POOL_MAX:-8}
+      DB_POOL_MIN: ${DB_POOL_MIN:-1}
+      ADAPTIVE_REWRITE: ${ADAPTIVE_REWRITE:-true}
+      ADAPTIVE_SEARCH: ${ADAPTIVE_SEARCH:-true}
+      CHAT_CONTEXT_TOKENS: ${CHAT_CONTEXT_TOKENS:-8000}
       IDENTITY_URL: http://identity:8080
       # Searches run with the user's own token; ai-core gets this agent's service account.
       CONTENT_URL: http://content:8080

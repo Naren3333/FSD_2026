@@ -10,6 +10,10 @@ export interface components {
       name: string;
       teacher_id: string;
     };
+    ClassroomPage: {
+      items: components['schemas']['Classroom'][];
+      total: number;
+    };
     Enrollment: {
       student_id: string;
       /** Format: uuid */

@@ -12,8 +12,9 @@ from fastapi import Depends, FastAPI, HTTPException, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
+from starlette.responses import Response
 
-from learning_transport import logs
+from learning_transport import logs, metrics
 from learning_transport.auth import AI_CLIENT, Claims, requires
 from learning_transport.errors import ErrorResponse, unavailable
 
@@ -76,6 +77,7 @@ def application(name: str, **kwargs: Any) -> FastAPI:
             )
         response.headers["X-Correlation-ID"] = correlation
         response.headers["X-Request-ID"] = request_id
+        metrics.observe(time.monotonic() - start, response.status_code)
         logger.info(
             "request",
             extra={
@@ -90,6 +92,14 @@ def application(name: str, **kwargs: Any) -> FastAPI:
     @app.get("/health/live")
     def live() -> dict[str, str]:
         return {"status": "alive"}
+
+    @app.get("/internal/metrics", response_class=Response)
+    async def operational(_caller: Claims = Depends(requires(AI_CLIENT))) -> Response:
+        extra = metrics.pool_metrics(app.state)
+        collect = getattr(app.state, "metric_gauges", None)
+        if collect is not None:
+            extra.update(await collect())
+        return Response(metrics.render(extra), media_type="text/plain; version=0.0.4")
 
     return app
 

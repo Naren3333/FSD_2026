@@ -10,7 +10,8 @@ import (
 
 // store is an organization's curriculum topics and their prerequisites.
 type store interface {
-	listTopics(ctx context.Context, org string, archived bool) ([]Topic, error)
+	countTopics(ctx context.Context, org string, archived bool) (int, error)
+	listTopics(ctx context.Context, org string, archived bool, paging ...platform.ListWindow) ([]Topic, error)
 	findTopic(ctx context.Context, org, id string) (Topic, error)
 	insertTopic(ctx context.Context, id, org, name string) error
 	renameTopic(ctx context.Context, org, id, name string) (bool, error)
@@ -25,8 +26,9 @@ type store interface {
 type pgStore struct{ db *pgxpool.Pool }
 
 // listTopics is the organization's active topics, or its archived ones, by name; up to 200.
-func (p pgStore) listTopics(ctx context.Context, org string, archived bool) ([]Topic, error) {
-	rows, err := p.db.Query(ctx, "SELECT id,name FROM topics WHERE org_id=$1 AND archived=$2 ORDER BY name,id LIMIT 200", org, archived)
+func (p pgStore) listTopics(ctx context.Context, org string, archived bool, paging ...platform.ListWindow) ([]Topic, error) {
+	window := platform.Window(paging, 200)
+	rows, err := p.db.Query(ctx, "SELECT id,name FROM topics WHERE org_id=$1 AND archived=$2 ORDER BY name,id OFFSET $3 LIMIT $4", org, archived, window.Offset, window.Limit)
 	if err != nil {
 		return nil, err
 	}
@@ -131,4 +133,10 @@ func (p pgStore) listPrerequisites(ctx context.Context, org, id string) ([]Topic
 func (p pgStore) deletePrerequisite(ctx context.Context, org, id, prerequisite string) (bool, error) {
 	tag, err := p.db.Exec(ctx, "DELETE FROM prerequisites p USING topics t WHERE p.topic_id=$1 AND p.prerequisite_id=$2 AND t.id=p.topic_id AND t.org_id=$3", id, prerequisite, org)
 	return tag.RowsAffected() == 1, err
+}
+
+func (p pgStore) countTopics(ctx context.Context, org string, archived bool) (int, error) {
+	var total int
+	err := p.db.QueryRow(ctx, `SELECT count(*) FROM topics WHERE org_id=$1 AND archived=$2`, org, archived).Scan(&total)
+	return total, err
 }

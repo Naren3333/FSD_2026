@@ -17,6 +17,7 @@ from dataclasses import replace
 from pathlib import Path
 
 import pymupdf
+from fastapi import HTTPException
 
 import pdf
 from ingest import tables as extraction
@@ -95,6 +96,8 @@ async def _laid_out(
             ),
             "layout",
         )
+    except HTTPException:
+        raise
     except Exception as e:
         log.warning("table_not_laid_out", extra={"table": i + 1, "page": str(page), "error": str(e)})
         return None

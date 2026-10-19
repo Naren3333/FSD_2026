@@ -35,6 +35,8 @@ var errClassroomPurged = errors.New("the classroom was deleted")
 
 // store is a classroom's assessments and its students' submissions and saved work.
 type store interface {
+	findAssessments(ctx context.Context, org string, ids []string) ([]Assessment, error)
+	countAssessments(ctx context.Context, org, classroom string, teacher bool, now time.Time) (int, error)
 	findAssessment(ctx context.Context, org, id string) (Assessment, error)
 	insertAssessment(ctx context.Context, org string, v Assessment) error
 	// updateAssessment replaces before, the assessment as the teacher's change was made against, with v while no
@@ -55,8 +57,8 @@ type store interface {
 	// listAssessments lists the classroom's assessments for student (their submitted flag); drafts and assessments
 	// not open yet only when all is set, for the classroom's teacher, with how many of the enrolled students given
 	// have submitted each. listProgress counts those students' submissions too.
-	listAssessments(ctx context.Context, org, classroomID, student string, all bool, enrolled []string, now time.Time) ([]Summary, error)
-	listProgress(ctx context.Context, org, classroomID string, enrolled []string) ([]Progress, error)
+	listAssessments(ctx context.Context, org, classroomID, student string, all bool, enrolled []string, now time.Time, paging ...platform.ListWindow) ([]Summary, error)
+	listProgress(ctx context.Context, org, classroomID string, enrolled []string, paging ...platform.ListWindow) ([]Progress, error)
 	// insertSubmission returns errAssessmentChanged when v's questions or marking settings are no longer the stored
 	// ones, and errClosed when the assessment no longer takes the submission. late is whether it was stored as late.
 	insertSubmission(ctx context.Context, v Assessment, sub Submission) (inserted, late bool, err error)
@@ -65,6 +67,14 @@ type store interface {
 	findSubmission(ctx context.Context, assessment, student string) (OwnSubmission, error)
 	findSaved(ctx context.Context, assessment, student string) (SavedAnswers, error)
 	saveAnswers(ctx context.Context, assessment, student string, answers map[string]string) (time.Time, error)
+}
+
+func (p pgStore) findAssessments(ctx context.Context, org string, ids []string) ([]Assessment, error) {
+	rows, err := p.db.Query(ctx, "SELECT "+assessmentColumns+" FROM assessments WHERE org_id=$1 AND id=ANY($2::uuid[])", org, ids)
+	if err != nil {
+		return nil, err
+	}
+	return pgx.CollectRows(rows, func(row pgx.CollectableRow) (Assessment, error) { return scanAssessment(row) })
 }
 
 // pgStore is the store in the service's own Postgres database.
@@ -255,8 +265,9 @@ func (p pgStore) deleteAssessment(ctx context.Context, org, id string, submissio
 }
 
 // listProgress is the classroom's 100 newest assessments with how many of the enrolled students submitted each.
-func (p pgStore) listProgress(ctx context.Context, org, classroomID string, enrolled []string) ([]Progress, error) {
-	rows, err := p.db.Query(ctx, "SELECT a.id,a.title,count(s.id),a.status,a.due_at FROM assessments a LEFT JOIN submissions s ON s.assessment_id=a.id AND s.student_id=ANY($3::text[]) WHERE a.classroom_id=$1 AND a.org_id=$2 GROUP BY a.id ORDER BY a.created_at DESC LIMIT 100", classroomID, org, enrolled)
+func (p pgStore) listProgress(ctx context.Context, org, classroomID string, enrolled []string, paging ...platform.ListWindow) ([]Progress, error) {
+	window := platform.Window(paging, 100)
+	rows, err := p.db.Query(ctx, "SELECT a.id,a.title,count(s.id),a.status,a.due_at FROM assessments a LEFT JOIN submissions s ON s.assessment_id=a.id AND s.student_id=ANY($3::text[]) WHERE a.classroom_id=$1 AND a.org_id=$2 GROUP BY a.id ORDER BY a.created_at DESC,a.id DESC OFFSET $4 LIMIT $5", classroomID, org, enrolled, window.Offset, window.Limit)
 	if err != nil {
 		return nil, err
 	}
@@ -272,14 +283,15 @@ func (p pgStore) listProgress(ctx context.Context, org, classroomID string, enro
 // submitted it and whether anyone has, removed students included (which is what stops a replacement or a plain
 // deletion). The question count and points are summed in SQL, so the questions (answer keys and rubrics included) are
 // never read for a list; a question stored without points is worth one, as in decodeQuestions.
-func (p pgStore) listAssessments(ctx context.Context, org, classroomID, student string, all bool, enrolled []string, now time.Time) ([]Summary, error) {
+func (p pgStore) listAssessments(ctx context.Context, org, classroomID, student string, all bool, enrolled []string, now time.Time, paging ...platform.ListWindow) ([]Summary, error) {
+	window := platform.Window(paging, 100)
 	rows, err := p.db.Query(ctx, `SELECT a.id,a.title,EXISTS(SELECT 1 FROM submissions s WHERE s.assessment_id=a.id AND s.student_id=$3),
 		a.status,a.opens_at,a.due_at,a.late_policy,jsonb_array_length(a.questions),
 		(SELECT coalesce(sum(coalesce(nullif((q->>'points')::int,0),1)),0) FROM jsonb_array_elements(a.questions) q),
 		CASE WHEN $4 THEN (SELECT count(*) FROM submissions s WHERE s.assessment_id=a.id AND s.student_id=ANY($6::text[])) END,
 		CASE WHEN $4 THEN EXISTS(SELECT 1 FROM submissions s WHERE s.assessment_id=a.id) END
 		FROM assessments a WHERE a.classroom_id=$1 AND a.org_id=$2 AND ($4 OR (a.status='published' AND (a.opens_at IS NULL OR a.opens_at<=$5)))
-		ORDER BY a.created_at DESC LIMIT 100`, classroomID, org, student, all, now, enrolled)
+		ORDER BY a.created_at DESC,a.id DESC OFFSET $7 LIMIT $8`, classroomID, org, student, all, now, enrolled, window.Offset, window.Limit)
 	if err != nil {
 		return nil, err
 	}
@@ -420,4 +432,10 @@ func (p pgStore) saveAnswers(ctx context.Context, assessment, student string, an
 		err = tx.Commit(ctx)
 	}
 	return at, err
+}
+
+func (p pgStore) countAssessments(ctx context.Context, org, classroom string, teacher bool, now time.Time) (int, error) {
+	var total int
+	err := p.db.QueryRow(ctx, `SELECT count(*) FROM assessments WHERE org_id=$1 AND classroom_id=$2 AND ($3 OR (status='published' AND (opens_at IS NULL OR opens_at<=$4)))`, org, classroom, teacher, now).Scan(&total)
+	return total, err
 }

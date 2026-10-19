@@ -3,9 +3,9 @@ passes through, so it keeps the ledger: one row per billable call, priced from t
 own `aicore` database. The cap is per user per day: SPEND_LIMIT_STUDENT_USD (default 5) and
 SPEND_LIMIT_TEACHER_USD (default 10), and the day starts at midnight in SPEND_TIMEZONE (default Asia/Singapore).
 
-The check happens before a call and the cost is recorded after it, so calls already running when a user reaches
-the cap still finish: the overshoot is at most the calls in flight. A user may have at most AI_USER_CONCURRENCY
-(default 10) inference and rerank calls running at once (429 AI_BUSY past it), which bounds that overshoot."""
+PostgreSQL reserves a conservative estimate before each provider attempt and transfers it to recorded usage
+afterwards. The same database serializes AI_USER_CONCURRENCY (default 10) across replicas, including ingest.
+Uncertain outcomes retain reservations until accounted for or past the budget day and lease (ADR 0012)."""
 
 import logging
 from dataclasses import dataclass
@@ -15,7 +15,7 @@ from typing import Literal, Protocol
 from zoneinfo import ZoneInfo
 
 from learning_transport import Contract, failure
-from learning_transport.db import AsyncPooled
+from learning_transport.db import AsyncPooled, lock_async
 from pydantic import Field
 
 from settings import get_settings
@@ -94,6 +94,15 @@ def timezone() -> str:
 
 
 class Ledger(Protocol):
+    async def adjust(self, reservation: str, unused: float) -> None: ...
+    async def reserve(self, reservation: str, billed: Billed, amount: float, concurrency: int) -> None: ...
+
+    async def release(self, reservation: str) -> None: ...
+
+    async def record_reserved(
+        self, reservation: str, billed: Billed, charge: Charge, correlation: str
+    ) -> None: ...
+
     async def today(self, billed: Billed) -> Usage: ...
 
     async def record(self, billed: Billed, charge: Charge, correlation_id: str) -> None: ...
@@ -105,6 +114,107 @@ class Ledger(Protocol):
 
 class PostgresLedger(AsyncPooled):
     MIGRATIONS = MIGRATIONS
+
+    async def metrics(self) -> dict[str, float]:
+        async with self.pool.connection() as conn:
+            cur = await conn.execute(
+                """SELECT count(*) AS calls,coalesce(sum(cost_usd),0) AS cost,
+            coalesce(sum(tokens_in),0) AS inputs,coalesce(sum(tokens_out),0) AS outputs
+            FROM usage WHERE created_at >= date_trunc('day',now() AT TIME ZONE %s) AT TIME ZONE %s""",
+                (timezone(), timezone()),
+            )
+            usage = await cur.fetchone()
+            cur = await conn.execute(
+                "SELECT count(*) AS reservations,coalesce(sum(amount),0) AS reserved,count(*) FILTER(WHERE expires_at<=now()) AS expired FROM budget_reservations"
+            )
+            reservations = await cur.fetchone()
+        assert usage is not None and reservations is not None
+        return {"learning_ai_today_" + key: float(value) for key, value in usage.items()} | {
+            "learning_ai_" + key: float(value) for key, value in reservations.items()
+        }
+
+    async def reserve(self, reservation: str, billed: Billed, amount: float, concurrency: int) -> None:
+        async with self.pool.connection() as conn, conn.transaction():
+            await lock_async(conn, "ai-budget", billed.org_id + ":" + billed.user_id)
+            cur = await conn.execute(
+                """SELECT
+              (SELECT coalesce(sum(cost_usd),0) FROM usage WHERE org_id=%s AND user_id=%s
+                AND created_at >= date_trunc('day',now() AT TIME ZONE %s) AT TIME ZONE %s) AS spent,
+              coalesce(sum(amount),0) AS reserved,
+              count(*) FILTER (WHERE expires_at>now() AND id<>%s::uuid) AS running,
+              (date_trunc('day',now() AT TIME ZONE %s)+interval '1 day') AT TIME ZONE %s AS resets_at
+            FROM budget_reservations WHERE org_id=%s AND user_id=%s
+              AND (expires_at>now() OR created_at>=date_trunc('day',now() AT TIME ZONE %s) AT TIME ZONE %s)""",
+                (
+                    billed.org_id,
+                    billed.user_id,
+                    timezone(),
+                    timezone(),
+                    reservation,
+                    timezone(),
+                    timezone(),
+                    billed.org_id,
+                    billed.user_id,
+                    timezone(),
+                    timezone(),
+                ),
+            )
+            row = await cur.fetchone()
+            assert row is not None
+            if row["running"] >= concurrency:
+                raise failure(429, "AI_BUSY", "Too many AI requests are running for you at once.")
+            if float(row["spent"]) + float(row["reserved"]) + amount > limit(billed.role):
+                raise limit_reached(
+                    Usage(
+                        spent_usd=float(row["spent"]),
+                        limit_usd=limit(billed.role),
+                        resets_at=row["resets_at"],
+                    )
+                )
+            await conn.execute(
+                """INSERT INTO budget_reservations(id,org_id,user_id,amount) VALUES(%s,%s,%s,%s)
+            ON CONFLICT(id) DO UPDATE SET amount=budget_reservations.amount+excluded.amount,
+            expires_at=now()+interval '30 minutes'""",
+                (reservation, billed.org_id, billed.user_id, amount),
+            )
+            # Old abandoned reservations are no longer counted after their budget day and lease have passed.
+            await conn.execute("DELETE FROM budget_reservations WHERE expires_at<now()-interval '2 days'")
+
+    async def release(self, reservation: str) -> None:
+        async with self.pool.connection() as conn:
+            await conn.execute("DELETE FROM budget_reservations WHERE id=%s", (reservation,))
+
+    async def adjust(self, reservation: str, unused: float) -> None:
+        async with self.pool.connection() as conn:
+            await conn.execute(
+                "UPDATE budget_reservations SET amount=greatest(0,amount-%s) WHERE id=%s",
+                (unused, reservation),
+            )
+
+    async def record_reserved(
+        self, reservation: str, billed: Billed, charge: Charge, correlation: str
+    ) -> None:
+        async with self.pool.connection() as conn, conn.transaction():
+            await conn.execute(
+                """INSERT INTO usage(org_id,user_id,role,operation,model,tokens_in,tokens_out,cost_usd,estimated,correlation_id)
+            VALUES(%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)""",
+                (
+                    billed.org_id,
+                    billed.user_id,
+                    billed.role,
+                    charge.operation,
+                    charge.model,
+                    charge.tokens_in,
+                    charge.tokens_out,
+                    charge.cost_usd,
+                    charge.estimated,
+                    correlation,
+                ),
+            )
+            await conn.execute(
+                "UPDATE budget_reservations SET amount=greatest(0,amount-%s) WHERE id=%s",
+                (charge.cost_usd, reservation),
+            )
 
     async def today(self, billed: Billed) -> Usage:
         # The day boundaries are computed by PostgreSQL, which carries the time zone database, on local dates in

@@ -22,7 +22,17 @@
 <div class="split">
   <section class="panel">
     <h3 id="library-title" tabindex="-1">Classroom library</h3>
-    <p class="caption">Up to 100 most recent documents</p>
+    <p class="caption">20 documents per page</p>
+    <app-pager
+      label="Materials pages"
+      [page]="documents.page()"
+      (pageChange)="documents.page.set($event)"
+      [pageSize]="documents.pageSize"
+      [total]="documents.total()"
+      noun="materials"
+      [disabled]="documents.loading() || state.busy()"
+      (go)="load()"
+    />
     <app-section-state [section]="documents" loading="Loading materials…" />
     @if (documents.ready()) {
       @for (doc of documents.value() ?? []; track doc.id) {

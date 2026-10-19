@@ -276,6 +276,10 @@ def documents(u: Users, room_id: str) -> None:
     request(u.student, "GET", f"/content/documents/{doc['id']}")
     original = u.student.get(f"/content/documents/{doc['id']}/original")
     assert original.status_code == 200 and original.content == text
+    page = request(u.student, "GET", f"/content/documents/page?classroom_id={room_id}&limit=1")
+    assert page["total"] == 1 and [item["id"] for item in page["items"]] == [doc["id"]]
+    request(u.other, "GET", f"/content/documents/page?classroom_id={room_id}", 403)
+    request(u.student, "GET", f"/content/documents/page?classroom_id={room_id}&limit=101", 422)
 
     pdf = request(u.teacher, "POST", f"{documents}&title=PDF", 201, content=b"%PDF-1.7\n", headers=PDF)
     assert pdf["status"] == "indexing" and pdf["doc_type"] == "teaching_material"
@@ -465,6 +469,7 @@ def assess_and_grade(u: Users, room_id: str) -> Graded:
     )  # fmt: skip
     public = request(u.student, "GET", f"/assessment/assessments/{assessment['id']}")
     assert all("answer" not in q and "tolerance" not in q for q in public["questions"])
+    assessment_reads(u, room_id, public)
 
     # The first answer is right, the second wrong. A second submission is refused.
     first, second = (q["id"] for q in assessment["questions"])
@@ -529,6 +534,15 @@ def assess_and_grade(u: Users, room_id: str) -> Graded:
     request(u.student, "GET", f"/analytics/performance/{u.teacher_id}?classroom_id={room_id}", 403)
     request(u.other, "GET", performance, 403)
     return Graded(submission["id"], grade["id"], performance, result["topics"])
+
+
+def assessment_reads(u: Users, room_id: str, public: dict[str, Any]) -> None:
+    """Batch and page reads retain the student's projection and classroom membership checks."""
+    ids = {"ids": [public["id"]]}
+    assert request(u.student, "POST", "/assessment/assessments/batch", json=ids) == [public]
+    request(u.other, "POST", "/assessment/assessments/batch", 403, json=ids)
+    page = request(u.student, "GET", f"/assessment/assessments/page?classroom_id={room_id}&limit=1")
+    assert page["total"] >= 1 and len(page["items"]) == 1 and "questions" not in page["items"][0]
 
 
 def own_submission(u: Users, path: str, answers: dict[str, str]) -> None:
@@ -1197,9 +1211,46 @@ def run() -> None:
     step("Classroom deletion and purge", lambda: delete_classroom(users, room_id, graded))
     step("Database isolation and migrations", databases)
     step("AI service accounts", lambda: ai_service_accounts(users))
+    step("Protected operational measurements", lambda: operational_metrics(users))
     step("Unauthorized agents answer 501", unauthorized_agents)
     step("Per-session rate limit", rate_limit_per_session)
     step("Removing this run's topics", remove_topics)
+
+
+def operational_metrics(users: Users) -> None:
+    # Probe internal endpoints from a service container; tokens go on stdin, never into process arguments/logs.
+    probe = """
+import sys, urllib.request, urllib.error, json
+token=sys.stdin.read().strip()
+results={}
+for name in ['content','identity','ai-core','question-chatbot-agent']:
+ request=urllib.request.Request('http://'+name+':8080/internal/metrics',headers={'Authorization':'Bearer '+token})
+ try:
+  with urllib.request.urlopen(request,timeout=10) as response: results[name]=response.read().decode()
+ except urllib.error.HTTPError as error: results[name]=error.code
+print(json.dumps(results))
+"""
+    allowed = json.loads(
+        docker("exec", "-T", "ai-core", "python", "-c", probe, input=service_token("content-indexer")).stdout
+    )
+    assert all(
+        isinstance(value, str) and "learning_http_requests_total" in value for value in allowed.values()
+    )
+    assert (
+        "learning_content_cleanup_jobs" in allowed["content"] and "learning_ai_reserved" in allowed["ai-core"]
+    )
+    denied = json.loads(
+        docker(
+            "exec",
+            "-T",
+            "ai-core",
+            "python",
+            "-c",
+            probe,
+            input=users.teacher.headers["authorization"].removeprefix("Bearer "),
+        ).stdout
+    )
+    assert set(denied.values()) == {403}
 
 
 if __name__ == "__main__":

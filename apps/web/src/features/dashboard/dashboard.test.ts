@@ -79,7 +79,15 @@ async function render(parts: Parts = {}, classroomId = 'c1', rooms: Rooms = {}) 
   TestBed.configureTestingModule({
     providers: [
       provideRouter([]),
-      { provide: IdentityApi, useValue: { roster: () => parts.roster ?? Promise.resolve(students) } },
+      {
+        provide: IdentityApi,
+        useValue: {
+          rosterPage: async () => {
+            const roster = await (parts.roster ?? Promise.resolve(students));
+            return { students: roster, total: roster.length };
+          },
+        },
+      },
       {
         provide: AssessmentApi,
         useValue: { progress: () => parts.progress ?? Promise.resolve([published]) },

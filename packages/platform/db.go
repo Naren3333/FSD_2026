@@ -2,7 +2,9 @@ package platform
 
 import (
 	"context"
+	"fmt"
 	"io/fs"
+	"strconv"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -31,8 +33,16 @@ func OpenDB(ctx context.Context, url string, migrations fs.FS, bootstrap string)
 	if err != nil {
 		return nil, err
 	}
-	config.MaxConns = 10
-	config.MinConns = 1
+	maximum, err := strconv.Atoi(Env("DB_POOL_MAX", "10"))
+	if err != nil || maximum < 1 || maximum > 1000 {
+		return nil, fmt.Errorf("DB_POOL_MAX must be 1–1000")
+	}
+	minimum, err := strconv.Atoi(Env("DB_POOL_MIN", "1"))
+	if err != nil || minimum < 0 || minimum > maximum {
+		return nil, fmt.Errorf("DB_POOL_MIN must be 0–DB_POOL_MAX")
+	}
+	config.MaxConns = int32(maximum)
+	config.MinConns = int32(minimum)
 	config.MaxConnLifetime = 30 * time.Minute
 	db, err := pgxpool.NewWithConfig(ctx, config)
 	if err != nil {

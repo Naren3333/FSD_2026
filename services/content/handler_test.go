@@ -38,7 +38,7 @@ func (documentStore) findDocument(_ context.Context, _, id string) (Document, []
 	return Document{ID: id, Classroom: classID, Title: "Doc", DocType: docType, Type: "text/plain"}, []byte("[]"), nil
 }
 
-func (d documentStore) listDocuments(_ context.Context, _, _ string, teacher bool) ([]Document, error) {
+func (d documentStore) listDocuments(_ context.Context, _, _ string, teacher bool, paging ...platform.ListWindow) ([]Document, error) {
 	*d.listedForTeacher = teacher
 	return []Document{}, nil
 }
@@ -268,12 +268,9 @@ type deletingStore struct {
 	err     error
 }
 
-func (d deletingStore) deleteDocument(ctx context.Context, _, id string, removeFiles func(context.Context) error) error {
+func (d deletingStore) deleteDocument(_ context.Context, _, id string) error {
 	if d.err != nil {
 		return d.err
-	}
-	if err := removeFiles(ctx); err != nil {
-		return err
 	}
 	*d.deleted = id
 	return nil
@@ -323,16 +320,16 @@ func TestDeletingADocumentRemovesItsRowAndObjects(t *testing.T) {
 		files := &removedFiles{}
 		s := server{store: deletingStore{deleted: &deleted}, access: platformtest.Access(platform.RelationTeacher), files: files}
 		w := platformtest.Serve(s.routes, http.MethodDelete, "/v1/documents/"+id, "", "user", "teacher")
-		if w.Code != http.StatusNoContent || deleted != id || len(files.prefixes) != 1 || files.prefixes[0] != "org/"+id+"/" {
+		if w.Code != http.StatusNoContent || deleted != id || len(files.prefixes) != 0 {
 			t.Errorf("%s: %d, deleted %q, removed %v", id, w.Code, deleted, files.prefixes)
 		}
 	}
 }
 
-func TestADeleteThatCannotRemoveTheObjectsKeepsTheRow(t *testing.T) {
+func TestADeleteDoesNotDependOnObjectStorage(t *testing.T) {
 	var deleted string
 	s := server{store: deletingStore{deleted: &deleted}, access: platformtest.Access(platform.RelationTeacher), files: &removedFiles{err: errors.New("storage down")}}
-	if w := platformtest.Serve(s.routes, http.MethodDelete, "/v1/documents/"+teachingID, "", "user", "teacher"); w.Code != http.StatusInternalServerError || deleted != "" {
+	if w := platformtest.Serve(s.routes, http.MethodDelete, "/v1/documents/"+teachingID, "", "user", "teacher"); w.Code != http.StatusNoContent || deleted != teachingID {
 		t.Fatalf("%d, deleted %q", w.Code, deleted)
 	}
 	// Deleted meanwhile by another request.

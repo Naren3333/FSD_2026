@@ -27,6 +27,17 @@
         }
       }
     },
+    "/internal/metrics": {
+      "get": {
+        "summary": "Operational",
+        "operationId": "operational_internal_metrics_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response"
+          }
+        }
+      }
+    },
     "/health/ready": {
       "get": {
         "summary": "Ready",

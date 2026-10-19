@@ -1,6 +1,6 @@
 # Engineering handover
 
-This is the current state of the system. Why each rule exists is in `docs/decisions/` (ADRs 0001–0011), how to run and recover it is in `docs/development/operations.md`, and service boundaries and data ownership are in `docs/architecture/system.md`. Dated history lives in git and in the ADRs.
+This is the current state of the system. Why each rule exists is in `docs/decisions/` (ADRs 0001–0012), how to run and recover it is in `docs/development/operations.md`, and service boundaries and data ownership are in `docs/architecture/system.md`. Dated history lives in git and in the ADRs.
 
 ## Delivered architecture
 
@@ -48,7 +48,7 @@ DESIGN.md / UX-CONTRACT.md         UI design and behavioural ownership
 - Authorized uploads of teaching material only (ADR 0009) into a restricted bucket, with SHA-256, original retrieval and UTF-8 text extraction. Older rubric and marking-scheme documents keep their type and stay teacher-only.
 - PDFs up to 50 MiB are indexed asynchronously through ai-core (`index_jobs`, leased by two workers, 30-minute lease, backoff to `AI_UNAVAILABLE` after six attempts) into chunks with `vector(1536)` embeddings, figure crops and full-text indexes; `content.indexed.v1` goes out on success. `POST /v1/documents/{id}/reindex` for teachers.
 - `POST /v1/search`: classroom access through Identity, vector and keyword legs, RRF, rerank through ai-core with RRF fallback, related figures and tables. Students only ever get teaching material.
-- `DELETE /v1/documents/{id}` (teacher) removes objects, then the row with chunks and job, and writes `content.deleted.v1`. An hourly sweep removes bucket objects older than 6 hours that no row names, re-checking each under the document row's lock just before removal.
+- `DELETE /v1/documents/{id}` (teacher) atomically removes the row, chunks and indexing job, writes `content.deleted.v1` and queues `object_cleanup_jobs`. A leased worker removes the object prefix after commit and retains failures for retry; classroom purges use the same queue (ADR 0012). An hourly sweep also removes bucket objects older than 6 hours that no row names, re-checking each under the document row's lock just before removal.
 
 ### Assessment (ADRs 0004, 0005, 0008)
 - Up to 50 questions: multiple choice, numerical, short answer (accepted answers) and free response (rubric, optional model answer), points per question, optional marking points (`marking_scheme`, up to 5 passages; teacher-only), and optional `sources`/`origin: "generated"` from question generation.
@@ -67,8 +67,8 @@ DESIGN.md / UX-CONTRACT.md         UI design and behavioural ownership
 - `GET /v1/performance?classroom_id=` pages the current roster (from Identity with the teacher's token). The consumer group comes from `KAFKA_GROUP` (operations.md, "Rebuilding analytics").
 
 ### AI applications
-- **ai-core** (private, `ai-client` role): `/v1/ingest` (PyMuPDF parsing, vision pass for tables, figures and OCR, chunker; 500 pages / 5000 chunks max, `TOO_LARGE`), `/v1/inference`, `/v1/rerank`. Every call names the billed user; ai-core records cost and enforces each user's daily allowance (ADR 0003) and at most `AI_USER_CONCURRENCY` (10) concurrent calls per user (429 `AI_BUSY`). The tiktoken `cl100k_base` file is committed under `services/ai-core/tiktoken/` so nothing downloads it.
-- **Question chatbot** (`/api/chatbot`, own `chatbot` database): query rewrite, Content search with the user's own token, relevance floor and fixed refusals, a streamed answer with citations. Answers are always saved (`interrupted` on disconnect). Citations of deleted materials are blanked (`removed: true`).
+- **ai-core** (private, `ai-client` role): `/v1/ingest` (local PyMuPDF text/layout extraction, selective vision for uncertain graphics/tables/OCR, configurable chunks; 500 pages / 5000 chunks max, `TOO_LARGE`), `/v1/inference`, `/v1/rerank`. Versioned operational caches reuse prepared PDFs and exact embedding inputs. Every call names the billed user; PostgreSQL reservations enforce the allowance before each provider attempt and share `AI_USER_CONCURRENCY` (10) across replicas (ADR 0012). Actual usage settles reservations; uncertain or failed accounting conservatively retains them. Tokenizer data is committed for both ai-core and the chatbot, with no runtime download.
+- **Question chatbot** (`/api/chatbot`, own `chatbot` database): skips rewriting simple standalone definitions; retains rewriting for history, ambiguity and multiple topics. Searches the primary query first and adds searches for uncovered topics, retaining the calibrated rerank floor. Evidence fits `CONTEXT_TOKENS` (8000 default) or the turn refuses without an answer call. Content receives the user's own token. Answers stream with citations and are always saved (`interrupted` on disconnect). Citations of deleted materials are blanked (`removed: true`).
 - **Question generation** (`/api/question-generation`, stateless): `POST /v1/questions` and `POST /v1/marking-guidance` for teachers; drafts must cite given passages and quote evidence found in them. `RELEVANCE_FLOOR` is 0.5, calibrated on the eval corpus (operations.md).
 - The two agents share their ai-core and Content transport in `learning_transport`.
 - **Student performance:** `/v1/performance_interpretation` validates and returns 501 `AI_CAPABILITY_NOT_IMPLEMENTED`.
@@ -76,6 +76,7 @@ DESIGN.md / UX-CONTRACT.md         UI design and behavioural ownership
 ### Web
 - Teachers land on the Class dashboard, students on Home. Sections: Classrooms, Curriculum (teacher), Materials with indexing status and delete, Ask the materials (streamed chat with sources), Assessments (editor with generation and marking guidance; student taking with autosave), Grading review with inline marking and AI suggestions, My results, Learning performance / My progress, Profile.
 - Every list loads through `shared/section.ts` and shows loading, empty and failure states; names come from the shared `CurriculumNames` service; dialogs use `app-confirm-dialog`. The app reads its gateway and Keycloak URLs from nginx's `/config.json`.
+- Classroom/topic/document/assessment APIs expose additive `/page` endpoints (`offset`, `limit` 1–100, default 20, `{items,total}`); legacy array endpoints retain their old caps. Materials and assessments use `PagedSection`; picker metadata loads all bounded pages. Progress uses `/progress/page`; assessment detail reads coalesce into authorized batches of up to 50. Class dashboard roster reads only its visible page plus the total.
 
 ## Events and persistence
 
@@ -106,10 +107,10 @@ The full requested definition of done is **not claimed**. The core workflow is i
 - Question bank, resits, numerical generated questions and student self-practice. Each student can submit an assessment once.
 - Document revisions beyond revision 1, lesson-plan persistence, and the performance interpretation agent.
 - Assessment trends, richer teacher summaries, and archival/reconciliation beyond Kafka's 7-day retention.
-- Complete pagination in the UI. Lists are capped (100 newest assessments, Identity's 100 newest classrooms).
+- Offset pagination can drift under concurrent insertions; metadata pickers still accumulate their full authorized list. Cursor pagination and server-side picker search remain future work.
 - Production Kafka TLS/SASL/ACLs, network policies, per-service machine identities, managed OIDC persistence, signing-key rollover, separate migration/runtime roles, backups/restore testing, secret management and dependency/image audits.
 - S3/SQL atomicity relies on retaining ambiguous originals plus the hourly sweep, not a staged-upload saga.
-- An ingest's allowance is checked only before it starts (page and chunk caps bound the cost).
+- Reservation estimates depend on configured model prices and image/token allowances. Uncertain provider outcomes or ledger-write failures retain conservative holds; operators must investigate these instead of blindly releasing them.
 - Static checks and focused browser tests are not a comprehensive accessibility, multi-browser, load, chaos or security assessment.
 
 Recommended next: question bank and resits (ADR 0004's "not built yet"), cursor pagination, then the performance interpretation agent, each behind its own ADR as AGENTS.md requires. Preserve teacher approval and evidence provenance throughout.

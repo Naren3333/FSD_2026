@@ -8,8 +8,7 @@ import (
 	"github.com/jackc/pgx/v5"
 )
 
-// purgeTimeout bounds one attempt at purging a classroom. It must cover deleting a large classroom's rows and every
-// one of its objects; a purge cut short rolls back and starts again, so one that never fits would block the consumer.
+// purgeTimeout bounds deleting a large classroom's rows and recording durable object cleanup jobs.
 const purgeTimeout = 5 * time.Minute
 
 // folders is what purging needs from object storage.
@@ -20,11 +19,10 @@ type folders interface {
 // purger removes a deleted classroom's documents: their rows (the chunks, vectors and indexing jobs go with them),
 // their originals and figure crops in object storage, and any of their events not yet published. It records the
 // classroom as purged, so an upload still under way is refused.
-type purger struct{ files folders }
+type purger struct{}
 
-// purge runs in the consumer's transaction. The objects are removed before the transaction commits, so a failure
-// leaves the rows in place and the retry removes whatever is left; deleting what is already gone changes nothing,
-// so a repeated event is harmless.
+// purge runs in the consumer's transaction. Durable cleanup jobs commit with the rows' deletion and inbox;
+// a duplicate event cannot lose cleanup work or remove objects before a successful commit.
 func (p purger) purge(ctx context.Context, tx pgx.Tx, event platform.Event) error {
 	v, err := platform.DecodeClassroomDeleted(event)
 	if err != nil {
@@ -49,7 +47,7 @@ func (p purger) purge(ctx context.Context, tx pgx.Tx, event platform.Event) erro
 		return err
 	}
 	for _, document := range documents {
-		if err = p.files.removeAll(ctx, v.Org+"/"+document+"/"); err != nil {
+		if _, err = tx.Exec(ctx, "INSERT INTO object_cleanup_jobs(prefix) VALUES($1) ON CONFLICT DO NOTHING", v.Org+"/"+document+"/"); err != nil {
 			return err
 		}
 	}

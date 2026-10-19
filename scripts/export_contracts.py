@@ -665,11 +665,52 @@ operations = {
         ),
     ],
 }
+# Additive page endpoints preserve existing bounded array clients.
+PAGE_SCHEMAS = {}
+for service, resource, item, query in [
+    ("identity", "classrooms", classroom, []),
+    ("curriculum", "topics", curriculum_topic, []),
+    ("content", "documents", document, ["classroom_id"]),
+    ("assessment", "assessments", assessment_summary, ["classroom_id"]),
+]:
+    schema = obj({"items": array(item, maximum=100), "total": COUNT})
+    PAGE_SCHEMAS[service] = schema
+    page_op = paged(operation("GET", f"/v1/{resource}/page", None, schema, query=query), 100, 20)
+    if service == "curriculum":
+        page_op[2]["parameters"] += topic_list[2]["parameters"]
+    operations[service].append(page_op)
+operations["assessment"].append(
+    operation(
+        "POST",
+        "/v1/assessments/batch",
+        obj({"ids": array(UUID, 1, 50)}),
+        array({"oneOf": [assessment, public_assessment]}, maximum=50),
+    )
+)
+
+operations["assessment"].append(
+    paged(
+        operation(
+            "GET",
+            "/v1/assessments/progress/page",
+            None,
+            obj({"items": array(assessment_progress), "total": COUNT}),
+            query=["classroom_id"],
+        ),
+        100,
+        20,
+    )
+)
+
 # The named schemas of the Go services' contracts, under components/schemas. The web's types are generated from them
 # (apps/web/src/api/generated), and each Go service's tests check its JSON structs against them (contract_test.go),
 # so these names are what both sides refer to. A schema used in a contract is written once there and referred to
 # by $ref; event schemas below stay self-contained.
 NAMES = {
+    "ClassroomPage": PAGE_SCHEMAS["identity"],
+    "TopicPage": PAGE_SCHEMAS["curriculum"],
+    "DocumentPage": PAGE_SCHEMAS["content"],
+    "AssessmentPage": PAGE_SCHEMAS["assessment"],
     "Error": error,
     "Profile": profile,
     "Classroom": classroom,

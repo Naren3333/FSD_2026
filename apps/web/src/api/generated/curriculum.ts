@@ -24,6 +24,10 @@ export interface components {
     TopicInput: {
       name: string;
     };
+    TopicPage: {
+      items: components['schemas']['Topic'][];
+      total: number;
+    };
   };
   responses: never;
   parameters: never;

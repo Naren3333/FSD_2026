@@ -209,17 +209,13 @@ func (s server) runSearch(ctx context.Context, f filter, query string, topK int,
 }
 
 func (s server) embedQuery(ctx context.Context, query string, who billed) ([]float32, string, error) {
-	if cached, ok := s.vectors.get(query); ok {
-		return cached.vector, cached.model, nil
-	}
-	ctx, cancel := context.WithTimeout(ctx, embedTimeout)
-	defer cancel()
-	vector, model, err := s.ai.embed(ctx, query, who)
-	if err != nil {
-		return nil, "", err
-	}
-	s.vectors.put(query, cachedVector{vector, model})
-	return vector, model, nil
+	v, err := s.vectors.load(ctx, query, func(work context.Context) (cachedVector, error) {
+		work, cancel := context.WithTimeout(work, embedTimeout)
+		defer cancel()
+		vector, model, err := s.ai.embed(work, query, who)
+		return cachedVector{vector, model}, err
+	})
+	return v.vector, v.model, err
 }
 
 const legColumns = "id,document_id,doc_type,section_path,page_start,page_end,content,kind,source,image,cites"

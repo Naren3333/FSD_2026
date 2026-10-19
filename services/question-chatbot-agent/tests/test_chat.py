@@ -4,6 +4,7 @@ what is saved. Ported from fsd_test's assistant tests."""
 import asyncio
 import json
 from collections.abc import AsyncIterator, Callable
+from dataclasses import replace
 from typing import Any
 from uuid import uuid4
 
@@ -16,6 +17,7 @@ from learning_transport import sse_event
 
 import main
 import prompts
+from chat import needs_rewrite
 from clients import Services
 
 C1, C2, C3 = str(uuid4()), str(uuid4()), str(uuid4())
@@ -768,3 +770,41 @@ def test_the_next_question_is_accepted_once_the_answer_is_saved(api: TestClient,
     assert post(api, tid, "stomata?")[-1][0] == "error"  # a failed answer is saved too, and ends the claim
     fakes.replies += [rewrite("stomata"), chat_stream(["Stomata let CO2 in [S2]."])]
     assert post(api, tid, "stomata?")[-1][0] == "done"
+
+
+def test_a_standalone_definition_skips_rewrite_but_still_requires_grounding(
+    api: TestClient, fakes: Fakes
+) -> None:
+    main.app.state.settings = replace(SETTINGS, adaptive_rewrite=True)
+    fakes.results = RESULTS
+    fakes.replies.append(chat_stream(["Chlorophyll absorbs light [S1]."]))
+    events = post(api, thread(api), "What is chlorophyll?")
+    assert events[-1][0] == "done"
+    calls = fakes.calls("/v1/inference")
+    assert len(calls) == 1 and calls[0]["stream"] is True
+    assert fakes.calls("/v1/search")[0]["query"] == "What is chlorophyll?"
+    assert needs_rewrite("Explain that further", []) is True
+    assert needs_rewrite("What is chlorophyll?", [{"role": "user", "content": "Earlier context"}]) is True
+    assert needs_rewrite("Compare X and Y", []) is True
+
+
+def test_covered_topics_reuse_the_primary_search(api: TestClient, fakes: Fakes) -> None:
+    main.app.state.settings = replace(SETTINGS, adaptive_search=True)
+    fakes.results = [result(C1, "Chlorophyll and stomata are parts of the leaf.", 1)]
+    fakes.replies += [
+        rewrite("chlorophyll and stomata", sub_queries=["chlorophyll", "stomata"]),
+        chat_stream(["The leaf [S1]."]),
+    ]
+    assert post(api, thread(api), "How do chlorophyll and stomata work together?")[-1][0] == "done"
+    assert len(fakes.calls("/v1/search")) == 1
+
+
+def test_context_budget_refuses_instead_of_sending_an_oversized_first_passage(
+    api: TestClient, fakes: Fakes
+) -> None:
+    main.app.state.settings = replace(SETTINGS, context_tokens=2000)
+    fakes.results = [result(C1, "chlorophyll " * 10000, 1)]
+    fakes.replies.append(rewrite("chlorophyll"))
+    events = post(api, thread(api), "chlorophyll?")
+    assert events[-1][1]["outcome"] == "no_results"
+    assert len(fakes.calls("/v1/inference")) == 1

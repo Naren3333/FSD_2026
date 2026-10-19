@@ -9,8 +9,17 @@
 <div class="split">
   <section class="panel">
     <h3>Your classrooms</h3>
-    <p class="caption">Up to 100 most recent classrooms</p>
-    @for (item of classrooms(); track item.id) {
+    <p class="caption">20 classrooms per page</p>
+    <app-pager
+      label="Classrooms pages"
+      [page]="effectiveRoomPage()"
+      (pageChange)="roomPage.set($event)"
+      [pageSize]="roomPageSize"
+      [total]="classrooms().length"
+      noun="classrooms"
+      [disabled]="state.busy()"
+    />
+    @for (item of visibleRooms(); track item.id) {
       <article class="record roster-row">
         <strong>{{ item.name }}</strong>
         <button

@@ -190,6 +190,11 @@ func (x indexer) complete(ctx context.Context, j job, r ingestResult) error {
 	if err = x.db.QueryRow(ctx, "SELECT EXISTS(SELECT 1 FROM documents WHERE id=$1)", j.document).Scan(&exists); err != nil || exists {
 		return err // a run that took the job over stores the same crops, by content hash
 	}
+	// The deletion's worker may already have cleaned this prefix before these late crops were written.
+	// Record fresh durable cleanup before the best-effort immediate removal.
+	if _, err = x.db.Exec(ctx, "INSERT INTO object_cleanup_jobs(prefix) VALUES($1) ON CONFLICT DO NOTHING", j.org+"/"+j.document+"/"); err != nil {
+		return err
+	}
 	return x.store.removeAll(ctx, j.org+"/"+j.document+"/")
 }
 

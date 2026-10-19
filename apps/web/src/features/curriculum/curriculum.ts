@@ -1,4 +1,5 @@
-import { Component, OnInit, ViewChild, inject, signal } from '@angular/core';
+import { PagerComponent } from '../../shared/pager';
+import { Component, OnInit, ViewChild, computed, inject, signal } from '@angular/core';
 import { FormControl, FormGroup, ReactiveFormsModule } from '@angular/forms';
 import { CurriculumApi } from '../../api/clients';
 import type { Topic } from '../../api/models';
@@ -18,6 +19,7 @@ import { requiredText } from '../../shared/validators';
   standalone: true,
   imports: [
     ReactiveFormsModule,
+    PagerComponent,
     FieldComponent,
     FieldControlDirective,
     StatusComponent,
@@ -40,6 +42,27 @@ export class CurriculumComponent implements OnInit {
   readonly archiving = signal<Topic | null>(null);
   @ViewChild('archiveDialog') archiveDialog?: ConfirmDialogComponent;
   readonly topics = new Section<Topic[]>();
+  readonly topicPage = signal(0);
+  readonly archivePage = signal(0);
+  readonly pageSize = 20;
+  readonly effectiveTopicPage = computed(() =>
+    Math.min(
+      this.topicPage(),
+      Math.max(0, Math.ceil((this.topics.value()?.length ?? 0) / this.pageSize) - 1),
+    ),
+  );
+  readonly effectiveArchivePage = computed(() =>
+    Math.min(this.archivePage(), Math.max(0, Math.ceil(this.archived().length / this.pageSize) - 1)),
+  );
+  readonly visibleArchived = computed(() => {
+    const page = this.effectiveArchivePage();
+    return this.archived().slice(page * this.pageSize, (page + 1) * this.pageSize);
+  });
+  readonly visibleTopics = computed(() => {
+    const items = this.topics.value() ?? [];
+    const page = this.effectiveTopicPage();
+    return items.slice(page * this.pageSize, (page + 1) * this.pageSize);
+  });
   readonly form = new FormGroup({
     name: new FormControl('', { nonNullable: true, validators: requiredText(160) }),
   });

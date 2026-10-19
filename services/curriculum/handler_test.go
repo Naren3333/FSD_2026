@@ -39,7 +39,7 @@ func newMemoryStore() *memoryStore {
 
 var errDown = errors.New("connection refused")
 
-func (m *memoryStore) listTopics(_ context.Context, _ string, archived bool) ([]Topic, error) {
+func (m *memoryStore) listTopics(_ context.Context, _ string, archived bool, paging ...platform.ListWindow) ([]Topic, error) {
 	from := m.topics
 	if archived {
 		from = m.archived
@@ -299,4 +299,9 @@ func TestPrerequisitesAreListedAndOnlyATeacherRemovesThem(t *testing.T) {
 		step{"remove a malformed id", http.MethodDelete, list + "/not-an-id", "", "teacher", http.StatusNotFound, ""},
 		step{"an unknown topic's prerequisites", http.MethodGet, "/v1/topics/" + topicB + "0/prerequisites", "", "teacher", http.StatusNotFound, ""},
 	)
+}
+
+func (m *memoryStore) countTopics(ctx context.Context, org string, archived bool) (int, error) {
+	items, err := m.listTopics(ctx, org, archived)
+	return len(items), err
 }

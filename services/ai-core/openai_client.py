@@ -27,6 +27,7 @@ from typing import Any, cast
 import openai
 from openai import AsyncOpenAI
 
+import budget
 from settings import get_settings
 
 log = logging.getLogger("ai-core.openai_client")
@@ -111,7 +112,7 @@ async def embed(texts: list[str], tally: Tally | None = None) -> tuple[list[list
         batch = texts[start : start + EMBED_BATCH]
         # encoding_format left unset: the SDK then requests base64 and decodes it to floats itself.
         create = functools.partial(client.embeddings.create, model=model, input=batch, timeout=TIMEOUT)
-        result = await call(create)
+        result = await call(lambda create=create, batch=batch: budget.guarded(create, model, batch))
         # Place by OpenAI's index rather than trusting the order of `data`.
         placed: list[list[float]] = [[] for _ in batch]
         for item in result.data:
@@ -136,14 +137,19 @@ async def stream_chat(messages: list[Any], max_tokens: int) -> AsyncGenerator[st
     """Text deltas in order, then one Usage. Breaking out early closes the HTTP stream."""
     client, settings = get_client(), get_settings()
     stream = await call(
-        lambda: client.chat.completions.create(
-            model=settings.chat_model,
-            messages=messages,
-            stream=True,
-            stream_options={"include_usage": True},
-            max_completion_tokens=max_tokens,
-            reasoning_effort=cast(Any, settings.chat_reasoning_effort),
-            timeout=TIMEOUT,
+        lambda: budget.guarded(
+            lambda: client.chat.completions.create(
+                model=settings.chat_model,
+                messages=messages,
+                stream=True,
+                stream_options={"include_usage": True},
+                max_completion_tokens=max_tokens,
+                reasoning_effort=cast(Any, settings.chat_reasoning_effort),
+                timeout=TIMEOUT,
+            ),
+            settings.chat_model,
+            messages,
+            max_tokens,
         ),
         deadline=_now() + STREAM_OPEN_BUDGET,
         min_attempt=TIMEOUT,
@@ -205,13 +211,18 @@ async def generate(
         }
     deadline = _now() + generation_budget(max_tokens)
     result = await call(
-        lambda: client.chat.completions.create(
-            model=settings.chat_model,
-            messages=messages,
-            max_completion_tokens=max_tokens,
-            reasoning_effort=cast(Any, settings.chat_reasoning_effort),
-            timeout=max(deadline - _now(), 1.0),
-            **extra,
+        lambda: budget.guarded(
+            lambda: client.chat.completions.create(
+                model=settings.chat_model,
+                messages=messages,
+                max_completion_tokens=max_tokens,
+                reasoning_effort=cast(Any, settings.chat_reasoning_effort),
+                timeout=max(deadline - _now(), 1.0),
+                **extra,
+            ),
+            settings.chat_model,
+            messages,
+            max_tokens,
         ),
         deadline=deadline,
     )

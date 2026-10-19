@@ -19,7 +19,7 @@ separate concern, covered in `docs/development/handover.md`, not here.
 | Background jobs are leased | Content's indexing jobs and Grading's AI marking jobs are leased with `FOR UPDATE SKIP LOCKED` and a lease time, so replicas take different jobs and a job whose replica died is taken over when its lease expires. | `services/content/index.go`, `services/grading/marker.go` |
 | Replicas can start together | Migrations run under a PostgreSQL advisory lock, so only one replica applies them. | `packages/platform/migrate.go`, `learning_transport/db.py` |
 | Replicas can stop cleanly | On SIGTERM a Go service stops taking requests, finishes those in flight and stops its workers; ai-core waits for ledger writes. | `packages/platform/app.go` |
-| Load per replica is bounded | Each replica has at most 10 database connections and each Python one at most 100 requests in flight; Kong limits each signed-in session to 120 requests a minute. | `packages/platform/db.go`, the Python Dockerfiles, `infra/kong/bootstrap.py` |
+| Load per replica is bounded | Database pools use validated DB_POOL_MAX/DB_POOL_MIN (Go default 10, Python default 8); each Python replica has at most 100 requests in flight; Kong limits each signed-in session to 120 requests a minute. | `packages/platform/db.go`, the Python Dockerfiles, `infra/kong/bootstrap.py` |
 | Services fail independently | Each service owns its database and reaches others only through their APIs or events, so a slow or failed consumer delays its own work without blocking the services that publish to it. | `docs/architecture/system.md` |
 
 ## The demo
@@ -86,11 +86,12 @@ What it shows, and what it does not:
   that share of the work is late, not lost.
 - **One Kong and one Keycloak.** Kong's rate limit is counted per Kong node (`policy: local`); Keycloak runs
   `start-dev`.
-- **Per-process counters.** ai-core limits each user's concurrent paid calls per process, so with more replicas a
-  user can overshoot their daily allowance by a few more calls (the allowance itself is checked in the shared
-  ledger). Content's query-vector cache is per replica.
-- **No metrics.** There is no Prometheus or tracing; the demo measures from the load generator, `docker stats` and
-  the databases.
+- **Operational caches are local.** Content coalesces identical embedding misses within one replica; ai-core's
+  disk caches and coalescing are optimizations, not shared authorities. Replicas may duplicate a cache miss.
+  AI allowance reservations and user concurrency are serialized in ai-core's PostgreSQL database across replicas.
+- **Metrics need a collector.** Authenticated `/internal/metrics` endpoints expose request/cache latency and
+  counts, pool pressure, Content queues and AI cost/reservation gauges. There is no Prometheus server or tracing
+  deployment; the scale demo also measures from the load generator, `docker stats` and the databases.
 
 ## What a real deployment would change
 

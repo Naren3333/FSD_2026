@@ -174,6 +174,8 @@ def run_lane(name: str, steps: list[tuple[list[str], Path]], timeout: int) -> bo
 
 
 def main() -> None:
+    # Piped Windows output otherwise uses cp1252 and can crash while printing a tool's Unicode diagnostics.
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--serial", action="store_true", help="run one lane at a time")
     parser.add_argument("--jobs", type=int, default=os.cpu_count() or 4, help="lanes to run at once")

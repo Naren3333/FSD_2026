@@ -55,11 +55,14 @@ test('a teacher generates questions and drafts marking guidance', async ({ page 
   await page.getByRole('button', { name: 'Add topic', exact: true }).click();
   await expect(page.getByText('Topic added.', { exact: true })).toBeVisible();
 
-  await page.route(/\/api\/content\/documents\?classroom_id=/, (route) =>
-    json(route, 200, [
-      doc(SLIDES, 'Testing slides', 'teaching_material'),
-      doc(SCHEME, 'Testing scheme', 'marking_scheme'),
-    ]),
+  await page.route(/\/api\/content\/documents\/page\?classroom_id=/, (route) =>
+    json(route, 200, {
+      items: [
+        doc(SLIDES, 'Testing slides', 'teaching_material'),
+        doc(SCHEME, 'Testing scheme', 'marking_scheme'),
+      ],
+      total: 2,
+    }),
   );
   let generations = 0;
   await page.route('**/api/question-generation/questions', (route) => {

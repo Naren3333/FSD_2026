@@ -13,6 +13,7 @@ type server struct{ store store }
 
 func (s server) routes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /v1/topics", s.list)
+	mux.HandleFunc("GET /v1/topics/page", s.list)
 	mux.HandleFunc("GET /v1/topics/{id}", s.get)
 	mux.HandleFunc("POST /v1/topics", s.create)
 	mux.HandleFunc("PATCH /v1/topics/{id}", s.rename)
@@ -31,9 +32,26 @@ func (s server) list(w http.ResponseWriter, r *http.Request) {
 		platform.Invalid(w, "archived must be true or false.")
 		return
 	}
-	result, err := s.store.listTopics(r.Context(), platform.Actor(r).Org, archived == "true")
+	var paging []platform.ListWindow
+	if r.URL.Path == "/v1/topics/page" {
+		offset, limit, valid := platform.Page(w, r, 20, 100)
+		if !valid {
+			return
+		}
+		paging = []platform.ListWindow{{Offset: offset, Limit: limit}}
+	}
+	result, err := s.store.listTopics(r.Context(), platform.Actor(r).Org, archived == "true", paging...)
 	if err != nil {
 		platform.Fail(w, err)
+		return
+	}
+	if len(paging) > 0 {
+		total, err := s.store.countTopics(r.Context(), platform.Actor(r).Org, archived == "true")
+		if err != nil {
+			platform.Fail(w, err)
+			return
+		}
+		platform.JSON(w, http.StatusOK, platform.ListPage[Topic]{Items: result, Total: total})
 		return
 	}
 	platform.JSON(w, http.StatusOK, result)

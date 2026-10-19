@@ -2,6 +2,9 @@ package main
 
 import (
 	"container/list"
+	"context"
+	"learning/platform"
+	"log/slog"
 	"sync"
 	"time"
 )
@@ -29,6 +32,63 @@ type vectorCache struct {
 	order   *list.List // of *vectorEntry, most recently used first
 	entries map[string]*list.Element
 	now     func() time.Time
+	flights map[string]*vectorFlight
+}
+
+type vectorFlight struct {
+	done  chan struct{}
+	value cachedVector
+	err   error
+}
+
+// load shares an in-flight embedding, never passages or authorization decisions. The initiating caller pays;
+// a cancelled waiter stops waiting without cancelling work another authorized caller is using.
+func (c *vectorCache) load(ctx context.Context, query string, fetch func(context.Context) (cachedVector, error)) (cachedVector, error) {
+	if c == nil {
+		return fetch(ctx)
+	}
+	if v, ok := c.get(query); ok {
+		platform.CountMetric("learning_query_vector_cache_hits_total", 1)
+		slog.Info("query_vector_cache", "hit", true)
+		return v, nil
+	}
+	c.mu.Lock()
+	if c.flights == nil {
+		c.flights = map[string]*vectorFlight{}
+	}
+	f, exists := c.flights[query]
+	platform.CountMetric("learning_query_vector_cache_misses_total", 1)
+	if exists {
+		platform.CountMetric("learning_query_vector_coalesced_total", 1)
+	}
+	if !exists {
+		f = &vectorFlight{done: make(chan struct{})}
+		c.flights[query] = f
+		go func() {
+			work, cancel := context.WithTimeout(context.WithoutCancel(ctx), embedTimeout)
+			defer cancel()
+			if v, ok := c.get(query); ok {
+				f.value = v
+			} else {
+				f.value, f.err = fetch(work)
+				if f.err == nil {
+					c.put(query, f.value)
+				}
+			}
+			c.mu.Lock()
+			delete(c.flights, query)
+			close(f.done)
+			c.mu.Unlock()
+		}()
+	}
+	c.mu.Unlock()
+	slog.Info("query_vector_cache", "hit", false, "coalesced", exists)
+	select {
+	case <-ctx.Done():
+		return cachedVector{}, ctx.Err()
+	case <-f.done:
+		return f.value, f.err
+	}
 }
 
 type vectorEntry struct {

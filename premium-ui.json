@@ -1,0 +1,11 @@
+{
+  "profile": "product-admin",
+  "sourceRoots": ["apps/web/src"],
+  "locale": "en-SG",
+  "canonicalMap": "UX-CONTRACT.md",
+  "requiredCapabilities": ["Select/Listbox", "Date", "Form", "Scrollbar", "Toast", "CRUD"],
+  "ownership": {"Select/Listbox": "native", "Date": "native"},
+  "requiredCommands": ["check", "stack"],
+  "commands": {"check": "python scripts/check.py", "stack": "python scripts/stack_tests.py"},
+  "evidence": {"crudFullFlow": "apps/web/e2e/workflow.spec.ts", "failurePaths": "apps/web/e2e/states.spec.ts"}
+}

@@ -1,3 +1,5 @@
+import { PagedSection } from '../../shared/paged-section';
+import { PagerComponent } from '../../shared/pager';
 import { Component, ElementRef, OnDestroy, ViewChild, inject, signal } from '@angular/core';
 import { FormControl, FormGroup, ReactiveFormsModule } from '@angular/forms';
 import { ContentApi } from '../../api/clients';
@@ -11,7 +13,7 @@ import { messageOf } from '../../shared/errors';
 import { FieldComponent, FieldControlDirective } from '../../shared/field';
 import { isPdf } from '../../shared/files';
 import { NoClassroomComponent } from '../../shared/no-classroom';
-import { Section, rereadAfterDelete } from '../../shared/section';
+import { rereadAfterDelete } from '../../shared/section';
 import { SectionStateComponent } from '../../shared/section-state';
 import { StatusComponent } from '../../shared/status';
 import { requiredText } from '../../shared/validators';
@@ -69,6 +71,7 @@ export function describe(doc: DocumentRecord): { label: string; detail: string }
   standalone: true,
   imports: [
     NoClassroomComponent,
+    PagerComponent,
     ReactiveFormsModule,
     FieldComponent,
     FieldControlDirective,
@@ -88,7 +91,7 @@ export class MaterialsComponent implements OnDestroy {
   /** The document waiting for its deletion to be confirmed. */
   readonly deleting = signal<DocumentRecord | null>(null);
   @ViewChild('deleteDialog') deleteDialog?: ConfirmDialogComponent;
-  readonly documents = new Section<DocumentRecord[]>();
+  readonly documents = new PagedSection<DocumentRecord>();
   readonly file = signal<File | null>(null);
   readonly polling = signal(false);
   @ViewChild('fileInput') fileInput?: ElementRef<HTMLInputElement>;
@@ -99,7 +102,10 @@ export class MaterialsComponent implements OnDestroy {
 
   constructor() {
     inject(UnsavedChanges).track(() => this.form.dirty);
-    onClassroomChange(() => this.load());
+    onClassroomChange(() => {
+      this.documents.page.set(0);
+      this.load();
+    });
   }
 
   ngOnDestroy(): void {
@@ -110,7 +116,9 @@ export class MaterialsComponent implements OnDestroy {
     this.documents.clear();
     this.schedule();
     if (!id) return;
-    void this.documents.load(() => this.content.documents(id)).then(() => this.schedule());
+    void this.documents
+      .load(() => this.documents.readPage((offset, limit) => this.content.documentPage(id, offset, limit)))
+      .then(() => this.schedule());
   }
   /**
    * While a PDF is indexing, re-reads the list quietly for a teacher; a failed read stops until the next manual
@@ -126,7 +134,7 @@ export class MaterialsComponent implements OnDestroy {
     this.timer = setTimeout(() => {
       if (this.documents.loading() || this.state.busy() || this.deleteState.busy()) return this.schedule();
       void this.documents
-        .poll(() => this.content.documents(id))
+        .poll(() => this.documents.readPage((offset, limit) => this.content.documentPage(id, offset, limit)))
         .then((read) => (read ? this.schedule() : this.polling.set(false)));
     }, 5000);
   }
@@ -134,7 +142,9 @@ export class MaterialsComponent implements OnDestroy {
    * refreshing even when this re-read fails. */
   private async reread(classroomId: string): Promise<void> {
     try {
-      await this.documents.reload(() => this.content.documents(classroomId));
+      await this.documents.reload(() =>
+        this.documents.readPage((offset, limit) => this.content.documentPage(classroomId, offset, limit)),
+      );
     } finally {
       this.schedule();
     }

@@ -2,6 +2,7 @@
 timeout, and applies the service's numbered migrations before it is used. Import this module only from a
 service that has psycopg installed."""
 
+import os
 import re
 from dataclasses import dataclass
 from pathlib import Path
@@ -14,6 +15,17 @@ from psycopg_pool import AsyncConnectionPool, ConnectionPool
 CONNECTION_OPTIONS: dict[str, Any] = {"row_factory": dict_row, "options": "-c statement_timeout=10000"}
 MAX_CONNECTIONS = 8
 CONNECT_TIMEOUT = 15  # seconds to wait for the first connection at startup
+
+
+def pool_limits() -> tuple[int, int]:
+    minimum, maximum = (
+        int(os.environ.get("DB_POOL_MIN", "1")),
+        int(os.environ.get("DB_POOL_MAX", str(MAX_CONNECTIONS))),
+    )
+    if not 0 <= minimum <= maximum <= 1000 or maximum == 0:
+        raise ValueError("Require 0 <= DB_POOL_MIN <= DB_POOL_MAX <= 1000 and DB_POOL_MAX > 0")
+    return minimum, maximum
+
 
 MIGRATION_NAME = re.compile(r"^(\d{3})_[a-z0-9_]+\.sql$")
 # Lock scopes, as in the Go platform package (lock.go): a scope and its key hash to one transaction-scoped advisory
@@ -73,8 +85,9 @@ def pending(steps: list[Migration], applied: set[int]) -> list[Migration]:
 
 async def open_async_pool(url: str, directory: Path) -> AsyncConnectionPool[Any]:
     steps = migrations(directory)
+    minimum, maximum = pool_limits()
     pool: AsyncConnectionPool[Any] = AsyncConnectionPool(
-        url, min_size=1, max_size=MAX_CONNECTIONS, timeout=5, open=False, kwargs=CONNECTION_OPTIONS
+        url, min_size=minimum, max_size=maximum, timeout=5, open=False, kwargs=CONNECTION_OPTIONS
     )
     await pool.open(wait=True, timeout=CONNECT_TIMEOUT)
     async with pool.connection() as conn, conn.transaction():
@@ -89,8 +102,9 @@ async def open_async_pool(url: str, directory: Path) -> AsyncConnectionPool[Any]
 
 def open_pool(url: str, directory: Path) -> ConnectionPool[Any]:
     steps = migrations(directory)
+    minimum, maximum = pool_limits()
     pool: ConnectionPool[Any] = ConnectionPool(
-        url, min_size=1, max_size=MAX_CONNECTIONS, timeout=5, open=False, kwargs=CONNECTION_OPTIONS
+        url, min_size=minimum, max_size=maximum, timeout=5, open=False, kwargs=CONNECTION_OPTIONS
     )
     pool.open(wait=True, timeout=CONNECT_TIMEOUT)
     with pool.connection() as conn, conn.transaction():

@@ -17,6 +17,7 @@ func (s server) routes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /v1/me", s.register)
 	mux.HandleFunc("DELETE /v1/me", s.deleteAccount)
 	mux.HandleFunc("GET /v1/classrooms", s.list)
+	mux.HandleFunc("GET /v1/classrooms/page", s.list)
 	mux.HandleFunc("POST /v1/classrooms", s.create)
 	mux.HandleFunc("DELETE /v1/classrooms/{id}", s.remove)
 	mux.HandleFunc("GET /v1/classrooms/{id}/access", s.access)
@@ -102,9 +103,26 @@ func (s server) create(w http.ResponseWriter, r *http.Request) {
 
 func (s server) list(w http.ResponseWriter, r *http.Request) {
 	c := platform.Actor(r)
-	result, err := s.store.listClassrooms(r.Context(), c.Org, c.Subject, c.Has("teacher"))
+	var paging []platform.ListWindow
+	if r.URL.Path == "/v1/classrooms/page" {
+		offset, limit, valid := platform.Page(w, r, 20, 100)
+		if !valid {
+			return
+		}
+		paging = []platform.ListWindow{{Offset: offset, Limit: limit}}
+	}
+	result, err := s.store.listClassrooms(r.Context(), c.Org, c.Subject, c.Has("teacher"), paging...)
 	if err != nil {
 		platform.Fail(w, err)
+		return
+	}
+	if len(paging) > 0 {
+		total, err := s.store.countClassrooms(r.Context(), c.Org, c.Subject, c.Has("teacher"))
+		if err != nil {
+			platform.Fail(w, err)
+			return
+		}
+		platform.JSON(w, http.StatusOK, platform.ListPage[Classroom]{Items: result, Total: total})
 		return
 	}
 	platform.JSON(w, http.StatusOK, result)

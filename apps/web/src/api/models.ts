@@ -25,6 +25,10 @@ export type Student = Identity['Student'];
 /** One page of students, and how many there are across every page. */
 export type StudentPage = Identity['StudentPage'];
 export type Classroom = Identity['Classroom'];
+export type ClassroomPage = Identity['ClassroomPage'];
+export type TopicPage = Curriculum['TopicPage'];
+export type DocumentPage = Content['DocumentPage'];
+export type AssessmentPage = Assessments['AssessmentPage'];
 /** A classroom enrollment, as Identity confirms adding or removing it. */
 export type Enrollment = Identity['Enrollment'];
 

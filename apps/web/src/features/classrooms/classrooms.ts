@@ -36,6 +36,16 @@ export class ClassroomsComponent {
   private readonly context = inject(ClassroomContext);
   private readonly identity = inject(IdentityApi);
   readonly classrooms = this.context.classrooms;
+  readonly roomPage = signal(0);
+  readonly roomPageSize = 20;
+  readonly effectiveRoomPage = computed(() => {
+    const last = Math.max(0, Math.ceil(this.classrooms().length / this.roomPageSize) - 1);
+    return Math.min(this.roomPage(), last);
+  });
+  readonly visibleRooms = computed(() => {
+    const page = this.effectiveRoomPage();
+    return this.classrooms().slice(page * this.roomPageSize, (page + 1) * this.roomPageSize);
+  });
   readonly classroomId = this.context.classroomId;
   readonly classroomName = this.context.classroomName;
   readonly state = new ActionState();

@@ -20,7 +20,7 @@ beforeEach(() => {
         useValue: {
           request: (service: Service, path: string, options?: RequestOptions) => {
             calls.push({ service, path, options });
-            return Promise.resolve(undefined);
+            return Promise.resolve(path.includes('/page?') ? { items: [], total: 0 } : undefined);
           },
         },
       },
@@ -34,7 +34,7 @@ describe('the clients for topics, documents and assessment changes', () => {
     await curriculum.archivedTopics();
     await curriculum.restoreTopic('t/1');
     expect(calls).toEqual([
-      { service: 'curriculum', path: '/topics?archived=true', options: undefined },
+      { service: 'curriculum', path: '/topics/page?offset=0&limit=100&archived=true', options: undefined },
       { service: 'curriculum', path: '/topics/t%2F1/restore', options: { method: 'POST' } },
     ]);
   });

@@ -18,7 +18,7 @@ test('forms preserve drafts and list refresh exposes loading and network recover
   await expect(page.getByLabel('Current classroom')).toBeEnabled();
   let release!: () => void;
   const pending = new Promise<void>((resolve) => (release = resolve));
-  await page.route('**/api/identity/classrooms', async (route) => {
+  await page.route('**/api/identity/classrooms/page*', async (route) => {
     await pending;
     await route.abort('failed');
   });
@@ -28,7 +28,7 @@ test('forms preserve drafts and list refresh exposes loading and network recover
   await expect(
     page.getByRole('alert').filter({ hasText: 'The service could not be reached.' }),
   ).toBeVisible();
-  await page.unroute('**/api/identity/classrooms');
+  await page.unroute('**/api/identity/classrooms/page*');
   await page.getByRole('button', { name: 'Refresh classrooms' }).click();
   await expect(page.getByRole('alert').filter({ hasText: 'The service could not be reached.' })).toHaveCount(
     0,

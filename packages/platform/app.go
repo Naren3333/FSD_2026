@@ -20,13 +20,14 @@ import (
 // App wires one service together: its database, routes, token verification, readiness checks and the background
 // workers it runs. Services build their handlers on the narrower pieces (the pool, ClassroomAccess), not on App.
 type App struct {
-	Name   string
-	DB     *pgxpool.Pool
-	Mux    *http.ServeMux
-	Client *http.Client // for calls to other services, with a short timeout
-	Checks []func(context.Context) error
-	auth   *Authenticator
-	slow   map[string]time.Duration
+	Name         string
+	DB           *pgxpool.Pool
+	Mux          *http.ServeMux
+	Client       *http.Client // for calls to other services, with a short timeout
+	Checks       []func(context.Context) error
+	MetricGauges func(context.Context) (map[string]float64, error)
+	auth         *Authenticator
+	slow         map[string]time.Duration
 }
 
 // requestTimeout bounds every request except the routes given a longer deadline with Slow.
@@ -48,6 +49,7 @@ func New(name string, migrations fs.FS, bootstrap string) (*App, error) {
 		JSON(w, http.StatusOK, map[string]string{"status": "alive"})
 	})
 	a.Mux.HandleFunc("GET /health/ready", a.ready)
+	a.Mux.HandleFunc("GET /internal/metrics", a.metrics)
 	return a, nil
 }
 
@@ -82,6 +84,13 @@ func (a *App) Handler() http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		recorder := &responseRecorder{ResponseWriter: w}
 		start := time.Now()
+		defer func() {
+			CountMetric("learning_http_requests_total", 1)
+			CountMetric("learning_http_request_seconds_total", time.Since(start).Seconds())
+			if recorder.status >= 500 {
+				CountMetric("learning_http_server_errors_total", 1)
+			}
+		}()
 		correlation := r.Header.Get("X-Correlation-ID")
 		if !ID(correlation) {
 			correlation = uuid.NewString()

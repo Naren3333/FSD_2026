@@ -1,3 +1,6 @@
+import { messageOf } from '../../shared/errors';
+import { PagedSection } from '../../shared/paged-section';
+import { PagerComponent } from '../../shared/pager';
 import { Component, ViewChild, computed, inject, signal } from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { ReactiveFormsModule, type ValidatorFn } from '@angular/forms';
@@ -65,6 +68,7 @@ const LOCKED =
     SectionStateComponent,
     ConfirmDialogComponent,
     NoClassroomComponent,
+    PagerComponent,
     MarkingPointsComponent,
     QuestionGeneratorComponent,
     MarkingGuidanceComponent,
@@ -81,7 +85,7 @@ export class AssessmentsComponent {
   readonly state = new ActionState();
   /** Deleting an assessment, in its confirmation dialog. */
   readonly deleteState = new ActionState();
-  readonly assessments = new Section<AssessmentSummary[]>();
+  readonly assessments = new PagedSection<AssessmentSummary>();
   readonly topics = this.curriculum.topics;
   /** Reading the curriculum for the topic a new question uses. */
   readonly topicsState = new Section<Topic[]>();
@@ -125,6 +129,7 @@ export class AssessmentsComponent {
     this.typesChanged();
     onClassroomChange(() => {
       this.cancelEdit();
+      this.assessments.page.set(0);
       this.load();
     });
     inject(ActivatedRoute)
@@ -161,7 +166,13 @@ export class AssessmentsComponent {
     this.assessments.clear();
     this.classDocs.clear();
     if (!classroomId) return;
-    void this.assessments.load(() => this.assessmentApi.list(classroomId)).then(() => this.openRequested());
+    void this.assessments
+      .load(() =>
+        this.assessments.readPage((offset, limit) =>
+          this.assessmentApi.assessmentPage(classroomId, offset, limit),
+        ),
+      )
+      .then(() => this.openRequested());
     if (this.session.isTeacher()) {
       // Read fresh, so a topic a colleague just added is there to choose.
       void this.topicsState.load(() => this.curriculum.refresh());
@@ -171,10 +182,23 @@ export class AssessmentsComponent {
 
   /** Opens the requested assessment once it is in the current classroom's list. */
   private openRequested(): void {
-    if (!this.requested || !this.assessments.value()?.some((a) => a.id === this.requested)) return;
+    if (!this.requested || !this.classroomId() || this.assessments.loading()) return;
     const id = this.requested;
+    const classroomId = this.classroomId();
     this.requested = '';
-    this.sheet?.open(id);
+    if (this.assessments.value()?.some((a) => a.id === id)) {
+      this.sheet?.open(id);
+      return;
+    }
+    // A Home/deep link can name an assessment on another page; the server still authorizes the read.
+    void this.assessmentApi
+      .get(id)
+      .then((item) => {
+        if (this.classroomId() === classroomId && item.classroom_id === classroomId) this.sheet?.open(id);
+      })
+      .catch((error: unknown) =>
+        this.state.error.set(messageOf(error, 'The assessment could not be opened.')),
+      );
   }
 
   // --- The teacher's editor --------------------------------------------------------------------------------
@@ -280,7 +304,11 @@ export class AssessmentsComponent {
         this.editing.set(saved);
         this.form.markAsPristine();
       }
-      await this.assessments.reload(() => this.assessmentApi.list(classroomId));
+      await this.assessments.reload(() =>
+        this.assessments.readPage((offset, limit) =>
+          this.assessmentApi.assessmentPage(classroomId, offset, limit),
+        ),
+      );
     }, message);
   }
 
@@ -295,13 +323,23 @@ export class AssessmentsComponent {
         else await this.assessmentApi.update(editing.id, toAssessment(this.form, classroomId, 'published'));
       } catch (error) {
         const refused = hasSubmissions(error);
-        await this.assessments.reload(() => this.assessmentApi.list(classroomId)).catch(() => undefined);
+        await this.assessments
+          .reload(() =>
+            this.assessments.readPage((offset, limit) =>
+              this.assessmentApi.assessmentPage(classroomId, offset, limit),
+            ),
+          )
+          .catch(() => undefined);
         const now = this.assessments.value()?.find((a) => a.id === editing.id);
         if (this.editing()?.id === editing.id && (refused || (now && submittedBy(now)))) this.lockTo(true);
         throw refused ? new Error(LOCKED) : error;
       }
       this.cancelEdit();
-      await this.assessments.reload(() => this.assessmentApi.list(classroomId));
+      await this.assessments.reload(() =>
+        this.assessments.readPage((offset, limit) =>
+          this.assessmentApi.assessmentPage(classroomId, offset, limit),
+        ),
+      );
     }, `${this.form.controls.title.value} saved.`);
   }
 
@@ -357,7 +395,11 @@ export class AssessmentsComponent {
     void this.state.run(async () => {
       await this.assessmentApi.publish(item.id);
       if (this.editing()?.id === item.id) this.cancelEdit();
-      await this.assessments.reload(() => this.assessmentApi.list(classroomId));
+      await this.assessments.reload(() =>
+        this.assessments.readPage((offset, limit) =>
+          this.assessmentApi.assessmentPage(classroomId, offset, limit),
+        ),
+      );
     }, `${item.title} published.`);
   }
 
@@ -382,7 +424,11 @@ export class AssessmentsComponent {
         // A student may have submitted since the list was read: the dialog then says what deleting now takes.
         const refused = hasSubmissions(error);
         const reread = await this.assessments
-          .reload(() => this.assessmentApi.list(classroomId))
+          .reload(() =>
+            this.assessments.readPage((offset, limit) =>
+              this.assessmentApi.assessmentPage(classroomId, offset, limit),
+            ),
+          )
           .then(
             () => true,
             () => false,
@@ -403,7 +449,12 @@ export class AssessmentsComponent {
       await rereadAfterDelete(
         this.assessments,
         item.id,
-        () => this.assessments.reload(() => this.assessmentApi.list(classroomId)),
+        () =>
+          this.assessments.reload(() =>
+            this.assessments.readPage((offset, limit) =>
+              this.assessmentApi.assessmentPage(classroomId, offset, limit),
+            ),
+          ),
         () => this.classroomId() === classroomId,
         this.state,
         { list: 'list', refresh: 'Refresh assessments' },
