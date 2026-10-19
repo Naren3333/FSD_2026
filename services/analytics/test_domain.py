@@ -5,7 +5,7 @@ from uuid import uuid4
 import pytest
 from pydantic import ValidationError
 
-from domain import LEGACY_TOPIC_FIELD, Evidence, TopicMetric, summarize
+from domain import Evidence, TopicMetric, summarize
 
 
 def row(topic: str, correct: bool, awarded: int | None = None, possible: int = 1) -> dict[str, object]:
@@ -138,16 +138,15 @@ def test_part_marks_show_in_the_marks_not_the_correct_count():
         TopicMetric.model_validate({**metric, "marks_awarded": 9})
 
 
-def test_v2_evidence_may_be_worth_more_than_one_point():
+def test_evidence_may_be_worth_more_than_one_point():
     assert Evidence(question_id=uuid4(), topic_id=uuid4(), correct=False, awarded=2, possible=5).awarded == 2
     with pytest.raises(ValidationError):
         Evidence(question_id=uuid4(), topic_id=uuid4(), correct=False, awarded=6, possible=5)
 
 
 def finalized(event_type: str, possible: int) -> dict[str, object]:
-    """A finalized event as that version publishes it: v1 and v2 name the topic by the legacy field."""
+    """A finalized event of the given type, as Grading publishes grading.finalized.v3."""
     evaluation = str(uuid4())
-    field = "topic_id" if event_type == "grading.finalized.v3" else LEGACY_TOPIC_FIELD
     return {
         "event_id": str(uuid4()),
         "event_type": event_type,
@@ -164,7 +163,7 @@ def finalized(event_type: str, possible: int) -> dict[str, object]:
             "evidence": [
                 {
                     "question_id": str(uuid4()),
-                    field: str(uuid4()),
+                    "topic_id": str(uuid4()),
                     "correct": True,
                     "awarded": possible,
                     "possible": possible,
@@ -174,32 +173,17 @@ def finalized(event_type: str, possible: int) -> dict[str, object]:
     }
 
 
-def test_every_finalized_version_is_read_and_v1_keeps_one_point():
+def test_a_finalized_event_is_read_and_only_v3_is_accepted():
     from domain import Event
 
     v3 = finalized("grading.finalized.v3", 4)
     topic = v3["data"]["evidence"][0]["topic_id"]  # type: ignore[index]
     assert str(Event.model_validate(v3).data.evidence[0].topic_id) == topic
-    assert Event.model_validate(finalized("grading.finalized.v2", 4)).data.evidence[0].possible == 4
-    assert Event.model_validate(finalized("grading.finalized.v1", 1)).data.evidence[0].possible == 1
-    with pytest.raises(ValidationError):
-        Event.model_validate(finalized("grading.finalized.v1", 4))
-
-
-def test_old_versions_map_their_topic_field_and_each_version_keeps_its_own_field():
-    from domain import Event
-
-    for version in ("grading.finalized.v1", "grading.finalized.v2"):
-        old = finalized(version, 1)
-        topic = old["data"]["evidence"][0][LEGACY_TOPIC_FIELD]  # type: ignore[index]
-        assert str(Event.model_validate(old).data.evidence[0].topic_id) == topic
-        evidence = old["data"]["evidence"][0]  # type: ignore[index]
-        evidence["topic_id"] = evidence.pop(LEGACY_TOPIC_FIELD)
+    for old in ("grading.finalized.v1", "grading.finalized.v2"):
         with pytest.raises(ValidationError):
-            Event.model_validate(old)
-    v3 = finalized("grading.finalized.v3", 1)
+            Event.model_validate(finalized(old, 1))
     evidence = v3["data"]["evidence"][0]  # type: ignore[index]
-    evidence[LEGACY_TOPIC_FIELD] = evidence.pop("topic_id")
+    evidence["skill_id"] = evidence.pop("topic_id")
     with pytest.raises(ValidationError):
         Event.model_validate(v3)
 
@@ -221,10 +205,6 @@ def test_finalized_events_on_the_wrong_topic_are_dead_lettered():
     from consumer import handler
 
     handle = handler(None)  # type: ignore[arg-type]  # never reached: the message is rejected first
-    v2 = json.dumps(finalized("grading.finalized.v2", 4)).encode()
-    assert handle("grading.finalized.v1", v2) is False
-    v1 = json.dumps(finalized("grading.finalized.v1", 1)).encode()
-    assert handle("grading.finalized.v2", v1) is False
     v3 = json.dumps(finalized("grading.finalized.v3", 4)).encode()
     assert handle("grading.finalized.v2", v3) is False
 
@@ -232,7 +212,7 @@ def test_finalized_events_on_the_wrong_topic_are_dead_lettered():
 def test_ids_longer_than_200_characters_are_valid():
     from domain import Event
 
-    event = finalized("grading.finalized.v2", 1)
+    event = finalized("grading.finalized.v3", 1)
     event["data"]["org_id"] = event["data"]["student_id"] = "x" * 300  # type: ignore[index]
     assert Event.model_validate(event).data.student_id == "x" * 300
 
@@ -281,7 +261,7 @@ def test_storing_and_purging_lock_the_classroom_before_its_tombstone():
     from domain import Event
 
     stored = Recorder()
-    process(stored, Event.model_validate(finalized("grading.finalized.v2", 1)))  # type: ignore[arg-type]
+    process(stored, Event.model_validate(finalized("grading.finalized.v3", 1)))  # type: ignore[arg-type]
     assert stored.statements.index(LOCK) < next(
         i for i, s in enumerate(stored.statements) if "purged_classrooms" in s
     )
@@ -312,7 +292,7 @@ def test_consumer_group_can_be_overridden(monkeypatch):
     assert groups == ["analytics-v1", "analytics-rebuild-1"]
 
 
-def test_the_consumer_reads_every_finalized_version(monkeypatch):
+def test_the_consumer_reads_its_topics(monkeypatch):
     import consumer
 
     topics: list[list[str]] = []
@@ -320,8 +300,6 @@ def test_the_consumer_reads_every_finalized_version(monkeypatch):
     consumer.run(None, None, None)  # type: ignore[arg-type]
     assert topics == [
         [
-            "grading.finalized.v1",
-            "grading.finalized.v2",
             "grading.finalized.v3",
             "identity.classroom.deleted.v1",
             "assessment.deleted.v1",
@@ -340,7 +318,7 @@ def test_the_weakness_threshold_is_below_sixty_percent_over_five_questions():
     assert too_few["evidence_status"] == "insufficient_evidence" and too_few["weakness_indicator"] is False
 
 
-def test_topics_are_sorted_and_v1_and_v2_rows_add_up():
+def test_topics_are_sorted_and_rows_add_up():
     a, b, c = sorted(str(uuid4()) for _ in range(3))
     rows = [row(c, True), row(a, False, 0, 4), row(b, True), row(a, True), row(a, True, 5, 5)]
     metrics = summarize(rows)
@@ -355,11 +333,11 @@ def test_a_grade_for_a_purged_classroom_stores_nothing():
     from domain import Event
 
     recorder = Recorder(purged=True)
-    process(recorder, Event.model_validate(finalized("grading.finalized.v2", 1)))  # type: ignore[arg-type]
+    process(recorder, Event.model_validate(finalized("grading.finalized.v3", 1)))  # type: ignore[arg-type]
     assert "inbox" in recorder.statements[0]
     assert not any("evaluations" in s or "evidence" in s for s in recorder.statements)
     stored = Recorder()
-    process(stored, Event.model_validate(finalized("grading.finalized.v2", 1)))  # type: ignore[arg-type]
+    process(stored, Event.model_validate(finalized("grading.finalized.v3", 1)))  # type: ignore[arg-type]
     assert any("INSERT INTO evaluations" in s for s in stored.statements)
 
 

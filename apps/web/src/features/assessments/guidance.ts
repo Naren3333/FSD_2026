@@ -1,7 +1,7 @@
 import { Component, Input, inject, signal } from '@angular/core';
 import { FormControl, ReactiveFormsModule } from '@angular/forms';
 import { QuestionGenerationApi } from '../../api/clients';
-import type { DocumentRecord, Excerpt, Guidance } from '../../api/models';
+import type { AgentExcerpt, DocumentRecord, Guidance } from '../../api/models';
 import { AiUsage } from '../../core/ai-usage';
 import { FieldComponent, FieldControlDirective } from '../../shared/field';
 import { Section } from '../../shared/section';
@@ -12,6 +12,7 @@ import {
   MAX_EXCERPTS,
   criterionForm,
   excerptLabel,
+  fromAgent,
   levelLines,
   markWrittenBy,
   optionLines,
@@ -114,9 +115,10 @@ export class MarkingGuidanceComponent {
       c.model_answer.setValue(g.rubric.model_answer ?? '');
     }
     const scheme = c.marking_scheme.value;
-    if (!this.schemeFull() && !scheme.some((e) => e.text === g.marking_points.text)) {
-      markWrittenBy(c.marking_scheme, g.marking_points, 'ai');
-      c.marking_scheme.setValue([...scheme, g.marking_points]);
+    const points = fromAgent(g.marking_points);
+    if (!this.schemeFull() && !scheme.some((e) => e.text === points.text)) {
+      markWrittenBy(c.marking_scheme, points, 'ai');
+      c.marking_scheme.setValue([...scheme, points]);
     }
     this.question.markAsDirty();
     this.used.set(true);
@@ -133,7 +135,7 @@ export class MarkingGuidanceComponent {
   }
 
   /** Where one of the guidance's passages is from. */
-  source(excerpt: Excerpt): string {
-    return excerptLabel(excerpt, this.documents.value());
+  source(excerpt: AgentExcerpt): string {
+    return excerptLabel(fromAgent(excerpt), this.documents.value());
   }
 }

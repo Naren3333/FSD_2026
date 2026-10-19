@@ -1,6 +1,6 @@
 # ADR 0010: No stale data after a removal or deletion
 
-Status: accepted 2026-10-18. The project owner asked for the findings of the stale-data audit to be fixed.
+Status: accepted 2026-10-18. The project owner asked for the findings of the stale-data audit to be fixed. The 7-day retention was confirmed by the project owner on 2026-10-19.
 
 ## Context
 

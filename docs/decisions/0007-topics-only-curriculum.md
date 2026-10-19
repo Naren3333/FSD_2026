@@ -12,7 +12,7 @@ Curriculum stored a tree of six kinds of node (subject, course, unit, topic, ski
 
 **The word "skill" is gone from new contracts.** Every `skill_id` is `topic_id`; error codes are `UNKNOWN_TOPIC` (question generation) and `INVALID_TOPIC` (Assessment); Analytics returns `topics` and `TopicMetric`; the web app says "topic".
 
-**Events get new versions; old ones stay readable.** Assessment publishes only `assessment.submitted.v4` (v3 with `questions[].topic_id`), and Grading publishes only `grading.finalized.v3` (v2 with `evidence[].topic_id`). Grading also keeps consuming v1–v3 submissions and Analytics v1–v2 finalized grades, reading their `skill_id` as the topic, because old events may still be queued or replayed. Old event schemas are unchanged.
+**Events get new versions; old ones stay readable.** Assessment publishes only `assessment.submitted.v4` (v3 with `questions[].topic_id`), and Grading publishes only `grading.finalized.v3` (v2 with `evidence[].topic_id`). Grading also keeps consuming v1–v3 submissions and Analytics v1–v2 finalized grades, reading their `skill_id` as the topic, because old events may still be queued or replayed. Old event schemas are unchanged. (Amended 2026-10-19: with every stack upgraded and Kafka keeping these topics for 7 days, the old versions were retired. Grading reads only v4, Analytics only v3, and their schemas, consumers and topics were removed.)
 
 **Stored data is renamed by each owner, in its own migration.**
 - Curriculum `002_topics.sql` (destructive, authorized 2026-10-18): deletes every node that is not a skill and its prerequisite links, drops `parent_id` and `kind`, renames `nodes` to `topics` and `prerequisites.skill_id` to `topic_id`. Existing skills keep their ids and names as topics.

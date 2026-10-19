@@ -15,9 +15,8 @@ const (
 	topicID      = "3f405162-7c8d-4e9f-8a1b-2c3d4e5f6071"
 )
 
-// submittedEvent is a submission event of the given version. Questions are written with topic_id; before v4 their
-// topic_id is sent as skill_id, as those versions name it.
-func submittedEvent(t *testing.T, topic string, data map[string]any) platform.Event {
+// submittedEvent is an assessment.submitted.v4 event, with data replacing the defaults it names.
+func submittedEvent(t *testing.T, data map[string]any) platform.Event {
 	t.Helper()
 	base := map[string]any{
 		"submission_id": submissionID, "assessment_id": submissionID, "classroom_id": submissionID, "org_id": "org", "student_id": "student-1",
@@ -32,83 +31,31 @@ func submittedEvent(t *testing.T, topic string, data map[string]any) platform.Ev
 	if err != nil {
 		t.Fatal(err)
 	}
-	if topic != topicSubmittedV4 {
-		body = legacyQuestions(t, body)
-	}
-	return platform.Event{Type: topic, Resource: submissionID, Data: body}
+	return platform.Event{Type: topicSubmitted, Resource: submissionID, Data: body}
 }
 
-// legacyQuestions renames each question's topic_id to skill_id, as submissions before v4 carry it.
-func legacyQuestions(t *testing.T, body []byte) []byte {
-	t.Helper()
-	var data map[string]any
-	if err := json.Unmarshal(body, &data); err != nil {
-		t.Fatal(err)
-	}
-	questions, _ := data["questions"].([]any)
-	for _, q := range questions {
-		if q, ok := q.(map[string]any); ok {
-			if topic, ok := q["topic_id"]; ok {
-				delete(q, "topic_id")
-				q["skill_id"] = topic
-			}
-		}
-	}
-	body, err := json.Marshal(data)
-	if err != nil {
-		t.Fatal(err)
-	}
-	return body
-}
-
-func TestEveryVersionCarriesTheQuestionsTopic(t *testing.T) {
-	for _, topic := range []string{topicSubmittedV1, topicSubmittedV2, topicSubmittedV3, topicSubmittedV4} {
-		v, ok := decodeSubmitted(submittedEvent(t, topic, nil))
-		if !ok || v.Questions[0].Topic != topicID {
-			t.Fatalf("%s: %v %+v", topic, ok, v.Questions)
-		}
-		evidence, err := v.score()
-		if err != nil || evidence[0].Topic != topicID {
-			t.Fatalf("%s: %+v %v", topic, evidence, err)
-		}
-	}
-}
-
-func TestEachVersionReadsOnlyItsOwnTopicField(t *testing.T) {
-	other := "4a516273-8d9e-4f0a-9b1c-2d3e4f506172"
-	question := func(name string) map[string]any {
-		return map[string]any{"questions": []map[string]any{{"id": questionID, "prompt": "1+1?", "type": "numerical", "options": nil, "answer": "2", "tolerance": "0", "points": 1, name: other}}, "answers": map[string]string{questionID: "2"}}
-	}
-	// A v4 question naming its topic only in skill_id has none, and is an InvalidEvent.
-	v, ok := decodeSubmitted(submittedEvent(t, topicSubmittedV4, question("skill_id")))
-	if _, err := v.score(); !ok || v.Questions[0].Topic != "" || err == nil {
-		t.Fatalf("v4 read skill_id: %v %+v %v", ok, v.Questions, err)
-	}
-	// Before v4 the topic is skill_id, whatever topic_id says.
-	event := submittedEvent(t, topicSubmittedV3, question("topic_id"))
-	var data map[string]any
-	_ = json.Unmarshal(event.Data, &data)
-	data["questions"].([]any)[0].(map[string]any)["topic_id"] = questionID
-	event.Data, _ = json.Marshal(data)
-	if v, ok = decodeSubmitted(event); !ok || v.Questions[0].Topic != other {
-		t.Fatalf("v3 topic: %v %+v", ok, v.Questions)
-	}
-}
-
-func TestAV2SubmissionKeepsItsSettings(t *testing.T) {
-	v, ok := decodeSubmitted(submittedEvent(t, topicSubmittedV2, nil))
-	if !ok || !v.Late || v.ReleasePolicy != releaseManual || !v.marking() || v.Questions[0].Points != 3 {
+func TestASubmissionCarriesItsSettingsAndTopics(t *testing.T) {
+	v, ok := decodeSubmitted(submittedEvent(t, nil))
+	if !ok || !v.Late || v.ReleasePolicy != releaseManual || !v.marking() || v.Questions[0].Points != 3 || v.Questions[0].Topic != topicID {
 		t.Fatalf("%v %+v", ok, v)
 	}
 	evidence, err := v.score()
-	if err != nil || !evidence[0].NeedsMarking || evidence[0].Possible != 3 {
+	if err != nil || !evidence[0].NeedsMarking || evidence[0].Possible != 3 || evidence[0].Topic != topicID {
 		t.Fatalf("%+v %v", evidence, err)
 	}
 }
 
-func TestOnlyV3AndV4SubmissionsCarryAMarkingScheme(t *testing.T) {
+func TestAQuestionNamingItsTopicOnlyAsSkillIDIsInvalid(t *testing.T) {
+	question := map[string]any{"questions": []map[string]any{{"id": questionID, "prompt": "1+1?", "type": "numerical", "options": nil, "answer": "2", "tolerance": "0", "points": 1, "skill_id": topicID}}, "answers": map[string]string{questionID: "2"}}
+	v, ok := decodeSubmitted(submittedEvent(t, question))
+	if _, err := v.score(); !ok || v.Questions[0].Topic != "" || err == nil {
+		t.Fatalf("read skill_id: %v %+v %v", ok, v.Questions, err)
+	}
+}
+
+func TestMarkingSchemePassagesAreKeptWithinLimits(t *testing.T) {
 	questions := func(scheme any) map[string]any {
-		event := submittedEvent(t, topicSubmittedV4, nil)
+		event := submittedEvent(t, nil)
 		var data map[string]any
 		_ = json.Unmarshal(event.Data, &data)
 		q := data["questions"].([]any)[0].(map[string]any)
@@ -116,32 +63,18 @@ func TestOnlyV3AndV4SubmissionsCarryAMarkingScheme(t *testing.T) {
 		return map[string]any{"questions": []any{q}}
 	}
 	passages := []map[string]any{{"document_id": submissionID, "chunk_id": questionID, "page": 2, "text": "Full marks need the reason."}}
-	for _, topic := range []string{topicSubmittedV3, topicSubmittedV4} {
-		v, ok := decodeSubmitted(submittedEvent(t, topic, questions(passages)))
-		if !ok || len(v.Questions[0].MarkingScheme) != 1 || v.Questions[0].MarkingScheme[0].Page != 2 {
-			t.Fatalf("%s: %v %+v", topic, ok, v.Questions)
-		}
-	}
-	if v, ok := decodeSubmitted(submittedEvent(t, topicSubmittedV2, questions(passages))); !ok || v.Questions[0].MarkingScheme != nil {
-		t.Fatalf("a v2 event's passages were kept: %+v", v.Questions)
+	v, ok := decodeSubmitted(submittedEvent(t, questions(passages)))
+	if !ok || len(v.Questions[0].MarkingScheme) != 1 || v.Questions[0].MarkingScheme[0].Page != 2 {
+		t.Fatalf("%v %+v", ok, v.Questions)
 	}
 	six := make([]map[string]any, maxExcerpts+1)
 	for i := range six {
 		six[i] = map[string]any{"text": "x"}
 	}
 	for name, scheme := range map[string]any{"blank": []map[string]any{{"text": " "}}, "too many": six} {
-		if _, ok := decodeSubmitted(submittedEvent(t, topicSubmittedV4, questions(scheme))); ok {
+		if _, ok := decodeSubmitted(submittedEvent(t, questions(scheme))); ok {
 			t.Errorf("%s passages accepted", name)
 		}
-	}
-}
-
-func TestAV1SubmissionGetsTodaysDefaults(t *testing.T) {
-	questions := []map[string]any{{"id": questionID, "prompt": "1+1?", "type": "numerical", "options": nil, "answer": "2", "tolerance": "0", "topic_id": topicID}}
-	event := submittedEvent(t, topicSubmittedV1, map[string]any{"questions": questions, "answers": map[string]string{questionID: "2"}, "late": nil, "release_policy": nil, "ai_marking": nil, "teacher_id": nil})
-	v, ok := decodeSubmitted(event)
-	if !ok || v.ReleasePolicy != releaseOnFinalize || v.marking() || v.Questions[0].Points != 1 {
-		t.Fatalf("%v %+v", ok, v)
 	}
 }
 
@@ -151,11 +84,11 @@ func TestMalformedSubmissionsAreRefused(t *testing.T) {
 		"too many points": {"questions": []map[string]any{{"id": questionID, "prompt": "?", "type": "numerical", "options": nil, "answer": "1", "tolerance": "0", "points": 101, "topic_id": topicID}}},
 		"missing answer":  {"answers": map[string]string{}},
 	} {
-		if _, ok := decodeSubmitted(submittedEvent(t, topicSubmittedV2, change)); ok {
+		if _, ok := decodeSubmitted(submittedEvent(t, change)); ok {
 			t.Errorf("%s: accepted", name)
 		}
 	}
-	event := submittedEvent(t, topicSubmittedV2, nil)
+	event := submittedEvent(t, nil)
 	event.Resource = questionID
 	if _, ok := decodeSubmitted(event); ok {
 		t.Error("accepted an event about another submission")
@@ -163,7 +96,7 @@ func TestMalformedSubmissionsAreRefused(t *testing.T) {
 }
 
 func TestOnlyANamedTeacherPaysForSuggestions(t *testing.T) {
-	v, _ := decodeSubmitted(submittedEvent(t, topicSubmittedV2, map[string]any{"teacher_id": ""}))
+	v, _ := decodeSubmitted(submittedEvent(t, map[string]any{"teacher_id": ""}))
 	if v.marking() {
 		t.Fatal("queued AI marking with nobody to bill")
 	}
@@ -189,7 +122,7 @@ func TestMalformedQuestionsAreInvalidEvents(t *testing.T) {
 	for name, change := range cases {
 		var invalid platform.InvalidEvent
 		// tx is nil: a malformed event must be refused before it touches the database.
-		if err := consume(context.Background(), nil, submittedEvent(t, topicSubmittedV2, change)); !errors.As(err, &invalid) {
+		if err := consume(context.Background(), nil, submittedEvent(t, change)); !errors.As(err, &invalid) {
 			t.Errorf("%s: %v", name, err)
 		}
 	}

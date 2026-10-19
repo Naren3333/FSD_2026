@@ -10,6 +10,362 @@
     }
   ],
   "components": {
+    "schemas": {
+      "Chunk": {
+        "type": "object",
+        "properties": {
+          "ordinal": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "text": {
+            "type": "string",
+            "minLength": 1
+          },
+          "start_character": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "end_character": {
+            "type": "integer",
+            "minimum": 1
+          }
+        },
+        "required": [
+          "ordinal",
+          "text",
+          "start_character",
+          "end_character"
+        ],
+        "additionalProperties": false
+      },
+      "Document": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "classroom_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "title": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 160
+          },
+          "mime_type": {
+            "enum": [
+              "text/plain",
+              "application/pdf"
+            ]
+          },
+          "status": {
+            "enum": [
+              "extracted",
+              "extraction_unsupported",
+              "indexing",
+              "indexed",
+              "failed"
+            ]
+          },
+          "revision": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "sha256": {
+            "type": "string",
+            "pattern": "^[a-f0-9]{64}$"
+          },
+          "doc_type": {
+            "enum": [
+              "teaching_material",
+              "rubric",
+              "marking_scheme"
+            ]
+          },
+          "chunks": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Chunk"
+            },
+            "minItems": 0,
+            "maxItems": 10000
+          },
+          "page_count": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "chunk_count": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "embedding_model": {
+            "type": "string",
+            "minLength": 1
+          },
+          "indexed_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "failure_reason": {
+            "enum": [
+              "NO_TEXT_LAYER",
+              "ENCRYPTED",
+              "CORRUPT",
+              "TOO_LARGE",
+              "AI_UNAVAILABLE",
+              "INTERNAL"
+            ]
+          }
+        },
+        "required": [
+          "id",
+          "classroom_id",
+          "title",
+          "mime_type",
+          "status",
+          "revision",
+          "sha256",
+          "doc_type"
+        ],
+        "additionalProperties": false
+      },
+      "Error": {
+        "type": "object",
+        "properties": {
+          "error": {
+            "type": "object",
+            "properties": {
+              "code": {
+                "type": "string",
+                "minLength": 1
+              },
+              "message": {
+                "type": "string",
+                "minLength": 1
+              }
+            },
+            "required": [
+              "code",
+              "message"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "required": [
+          "error"
+        ],
+        "additionalProperties": false
+      },
+      "RelatedItem": {
+        "type": "object",
+        "properties": {
+          "chunk_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "kind": {
+            "enum": [
+              "table",
+              "figure",
+              "text"
+            ]
+          },
+          "label": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "page_start": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "image": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "pattern": "^[a-f0-9]{16}\\.png$"
+          },
+          "content": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "required": [
+          "chunk_id",
+          "kind",
+          "label",
+          "page_start",
+          "image",
+          "content"
+        ],
+        "additionalProperties": false
+      },
+      "SearchHit": {
+        "type": "object",
+        "properties": {
+          "chunk_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "document_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "title": {
+            "type": "string",
+            "minLength": 1
+          },
+          "doc_type": {
+            "enum": [
+              "teaching_material",
+              "rubric",
+              "marking_scheme"
+            ]
+          },
+          "section_path": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "page_start": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "page_end": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "content": {
+            "type": "string",
+            "minLength": 1
+          },
+          "kind": {
+            "enum": [
+              "text",
+              "table",
+              "figure"
+            ]
+          },
+          "source": {
+            "enum": [
+              "pdf",
+              "vision"
+            ]
+          },
+          "image": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "pattern": "^[a-f0-9]{16}\\.png$"
+          },
+          "score": {
+            "type": "number"
+          },
+          "related": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/RelatedItem"
+            },
+            "minItems": 0,
+            "maxItems": 100
+          }
+        },
+        "required": [
+          "chunk_id",
+          "document_id",
+          "title",
+          "doc_type",
+          "section_path",
+          "page_start",
+          "page_end",
+          "content",
+          "kind",
+          "source",
+          "image",
+          "score",
+          "related"
+        ],
+        "additionalProperties": false
+      },
+      "SearchRequest": {
+        "type": "object",
+        "properties": {
+          "classroom_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "query": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 1000
+          },
+          "top_k": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 30,
+            "default": 8
+          },
+          "rerank": {
+            "type": "boolean",
+            "default": true
+          },
+          "document_ids": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "minItems": 0,
+            "maxItems": 100
+          },
+          "doc_types": {
+            "type": "array",
+            "items": {
+              "enum": [
+                "teaching_material",
+                "rubric",
+                "marking_scheme"
+              ]
+            },
+            "minItems": 0,
+            "maxItems": 3
+          }
+        },
+        "required": [
+          "classroom_id",
+          "query"
+        ],
+        "additionalProperties": false
+      },
+      "SearchResponse": {
+        "type": "object",
+        "properties": {
+          "results": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/SearchHit"
+            },
+            "minItems": 0,
+            "maxItems": 30
+          },
+          "rerank_fallback": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "results",
+          "rerank_fallback"
+        ],
+        "additionalProperties": false
+      }
+    },
     "securitySchemes": {
       "bearerAuth": {
         "type": "http",
@@ -41,122 +397,7 @@
                 "schema": {
                   "type": "array",
                   "items": {
-                    "type": "object",
-                    "properties": {
-                      "id": {
-                        "type": "string",
-                        "format": "uuid"
-                      },
-                      "classroom_id": {
-                        "type": "string",
-                        "format": "uuid"
-                      },
-                      "title": {
-                        "type": "string",
-                        "minLength": 1,
-                        "maxLength": 160
-                      },
-                      "mime_type": {
-                        "enum": [
-                          "text/plain",
-                          "application/pdf"
-                        ]
-                      },
-                      "status": {
-                        "enum": [
-                          "extracted",
-                          "extraction_unsupported",
-                          "indexing",
-                          "indexed",
-                          "failed"
-                        ]
-                      },
-                      "revision": {
-                        "type": "integer",
-                        "minimum": 1
-                      },
-                      "sha256": {
-                        "type": "string",
-                        "pattern": "^[a-f0-9]{64}$"
-                      },
-                      "doc_type": {
-                        "enum": [
-                          "teaching_material",
-                          "rubric",
-                          "marking_scheme"
-                        ]
-                      },
-                      "chunks": {
-                        "type": "array",
-                        "items": {
-                          "type": "object",
-                          "properties": {
-                            "ordinal": {
-                              "type": "integer",
-                              "minimum": 0
-                            },
-                            "text": {
-                              "type": "string",
-                              "minLength": 1
-                            },
-                            "start_character": {
-                              "type": "integer",
-                              "minimum": 0
-                            },
-                            "end_character": {
-                              "type": "integer",
-                              "minimum": 1
-                            }
-                          },
-                          "required": [
-                            "ordinal",
-                            "text",
-                            "start_character",
-                            "end_character"
-                          ],
-                          "additionalProperties": false
-                        },
-                        "minItems": 0,
-                        "maxItems": 10000
-                      },
-                      "page_count": {
-                        "type": "integer",
-                        "minimum": 0
-                      },
-                      "chunk_count": {
-                        "type": "integer",
-                        "minimum": 0
-                      },
-                      "embedding_model": {
-                        "type": "string",
-                        "minLength": 1
-                      },
-                      "indexed_at": {
-                        "type": "string",
-                        "format": "date-time"
-                      },
-                      "failure_reason": {
-                        "enum": [
-                          "NO_TEXT_LAYER",
-                          "ENCRYPTED",
-                          "CORRUPT",
-                          "TOO_LARGE",
-                          "AI_UNAVAILABLE",
-                          "INTERNAL"
-                        ]
-                      }
-                    },
-                    "required": [
-                      "id",
-                      "classroom_id",
-                      "title",
-                      "mime_type",
-                      "status",
-                      "revision",
-                      "sha256",
-                      "doc_type"
-                    ],
-                    "additionalProperties": false
+                    "$ref": "#/components/schemas/Document"
                   },
                   "minItems": 0,
                   "maxItems": 100
@@ -169,31 +410,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object",
-                  "properties": {
-                    "error": {
-                      "type": "object",
-                      "properties": {
-                        "code": {
-                          "type": "string",
-                          "minLength": 1
-                        },
-                        "message": {
-                          "type": "string",
-                          "minLength": 1
-                        }
-                      },
-                      "required": [
-                        "code",
-                        "message"
-                      ],
-                      "additionalProperties": false
-                    }
-                  },
-                  "required": [
-                    "error"
-                  ],
-                  "additionalProperties": false
+                  "$ref": "#/components/schemas/Error"
                 }
               }
             }
@@ -203,31 +420,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object",
-                  "properties": {
-                    "error": {
-                      "type": "object",
-                      "properties": {
-                        "code": {
-                          "type": "string",
-                          "minLength": 1
-                        },
-                        "message": {
-                          "type": "string",
-                          "minLength": 1
-                        }
-                      },
-                      "required": [
-                        "code",
-                        "message"
-                      ],
-                      "additionalProperties": false
-                    }
-                  },
-                  "required": [
-                    "error"
-                  ],
-                  "additionalProperties": false
+                  "$ref": "#/components/schemas/Error"
                 }
               }
             }
@@ -237,31 +430,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object",
-                  "properties": {
-                    "error": {
-                      "type": "object",
-                      "properties": {
-                        "code": {
-                          "type": "string",
-                          "minLength": 1
-                        },
-                        "message": {
-                          "type": "string",
-                          "minLength": 1
-                        }
-                      },
-                      "required": [
-                        "code",
-                        "message"
-                      ],
-                      "additionalProperties": false
-                    }
-                  },
-                  "required": [
-                    "error"
-                  ],
-                  "additionalProperties": false
+                  "$ref": "#/components/schemas/Error"
                 }
               }
             }
@@ -271,31 +440,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object",
-                  "properties": {
-                    "error": {
-                      "type": "object",
-                      "properties": {
-                        "code": {
-                          "type": "string",
-                          "minLength": 1
-                        },
-                        "message": {
-                          "type": "string",
-                          "minLength": 1
-                        }
-                      },
-                      "required": [
-                        "code",
-                        "message"
-                      ],
-                      "additionalProperties": false
-                    }
-                  },
-                  "required": [
-                    "error"
-                  ],
-                  "additionalProperties": false
+                  "$ref": "#/components/schemas/Error"
                 }
               }
             }
@@ -305,31 +450,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object",
-                  "properties": {
-                    "error": {
-                      "type": "object",
-                      "properties": {
-                        "code": {
-                          "type": "string",
-                          "minLength": 1
-                        },
-                        "message": {
-                          "type": "string",
-                          "minLength": 1
-                        }
-                      },
-                      "required": [
-                        "code",
-                        "message"
-                      ],
-                      "additionalProperties": false
-                    }
-                  },
-                  "required": [
-                    "error"
-                  ],
-                  "additionalProperties": false
+                  "$ref": "#/components/schemas/Error"
                 }
               }
             }
@@ -339,31 +460,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object",
-                  "properties": {
-                    "error": {
-                      "type": "object",
-                      "properties": {
-                        "code": {
-                          "type": "string",
-                          "minLength": 1
-                        },
-                        "message": {
-                          "type": "string",
-                          "minLength": 1
-                        }
-                      },
-                      "required": [
-                        "code",
-                        "message"
-                      ],
-                      "additionalProperties": false
-                    }
-                  },
-                  "required": [
-                    "error"
-                  ],
-                  "additionalProperties": false
+                  "$ref": "#/components/schemas/Error"
                 }
               }
             }
@@ -373,31 +470,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object",
-                  "properties": {
-                    "error": {
-                      "type": "object",
-                      "properties": {
-                        "code": {
-                          "type": "string",
-                          "minLength": 1
-                        },
-                        "message": {
-                          "type": "string",
-                          "minLength": 1
-                        }
-                      },
-                      "required": [
-                        "code",
-                        "message"
-                      ],
-                      "additionalProperties": false
-                    }
-                  },
-                  "required": [
-                    "error"
-                  ],
-                  "additionalProperties": false
+                  "$ref": "#/components/schemas/Error"
                 }
               }
             }
@@ -442,122 +515,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object",
-                  "properties": {
-                    "id": {
-                      "type": "string",
-                      "format": "uuid"
-                    },
-                    "classroom_id": {
-                      "type": "string",
-                      "format": "uuid"
-                    },
-                    "title": {
-                      "type": "string",
-                      "minLength": 1,
-                      "maxLength": 160
-                    },
-                    "mime_type": {
-                      "enum": [
-                        "text/plain",
-                        "application/pdf"
-                      ]
-                    },
-                    "status": {
-                      "enum": [
-                        "extracted",
-                        "extraction_unsupported",
-                        "indexing",
-                        "indexed",
-                        "failed"
-                      ]
-                    },
-                    "revision": {
-                      "type": "integer",
-                      "minimum": 1
-                    },
-                    "sha256": {
-                      "type": "string",
-                      "pattern": "^[a-f0-9]{64}$"
-                    },
-                    "doc_type": {
-                      "enum": [
-                        "teaching_material",
-                        "rubric",
-                        "marking_scheme"
-                      ]
-                    },
-                    "chunks": {
-                      "type": "array",
-                      "items": {
-                        "type": "object",
-                        "properties": {
-                          "ordinal": {
-                            "type": "integer",
-                            "minimum": 0
-                          },
-                          "text": {
-                            "type": "string",
-                            "minLength": 1
-                          },
-                          "start_character": {
-                            "type": "integer",
-                            "minimum": 0
-                          },
-                          "end_character": {
-                            "type": "integer",
-                            "minimum": 1
-                          }
-                        },
-                        "required": [
-                          "ordinal",
-                          "text",
-                          "start_character",
-                          "end_character"
-                        ],
-                        "additionalProperties": false
-                      },
-                      "minItems": 0,
-                      "maxItems": 10000
-                    },
-                    "page_count": {
-                      "type": "integer",
-                      "minimum": 0
-                    },
-                    "chunk_count": {
-                      "type": "integer",
-                      "minimum": 0
-                    },
-                    "embedding_model": {
-                      "type": "string",
-                      "minLength": 1
-                    },
-                    "indexed_at": {
-                      "type": "string",
-                      "format": "date-time"
-                    },
-                    "failure_reason": {
-                      "enum": [
-                        "NO_TEXT_LAYER",
-                        "ENCRYPTED",
-                        "CORRUPT",
-                        "TOO_LARGE",
-                        "AI_UNAVAILABLE",
-                        "INTERNAL"
-                      ]
-                    }
-                  },
-                  "required": [
-                    "id",
-                    "classroom_id",
-                    "title",
-                    "mime_type",
-                    "status",
-                    "revision",
-                    "sha256",
-                    "doc_type"
-                  ],
-                  "additionalProperties": false
+                  "$ref": "#/components/schemas/Document"
                 }
               }
             }
@@ -567,31 +525,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object",
-                  "properties": {
-                    "error": {
-                      "type": "object",
-                      "properties": {
-                        "code": {
-                          "type": "string",
-                          "minLength": 1
-                        },
-                        "message": {
-                          "type": "string",
-                          "minLength": 1
-                        }
-                      },
-                      "required": [
-                        "code",
-                        "message"
-                      ],
-                      "additionalProperties": false
-                    }
-                  },
-                  "required": [
-                    "error"
-                  ],
-                  "additionalProperties": false
+                  "$ref": "#/components/schemas/Error"
                 }
               }
             }
@@ -601,31 +535,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object",
-                  "properties": {
-                    "error": {
-                      "type": "object",
-                      "properties": {
-                        "code": {
-                          "type": "string",
-                          "minLength": 1
-                        },
-                        "message": {
-                          "type": "string",
-                          "minLength": 1
-                        }
-                      },
-                      "required": [
-                        "code",
-                        "message"
-                      ],
-                      "additionalProperties": false
-                    }
-                  },
-                  "required": [
-                    "error"
-                  ],
-                  "additionalProperties": false
+                  "$ref": "#/components/schemas/Error"
                 }
               }
             }
@@ -635,31 +545,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object",
-                  "properties": {
-                    "error": {
-                      "type": "object",
-                      "properties": {
-                        "code": {
-                          "type": "string",
-                          "minLength": 1
-                        },
-                        "message": {
-                          "type": "string",
-                          "minLength": 1
-                        }
-                      },
-                      "required": [
-                        "code",
-                        "message"
-                      ],
-                      "additionalProperties": false
-                    }
-                  },
-                  "required": [
-                    "error"
-                  ],
-                  "additionalProperties": false
+                  "$ref": "#/components/schemas/Error"
                 }
               }
             }
@@ -669,31 +555,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object",
-                  "properties": {
-                    "error": {
-                      "type": "object",
-                      "properties": {
-                        "code": {
-                          "type": "string",
-                          "minLength": 1
-                        },
-                        "message": {
-                          "type": "string",
-                          "minLength": 1
-                        }
-                      },
-                      "required": [
-                        "code",
-                        "message"
-                      ],
-                      "additionalProperties": false
-                    }
-                  },
-                  "required": [
-                    "error"
-                  ],
-                  "additionalProperties": false
+                  "$ref": "#/components/schemas/Error"
                 }
               }
             }
@@ -703,31 +565,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object",
-                  "properties": {
-                    "error": {
-                      "type": "object",
-                      "properties": {
-                        "code": {
-                          "type": "string",
-                          "minLength": 1
-                        },
-                        "message": {
-                          "type": "string",
-                          "minLength": 1
-                        }
-                      },
-                      "required": [
-                        "code",
-                        "message"
-                      ],
-                      "additionalProperties": false
-                    }
-                  },
-                  "required": [
-                    "error"
-                  ],
-                  "additionalProperties": false
+                  "$ref": "#/components/schemas/Error"
                 }
               }
             }
@@ -737,31 +575,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object",
-                  "properties": {
-                    "error": {
-                      "type": "object",
-                      "properties": {
-                        "code": {
-                          "type": "string",
-                          "minLength": 1
-                        },
-                        "message": {
-                          "type": "string",
-                          "minLength": 1
-                        }
-                      },
-                      "required": [
-                        "code",
-                        "message"
-                      ],
-                      "additionalProperties": false
-                    }
-                  },
-                  "required": [
-                    "error"
-                  ],
-                  "additionalProperties": false
+                  "$ref": "#/components/schemas/Error"
                 }
               }
             }
@@ -771,31 +585,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object",
-                  "properties": {
-                    "error": {
-                      "type": "object",
-                      "properties": {
-                        "code": {
-                          "type": "string",
-                          "minLength": 1
-                        },
-                        "message": {
-                          "type": "string",
-                          "minLength": 1
-                        }
-                      },
-                      "required": [
-                        "code",
-                        "message"
-                      ],
-                      "additionalProperties": false
-                    }
-                  },
-                  "required": [
-                    "error"
-                  ],
-                  "additionalProperties": false
+                  "$ref": "#/components/schemas/Error"
                 }
               }
             }
@@ -805,31 +595,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object",
-                  "properties": {
-                    "error": {
-                      "type": "object",
-                      "properties": {
-                        "code": {
-                          "type": "string",
-                          "minLength": 1
-                        },
-                        "message": {
-                          "type": "string",
-                          "minLength": 1
-                        }
-                      },
-                      "required": [
-                        "code",
-                        "message"
-                      ],
-                      "additionalProperties": false
-                    }
-                  },
-                  "required": [
-                    "error"
-                  ],
-                  "additionalProperties": false
+                  "$ref": "#/components/schemas/Error"
                 }
               }
             }
@@ -839,31 +605,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object",
-                  "properties": {
-                    "error": {
-                      "type": "object",
-                      "properties": {
-                        "code": {
-                          "type": "string",
-                          "minLength": 1
-                        },
-                        "message": {
-                          "type": "string",
-                          "minLength": 1
-                        }
-                      },
-                      "required": [
-                        "code",
-                        "message"
-                      ],
-                      "additionalProperties": false
-                    }
-                  },
-                  "required": [
-                    "error"
-                  ],
-                  "additionalProperties": false
+                  "$ref": "#/components/schemas/Error"
                 }
               }
             }
@@ -910,122 +652,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object",
-                  "properties": {
-                    "id": {
-                      "type": "string",
-                      "format": "uuid"
-                    },
-                    "classroom_id": {
-                      "type": "string",
-                      "format": "uuid"
-                    },
-                    "title": {
-                      "type": "string",
-                      "minLength": 1,
-                      "maxLength": 160
-                    },
-                    "mime_type": {
-                      "enum": [
-                        "text/plain",
-                        "application/pdf"
-                      ]
-                    },
-                    "status": {
-                      "enum": [
-                        "extracted",
-                        "extraction_unsupported",
-                        "indexing",
-                        "indexed",
-                        "failed"
-                      ]
-                    },
-                    "revision": {
-                      "type": "integer",
-                      "minimum": 1
-                    },
-                    "sha256": {
-                      "type": "string",
-                      "pattern": "^[a-f0-9]{64}$"
-                    },
-                    "doc_type": {
-                      "enum": [
-                        "teaching_material",
-                        "rubric",
-                        "marking_scheme"
-                      ]
-                    },
-                    "chunks": {
-                      "type": "array",
-                      "items": {
-                        "type": "object",
-                        "properties": {
-                          "ordinal": {
-                            "type": "integer",
-                            "minimum": 0
-                          },
-                          "text": {
-                            "type": "string",
-                            "minLength": 1
-                          },
-                          "start_character": {
-                            "type": "integer",
-                            "minimum": 0
-                          },
-                          "end_character": {
-                            "type": "integer",
-                            "minimum": 1
-                          }
-                        },
-                        "required": [
-                          "ordinal",
-                          "text",
-                          "start_character",
-                          "end_character"
-                        ],
-                        "additionalProperties": false
-                      },
-                      "minItems": 0,
-                      "maxItems": 10000
-                    },
-                    "page_count": {
-                      "type": "integer",
-                      "minimum": 0
-                    },
-                    "chunk_count": {
-                      "type": "integer",
-                      "minimum": 0
-                    },
-                    "embedding_model": {
-                      "type": "string",
-                      "minLength": 1
-                    },
-                    "indexed_at": {
-                      "type": "string",
-                      "format": "date-time"
-                    },
-                    "failure_reason": {
-                      "enum": [
-                        "NO_TEXT_LAYER",
-                        "ENCRYPTED",
-                        "CORRUPT",
-                        "TOO_LARGE",
-                        "AI_UNAVAILABLE",
-                        "INTERNAL"
-                      ]
-                    }
-                  },
-                  "required": [
-                    "id",
-                    "classroom_id",
-                    "title",
-                    "mime_type",
-                    "status",
-                    "revision",
-                    "sha256",
-                    "doc_type"
-                  ],
-                  "additionalProperties": false
+                  "$ref": "#/components/schemas/Document"
                 }
               }
             }
@@ -1035,31 +662,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object",
-                  "properties": {
-                    "error": {
-                      "type": "object",
-                      "properties": {
-                        "code": {
-                          "type": "string",
-                          "minLength": 1
-                        },
-                        "message": {
-                          "type": "string",
-                          "minLength": 1
-                        }
-                      },
-                      "required": [
-                        "code",
-                        "message"
-                      ],
-                      "additionalProperties": false
-                    }
-                  },
-                  "required": [
-                    "error"
-                  ],
-                  "additionalProperties": false
+                  "$ref": "#/components/schemas/Error"
                 }
               }
             }
@@ -1069,31 +672,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object",
-                  "properties": {
-                    "error": {
-                      "type": "object",
-                      "properties": {
-                        "code": {
-                          "type": "string",
-                          "minLength": 1
-                        },
-                        "message": {
-                          "type": "string",
-                          "minLength": 1
-                        }
-                      },
-                      "required": [
-                        "code",
-                        "message"
-                      ],
-                      "additionalProperties": false
-                    }
-                  },
-                  "required": [
-                    "error"
-                  ],
-                  "additionalProperties": false
+                  "$ref": "#/components/schemas/Error"
                 }
               }
             }
@@ -1103,31 +682,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object",
-                  "properties": {
-                    "error": {
-                      "type": "object",
-                      "properties": {
-                        "code": {
-                          "type": "string",
-                          "minLength": 1
-                        },
-                        "message": {
-                          "type": "string",
-                          "minLength": 1
-                        }
-                      },
-                      "required": [
-                        "code",
-                        "message"
-                      ],
-                      "additionalProperties": false
-                    }
-                  },
-                  "required": [
-                    "error"
-                  ],
-                  "additionalProperties": false
+                  "$ref": "#/components/schemas/Error"
                 }
               }
             }
@@ -1137,31 +692,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object",
-                  "properties": {
-                    "error": {
-                      "type": "object",
-                      "properties": {
-                        "code": {
-                          "type": "string",
-                          "minLength": 1
-                        },
-                        "message": {
-                          "type": "string",
-                          "minLength": 1
-                        }
-                      },
-                      "required": [
-                        "code",
-                        "message"
-                      ],
-                      "additionalProperties": false
-                    }
-                  },
-                  "required": [
-                    "error"
-                  ],
-                  "additionalProperties": false
+                  "$ref": "#/components/schemas/Error"
                 }
               }
             }
@@ -1171,31 +702,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object",
-                  "properties": {
-                    "error": {
-                      "type": "object",
-                      "properties": {
-                        "code": {
-                          "type": "string",
-                          "minLength": 1
-                        },
-                        "message": {
-                          "type": "string",
-                          "minLength": 1
-                        }
-                      },
-                      "required": [
-                        "code",
-                        "message"
-                      ],
-                      "additionalProperties": false
-                    }
-                  },
-                  "required": [
-                    "error"
-                  ],
-                  "additionalProperties": false
+                  "$ref": "#/components/schemas/Error"
                 }
               }
             }
@@ -1205,31 +712,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object",
-                  "properties": {
-                    "error": {
-                      "type": "object",
-                      "properties": {
-                        "code": {
-                          "type": "string",
-                          "minLength": 1
-                        },
-                        "message": {
-                          "type": "string",
-                          "minLength": 1
-                        }
-                      },
-                      "required": [
-                        "code",
-                        "message"
-                      ],
-                      "additionalProperties": false
-                    }
-                  },
-                  "required": [
-                    "error"
-                  ],
-                  "additionalProperties": false
+                  "$ref": "#/components/schemas/Error"
                 }
               }
             }
@@ -1239,31 +722,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object",
-                  "properties": {
-                    "error": {
-                      "type": "object",
-                      "properties": {
-                        "code": {
-                          "type": "string",
-                          "minLength": 1
-                        },
-                        "message": {
-                          "type": "string",
-                          "minLength": 1
-                        }
-                      },
-                      "required": [
-                        "code",
-                        "message"
-                      ],
-                      "additionalProperties": false
-                    }
-                  },
-                  "required": [
-                    "error"
-                  ],
-                  "additionalProperties": false
+                  "$ref": "#/components/schemas/Error"
                 }
               }
             }
@@ -1292,31 +751,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object",
-                  "properties": {
-                    "error": {
-                      "type": "object",
-                      "properties": {
-                        "code": {
-                          "type": "string",
-                          "minLength": 1
-                        },
-                        "message": {
-                          "type": "string",
-                          "minLength": 1
-                        }
-                      },
-                      "required": [
-                        "code",
-                        "message"
-                      ],
-                      "additionalProperties": false
-                    }
-                  },
-                  "required": [
-                    "error"
-                  ],
-                  "additionalProperties": false
+                  "$ref": "#/components/schemas/Error"
                 }
               }
             }
@@ -1326,31 +761,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object",
-                  "properties": {
-                    "error": {
-                      "type": "object",
-                      "properties": {
-                        "code": {
-                          "type": "string",
-                          "minLength": 1
-                        },
-                        "message": {
-                          "type": "string",
-                          "minLength": 1
-                        }
-                      },
-                      "required": [
-                        "code",
-                        "message"
-                      ],
-                      "additionalProperties": false
-                    }
-                  },
-                  "required": [
-                    "error"
-                  ],
-                  "additionalProperties": false
+                  "$ref": "#/components/schemas/Error"
                 }
               }
             }
@@ -1360,31 +771,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object",
-                  "properties": {
-                    "error": {
-                      "type": "object",
-                      "properties": {
-                        "code": {
-                          "type": "string",
-                          "minLength": 1
-                        },
-                        "message": {
-                          "type": "string",
-                          "minLength": 1
-                        }
-                      },
-                      "required": [
-                        "code",
-                        "message"
-                      ],
-                      "additionalProperties": false
-                    }
-                  },
-                  "required": [
-                    "error"
-                  ],
-                  "additionalProperties": false
+                  "$ref": "#/components/schemas/Error"
                 }
               }
             }
@@ -1394,31 +781,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object",
-                  "properties": {
-                    "error": {
-                      "type": "object",
-                      "properties": {
-                        "code": {
-                          "type": "string",
-                          "minLength": 1
-                        },
-                        "message": {
-                          "type": "string",
-                          "minLength": 1
-                        }
-                      },
-                      "required": [
-                        "code",
-                        "message"
-                      ],
-                      "additionalProperties": false
-                    }
-                  },
-                  "required": [
-                    "error"
-                  ],
-                  "additionalProperties": false
+                  "$ref": "#/components/schemas/Error"
                 }
               }
             }
@@ -1428,31 +791,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object",
-                  "properties": {
-                    "error": {
-                      "type": "object",
-                      "properties": {
-                        "code": {
-                          "type": "string",
-                          "minLength": 1
-                        },
-                        "message": {
-                          "type": "string",
-                          "minLength": 1
-                        }
-                      },
-                      "required": [
-                        "code",
-                        "message"
-                      ],
-                      "additionalProperties": false
-                    }
-                  },
-                  "required": [
-                    "error"
-                  ],
-                  "additionalProperties": false
+                  "$ref": "#/components/schemas/Error"
                 }
               }
             }
@@ -1462,31 +801,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object",
-                  "properties": {
-                    "error": {
-                      "type": "object",
-                      "properties": {
-                        "code": {
-                          "type": "string",
-                          "minLength": 1
-                        },
-                        "message": {
-                          "type": "string",
-                          "minLength": 1
-                        }
-                      },
-                      "required": [
-                        "code",
-                        "message"
-                      ],
-                      "additionalProperties": false
-                    }
-                  },
-                  "required": [
-                    "error"
-                  ],
-                  "additionalProperties": false
+                  "$ref": "#/components/schemas/Error"
                 }
               }
             }
@@ -1496,31 +811,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object",
-                  "properties": {
-                    "error": {
-                      "type": "object",
-                      "properties": {
-                        "code": {
-                          "type": "string",
-                          "minLength": 1
-                        },
-                        "message": {
-                          "type": "string",
-                          "minLength": 1
-                        }
-                      },
-                      "required": [
-                        "code",
-                        "message"
-                      ],
-                      "additionalProperties": false
-                    }
-                  },
-                  "required": [
-                    "error"
-                  ],
-                  "additionalProperties": false
+                  "$ref": "#/components/schemas/Error"
                 }
               }
             }
@@ -1548,122 +839,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object",
-                  "properties": {
-                    "id": {
-                      "type": "string",
-                      "format": "uuid"
-                    },
-                    "classroom_id": {
-                      "type": "string",
-                      "format": "uuid"
-                    },
-                    "title": {
-                      "type": "string",
-                      "minLength": 1,
-                      "maxLength": 160
-                    },
-                    "mime_type": {
-                      "enum": [
-                        "text/plain",
-                        "application/pdf"
-                      ]
-                    },
-                    "status": {
-                      "enum": [
-                        "extracted",
-                        "extraction_unsupported",
-                        "indexing",
-                        "indexed",
-                        "failed"
-                      ]
-                    },
-                    "revision": {
-                      "type": "integer",
-                      "minimum": 1
-                    },
-                    "sha256": {
-                      "type": "string",
-                      "pattern": "^[a-f0-9]{64}$"
-                    },
-                    "doc_type": {
-                      "enum": [
-                        "teaching_material",
-                        "rubric",
-                        "marking_scheme"
-                      ]
-                    },
-                    "chunks": {
-                      "type": "array",
-                      "items": {
-                        "type": "object",
-                        "properties": {
-                          "ordinal": {
-                            "type": "integer",
-                            "minimum": 0
-                          },
-                          "text": {
-                            "type": "string",
-                            "minLength": 1
-                          },
-                          "start_character": {
-                            "type": "integer",
-                            "minimum": 0
-                          },
-                          "end_character": {
-                            "type": "integer",
-                            "minimum": 1
-                          }
-                        },
-                        "required": [
-                          "ordinal",
-                          "text",
-                          "start_character",
-                          "end_character"
-                        ],
-                        "additionalProperties": false
-                      },
-                      "minItems": 0,
-                      "maxItems": 10000
-                    },
-                    "page_count": {
-                      "type": "integer",
-                      "minimum": 0
-                    },
-                    "chunk_count": {
-                      "type": "integer",
-                      "minimum": 0
-                    },
-                    "embedding_model": {
-                      "type": "string",
-                      "minLength": 1
-                    },
-                    "indexed_at": {
-                      "type": "string",
-                      "format": "date-time"
-                    },
-                    "failure_reason": {
-                      "enum": [
-                        "NO_TEXT_LAYER",
-                        "ENCRYPTED",
-                        "CORRUPT",
-                        "TOO_LARGE",
-                        "AI_UNAVAILABLE",
-                        "INTERNAL"
-                      ]
-                    }
-                  },
-                  "required": [
-                    "id",
-                    "classroom_id",
-                    "title",
-                    "mime_type",
-                    "status",
-                    "revision",
-                    "sha256",
-                    "doc_type"
-                  ],
-                  "additionalProperties": false
+                  "$ref": "#/components/schemas/Document"
                 }
               }
             }
@@ -1673,31 +849,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object",
-                  "properties": {
-                    "error": {
-                      "type": "object",
-                      "properties": {
-                        "code": {
-                          "type": "string",
-                          "minLength": 1
-                        },
-                        "message": {
-                          "type": "string",
-                          "minLength": 1
-                        }
-                      },
-                      "required": [
-                        "code",
-                        "message"
-                      ],
-                      "additionalProperties": false
-                    }
-                  },
-                  "required": [
-                    "error"
-                  ],
-                  "additionalProperties": false
+                  "$ref": "#/components/schemas/Error"
                 }
               }
             }
@@ -1707,31 +859,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object",
-                  "properties": {
-                    "error": {
-                      "type": "object",
-                      "properties": {
-                        "code": {
-                          "type": "string",
-                          "minLength": 1
-                        },
-                        "message": {
-                          "type": "string",
-                          "minLength": 1
-                        }
-                      },
-                      "required": [
-                        "code",
-                        "message"
-                      ],
-                      "additionalProperties": false
-                    }
-                  },
-                  "required": [
-                    "error"
-                  ],
-                  "additionalProperties": false
+                  "$ref": "#/components/schemas/Error"
                 }
               }
             }
@@ -1741,31 +869,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object",
-                  "properties": {
-                    "error": {
-                      "type": "object",
-                      "properties": {
-                        "code": {
-                          "type": "string",
-                          "minLength": 1
-                        },
-                        "message": {
-                          "type": "string",
-                          "minLength": 1
-                        }
-                      },
-                      "required": [
-                        "code",
-                        "message"
-                      ],
-                      "additionalProperties": false
-                    }
-                  },
-                  "required": [
-                    "error"
-                  ],
-                  "additionalProperties": false
+                  "$ref": "#/components/schemas/Error"
                 }
               }
             }
@@ -1775,31 +879,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object",
-                  "properties": {
-                    "error": {
-                      "type": "object",
-                      "properties": {
-                        "code": {
-                          "type": "string",
-                          "minLength": 1
-                        },
-                        "message": {
-                          "type": "string",
-                          "minLength": 1
-                        }
-                      },
-                      "required": [
-                        "code",
-                        "message"
-                      ],
-                      "additionalProperties": false
-                    }
-                  },
-                  "required": [
-                    "error"
-                  ],
-                  "additionalProperties": false
+                  "$ref": "#/components/schemas/Error"
                 }
               }
             }
@@ -1809,31 +889,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object",
-                  "properties": {
-                    "error": {
-                      "type": "object",
-                      "properties": {
-                        "code": {
-                          "type": "string",
-                          "minLength": 1
-                        },
-                        "message": {
-                          "type": "string",
-                          "minLength": 1
-                        }
-                      },
-                      "required": [
-                        "code",
-                        "message"
-                      ],
-                      "additionalProperties": false
-                    }
-                  },
-                  "required": [
-                    "error"
-                  ],
-                  "additionalProperties": false
+                  "$ref": "#/components/schemas/Error"
                 }
               }
             }
@@ -1843,31 +899,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object",
-                  "properties": {
-                    "error": {
-                      "type": "object",
-                      "properties": {
-                        "code": {
-                          "type": "string",
-                          "minLength": 1
-                        },
-                        "message": {
-                          "type": "string",
-                          "minLength": 1
-                        }
-                      },
-                      "required": [
-                        "code",
-                        "message"
-                      ],
-                      "additionalProperties": false
-                    }
-                  },
-                  "required": [
-                    "error"
-                  ],
-                  "additionalProperties": false
+                  "$ref": "#/components/schemas/Error"
                 }
               }
             }
@@ -1877,31 +909,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object",
-                  "properties": {
-                    "error": {
-                      "type": "object",
-                      "properties": {
-                        "code": {
-                          "type": "string",
-                          "minLength": 1
-                        },
-                        "message": {
-                          "type": "string",
-                          "minLength": 1
-                        }
-                      },
-                      "required": [
-                        "code",
-                        "message"
-                      ],
-                      "additionalProperties": false
-                    }
-                  },
-                  "required": [
-                    "error"
-                  ],
-                  "additionalProperties": false
+                  "$ref": "#/components/schemas/Error"
                 }
               }
             }
@@ -1919,154 +927,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object",
-                  "properties": {
-                    "results": {
-                      "type": "array",
-                      "items": {
-                        "type": "object",
-                        "properties": {
-                          "chunk_id": {
-                            "type": "string",
-                            "format": "uuid"
-                          },
-                          "document_id": {
-                            "type": "string",
-                            "format": "uuid"
-                          },
-                          "title": {
-                            "type": "string",
-                            "minLength": 1
-                          },
-                          "doc_type": {
-                            "enum": [
-                              "teaching_material",
-                              "rubric",
-                              "marking_scheme"
-                            ]
-                          },
-                          "section_path": {
-                            "type": [
-                              "string",
-                              "null"
-                            ]
-                          },
-                          "page_start": {
-                            "type": "integer",
-                            "minimum": 1
-                          },
-                          "page_end": {
-                            "type": "integer",
-                            "minimum": 1
-                          },
-                          "content": {
-                            "type": "string",
-                            "minLength": 1
-                          },
-                          "kind": {
-                            "enum": [
-                              "text",
-                              "table",
-                              "figure"
-                            ]
-                          },
-                          "source": {
-                            "enum": [
-                              "pdf",
-                              "vision"
-                            ]
-                          },
-                          "image": {
-                            "type": [
-                              "string",
-                              "null"
-                            ],
-                            "pattern": "^[a-f0-9]{16}\\.png$"
-                          },
-                          "score": {
-                            "type": "number"
-                          },
-                          "related": {
-                            "type": "array",
-                            "items": {
-                              "type": "object",
-                              "properties": {
-                                "chunk_id": {
-                                  "type": "string",
-                                  "format": "uuid"
-                                },
-                                "kind": {
-                                  "enum": [
-                                    "table",
-                                    "figure",
-                                    "text"
-                                  ]
-                                },
-                                "label": {
-                                  "type": [
-                                    "string",
-                                    "null"
-                                  ]
-                                },
-                                "page_start": {
-                                  "type": "integer",
-                                  "minimum": 1
-                                },
-                                "image": {
-                                  "type": [
-                                    "string",
-                                    "null"
-                                  ],
-                                  "pattern": "^[a-f0-9]{16}\\.png$"
-                                },
-                                "content": {
-                                  "type": "string",
-                                  "minLength": 1
-                                }
-                              },
-                              "required": [
-                                "chunk_id",
-                                "kind",
-                                "label",
-                                "page_start",
-                                "image",
-                                "content"
-                              ],
-                              "additionalProperties": false
-                            },
-                            "minItems": 0,
-                            "maxItems": 100
-                          }
-                        },
-                        "required": [
-                          "chunk_id",
-                          "document_id",
-                          "title",
-                          "doc_type",
-                          "section_path",
-                          "page_start",
-                          "page_end",
-                          "content",
-                          "kind",
-                          "source",
-                          "image",
-                          "score",
-                          "related"
-                        ],
-                        "additionalProperties": false
-                      },
-                      "minItems": 0,
-                      "maxItems": 30
-                    },
-                    "rerank_fallback": {
-                      "type": "boolean"
-                    }
-                  },
-                  "required": [
-                    "results",
-                    "rerank_fallback"
-                  ],
-                  "additionalProperties": false
+                  "$ref": "#/components/schemas/SearchResponse"
                 }
               }
             }
@@ -2076,31 +937,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object",
-                  "properties": {
-                    "error": {
-                      "type": "object",
-                      "properties": {
-                        "code": {
-                          "type": "string",
-                          "minLength": 1
-                        },
-                        "message": {
-                          "type": "string",
-                          "minLength": 1
-                        }
-                      },
-                      "required": [
-                        "code",
-                        "message"
-                      ],
-                      "additionalProperties": false
-                    }
-                  },
-                  "required": [
-                    "error"
-                  ],
-                  "additionalProperties": false
+                  "$ref": "#/components/schemas/Error"
                 }
               }
             }
@@ -2110,31 +947,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object",
-                  "properties": {
-                    "error": {
-                      "type": "object",
-                      "properties": {
-                        "code": {
-                          "type": "string",
-                          "minLength": 1
-                        },
-                        "message": {
-                          "type": "string",
-                          "minLength": 1
-                        }
-                      },
-                      "required": [
-                        "code",
-                        "message"
-                      ],
-                      "additionalProperties": false
-                    }
-                  },
-                  "required": [
-                    "error"
-                  ],
-                  "additionalProperties": false
+                  "$ref": "#/components/schemas/Error"
                 }
               }
             }
@@ -2144,31 +957,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object",
-                  "properties": {
-                    "error": {
-                      "type": "object",
-                      "properties": {
-                        "code": {
-                          "type": "string",
-                          "minLength": 1
-                        },
-                        "message": {
-                          "type": "string",
-                          "minLength": 1
-                        }
-                      },
-                      "required": [
-                        "code",
-                        "message"
-                      ],
-                      "additionalProperties": false
-                    }
-                  },
-                  "required": [
-                    "error"
-                  ],
-                  "additionalProperties": false
+                  "$ref": "#/components/schemas/Error"
                 }
               }
             }
@@ -2178,31 +967,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object",
-                  "properties": {
-                    "error": {
-                      "type": "object",
-                      "properties": {
-                        "code": {
-                          "type": "string",
-                          "minLength": 1
-                        },
-                        "message": {
-                          "type": "string",
-                          "minLength": 1
-                        }
-                      },
-                      "required": [
-                        "code",
-                        "message"
-                      ],
-                      "additionalProperties": false
-                    }
-                  },
-                  "required": [
-                    "error"
-                  ],
-                  "additionalProperties": false
+                  "$ref": "#/components/schemas/Error"
                 }
               }
             }
@@ -2212,31 +977,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object",
-                  "properties": {
-                    "error": {
-                      "type": "object",
-                      "properties": {
-                        "code": {
-                          "type": "string",
-                          "minLength": 1
-                        },
-                        "message": {
-                          "type": "string",
-                          "minLength": 1
-                        }
-                      },
-                      "required": [
-                        "code",
-                        "message"
-                      ],
-                      "additionalProperties": false
-                    }
-                  },
-                  "required": [
-                    "error"
-                  ],
-                  "additionalProperties": false
+                  "$ref": "#/components/schemas/Error"
                 }
               }
             }
@@ -2246,31 +987,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object",
-                  "properties": {
-                    "error": {
-                      "type": "object",
-                      "properties": {
-                        "code": {
-                          "type": "string",
-                          "minLength": 1
-                        },
-                        "message": {
-                          "type": "string",
-                          "minLength": 1
-                        }
-                      },
-                      "required": [
-                        "code",
-                        "message"
-                      ],
-                      "additionalProperties": false
-                    }
-                  },
-                  "required": [
-                    "error"
-                  ],
-                  "additionalProperties": false
+                  "$ref": "#/components/schemas/Error"
                 }
               }
             }
@@ -2280,31 +997,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object",
-                  "properties": {
-                    "error": {
-                      "type": "object",
-                      "properties": {
-                        "code": {
-                          "type": "string",
-                          "minLength": 1
-                        },
-                        "message": {
-                          "type": "string",
-                          "minLength": 1
-                        }
-                      },
-                      "required": [
-                        "code",
-                        "message"
-                      ],
-                      "additionalProperties": false
-                    }
-                  },
-                  "required": [
-                    "error"
-                  ],
-                  "additionalProperties": false
+                  "$ref": "#/components/schemas/Error"
                 }
               }
             }
@@ -2314,31 +1007,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object",
-                  "properties": {
-                    "error": {
-                      "type": "object",
-                      "properties": {
-                        "code": {
-                          "type": "string",
-                          "minLength": 1
-                        },
-                        "message": {
-                          "type": "string",
-                          "minLength": 1
-                        }
-                      },
-                      "required": [
-                        "code",
-                        "message"
-                      ],
-                      "additionalProperties": false
-                    }
-                  },
-                  "required": [
-                    "error"
-                  ],
-                  "additionalProperties": false
+                  "$ref": "#/components/schemas/Error"
                 }
               }
             }
@@ -2389,54 +1058,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "type": "object",
-                "properties": {
-                  "classroom_id": {
-                    "type": "string",
-                    "format": "uuid"
-                  },
-                  "query": {
-                    "type": "string",
-                    "minLength": 1,
-                    "maxLength": 1000
-                  },
-                  "top_k": {
-                    "type": "integer",
-                    "minimum": 1,
-                    "maximum": 30,
-                    "default": 8
-                  },
-                  "rerank": {
-                    "type": "boolean",
-                    "default": true
-                  },
-                  "document_ids": {
-                    "type": "array",
-                    "items": {
-                      "type": "string",
-                      "format": "uuid"
-                    },
-                    "minItems": 0,
-                    "maxItems": 100
-                  },
-                  "doc_types": {
-                    "type": "array",
-                    "items": {
-                      "enum": [
-                        "teaching_material",
-                        "rubric",
-                        "marking_scheme"
-                      ]
-                    },
-                    "minItems": 0,
-                    "maxItems": 3
-                  }
-                },
-                "required": [
-                  "classroom_id",
-                  "query"
-                ],
-                "additionalProperties": false
+                "$ref": "#/components/schemas/SearchRequest"
               }
             }
           }
@@ -2482,31 +1104,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object",
-                  "properties": {
-                    "error": {
-                      "type": "object",
-                      "properties": {
-                        "code": {
-                          "type": "string",
-                          "minLength": 1
-                        },
-                        "message": {
-                          "type": "string",
-                          "minLength": 1
-                        }
-                      },
-                      "required": [
-                        "code",
-                        "message"
-                      ],
-                      "additionalProperties": false
-                    }
-                  },
-                  "required": [
-                    "error"
-                  ],
-                  "additionalProperties": false
+                  "$ref": "#/components/schemas/Error"
                 }
               }
             }
@@ -2516,31 +1114,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object",
-                  "properties": {
-                    "error": {
-                      "type": "object",
-                      "properties": {
-                        "code": {
-                          "type": "string",
-                          "minLength": 1
-                        },
-                        "message": {
-                          "type": "string",
-                          "minLength": 1
-                        }
-                      },
-                      "required": [
-                        "code",
-                        "message"
-                      ],
-                      "additionalProperties": false
-                    }
-                  },
-                  "required": [
-                    "error"
-                  ],
-                  "additionalProperties": false
+                  "$ref": "#/components/schemas/Error"
                 }
               }
             }
@@ -2550,31 +1124,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object",
-                  "properties": {
-                    "error": {
-                      "type": "object",
-                      "properties": {
-                        "code": {
-                          "type": "string",
-                          "minLength": 1
-                        },
-                        "message": {
-                          "type": "string",
-                          "minLength": 1
-                        }
-                      },
-                      "required": [
-                        "code",
-                        "message"
-                      ],
-                      "additionalProperties": false
-                    }
-                  },
-                  "required": [
-                    "error"
-                  ],
-                  "additionalProperties": false
+                  "$ref": "#/components/schemas/Error"
                 }
               }
             }
@@ -2584,31 +1134,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object",
-                  "properties": {
-                    "error": {
-                      "type": "object",
-                      "properties": {
-                        "code": {
-                          "type": "string",
-                          "minLength": 1
-                        },
-                        "message": {
-                          "type": "string",
-                          "minLength": 1
-                        }
-                      },
-                      "required": [
-                        "code",
-                        "message"
-                      ],
-                      "additionalProperties": false
-                    }
-                  },
-                  "required": [
-                    "error"
-                  ],
-                  "additionalProperties": false
+                  "$ref": "#/components/schemas/Error"
                 }
               }
             }
@@ -2618,31 +1144,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object",
-                  "properties": {
-                    "error": {
-                      "type": "object",
-                      "properties": {
-                        "code": {
-                          "type": "string",
-                          "minLength": 1
-                        },
-                        "message": {
-                          "type": "string",
-                          "minLength": 1
-                        }
-                      },
-                      "required": [
-                        "code",
-                        "message"
-                      ],
-                      "additionalProperties": false
-                    }
-                  },
-                  "required": [
-                    "error"
-                  ],
-                  "additionalProperties": false
+                  "$ref": "#/components/schemas/Error"
                 }
               }
             }
@@ -2686,31 +1188,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object",
-                  "properties": {
-                    "error": {
-                      "type": "object",
-                      "properties": {
-                        "code": {
-                          "type": "string",
-                          "minLength": 1
-                        },
-                        "message": {
-                          "type": "string",
-                          "minLength": 1
-                        }
-                      },
-                      "required": [
-                        "code",
-                        "message"
-                      ],
-                      "additionalProperties": false
-                    }
-                  },
-                  "required": [
-                    "error"
-                  ],
-                  "additionalProperties": false
+                  "$ref": "#/components/schemas/Error"
                 }
               }
             }
@@ -2720,31 +1198,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object",
-                  "properties": {
-                    "error": {
-                      "type": "object",
-                      "properties": {
-                        "code": {
-                          "type": "string",
-                          "minLength": 1
-                        },
-                        "message": {
-                          "type": "string",
-                          "minLength": 1
-                        }
-                      },
-                      "required": [
-                        "code",
-                        "message"
-                      ],
-                      "additionalProperties": false
-                    }
-                  },
-                  "required": [
-                    "error"
-                  ],
-                  "additionalProperties": false
+                  "$ref": "#/components/schemas/Error"
                 }
               }
             }
@@ -2754,31 +1208,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object",
-                  "properties": {
-                    "error": {
-                      "type": "object",
-                      "properties": {
-                        "code": {
-                          "type": "string",
-                          "minLength": 1
-                        },
-                        "message": {
-                          "type": "string",
-                          "minLength": 1
-                        }
-                      },
-                      "required": [
-                        "code",
-                        "message"
-                      ],
-                      "additionalProperties": false
-                    }
-                  },
-                  "required": [
-                    "error"
-                  ],
-                  "additionalProperties": false
+                  "$ref": "#/components/schemas/Error"
                 }
               }
             }
@@ -2788,31 +1218,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object",
-                  "properties": {
-                    "error": {
-                      "type": "object",
-                      "properties": {
-                        "code": {
-                          "type": "string",
-                          "minLength": 1
-                        },
-                        "message": {
-                          "type": "string",
-                          "minLength": 1
-                        }
-                      },
-                      "required": [
-                        "code",
-                        "message"
-                      ],
-                      "additionalProperties": false
-                    }
-                  },
-                  "required": [
-                    "error"
-                  ],
-                  "additionalProperties": false
+                  "$ref": "#/components/schemas/Error"
                 }
               }
             }
@@ -2822,31 +1228,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object",
-                  "properties": {
-                    "error": {
-                      "type": "object",
-                      "properties": {
-                        "code": {
-                          "type": "string",
-                          "minLength": 1
-                        },
-                        "message": {
-                          "type": "string",
-                          "minLength": 1
-                        }
-                      },
-                      "required": [
-                        "code",
-                        "message"
-                      ],
-                      "additionalProperties": false
-                    }
-                  },
-                  "required": [
-                    "error"
-                  ],
-                  "additionalProperties": false
+                  "$ref": "#/components/schemas/Error"
                 }
               }
             }

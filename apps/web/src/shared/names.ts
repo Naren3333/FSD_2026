@@ -27,15 +27,18 @@ export class EvidenceNames {
     private readonly topicName: (topicId: string) => string,
   ) {}
 
-  title(evaluation: Evaluation): string {
+  title(evaluation: Pick<Evaluation, 'assessment_id'>): string {
     return this.assessments()?.get(evaluation.assessment_id)?.title ?? '';
   }
-  question(evaluation: Evaluation, evidence: Evidence): Question | undefined {
+  question(
+    evaluation: Pick<Evaluation, 'assessment_id'>,
+    evidence: Pick<Evidence, 'question_id'>,
+  ): Question | undefined {
     return this.assessments()
       ?.get(evaluation.assessment_id)
       ?.questions?.find((q) => q.id === evidence.question_id);
   }
-  prompt(evaluation: Evaluation, evidence: Evidence): string {
+  prompt(evaluation: Pick<Evaluation, 'assessment_id'>, evidence: Pick<Evidence, 'question_id'>): string {
     return this.question(evaluation, evidence)?.prompt ?? '';
   }
   /** The name of the topic of a piece of evidence, or of a topic's metric. */
@@ -45,7 +48,10 @@ export class EvidenceNames {
 }
 
 /** The marks awarded across an evaluation's questions, out of the marks possible. */
-export function total(evidence: readonly Evidence[]): { awarded: number; possible: number } {
+export function total(evidence: readonly Pick<Evidence, 'awarded' | 'possible'>[]): {
+  awarded: number;
+  possible: number;
+} {
   return evidence.reduce(
     (sum, e) => ({ awarded: sum.awarded + e.awarded, possible: sum.possible + e.possible }),
     { awarded: 0, possible: 0 },
@@ -54,7 +60,7 @@ export function total(evidence: readonly Evidence[]): { awarded: number; possibl
 
 /** Loads each assessment the evaluations refer to once, by id. */
 export async function assessmentsOf(
-  evaluations: readonly Evaluation[],
+  evaluations: readonly Pick<Evaluation, 'assessment_id'>[],
   get: (id: string) => Promise<Assessment>,
 ): Promise<Map<string, Assessment>> {
   const ids = [...new Set(evaluations.map((e) => e.assessment_id))];

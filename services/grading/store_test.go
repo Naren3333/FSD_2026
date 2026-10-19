@@ -35,7 +35,7 @@ func submit(t *testing.T, db *pgxpool.Pool, id, student string, change map[strin
 	for k, v := range change {
 		data[k] = v
 	}
-	event := submittedEvent(t, topicSubmittedV4, data)
+	event := submittedEvent(t, data)
 	event.Resource = id
 	tx, err := db.Begin(t.Context())
 	if err != nil {

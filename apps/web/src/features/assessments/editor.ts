@@ -8,11 +8,13 @@ import {
   Validators,
 } from '@angular/forms';
 import type {
+  AgentExcerpt,
   Assessment,
   AssessmentDetails,
   AssessmentSettings,
   Criterion,
   DocumentRecord,
+  DraftQuestion,
   Excerpt,
   LatePolicy,
   NewAssessment,
@@ -246,6 +248,30 @@ export function marksText(points: number): string {
  * question) or the teacher. Neither carries a document, so once the assessment is reloaded they can no longer be told
  * apart. */
 const writtenBy = new WeakMap<FormControl<Excerpt[]>, Map<string, 'ai' | 'teacher'>>();
+
+/** A passage from the question-generation agent as Assessment takes it, without the nulls the agent sends for what
+ * it doesn't name. */
+export function fromAgent(excerpt: AgentExcerpt): Excerpt {
+  const { document_id, chunk_id, page, text } = excerpt;
+  return {
+    text,
+    ...(document_id ? { document_id } : {}),
+    ...(chunk_id ? { chunk_id } : {}),
+    ...(page ? { page } : {}),
+  };
+}
+
+/** A drafted question as the editor keeps it: no nulls, and its passages as Assessment takes them. */
+export function draftQuestion(draft: DraftQuestion): Omit<Question, 'id'> {
+  const { rubric, max_length, marking_scheme, sources, ...rest } = draft;
+  return {
+    ...rest,
+    sources: sources.map(fromAgent),
+    ...(rubric ? { rubric } : {}),
+    ...(max_length ? { max_length } : {}),
+    ...(marking_scheme ? { marking_scheme: marking_scheme.map(fromAgent) } : {}),
+  };
+}
 
 export function markWrittenBy(control: FormControl<Excerpt[]>, excerpt: Excerpt, by: 'ai' | 'teacher'): void {
   if (excerpt.document_id) return;

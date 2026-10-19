@@ -2,7 +2,7 @@ import { PercentPipe } from '@angular/common';
 import { Component, computed, inject } from '@angular/core';
 import { RouterLink } from '@angular/router';
 import { AnalyticsApi, AssessmentApi, GradingApi } from '../../api/clients';
-import type { AssessmentSummary, Evaluation, Performance } from '../../api/models';
+import type { AssessmentSummary, OwnResult, Performance } from '../../api/models';
 import { ClassroomContext, onClassroomChange } from '../../core/classroom-context';
 import { CurriculumNames } from '../../core/curriculum-names';
 import { Session } from '../../core/session';
@@ -32,7 +32,7 @@ export class HomeComponent {
   readonly classroomId = this.context.classroomId;
   readonly classroomName = this.context.classroomName;
   readonly assessments = new Section<AssessmentSummary[]>();
-  readonly results = new Section<Evaluation[]>();
+  readonly results = new Section<OwnResult[]>();
   readonly performance = new Section<Performance>();
   /** Recent results shown here; the rest are under My results. */
   readonly recentCount = 3;

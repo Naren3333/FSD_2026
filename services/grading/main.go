@@ -18,18 +18,14 @@ func main() {
 	platform.Serve("grading", migrations, platform.EventMigration, func(a *platform.App) ([]func(context.Context), error) {
 		identity := a.Identity()
 		server{store: pgStore{a.DB}, access: identity, roster: identity}.routes(a.Mux)
-		// Ready only while all nine consumers run: a stalled one would otherwise go unnoticed.
-		var v1Running, v2Running, v3Running, v4Running, classroomsRunning, assessmentsRunning, enrollmentsRunning, dueRunning, usersRunning atomic.Bool
+		// Ready only while all six consumers run: a stalled one would otherwise go unnoticed.
+		var submissionsRunning, classroomsRunning, assessmentsRunning, enrollmentsRunning, dueRunning, usersRunning atomic.Bool
 		a.Checks = append(a.Checks, func(ctx context.Context) error {
-			if !v1Running.Load() || !v2Running.Load() || !v3Running.Load() || !v4Running.Load() || !classroomsRunning.Load() || !assessmentsRunning.Load() || !enrollmentsRunning.Load() || !dueRunning.Load() || !usersRunning.Load() {
+			if !submissionsRunning.Load() || !classroomsRunning.Load() || !assessmentsRunning.Load() || !enrollmentsRunning.Load() || !dueRunning.Load() || !usersRunning.Load() {
 				return errors.New("a consumer is stopped")
 			}
 			return platform.KafkaReady(ctx)
 		})
-		// Older submission versions keep their consumer groups, so events published before v4 are still graded once.
-		submissionsV1 := platform.Consumer{DB: a.DB, Group: "grading-v1"}
-		submissionsV2 := platform.Consumer{DB: a.DB, Group: "grading-submitted-v2"}
-		submissionsV3 := platform.Consumer{DB: a.DB, Group: "grading-submitted-v3"}
 		submissions := platform.Consumer{DB: a.DB, Group: "grading-submitted-v4"}
 		classrooms := platform.Consumer{DB: a.DB, Group: "grading-classrooms-v1"}
 		assessments := platform.Consumer{DB: a.DB, Group: "grading-assessments-v1"}
@@ -39,10 +35,7 @@ func main() {
 		marking := marker{a.DB, aiSuggester{platform.NewAICore()}}
 		return []func(context.Context){
 			platform.Outbox{DB: a.DB}.Run,
-			func(ctx context.Context) { submissionsV1.Consume(ctx, topicSubmittedV1, consume, &v1Running) },
-			func(ctx context.Context) { submissionsV2.Consume(ctx, topicSubmittedV2, consume, &v2Running) },
-			func(ctx context.Context) { submissionsV3.Consume(ctx, topicSubmittedV3, consume, &v3Running) },
-			func(ctx context.Context) { submissions.Consume(ctx, topicSubmittedV4, consume, &v4Running) },
+			func(ctx context.Context) { submissions.Consume(ctx, topicSubmitted, consume, &submissionsRunning) },
 			marking.Run,
 			marking.Run,
 			func(ctx context.Context) {

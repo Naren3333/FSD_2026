@@ -1,10 +1,12 @@
 import { describe, expect, it } from 'vitest';
-import type { Question } from '../../api/models';
+import type { DraftQuestion, Question } from '../../api/models';
 import {
   MAX_EXCERPT_TEXT,
   assessmentForm,
   clipText,
+  draftQuestion,
   fillForm,
+  fromAgent,
   isoOrNull,
   localInput,
   parseLevels,
@@ -225,5 +227,27 @@ describe('generated questions', () => {
     expect(kept.sources).toEqual(generated.sources);
     expect(written).not.toHaveProperty('origin');
     expect(written).not.toHaveProperty('sources');
+  });
+
+  it('drop the nulls the agent sends for what it leaves out', () => {
+    const draft: DraftQuestion = {
+      prompt: 'Explain why a unit test is fast.',
+      type: 'free_response',
+      topic_id: 's1',
+      points: 2,
+      options: [],
+      answer: '',
+      rubric: null,
+      max_length: null,
+      marking_scheme: [{ document_id: null, chunk_id: null, page: null, text: 'Names isolation.' }],
+      sources: [{ document_id: 'd1', chunk_id: 'k1', page: 2, text: 'A unit test checks one function.' }],
+      origin: 'generated',
+    };
+    const kept = draftQuestion(draft);
+    expect(kept).not.toHaveProperty('rubric');
+    expect(kept).not.toHaveProperty('max_length');
+    expect(kept.marking_scheme).toEqual([{ text: 'Names isolation.' }]);
+    expect(kept.sources).toEqual(draft.sources);
+    expect(fromAgent({ text: 'x', page: null })).toEqual({ text: 'x' });
   });
 });

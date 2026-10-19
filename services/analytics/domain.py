@@ -6,19 +6,12 @@ from learning_transport import Contract
 from learning_transport.kafka import Envelope
 from pydantic import Field, model_validator
 
-FINALIZED_V1 = "grading.finalized.v1"
-FINALIZED_V2 = "grading.finalized.v2"
-FINALIZED_V3 = "grading.finalized.v3"
-FINALIZED = (FINALIZED_V1, FINALIZED_V2, FINALIZED_V3)
-# v1 and v2 name each evidence item's topic by this older field; v3 calls it topic_id. Old events may still be queued
-# or replayed, so they are read with the field mapped onto topic_id.
-LEGACY_VERSIONS = (FINALIZED_V1, FINALIZED_V2)
-LEGACY_TOPIC_FIELD = "skill_id"
+FINALIZED = "grading.finalized.v3"
 
 
 class Evidence(Contract):
-    """One question's finalized marks. A question is correct only with full marks; since v2 a question is worth up
-    to 100 points and may earn part of them."""
+    """One question's finalized marks. A question is correct only with full marks; it is worth up to 100 points and
+    may earn part of them."""
 
     question_id: UUID
     topic_id: UUID
@@ -53,32 +46,10 @@ class Finalized(Contract):
 class Event(Envelope):
     data: Finalized
 
-    @model_validator(mode="before")
-    @classmethod
-    def legacy_topic_field(cls, value: Any) -> Any:
-        """An older version's evidence names its topic by the legacy field; read it as topic_id. A legacy event that
-        already says topic_id is not that version, and is rejected."""
-        if not isinstance(value, dict) or value.get("event_type") not in LEGACY_VERSIONS:
-            return value
-        data = value.get("data")
-        if not isinstance(data, dict) or not isinstance(data.get("evidence"), list):
-            return value
-        if any(isinstance(item, dict) and "topic_id" in item for item in data["evidence"]):
-            raise ValueError("This version's evidence has no topic_id field")
-        evidence = [
-            {("topic_id" if k == LEGACY_TOPIC_FIELD else k): v for k, v in item.items()}
-            if isinstance(item, dict)
-            else item
-            for item in data["evidence"]
-        ]
-        return {**value, "data": {**data, "evidence": evidence}}
-
     @model_validator(mode="after")
     def finalized(self) -> "Event":
-        if self.event_type not in FINALIZED or self.resource_id != self.data.evaluation_id:
+        if self.event_type != FINALIZED or self.resource_id != self.data.evaluation_id:
             raise ValueError("Not a finalized grading event")
-        if self.event_type == FINALIZED_V1 and any(e.possible != 1 for e in self.data.evidence):
-            raise ValueError("A v1 question is worth one point")
         return self
 
 

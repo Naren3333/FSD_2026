@@ -20,6 +20,7 @@ import type {
   GuidanceRequest,
   Mark,
   NewAssessment,
+  OwnResult,
   OwnSubmission,
   Performance,
   Profile,
@@ -266,7 +267,7 @@ export class GradingApi {
     return this.gateway.request('grading', `/evaluations/counts?${query}`);
   }
   /** The signed-in student's released results in the classroom; drafts are never returned. */
-  mine(classroomId: string): Promise<Evaluation[]> {
+  mine(classroomId: string): Promise<OwnResult[]> {
     return this.gateway.request('grading', `/evaluations/mine?classroom_id=${id(classroomId)}`);
   }
   /** Saves the teacher's marks on a draft without finalizing it. */

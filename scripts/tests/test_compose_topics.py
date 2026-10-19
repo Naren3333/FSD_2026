@@ -48,6 +48,13 @@ def test_compose_creates_every_topic_the_services_name():
     assert set(named) - created_topics() == set()
 
 
+def test_compose_creates_no_topic_the_services_no_longer_name():
+    """Retired event versions leave Compose too, with their dead-letter topics."""
+    named = named_topics()
+    unused = {t for t in created_topics() if t.removesuffix(".dlq") not in named}
+    assert unused == set()
+
+
 def test_every_consumed_topic_has_its_dead_letter_topic():
     created = created_topics()
     missing = {f"{topic}.dlq" for topic in named_topics() if topic not in EMIT_ONLY} - created

@@ -112,20 +112,16 @@ services:
     - /bin/sh
     - -ec
     command:
-    - for topic in content.uploaded.v1 content.indexed.v1 content.deleted.v1 assessment.submitted.v1 grading.finalized.v1
-      assessment.submitted.v2 assessment.submitted.v3 assessment.submitted.v4 grading.finalized.v2
+    - for topic in content.uploaded.v1 content.indexed.v1 content.deleted.v1 assessment.submitted.v4
       grading.finalized.v3 identity.classroom.deleted.v1 assessment.deleted.v1
       identity.enrollment.removed.v1 assessment.due_changed.v1 identity.user.deleted.v1
-      assessment.submitted.v1.dlq grading.finalized.v1.dlq assessment.submitted.v2.dlq
-      assessment.submitted.v3.dlq assessment.submitted.v4.dlq grading.finalized.v2.dlq grading.finalized.v3.dlq
+      assessment.submitted.v4.dlq grading.finalized.v3.dlq
       identity.classroom.deleted.v1.dlq assessment.deleted.v1.dlq content.deleted.v1.dlq
       identity.enrollment.removed.v1.dlq assessment.due_changed.v1.dlq identity.user.deleted.v1.dlq; do /opt/kafka/bin/kafka-topics.sh
       --bootstrap-server kafka:9092 --create --if-not-exists --topic $$topic --partitions
       3 --replication-factor 1; done;
-      for topic in assessment.submitted.v1 assessment.submitted.v2 assessment.submitted.v3 assessment.submitted.v4
-      grading.finalized.v1 grading.finalized.v2 grading.finalized.v3
-      assessment.submitted.v1.dlq assessment.submitted.v2.dlq assessment.submitted.v3.dlq assessment.submitted.v4.dlq
-      grading.finalized.v1.dlq grading.finalized.v2.dlq grading.finalized.v3.dlq
+      for topic in assessment.submitted.v4 grading.finalized.v3
+      assessment.submitted.v4.dlq grading.finalized.v3.dlq
       identity.classroom.deleted.v1.dlq assessment.deleted.v1.dlq content.deleted.v1.dlq
       identity.enrollment.removed.v1.dlq assessment.due_changed.v1.dlq identity.user.deleted.v1.dlq;
       do /opt/kafka/bin/kafka-configs.sh --bootstrap-server kafka:9092 --alter --entity-type topics

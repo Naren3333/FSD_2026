@@ -1,6 +1,6 @@
 # ADR 0011: Users can delete their own account
 
-Status: accepted 2026-10-18. The project owner asked for account deletion through a simple Profile tab.
+Status: accepted 2026-10-18. The project owner asked for account deletion through a simple Profile tab. Keeping ai-core's usage ledger was confirmed by the project owner on 2026-10-19.
 
 ## Context
 

@@ -1,6 +1,6 @@
 import { Component, inject } from '@angular/core';
 import { AssessmentApi, GradingApi } from '../../api/clients';
-import type { Assessment, Evaluation, Evidence } from '../../api/models';
+import type { Assessment, Evidence, OwnResult } from '../../api/models';
 import { ClassroomContext, onClassroomChange } from '../../core/classroom-context';
 import { CurriculumNames } from '../../core/curriculum-names';
 import { date } from '../../shared/format';
@@ -12,7 +12,7 @@ import { SectionStateComponent } from '../../shared/section-state';
 
 /** A student's finalized results with the assessments they belong to. */
 interface Results {
-  results: Evaluation[];
+  results: OwnResult[];
   assessments: Map<string, Assessment>;
 }
 
@@ -57,11 +57,11 @@ export class ResultsComponent {
     });
   }
 
-  outcome(evidence: Evidence): string {
+  outcome(evidence: Pick<Evidence, 'correct' | 'awarded'>): string {
     if (evidence.correct) return 'Correct';
     return evidence.awarded > 0 ? 'Part marks' : 'Incorrect';
   }
-  finalizedOn(result: Evaluation): string {
+  finalizedOn(result: OwnResult): string {
     return result.finalized_at ? date(result.finalized_at) : '';
   }
 }

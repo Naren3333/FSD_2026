@@ -27,16 +27,6 @@ def array(item, minimum=0, maximum=100):
     return {"type": "array", "items": item, "minItems": minimum, "maxItems": maximum}
 
 
-def topics(schema):
-    """The schema with every `skill_id` field named `topic_id`. Since ADR 0007 the curriculum's one level is the topic;
-    the shapes below keep `skill_id` because the event versions published before it carry that name."""
-    if isinstance(schema, list):
-        return ["topic_id" if item == "skill_id" else topics(item) for item in schema]
-    if isinstance(schema, dict):
-        return {("topic_id" if key == "skill_id" else key): topics(value) for key, value in schema.items()}
-    return schema
-
-
 CHECK = "--check" in sys.argv[1:]
 stale = []  # with --check, the contracts that differ from the code
 
@@ -50,28 +40,7 @@ def save(path, data):
         stale.append(path)
 
 
-question = obj(
-    {
-        "id": UUID,
-        "prompt": {"type": "string", "minLength": 1, "maxLength": 2000},
-        "type": {"enum": ["multiple_choice", "numerical"]},
-        "options": {"type": ["array", "null"], "items": TEXT},
-        "answer": TEXT,
-        "tolerance": {"type": "string"},
-        "skill_id": UUID,
-    }
-)
-evidence = obj(
-    {
-        "question_id": UUID,
-        "skill_id": UUID,
-        "correct": {"type": "boolean"},
-        "awarded": {"type": "integer", "minimum": 0, "maximum": 1},
-        "possible": {"const": 1},
-    }
-)
 # Assessment and grading since ADR 0004: points, short answers, free responses with rubrics, drafts and dates.
-# `question` and `evidence` above stay as the v1 events carry them.
 NULLABLE_TIME = {"type": ["string", "null"], "format": "date-time"}
 QUESTION_TYPES = {"enum": ["multiple_choice", "numerical", "short_answer", "free_response"]}
 POINTS = {"type": "integer", "minimum": 1, "maximum": 100}
@@ -92,10 +61,9 @@ question_fields = {
     "rubric": rubric,
     "max_length": {"type": "integer", "minimum": 1, "maximum": 20000},
     "points": POINTS,
-    "skill_id": UUID,
+    "topic_id": UUID,
 }
-QUESTION_REQUIRED = ["id", "prompt", "type", "options", "answer", "tolerance", "points", "skill_id"]
-question_v2 = obj(question_fields, QUESTION_REQUIRED)
+QUESTION_REQUIRED = ["id", "prompt", "type", "options", "answer", "tolerance", "points", "topic_id"]
 # Since ADR 0005 a short answer or free response may carry passages of the classroom's marking scheme for AI
 # marking suggestions: picked from Content's search (with their document, chunk and page) or pasted by the teacher.
 excerpt = obj(
@@ -108,7 +76,7 @@ excerpt = obj(
     ["text"],
 )
 question_fields = {**question_fields, "marking_scheme": array(excerpt, 1, 5)}
-question_v3 = obj(question_fields, QUESTION_REQUIRED)
+submitted_question = obj(question_fields, QUESTION_REQUIRED)
 # Since ADR 0006 a question the teacher kept from AI question generation says so and names the passages it came
 # from. Teacher-only provenance in Assessment's HTTP API: neither students nor the submission event get it.
 question_fields = {
@@ -139,11 +107,11 @@ question_input = obj(
         },
         "rubric": input_rubric,
     },
-    ["prompt", "type", "skill_id"],
+    ["prompt", "type", "topic_id"],
 )
 public_question = obj(
-    {k: question_fields[k] for k in ["id", "prompt", "type", "options", "max_length", "points", "skill_id"]},
-    ["id", "prompt", "type", "options", "points", "skill_id"],
+    {k: question_fields[k] for k in ["id", "prompt", "type", "options", "max_length", "points", "topic_id"]},
+    ["id", "prompt", "type", "options", "points", "topic_id"],
 )
 STATUS = {"enum": ["draft", "published"]}
 LATE = {"enum": ["accept_flagged", "reject"]}
@@ -221,6 +189,31 @@ saved_answers = obj(
     {"answers": {"type": "object", "additionalProperties": {"type": "string"}}, "saved_at": NULLABLE_TIME}
 )
 ANSWERS = {"type": "object", "additionalProperties": {"type": "string"}}
+assessment_progress = obj(
+    {
+        "id": UUID,
+        "title": TEXT,
+        "submissions": {"type": "integer", "minimum": 0},
+        "status": STATUS,
+        "due_at": NULLABLE_TIME,
+    }
+)
+assessment_details = obj(
+    {
+        "title": {"type": "string", "minLength": 1, "maxLength": 160},
+        "due_at": NULLABLE_TIME,
+        "late_policy": LATE,
+    },
+    [],  # a field left out keeps its value
+)
+submission_receipt = obj({"id": UUID, "status": {"const": "submitted"}, "late": {"type": "boolean"}})
+own_submission = obj(
+    {
+        "answers": ANSWERS,
+        "submitted_at": {"type": "string", "format": "date-time"},
+        "late": {"type": "boolean"},
+    }
+)
 criterion_score = obj({"criterion_id": TEXT, "points": {"type": "integer", "minimum": 0, "maximum": 100}})
 suggestion = obj(
     {
@@ -249,12 +242,12 @@ suggestion = obj(
 )
 MARKS = {
     "question_id": UUID,
-    "skill_id": UUID,
+    "topic_id": UUID,
     "correct": {"type": "boolean"},
     "awarded": {"type": "integer", "minimum": 0, "maximum": 100},
     "possible": POINTS,
 }
-evidence_v2 = obj(
+evaluation_evidence = obj(
     {
         **MARKS,
         "needs_marking": {"type": "boolean"},
@@ -353,6 +346,8 @@ search_response = obj({"results": array(search_hit, maximum=30), "rerank_fallbac
 classroom = obj({"id": UUID, "name": TEXT, "teacher_id": TEXT})
 TOPIC_NAME = {"type": "string", "minLength": 1, "maxLength": 160}
 curriculum_topic = obj({"id": UUID, "name": TOPIC_NAME})
+topic_input = obj({"name": TOPIC_NAME})
+prerequisite = obj({"topic_id": UUID, "prerequisite_id": UUID})
 evaluation = obj(
     {
         "id": UUID,
@@ -360,7 +355,7 @@ evaluation = obj(
         "classroom_id": UUID,
         "student_id": TEXT,
         "status": {"enum": ["draft", "finalized"]},
-        "evidence": array(evidence_v2, 1, 50),
+        "evidence": array(evaluation_evidence, 1, 50),
         "answers": ANSWERS,
         "late": {"type": "boolean"},
         "submitted_at": NULLABLE_TIME,
@@ -383,11 +378,44 @@ own_result = obj(
         "released_at": {"type": "string", "format": "date-time"},
     }
 )
+evaluation_page = obj(
+    {"evaluations": array(evaluation, maximum=100), "total": {"type": "integer", "minimum": 0}}
+)
+grading_counts = obj(
+    {
+        "drafts": {"type": "integer", "minimum": 0},
+        "finalized": {"type": "integer", "minimum": 0},
+        "unreleased": {"type": "integer", "minimum": 0},
+    }
+)
+release = obj({"assessment_id": UUID, "released": {"type": "integer", "minimum": 0}})
+marks_request = obj({"marks": {"type": "object", "additionalProperties": mark, "minProperties": 1}})
+finalize_request = obj(
+    {
+        "reason": {"type": "string", "minLength": 1, "maxLength": 1000},
+        "overrides": {
+            "type": "object",
+            "additionalProperties": {"type": "integer", "minimum": 0, "maximum": 100},
+        },
+        "marks": {"type": "object", "additionalProperties": mark},
+    },
+    ["reason"],
+)
 NAME = {"type": "string"}
 student = obj({"id": TEXT, "username": NAME, "display_name": NAME})
 enrollment = obj({"student_id": TEXT, "username": TEXT}, [])
 enrollment["oneOf"] = [{"required": ["student_id"]}, {"required": ["username"]}]
 error = obj({"error": obj({"code": TEXT, "message": TEXT})})
+profile = obj(
+    {
+        "id": TEXT,
+        "org_id": TEXT,
+        "role": {"enum": ["teacher", "student"]},
+        "username": NAME,
+        "display_name": NAME,
+    }
+)
+enrollment_record = obj({"student_id": TEXT, "classroom_id": UUID})
 
 
 ERRORS = {
@@ -481,12 +509,9 @@ def paged(op, most, fallback):
 
 
 # One page of the teacher's school's students, narrowed by an optional search.
-school_students = operation(
-    "GET",
-    "/v1/students",
-    None,
-    obj({"students": array(student, maximum=50), "total": COUNT}),
-)
+school_student_page = obj({"students": array(student, maximum=50), "total": COUNT})
+roster_page = obj({"students": array(student, maximum=500), "total": COUNT})
+school_students = operation("GET", "/v1/students", None, school_student_page)
 school_students[2]["parameters"] = [
     {"name": "search", "in": "query", "required": False, "schema": {"type": "string", "maxLength": 120}},
 ]
@@ -494,20 +519,7 @@ paged(school_students, 50, 10)
 
 operations = {
     "identity": [
-        operation(
-            "POST",
-            "/v1/me",
-            None,
-            obj(
-                {
-                    "id": TEXT,
-                    "org_id": TEXT,
-                    "role": {"enum": ["teacher", "student"]},
-                    "username": NAME,
-                    "display_name": NAME,
-                }
-            ),
-        ),
+        operation("POST", "/v1/me", None, profile),
         operation("DELETE", "/v1/me", None, None, 204),
         operation("GET", "/v1/classrooms", None, array(classroom)),
         operation(
@@ -529,22 +541,17 @@ operations = {
             "POST",
             "/v1/classrooms/{id}/enrollments",
             enrollment,
-            obj({"student_id": TEXT, "classroom_id": UUID}),
+            enrollment_record,
         ),
         operation(
             "DELETE",
             "/v1/classrooms/{id}/enrollments/{student}",
             None,
-            obj({"student_id": TEXT, "classroom_id": UUID}),
+            enrollment_record,
         ),
         # One page of the roster by name, and how many are enrolled.
         paged(
-            operation(
-                "GET",
-                "/v1/classrooms/{id}/students",
-                None,
-                obj({"students": array(student, maximum=500), "total": COUNT}),
-            ),
+            operation("GET", "/v1/classrooms/{id}/students", None, roster_page),
             500,
             50,
         ),
@@ -556,8 +563,8 @@ operations = {
     "curriculum": [
         topic_list,
         operation("GET", "/v1/topics/{id}", None, curriculum_topic),
-        operation("POST", "/v1/topics", obj({"name": TOPIC_NAME}), curriculum_topic, 201),
-        operation("PATCH", "/v1/topics/{id}", obj({"name": TOPIC_NAME}), curriculum_topic),
+        operation("POST", "/v1/topics", topic_input, curriculum_topic, 201),
+        operation("PATCH", "/v1/topics/{id}", topic_input, curriculum_topic),
         operation("DELETE", "/v1/topics/{id}", None, None, 204),
         operation("POST", "/v1/topics/{id}/restore", None, curriculum_topic),
         # The topic's active prerequisites, by name; links to archived topics are kept and listed again on restore.
@@ -566,7 +573,7 @@ operations = {
             "POST",
             "/v1/topics/{id}/prerequisites",
             obj({"prerequisite_id": UUID}),
-            obj({"topic_id": UUID, "prerequisite_id": UUID}),
+            prerequisite,
         ),
         operation("DELETE", "/v1/topics/{id}/prerequisites/{prerequisite}", None, None, 204),
     ],
@@ -585,17 +592,7 @@ operations = {
             "GET",
             "/v1/assessments/progress",
             None,
-            array(
-                obj(
-                    {
-                        "id": UUID,
-                        "title": TEXT,
-                        "submissions": {"type": "integer", "minimum": 0},
-                        "status": STATUS,
-                        "due_at": NULLABLE_TIME,
-                    }
-                )
-            ),
+            array(assessment_progress),
             query=["classroom_id"],
         ),
         operation("GET", "/v1/assessments/{id}", None, {"oneOf": [assessment, public_assessment]}),
@@ -603,14 +600,7 @@ operations = {
         operation(
             "PATCH",
             "/v1/assessments/{id}",
-            obj(
-                {
-                    "title": {"type": "string", "minLength": 1, "maxLength": 160},
-                    "due_at": NULLABLE_TIME,
-                    "late_policy": LATE,
-                },
-                [],  # a field left out keeps its value
-            ),
+            assessment_details,
             assessment,
         ),
         # Once students have submitted, only with with_submissions=true: their submissions and grades go too (ADR 0008).
@@ -620,7 +610,7 @@ operations = {
             "POST",
             "/v1/assessments/{id}/submissions",
             obj({"answers": {"type": "object", "additionalProperties": TEXT}}),
-            obj({"id": UUID, "status": {"const": "submitted"}, "late": {"type": "boolean"}}),
+            submission_receipt,
             201,
         ),
         # The calling student's own submitted answers; 404 before they submit. Never the answer keys.
@@ -628,13 +618,7 @@ operations = {
             "GET",
             "/v1/assessments/{id}/submission",
             None,
-            obj(
-                {
-                    "answers": ANSWERS,
-                    "submitted_at": {"type": "string", "format": "date-time"},
-                    "late": {"type": "boolean"},
-                }
-            ),
+            own_submission,
         ),
         operation("GET", "/v1/assessments/{id}/saved-answers", None, saved_answers),
         operation("PUT", "/v1/assessments/{id}/saved-answers", obj({"answers": ANSWERS}), saved_answers),
@@ -646,7 +630,7 @@ operations = {
                 "GET",
                 "/v1/evaluations",
                 None,
-                obj({"evaluations": array(evaluation, maximum=100), "total": COUNT}),
+                evaluation_page,
                 query=["classroom_id", "assessment_id"],
             ),
             100,
@@ -658,45 +642,109 @@ operations = {
             "GET",
             "/v1/evaluations/counts",
             None,
-            obj(
-                {
-                    "drafts": {"type": "integer", "minimum": 0},
-                    "finalized": {"type": "integer", "minimum": 0},
-                    "unreleased": {"type": "integer", "minimum": 0},
-                }
-            ),
+            grading_counts,
             query=["classroom_id", "assessment_id"],
         ),
         operation(
             "POST",
             "/v1/evaluations/release",
             obj({"assessment_id": UUID}),
-            obj({"assessment_id": UUID, "released": {"type": "integer", "minimum": 0}}),
+            release,
         ),
         operation(
             "POST",
             "/v1/evaluations/{id}/marks",
-            obj({"marks": {"type": "object", "additionalProperties": mark, "minProperties": 1}}),
+            marks_request,
             evaluation,
         ),
         operation(
             "POST",
             "/v1/evaluations/{id}/finalize",
-            obj(
-                {
-                    "reason": {"type": "string", "minLength": 1, "maxLength": 1000},
-                    "overrides": {
-                        "type": "object",
-                        "additionalProperties": {"type": "integer", "minimum": 0, "maximum": 100},
-                    },
-                    "marks": {"type": "object", "additionalProperties": mark},
-                },
-                ["reason"],
-            ),
+            finalize_request,
             evaluation,
         ),
     ],
 }
+# The named schemas of the Go services' contracts, under components/schemas. The web's types are generated from them
+# (apps/web/src/api/generated), and each Go service's tests check its JSON structs against them (contract_test.go),
+# so these names are what both sides refer to. A schema used in a contract is written once there and referred to
+# by $ref; event schemas below stay self-contained.
+NAMES = {
+    "Error": error,
+    "Profile": profile,
+    "Classroom": classroom,
+    "Student": student,
+    "StudentPage": roster_page,
+    "SchoolStudentPage": school_student_page,
+    "EnrollmentRequest": enrollment,
+    "Enrollment": enrollment_record,
+    "Topic": curriculum_topic,
+    "TopicInput": topic_input,
+    "Prerequisite": prerequisite,
+    "Document": document,
+    "Chunk": chunk,
+    "SearchRequest": search_request,
+    "SearchResponse": search_response,
+    "SearchHit": search_hit,
+    "RelatedItem": related,
+    "Level": level,
+    "Criterion": criterion,
+    "Rubric": rubric,
+    "RubricInput": input_rubric,
+    "Excerpt": excerpt,
+    "Question": teacher_question,
+    "QuestionInput": question_input,
+    "StudentQuestion": public_question,
+    "Assessment": assessment,
+    "AssessmentInput": assessment_input,
+    "StudentAssessment": public_assessment,
+    "AssessmentSummary": assessment_summary,
+    "AssessmentProgress": assessment_progress,
+    "AssessmentDetails": assessment_details,
+    "SubmissionReceipt": submission_receipt,
+    "OwnSubmission": own_submission,
+    "SavedAnswers": saved_answers,
+    "Evaluation": evaluation,
+    "EvaluationEvidence": evaluation_evidence,
+    "EvaluationPage": evaluation_page,
+    "Suggestion": suggestion,
+    "CriterionScore": criterion_score,
+    "Mark": mark,
+    "MarksRequest": marks_request,
+    "FinalizeRequest": finalize_request,
+    "OwnResult": own_result,
+    "OwnEvidence": own_evidence,
+    "GradingCounts": grading_counts,
+    "Release": release,
+}
+NAMED = {id(schema): name for name, schema in NAMES.items()}
+assert len(NAMED) == len(NAMES), "a schema has two names"
+
+
+def referenced(node, used, top=None):
+    """The node with every named schema in it (but `top` itself) replaced by its $ref, adding each name to `used`."""
+    if isinstance(node, dict):
+        if node is not top and id(node) in NAMED:
+            used.add(NAMED[id(node)])
+            return {"$ref": f"#/components/schemas/{NAMED[id(node)]}"}
+        return {key: referenced(value, used) for key, value in node.items()}
+    if isinstance(node, list):
+        return [referenced(item, used) for item in node]
+    return node
+
+
+def components(used):
+    """The named schemas `used` names and every named schema they refer to, by name."""
+    schemas, pending = {}, set(used)
+    while pending:
+        name = pending.pop()
+        if name not in schemas:
+            refs = set()
+            schemas[name] = referenced(NAMES[name], refs, top=NAMES[name])
+            pending |= refs
+    return dict(sorted(schemas.items()))
+
+
 for name, routes in operations.items():
     paths = {}
     for path, method, op in routes:
@@ -787,6 +835,8 @@ for name, routes in operations.items():
                 },
             }
         }
+    used = set()
+    paths = referenced(paths, used)
     save(
         f"contracts/http/{name}.openapi.json",
         {
@@ -794,9 +844,12 @@ for name, routes in operations.items():
             "info": {"title": name, "version": "1.0.0"},
             "security": [{"bearerAuth": []}],
             "components": {
-                "securitySchemes": {"bearerAuth": {"type": "http", "scheme": "bearer", "bearerFormat": "JWT"}}
+                "schemas": components(used),
+                "securitySchemes": {
+                    "bearerAuth": {"type": "http", "scheme": "bearer", "bearerFormat": "JWT"}
+                },
             },
-            "paths": topics(paths),
+            "paths": paths,
         },
     )
 
@@ -832,42 +885,14 @@ payloads = {
         }
     ),
     "content.deleted.v1": obj({"document_id": UUID, "classroom_id": UUID, "org_id": TEXT}),
-    "assessment.submitted.v1": obj(
+    "assessment.submitted.v4": obj(
         {
             "submission_id": UUID,
             "assessment_id": UUID,
             "classroom_id": UUID,
             "org_id": TEXT,
             "student_id": TEXT,
-            "questions": array(question, 1, 50),
-            "answers": {"type": "object", "additionalProperties": TEXT},
-        }
-    ),
-    "assessment.submitted.v2": obj(
-        {
-            "submission_id": UUID,
-            "assessment_id": UUID,
-            "classroom_id": UUID,
-            "org_id": TEXT,
-            "student_id": TEXT,
-            "questions": array(question_v2, 1, 50),
-            "answers": {"type": "object", "additionalProperties": TEXT},
-            "late": {"type": "boolean"},
-            "submitted_at": {"type": "string", "format": "date-time"},
-            "release_policy": RELEASE,
-            "ai_marking": {"type": "boolean"},
-            # The teacher whose AI allowance pays for AI marking; empty for assessments made before it was recorded.
-            "teacher_id": {"type": "string"},
-        }
-    ),
-    "assessment.submitted.v3": obj(
-        {
-            "submission_id": UUID,
-            "assessment_id": UUID,
-            "classroom_id": UUID,
-            "org_id": TEXT,
-            "student_id": TEXT,
-            "questions": array(question_v3, 1, 50),
+            "questions": array(submitted_question, 1, 50),
             "answers": {"type": "object", "additionalProperties": TEXT},
             "late": {"type": "boolean"},
             "submitted_at": {"type": "string", "format": "date-time"},
@@ -876,35 +901,7 @@ payloads = {
             "teacher_id": {"type": "string"},
         }
     ),
-    "assessment.submitted.v4": topics(
-        obj(
-            {
-                "submission_id": UUID,
-                "assessment_id": UUID,
-                "classroom_id": UUID,
-                "org_id": TEXT,
-                "student_id": TEXT,
-                "questions": array(question_v3, 1, 50),
-                "answers": {"type": "object", "additionalProperties": TEXT},
-                "late": {"type": "boolean"},
-                "submitted_at": {"type": "string", "format": "date-time"},
-                "release_policy": RELEASE,
-                "ai_marking": {"type": "boolean"},
-                "teacher_id": {"type": "string"},
-            }
-        )
-    ),
-    "grading.finalized.v1": obj(
-        {
-            "evaluation_id": UUID,
-            "assessment_id": UUID,
-            "classroom_id": UUID,
-            "org_id": TEXT,
-            "student_id": TEXT,
-            "evidence": array(evidence, 1, 50),
-        }
-    ),
-    "grading.finalized.v2": obj(
+    "grading.finalized.v3": obj(
         {
             "evaluation_id": UUID,
             "assessment_id": UUID,
@@ -913,18 +910,6 @@ payloads = {
             "student_id": TEXT,
             "evidence": array(final_evidence, 1, 50),
         }
-    ),
-    "grading.finalized.v3": topics(
-        obj(
-            {
-                "evaluation_id": UUID,
-                "assessment_id": UUID,
-                "classroom_id": UUID,
-                "org_id": TEXT,
-                "student_id": TEXT,
-                "evidence": array(final_evidence, 1, 50),
-            }
-        )
     ),
 }
 # When an event is published, for topics whose timing matters to consumers.
@@ -945,7 +930,6 @@ descriptions = {
     "assessment.deleted.v1": "A published assessment its teacher deleted, with any submissions (ADR 0008). Grading "
     "deletes its evaluations, Analytics its evidence, and both ignore anything for it that arrives later.",
     "grading.finalized.v3": FINALIZED_TIMING,
-    "grading.finalized.v2": FINALIZED_TIMING,
 }
 for topic, payload in payloads.items():
     schema = obj(
@@ -985,10 +969,32 @@ for name in [
         encoding="utf-8",
     )
     save(f"contracts/http/{name}.openapi.json", json.loads(data))
+# Leftover event schemas (a retired version) are stale too: nothing above writes them.
+written = {f"contracts/events/{topic}.schema.json" for topic in payloads}
+stale += sorted(
+    p.relative_to(ROOT).as_posix()
+    for p in (ROOT / "contracts/events").glob("*.schema.json")
+    if p.relative_to(ROOT).as_posix() not in written
+)
 if CHECK and stale:
     raise SystemExit(
         "Out of date; run python scripts/export_contracts.py and review the diff:\n  " + "\n  ".join(stale)
     )
+if stale:  # leftover event schemas, when writing
+    for path in stale:
+        (ROOT / path).unlink()
+        print(f"Removed {path}")
 print(
     f"{'Checked' if CHECK else 'Exported'} ten HTTP contracts and {len(payloads)} implemented event schemas."
 )
+# The web app's API types are generated from these contracts (apps/web/src/api/generated); its check.py lane checks
+# them with `npm run contracts:check`.
+if not CHECK:
+    web = ROOT / "apps/web"
+    if (web / "node_modules").exists():
+        npm = "npm.cmd" if os.name == "nt" else "npm"
+        subprocess.check_call([npm, "run", "--silent", "contracts"], cwd=web)
+    else:
+        print(
+            "apps/web has no node_modules: run npm ci there, then npm run contracts, to update the web's types."
+        )

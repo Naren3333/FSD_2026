@@ -1,5 +1,4 @@
-"""Analytics' events: grading.finalized.v3 (and v2 and v1, still read for queued or replayed events, with their
-evidence's older field mapped onto topic_id) stores each finalized evaluation's evidence once (inbox), and
+"""Analytics' events: grading.finalized.v3 stores each finalized evaluation's evidence once (inbox), and
 identity.classroom.deleted.v1 purges a deleted classroom's evidence, assessment.deleted.v1 a deleted assessment's
 (ADR 0008), and identity.user.deleted.v1 the evidence of a student who deleted their account (ADR 0011). Messages
 that don't match the contract, or whose event type is not their Kafka topic's, are dead-lettered;
@@ -181,7 +180,7 @@ def run(pool: ConnectionPool[Any], stop: threading.Event, connected: threading.E
     group = os.environ.get("KAFKA_GROUP") or DEFAULT_GROUP
     consume(
         group,
-        [*FINALIZED, CLASSROOM_DELETED, ASSESSMENT_DELETED, USER_DELETED],
+        [FINALIZED, CLASSROOM_DELETED, ASSESSMENT_DELETED, USER_DELETED],
         handler(pool),
         stop,
         connected,

@@ -121,7 +121,7 @@
         @switch (item.draft.question.type) {
           @case ('multiple_choice') {
             <ul>
-              @for (option of item.draft.question.options ?? []; track option) {
+              @for (option of item.draft.question.options; track option) {
                 <li>
                   {{ option }}
                   @if (option === item.draft.question.answer) {
@@ -155,10 +155,10 @@
         <blockquote>{{ item.draft.evidence }}</blockquote>
         <details class="scheme-used">
           <summary>
-            From {{ item.draft.question.sources?.length ?? 0 }}
-            {{ item.draft.question.sources?.length === 1 ? 'passage' : 'passages' }} of your materials
+            From {{ item.draft.question.sources.length }}
+            {{ item.draft.question.sources.length === 1 ? 'passage' : 'passages' }} of your materials
           </summary>
-          @for (excerpt of item.draft.question.sources ?? []; track $index) {
+          @for (excerpt of item.draft.question.sources; track $index) {
             <p class="caption">{{ source(excerpt) }}</p>
             <p class="passage">{{ excerpt.text }}</p>
           }

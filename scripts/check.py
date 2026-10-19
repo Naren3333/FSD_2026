@@ -33,7 +33,7 @@ PYTHON_SERVICES = [
     "student-performance-agent",
     "question-chatbot-agent",
 ]
-WEB_SCRIPTS = ["format:check", "lint", "typecheck", "test", "build"]
+WEB_SCRIPTS = ["format:check", "contracts:check", "lint", "typecheck", "test", "build"]
 
 env = dict(
     os.environ,

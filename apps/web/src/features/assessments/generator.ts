@@ -14,7 +14,7 @@ import { QuestionGenerationApi } from '../../api/clients';
 import type {
   Difficulty,
   DocumentRecord,
-  Excerpt,
+  AgentExcerpt,
   GenerateResult,
   GeneratableType,
   Question,
@@ -24,7 +24,7 @@ import { CurriculumNames } from '../../core/curriculum-names';
 import { FieldComponent, FieldControlDirective } from '../../shared/field';
 import { Section } from '../../shared/section';
 import { SectionStateComponent } from '../../shared/section-state';
-import { MAX_PROMPT, clipText, excerptLabel, marksText } from './editor';
+import { MAX_PROMPT, clipText, draftQuestion, excerptLabel, fromAgent, marksText } from './editor';
 
 /** The agent's limits (ADR 0006). */
 export const MAX_SOURCE_DOCUMENTS = 10;
@@ -174,7 +174,7 @@ export class QuestionGeneratorComponent implements OnChanges {
   add(position: number): void {
     const draft = this.result.value()?.questions[position];
     if (!draft || !this.room || this.decided().has(position)) return;
-    this.keep.emit(draft.question);
+    this.keep.emit(draftQuestion(draft.question));
     this.decide(position);
   }
 
@@ -198,8 +198,8 @@ export class QuestionGeneratorComponent implements OnChanges {
   }
 
   /** Where a passage is from: its document and page. */
-  source(excerpt: Excerpt): string {
-    return excerptLabel(excerpt, this.documents.value());
+  source(excerpt: AgentExcerpt): string {
+    return excerptLabel(fromAgent(excerpt), this.documents.value());
   }
 
   readonly marks = marksText;

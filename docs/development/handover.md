@@ -21,7 +21,8 @@ services/{analytics,ai-core,question-generation-agent,
                                    Independent Python apps, requirements, tests, Dockerfiles
 packages/platform/                 Go HTTP/auth/db/event/lock helpers (platformtest: test doubles)
 packages/python-platform/          Python auth, errors, logging, Identity/token/ai-core clients, Kafka, SSE, DB pools and locks
-contracts/{http,events}/           Ten OpenAPI documents and the event schemas (scripts/export_contracts.py writes them)
+contracts/{http,events}/           Ten OpenAPI documents and the event schemas (scripts/export_contracts.py writes them);
+                                   the web's types (apps/web/src/api/generated) and Go contract_test.go follow them
 infra/kong/                        Kong declarative config generator (bootstrap.py)
 scripts/                           Setup, upgrade, checks, readiness, contracts, integration, stack tests, db tests, evals
 docs/                              Original brief, ADRs, architecture, operations, this handover
@@ -41,7 +42,7 @@ DESIGN.md / UX-CONTRACT.md         UI design and behavioural ownership
 
 ### Curriculum (ADR 0007)
 - One level, called topic: `GET/POST /v1/topics`, `GET/PATCH/DELETE /v1/topics/{id}` (delete archives), `POST /v1/topics/{id}/restore`, prerequisites (`GET/POST /v1/topics/{id}/prerequisites`, `DELETE .../{prerequisite}`) with serialized cycle detection that counts archived topics.
-- `GET /v1/topics?archived=true` lists archived topics so old questions and evidence keep their names. The product never deletes a topic; only test cleanup does (`local_stack.delete_topics`, `scripts/delete_test_topics.py`).
+- `GET /v1/topics?archived=true` lists archived topics so old questions and evidence keep their names. The product never deletes a topic; only test cleanup does (`local_stack.delete_topics`).
 
 ### Content
 - Authorized uploads of teaching material only (ADR 0009) into a restricted bucket, with SHA-256, original retrieval and UTF-8 text extraction. Older rubric and marking-scheme documents keep their type and stay teacher-only.
@@ -68,7 +69,7 @@ DESIGN.md / UX-CONTRACT.md         UI design and behavioural ownership
 ### AI applications
 - **ai-core** (private, `ai-client` role): `/v1/ingest` (PyMuPDF parsing, vision pass for tables, figures and OCR, chunker; 500 pages / 5000 chunks max, `TOO_LARGE`), `/v1/inference`, `/v1/rerank`. Every call names the billed user; ai-core records cost and enforces each user's daily allowance (ADR 0003) and at most `AI_USER_CONCURRENCY` (4) concurrent calls per user (429 `AI_BUSY`). The tiktoken `cl100k_base` file is committed under `services/ai-core/tiktoken/` so nothing downloads it.
 - **Question chatbot** (`/api/chatbot`, own `chatbot` database): query rewrite, Content search with the user's own token, relevance floor and fixed refusals, a streamed answer with citations. Answers are always saved (`interrupted` on disconnect). Citations of deleted materials are blanked (`removed: true`).
-- **Question generation** (`/api/question-generation`, stateless): `POST /v1/questions` and `POST /v1/marking-guidance` for teachers; drafts must cite given passages and quote evidence found in them. `RELEVANCE_FLOOR` (0.3) is not calibrated against real documents.
+- **Question generation** (`/api/question-generation`, stateless): `POST /v1/questions` and `POST /v1/marking-guidance` for teachers; drafts must cite given passages and quote evidence found in them. `RELEVANCE_FLOOR` is 0.5, calibrated on the eval corpus (operations.md).
 - The two agents share their ai-core and Content transport in `learning_transport`.
 - **Student performance:** `/v1/performance_interpretation` validates and returns 501 `AI_CAPABILITY_NOT_IMPLEMENTED`.
 
@@ -78,17 +79,18 @@ DESIGN.md / UX-CONTRACT.md         UI design and behavioural ownership
 
 ## Events and persistence
 
-- **Current topics:** `content.uploaded.v1`, `content.indexed.v1` (no consumer), `content.deleted.v1`, `assessment.submitted.v4`, `assessment.deleted.v1`, `assessment.due_changed.v1`, `grading.finalized.v3`, `identity.classroom.deleted.v1`, `identity.enrollment.removed.v1`, `identity.user.deleted.v1`. Older versions (`assessment.submitted.v1–v3`, `grading.finalized.v1–v2`) are no longer produced; Grading and Analytics still read them for events already on the broker. Consumed topics have `.dlq` topics; `kafka-init` creates them all and sets 7-day retention on submission, finalized-grade and dead-letter topics.
+- **Current topics:** `content.uploaded.v1`, `content.indexed.v1` (no consumer), `content.deleted.v1`, `assessment.submitted.v4`, `assessment.deleted.v1`, `assessment.due_changed.v1`, `grading.finalized.v3`, `identity.classroom.deleted.v1`, `identity.enrollment.removed.v1`, `identity.user.deleted.v1`. Older versions (`assessment.submitted.v1–v3`, `grading.finalized.v1–v2`) were retired on 2026-10-19: nothing produces or reads them, and their schemas are gone (ADR 0007 amendment). Consumed topics have `.dlq` topics; `kafka-init` creates them all and sets 7-day retention on submission, finalized-grade and dead-letter topics.
 - Producers write outboxes in the business transaction and publish at least once; only the oldest unpublished event per topic and key is due, so keys stay ordered. Outboxes prune events published over 7 days ago. Consumers commit offsets only after the inbox/business transaction or a confirmed dead-letter write; event-ID plus business-key deduplication covers replays.
 - Eight service-owned databases (question generation and performance interpretation are stateless) with independent non-superuser credentials. All advisory locks use `platform.Lock`/`learning_transport.db.lock` (`hashtextextended(scope || ':' || key, 0)`).
 
 ## Verification
 
-- **Local gates:** `python scripts/check.py` runs formatting, lint, types, unit tests and builds for every Go module, Python service and the web app, plus `export_contracts.py --check`. Database-backed tests skip there; `scripts/db_tests.py` runs them against PostgreSQL.
-- **Stack tests:** `python scripts/stack_tests.py [integration] [db] [e2e]` builds a disposable `learning-test` Compose project (Kong 18000, Keycloak 18081, web 14200), runs `integration.py`, `db_tests.py` and the Playwright suite, then removes it, beside a running development stack. Both test scripts refuse the development stack, and the test project name with any non-test port, unless given `--dev` / `E2E_DEV_STACK=1`. The test stack has its own realm import (`.local/test-stack/`), so only it allows the test web origin. Run in a Linux cloud container on 2026-10-18; not yet on Windows.
+- **Local gates:** `python scripts/check.py` runs formatting, lint, types, unit tests and builds for every Go module, Python service and the web app, plus `export_contracts.py --check`, the web's `npm run contracts:check` (its generated API types) and each Go service's `contract_test.go` (its JSON structs against the contract's named schemas). Database-backed tests skip there; `scripts/db_tests.py` runs them against PostgreSQL.
+- **Stack tests:** `python scripts/stack_tests.py [integration] [db] [e2e]` builds a disposable `learning-test` Compose project (Kong 18000, Keycloak 18081, web 14200), runs `integration.py`, `db_tests.py` and the Playwright suite, then removes it, beside a running development stack. Both test scripts refuse the development stack, and the test project name with any non-test port, unless given `--dev` / `E2E_DEV_STACK=1`. The test stack has its own realm import (`.local/test-stack/`), so only it allows the test web origin. Run in a Linux cloud container on 2026-10-18 and on Windows by 2026-10-19.
 - `integration.py` exercises the real gateway, Keycloak, PostgreSQL, S3 and Kafka: authorization failures, schema validation of responses and events, consumer restart, duplicate-event idempotency, classroom/assessment/account purges, late events after purges, rate limiting per session and database isolation.
 - GitHub Actions runs the full gate on `main`, including the live integration and Playwright jobs.
-- **Not verified:** chat turns and question generation against the real OpenAI and Voyage APIs (only a real ingest has run, on the desktop), the premium UI audit (its tool isn't in the repository), Neon, and any production deployment.
+- **Real models (desktop, 2026-10-19):** ingest of the 22-PDF eval corpus, the chat eval (99 turns: 0 leaks, 0 obeyed injections, 1 failure, `waterfall-weakness`, refused as on 2026-10-13), question generation, marking guidance and AI marking suggestions ran against OpenAI and Voyage, for $0.08 in all on ai-core's ledger.
+- **Not verified:** the premium UI audit (its tool isn't in the repository), Neon, and any production deployment.
 
 ## Operational notes
 
