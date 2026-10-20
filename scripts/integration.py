@@ -1046,7 +1046,7 @@ def ai_service_accounts(u: Users) -> None:
     """Service accounts reach the private AI service (200 with provider keys, 503 without); people do not."""
     for client_id in AI_CLIENTS:
         assert ai_core_status(service_token(client_id)) in ((200,) if LIVE_AI else (200, 503)), client_id
-    assert ai_core_status(u.student.headers["Authorization"].removeprefix("Bearer ")) == 403
+    assert ai_core_status(password_token("student", env()["STUDENT_PASSWORD"])) == 403
 
 
 # Runs inside the analytics container: sends a valid request to each agent that is not authorized yet and prints
@@ -1247,10 +1247,12 @@ print(json.dumps(results))
             "python",
             "-c",
             probe,
-            input=users.teacher.headers["authorization"].removeprefix("Bearer "),
+            # This late step can run after the original sign-in token's expiry. Exercise role
+            # authorization with a fresh teacher token, rather than accidentally testing expiry.
+            input=password_token("teacher", env()["TEACHER_PASSWORD"]),
         ).stdout
     )
-    assert set(denied.values()) == {403}
+    assert set(denied.values()) == {403}, denied
 
 
 if __name__ == "__main__":

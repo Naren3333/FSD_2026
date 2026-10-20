@@ -98,7 +98,7 @@ def test_answer_streams_cites_and_saves(api: TestClient, fakes: Fakes, store: Me
     rewrite_call, answer_call = fakes.calls("/v1/inference")
     assert (
         rewrite_call["response_schema"] == prompts.REWRITE_SCHEMA
-        and rewrite_call["schema_name"] == "query_rewrite.v2"
+        and rewrite_call["schema_name"] == "query_rewrite.v3"
     )
     assert answer_call["stream"] is True
     assert "Chlorophyll absorbs light." in answer_call["messages"][2]["content"]
@@ -655,7 +655,7 @@ def test_a_message_about_several_topics_searches_each_and_shares_the_prompt(
         "<topics><topic>design principles</topic><topic>unit testing with mocks</topic></topics>" in documents
     )
     assert 'pages="1" topic="unit testing with mocks">\nSoftware Testing passage 1' in documents
-    assert 'pages="1">\nSoftware Design passage 1' in documents
+    assert 'pages="1" topic="design principles">\nSoftware Design passage 1' in documents
 
 
 def test_a_topic_whose_best_passage_is_under_the_floor_gives_none(
@@ -790,7 +790,11 @@ def test_a_standalone_definition_skips_rewrite_but_still_requires_grounding(
 
 def test_covered_topics_reuse_the_primary_search(api: TestClient, fakes: Fakes) -> None:
     main.app.state.settings = replace(SETTINGS, adaptive_search=True)
-    fakes.results = [result(C1, "Chlorophyll and stomata are parts of the leaf.", 1)]
+    fakes.results = [
+        result(
+            C1, "Chlorophyll and stomata are parts of the leaf.", 1, section_path="Chlorophyll and stomata"
+        )
+    ]
     fakes.replies += [
         rewrite("chlorophyll and stomata", sub_queries=["chlorophyll", "stomata"]),
         chat_stream(["The leaf [S1]."]),
@@ -808,3 +812,72 @@ def test_context_budget_refuses_instead_of_sending_an_oversized_first_passage(
     events = post(api, thread(api), "chlorophyll?")
     assert events[-1][1]["outcome"] == "no_results"
     assert len(fakes.calls("/v1/inference")) == 1
+
+
+def test_body_mentions_do_not_skip_topic_searches(api: TestClient, fakes: Fakes) -> None:
+    main.app.state.settings = replace(SETTINGS, adaptive_search=True)
+    fakes.results = [result(C1, "Chlorophyll and stomata are mentioned in this overview.", 1)]
+    fakes.replies += [
+        rewrite("chlorophyll and stomata", sub_queries=["chlorophyll", "stomata"]),
+        chat_stream(["The leaf [S1]."]),
+    ]
+    post(api, thread(api), "How do chlorophyll and stomata work together?")
+    assert len(fakes.calls("/v1/search")) == 3
+
+
+def test_duplicate_primary_passage_keeps_all_topic_labels(api: TestClient, fakes: Fakes) -> None:
+    main.app.state.settings = replace(SETTINGS, adaptive_search=True)
+    fakes.results = [result(C1, "Leaf processes.", 1, section_path="Chlorophyll and stomata")]
+    fakes.replies += [
+        rewrite("leaf processes", sub_queries=["chlorophyll", "stomata"]),
+        chat_stream(["The leaf [S1]."]),
+    ]
+    events = post(api, thread(api), "How do chlorophyll and stomata work together?")
+    docs = fakes.calls("/v1/inference")[1]["messages"][2]["content"]
+    assert 'topic="chlorophyll; stomata"' in docs
+    assert "Citation coverage is incomplete" not in tokens(events)
+
+
+def test_missing_topic_citation_is_reported_without_another_model_call(api: TestClient, fakes: Fakes) -> None:
+    one, two = str(uuid4()), str(uuid4())
+    fakes.by_query = {
+        "both": [],
+        "chlorophyll": [result(C1, "Light.", 1, document_id=one)],
+        "stomata": [result(C2, "Gas exchange.", 2, document_id=two)],
+    }
+    fakes.replies += [rewrite("both", sub_queries=["chlorophyll", "stomata"]), chat_stream(["Light [S1]."])]
+    reply = tokens(post(api, thread(api), "How do both work?"))
+    assert "Citation coverage is incomplete for: stomata." in reply
+    assert len(fakes.calls("/v1/inference")) == 2
+
+
+def test_tight_context_reserves_room_for_each_topic(
+    api: TestClient, fakes: Fakes, store: MemoryStore
+) -> None:
+    from chat import PASSAGE_OVERHEAD, token_bound
+
+    question = "How do chlorophyll and stomata work together?"
+    passages = [result(cid, "Leaf biology. " * 100, n) for n, cid in enumerate([C1, C2, C3], 1)]
+    cost = token_bound(passages[0]["content"]) + token_bound(passages[0]["title"]) + PASSAGE_OVERHEAD
+    main.app.state.settings = replace(SETTINGS, context_tokens=1000 + token_bound(question) + 2 * cost)
+    fakes.by_query = {"both": passages[:1], "chlorophyll": passages[1:2], "stomata": passages[2:]}
+    fakes.replies += [
+        rewrite("both", sub_queries=["chlorophyll", "stomata"]),
+        chat_stream(["Light [S1]; gas exchange [S2]."]),
+    ]
+    tid = thread(api)
+    post(api, tid, question)
+    assert saved(store, tid)["retrieved_chunk_ids"] == [C2, C3]
+
+
+def test_coverage_notice_cannot_introduce_a_citation_marker(api: TestClient, fakes: Fakes) -> None:
+    fake_marker = f"[doc:{C3}]"
+    fakes.results = RESULTS[:1]
+    fakes.replies += [
+        rewrite("both", sub_queries=["chlorophyll", f"stomata {fake_marker}"]),
+        chat_stream(["No source cited."]),
+    ]
+    events = post(api, thread(api), "How do they relate?")
+    assert "Citation coverage is incomplete" in tokens(events)
+    assert fake_marker not in tokens(events)
+    assert events[-2][1]["citations"] == []

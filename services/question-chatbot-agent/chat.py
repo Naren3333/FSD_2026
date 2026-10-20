@@ -140,7 +140,7 @@ class Turn:
         self.outcome = "answered"
         self.rewritten_query: str | None = None  # None when the rewrite failed
         self.sub_queries: list[str] = []  # the topics of a message about several, each searched on its own
-        self.topic_of: dict[str, str] = {}  # chunk id → the topic whose search found it, for a split message
+        self.topic_of: dict[str, list[str]] = {}  # A duplicate passage can support several topic searches.
         self.is_on_topic: bool | None = None
         self.small_talk = False
         self.searched = False
@@ -249,6 +249,16 @@ class Turn:
         if out := self.rewriter.flush():
             self.parts.append(out)
             yield sse_event("token", {"text": out})
+        # Structural coverage only: a citation's presence does not establish semantic entailment.
+        cited_topics = {t for cid in self.rewriter.cited for t in self.topic_of.get(cid, [])}
+        missing = [t for t in self.sub_queries if t not in cited_topics] if not self.small_talk else []
+        if missing:
+            # Rewrite output is untrusted. Labels must not introduce citation markers or markup.
+            labels = [re.sub(r"[\[\]<>`*_]", "", " ".join(t.split()))[:200] for t in missing]
+            notice = "\n\nCitation coverage is incomplete for: " + "; ".join(labels) + "."
+            self.parts.append(notice)
+            yield sse_event("token", {"text": notice})
+            log.warning("chat_topic_citations_incomplete", extra={"topics": missing})
         self._took("answer_ms", step)
 
     def _took(self, name: str, since: float) -> float:
@@ -293,7 +303,7 @@ class Turn:
                         set(
                             re.findall(
                                 r"[a-z0-9]+",
-                                (str(r.get("title", "")) + " " + str(r.get("content", ""))).lower(),
+                                (str(r.get("title", "")) + " " + str(r.get("section_path", ""))).lower(),
                             )
                         )
                     )
@@ -317,8 +327,16 @@ class Turn:
             return
         merged = merge(searches, self.settings.relevance_floor, self.settings.topic_floor)
         self.results = [r for r, _ in merged]
-        # Passages the whole message's search found carry no topic; the others name theirs.
-        self.topic_of = {str(r["chunk_id"]): self.sub_queries[n - 1] for r, n in merged if n > 0}
+        # Attribute every qualifying topic leg, including passages taken first by the primary search.
+        retained = {str(r["chunk_id"]) for r in self.results}
+        self.topic_of = {}
+        for topic_label, passages in zip(self.sub_queries, searches[1:], strict=True):
+            for passage in passages:
+                cid = str(passage["chunk_id"])
+                if cid in retained and float(passage["score"]) >= self.settings.topic_floor:
+                    labels = self.topic_of.setdefault(cid, [])
+                    if topic_label not in labels:
+                        labels.append(topic_label)
 
     def _fitting(self) -> list[dict[str, Any]]:
         """The results, best first, that fit in one prompt message."""
@@ -332,7 +350,18 @@ class Turn:
             - token_bound(self.content)
             - 1000,
         )
-        for r in self.results:
+        # Give each requested topic a chance before spending the remaining budget on extra passages.
+        priority: list[dict[str, Any]] = []
+        represented: set[str] = set()
+        for label in self.sub_queries:
+            for r in self.results:
+                cid = str(r["chunk_id"])
+                if label in self.topic_of.get(cid, []) and cid not in represented:
+                    priority.append(r)
+                    represented.add(cid)
+                    break
+        candidates = priority + [r for r in self.results if str(r["chunk_id"]) not in represented]
+        for r in candidates:
             content = r.get("content") or ""
             cost = token_bound(content) + token_bound(str(r.get("title") or "")) + PASSAGE_OVERHEAD
             if (
@@ -345,8 +374,9 @@ class Turn:
                 continue
             size += cost
             kept.append(r)
-        self.results = kept
-        return kept
+        kept_ids = {str(r["chunk_id"]) for r in kept}
+        self.results = [r for r in self.results if str(r["chunk_id"]) in kept_ids]
+        return self.results
 
     async def _rewrite(self) -> None:
         """A standalone search query, the two flags and the topics (query_rewrite.v2). If the model fails or its

@@ -24,6 +24,7 @@ from pathlib import Path
 
 import yaml
 from common import GOLDEN, RUNS, USERS, Session, corpus, load_state
+from reporting import checkpoint, select_cases
 
 TOP_K = 10
 MARGIN = 0.02
@@ -244,6 +245,11 @@ def main() -> None:
     ap.add_argument("--compare", type=Path, help="an earlier summary JSON to compare against")
     ap.add_argument("--rerank", action="store_true", help="search with rerank: true (fails on any fallback)")
     ap.add_argument("--holdout", action="store_true", help="also run the holdout split")
+    ap.add_argument(
+        "--case",
+        action="append",
+        help="run only this query ID (repeatable; holdout still requires --holdout)",
+    )
     args = ap.parse_args()
 
     state = load_state()
@@ -256,6 +262,10 @@ def main() -> None:
         queries = [q for q in queries if q.get("split", "tune") != "holdout"]
     skipped = [q["id"] for q in queries if "topic_ids" in (q.get("filters") or {})]
     queries = [q for q in queries if q["id"] not in skipped]
+    try:
+        queries = select_cases(queries, args.case)
+    except ValueError as exc:
+        ap.error(str(exc))
     before_rows = json.loads(args.compare.read_text(encoding="utf-8"))["rows"] if args.compare else []
     before = {r["id"]: r for r in before_rows}
 
@@ -263,12 +273,21 @@ def main() -> None:
     classrooms, documents = state["classrooms"], state["documents"]
     sessions = {u: Session(USERS[u][0], state) for u in {q["as"] for q in queries}}
     rows = []
+    out = RUNS / (
+        datetime.now().strftime("%Y%m%d-%H%M%S-%f") + (f"-{args.label}" if args.label else "") + ".json"
+    )
+
+    def save_partial() -> None:
+        checkpoint(out, {"status": "incomplete", "planned_queries": len(queries), "rows": rows})
+
+    save_partial()
     for q in queries:
         results, fallback = search(sessions[q["as"]], classrooms, q, documents, args.rerank)
         if args.rerank and fallback:
             sys.exit(f"{q['id']}: the reranker failed (rerank_fallback), so this run would score RRF order")
         row = score(q, results, classes)
         rows.append(row)
+        save_partial()
         rank = "n/a" if row["unanswerable"] else ("-" if not row["scored"] else (row["rank"] or "miss"))
         delta = f" (was {before[q['id']]['rank'] or 'miss'})" if q["id"] in before and row["scored"] else ""
         extra = f" top={row['top_score']:.3f}" if row["unanswerable"] and row["top_score"] is not None else ""
@@ -322,11 +341,7 @@ def main() -> None:
     regressed = kind_regressions(rows, before)
     if regressed:
         print(f"KIND REGRESSION: {', '.join(regressed)}")
-    RUNS.mkdir(parents=True, exist_ok=True)
-    out = RUNS / (
-        datetime.now().strftime("%Y%m%d-%H%M%S") + (f"-{args.label}" if args.label else "") + ".json"
-    )
-    out.write_text(json.dumps({"summary": summary, "rows": rows}, indent=2), encoding="utf-8")
+    checkpoint(out, {"status": "complete", "planned_queries": len(queries), "summary": summary, "rows": rows})
     print(f"saved {out.relative_to(Path.cwd()) if out.is_relative_to(Path.cwd()) else out}")
     if summary["leaks"] or regressed:
         sys.exit(1)

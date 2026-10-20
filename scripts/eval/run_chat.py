@@ -30,10 +30,12 @@ import time
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
 from pathlib import Path
+from threading import Lock
 
 import yaml
 from common import GOLDEN, ROOT, RUNS, USERS, Session, load_state
 from local_stack import check, psql_json, sse_events
+from reporting import checkpoint, select_cases
 
 sys.path.insert(0, str(ROOT / "services" / "question-chatbot-agent"))
 import prompts  # the chatbot's own prompts, to spot one quoted in a reply
@@ -253,6 +255,7 @@ def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--label", default="")
     ap.add_argument("--only", choices=GROUPS)
+    ap.add_argument("--case", action="append", help="run only this case ID (repeatable)")
     args = ap.parse_args()
 
     state = load_state()
@@ -260,23 +263,51 @@ def main() -> None:
         sys.exit("Run scripts/eval/load_corpus.py first.")
     classes = {title: d["class"] for title, d in state["documents"].items()}
     cases = load_cases(args.only, classes)
+    try:
+        cases = select_cases(cases, args.case)
+    except ValueError as exc:
+        ap.error(str(exc))
     chunks = chunk_map(state)
     print(
         f"{len(cases)} cases, {sum(len(c['turns']) for c in cases)} turns; {len(chunks)} chunks mapped",
         flush=True,
     )
     started = time.monotonic()
+    out = RUNS / f"chat-{datetime.now():%Y%m%d-%H%M%S-%f}{'-' + args.label if args.label else ''}.json"
+    done: list[dict] = []
+    order = {c["id"]: n for n, c in enumerate(cases)}
+    sentences = prompt_sentences()
+    report_lock = Lock()
+
+    def save(status: str) -> None:
+        checkpoint(
+            out, {"status": status, "planned_cases": len(cases), "summary": summarize(done), "cases": done}
+        )
+
+    def run_user(own: list[dict]) -> None:
+        for case in own:
+            completed = run_case(case, state)
+            assess(completed, chunks, sentences)
+            with report_lock:
+                done.append(completed)
+                done.sort(key=lambda c: order[c["id"]])
+                save("running")
+                mark = "FAIL" if completed["failures"] else ("flag" if completed["flags"] else "ok")
+                print(f"[{len(done)}/{len(cases)}] {mark}: {case['id']}", flush=True)
+
+    save("running")
+    print(f"Checkpoint: {out}", flush=True)
     # The chatbot answers one question per user at a time, so each user's cases run in turn, users in parallel.
     by_user: dict[str, list[dict]] = {}
     for c in cases:
         by_user.setdefault(c["as"], []).append(c)
-    with ThreadPoolExecutor(len(by_user) or 1) as pool:
-        runs = list(pool.map(lambda own: [run_case(c, state) for c in own], by_user.values()))
-    order = {c["id"]: n for n, c in enumerate(cases)}
-    done = sorted((c for run in runs for c in run), key=lambda c: order[c["id"]])
-    sentences = prompt_sentences()
-    for c in done:
-        assess(c, chunks, sentences)
+    try:
+        with ThreadPoolExecutor(len(by_user) or 1) as pool:
+            list(pool.map(run_user, by_user.values()))
+    except BaseException:
+        save("interrupted")
+        print(f"Partial results saved to {out}", flush=True)
+        raise
     summary = summarize(done)
     summary["seconds"] = round(time.monotonic() - started)
     for group in GROUPS:
@@ -291,9 +322,7 @@ def main() -> None:
             for f in c["failures"] + c["flags"]:
                 print(f"         - {f}")
     print(f"\n{json.dumps(summary, indent=2)}")
-    RUNS.mkdir(parents=True, exist_ok=True)
-    out = RUNS / f"chat-{datetime.now():%Y%m%d-%H%M%S}{'-' + args.label if args.label else ''}.json"
-    out.write_text(json.dumps({"summary": summary, "cases": done}, indent=2, default=str), encoding="utf-8")
+    checkpoint(out, {"status": "complete", "planned_cases": len(cases), "summary": summary, "cases": done})
     print(f"\nwrote {out}")
     sys.exit(1 if summary["failures"] else 0)
 
