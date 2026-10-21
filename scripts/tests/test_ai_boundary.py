@@ -1,6 +1,4 @@
-"""Every paid model call goes through ai-core (ADR 0002, ADR 0003): only ai-core gets the provider keys, and no
-other service or shared package carries a provider SDK or calls a provider's API. Static checks over the
-repository; nothing needs Docker or the running stack."""
+"""verify that provider credentials and paid calls remain inside ai-core."""
 
 import re
 from pathlib import Path
@@ -20,21 +18,21 @@ SKIPPED_DIRS = {
     "tiktoken",
 }
 PROVIDER_CODE = re.compile(
-    r"^\s*(?:import|from)\s+(?:openai|voyageai|anthropic)\b"  # a Python SDK import
-    r"|github\.com/(?:openai|anthropics|sashabaranov)/"  # a Go SDK module
-    r"|^\s*[\"']?(?:openai|voyageai|anthropic)\s*(?:[=<>~!\[;\"']|$)"  # a Python requirement
-    r"|api\.(?:openai|voyageai|anthropic)\.com",  # a provider's API host
+    r"^\s*(?:import|from)\s+(?:openai|voyageai|anthropic)\b"  # a python sdk import
+    r"|github\.com/(?:openai|anthropics|sashabaranov)/"  # a go sdk module
+    r"|^\s*[\"']?(?:openai|voyageai|anthropic)\s*(?:[=<>~!\[;\"']|$)"  # a python requirement
+    r"|api\.(?:openai|voyageai|anthropic)\.com",  # a provider's api host
     re.MULTILINE,
 )
 
 
 def services_given(compose: dict, key: str) -> set[str]:
-    """The Compose services whose definition mentions `key` anywhere: environment, command or otherwise."""
+    """the compose services whose definition mentions `key` anywhere: environment, command or otherwise."""
     return {name for name, service in compose["services"].items() if key in yaml.safe_dump(service)}
 
 
 def provider_code(roots: list[Path]) -> list[str]:
-    """Files under `roots` that import a provider SDK, depend on one, or call a provider's API host."""
+    """files under `roots` that import a provider sdk, depend on one, or call a provider's api host."""
     found = []
     for root in roots:
         for path in sorted(root.rglob("*")):
@@ -49,7 +47,7 @@ def test_only_ai_core_gets_the_provider_keys() -> None:
     compose = yaml.safe_load((ROOT / "docker-compose.yml").read_text(encoding="utf-8"))
     for key in PROVIDER_KEYS:
         assert services_given(compose, key) == {"ai-core"}, key
-    # An env_file would hand a service every value in .env, the keys included.
+    # an env_file would hand a service every value in .env, the keys included.
     assert [name for name, s in compose["services"].items() if "env_file" in s] == []
 
 
@@ -61,7 +59,7 @@ def test_no_other_service_calls_a_model_provider() -> None:
 
 
 def test_the_scan_finds_provider_code(tmp_path: Path) -> None:
-    """The check above would catch each way a service could reach a provider, and ai-core's own code."""
+    """the check above would catch each way a service could reach a provider, and ai-core's own code."""
     planted = {
         "a.py": "import openai\n",
         "b.py": "from anthropic import Anthropic\n",
@@ -72,7 +70,7 @@ def test_the_scan_finds_provider_code(tmp_path: Path) -> None:
     }
     for name, text in planted.items():
         (tmp_path / name).write_text(text, encoding="utf-8")
-    # Scratch files can live inside the workspace on Windows, where the scanner reports repo-relative paths.
+    # scratch files can live inside the workspace on windows, where the scanner reports repo-relative paths.
     assert [Path(name).name for name in provider_code([tmp_path])] == [
         "a.py",
         "b.py",

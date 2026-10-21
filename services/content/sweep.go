@@ -12,14 +12,15 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
-// sweepGrace is how old an object must be before the sweeper may remove it: longer than any upload
-// (uploadDeadline) or indexing run (ingestTimeout) that is still writing objects its row will name.
+// sweepgrace is how old an object must be before the sweeper may remove it: longer than any upload
+// (uploaddeadline) or indexing run (ingesttimeout) that is still writing objects its row will name.
 const sweepGrace = 6 * time.Hour
 
-// sweepEvery is how often each replica sweeps; replicas sweeping at once only remove the same objects twice.
+// sweepevery is how often each replica sweeps; replicas sweeping at once only remove the same objects
+// twice.
 const sweepEvery = time.Hour
 
-// storedObject is an object in the bucket with when it was last written.
+// storedobject is an object in the bucket with when it was last written.
 type storedObject struct {
 	key      string
 	modified time.Time
@@ -33,15 +34,13 @@ type bucket interface {
 	remove(ctx context.Context, key string) error
 }
 
-// sweeper removes objects no document row names, which nothing could otherwise reach or delete: an original
-// whose upload never committed and whose cleanup failed (removeOrphan), what a delete or purge cut short left, and
-// figure crops an earlier index stored that a reindex no longer cites.
+// remove unreferenced originals and crops left behind by failed writes, purges or reindexing.
 type sweeper struct {
 	db    *pgxpool.Pool
 	files bucket
 }
 
-// run sweeps every sweepEvery until ctx ends.
+// run sweeps every sweepevery until ctx ends.
 func (s sweeper) run(ctx context.Context) {
 	ticker := time.NewTicker(sweepEvery)
 	defer ticker.Stop()
@@ -67,8 +66,8 @@ type owner struct {
 	figures  []string // the crops its chunks cite
 }
 
-// sweep removes every object written before cutoff that no document row names, and reports how many it removed.
-// Objects of a document being indexed are left alone: the run may still be storing them.
+// sweep removes every object written before cutoff that no document row names, and reports how many it
+// removed.
 func (s sweeper) sweep(ctx context.Context, cutoff time.Time) (int, error) {
 	objects, err := s.files.list(ctx)
 	if err != nil {
@@ -89,9 +88,7 @@ func (s sweeper) sweep(ctx context.Context, cutoff time.Time) (int, error) {
 	return s.removeUnowned(ctx, old, owners, cutoff)
 }
 
-// removeUnowned removes the keys, grouped by document id, that their document's row does not keep, and reports how
-// many it removed before any failure. owners, read for the whole sweep, only picks the candidates: each document's
-// are judged again under its row's lock (removeLocked) before any goes.
+// recheck candidate objects under their document's lock before removal.
 func (s sweeper) removeUnowned(ctx context.Context, old map[string][]string, owners map[string]owner, cutoff time.Time) (int, error) {
 	removed := 0
 	for id, keys := range old {
@@ -109,13 +106,8 @@ func (s sweeper) removeUnowned(ctx context.Context, old map[string][]string, own
 	return removed, nil
 }
 
-// removeLocked removes the document's keys its row does not keep, holding the row FOR SHARE from reading it until the
-// last removal, and reports how many it removed. The lock closes the race with a reindex: only an indexing run stores
-// crops, and a run starts only after queueIndex has marked the row indexing, an UPDATE that waits for this lock. So
-// either the reindex was queued before the row is read here, and everything of the document is kept, or every crop
-// it stores (a crop's key is its content's hash, so possibly one removed here) is stored after these removals. Each
-// key is also looked at again just before it goes, so one written since cutoff, such as the original of an upload
-// whose row is still committing, is left for a later sweep to judge.
+// removelocked removes the document's keys its row does not keep, holding the row for share from reading it
+// until the last removal, and reports how many it removed.
 func (s sweeper) removeLocked(ctx context.Context, id string, keys []string, cutoff time.Time) (int, error) {
 	tx, err := s.db.Begin(ctx)
 	if err != nil {
@@ -150,7 +142,7 @@ func (s sweeper) removeLocked(ctx context.Context, id string, keys []string, cut
 	return removed, tx.Commit(ctx)
 }
 
-// writtenBefore groups the keys of objects written before cutoff by the document id in their path.
+// writtenbefore groups the keys of objects written before cutoff by the document id in their path.
 func writtenBefore(objects []storedObject, cutoff time.Time) map[string][]string {
 	old := map[string][]string{}
 	for _, o := range objects {
@@ -163,7 +155,8 @@ func writtenBefore(objects []storedObject, cutoff time.Time) map[string][]string
 	return old
 }
 
-// keeps says whether the row still needs the object: all of them while it indexes, else its original and cited crops.
+// keeps says whether the row still needs the object: all of them while it indexes, else its original and
+// cited crops.
 func (o owner) keeps(key string) bool {
 	return o.indexing || key == o.original || slices.Contains(o.figures, key)
 }
@@ -173,8 +166,8 @@ type querier interface {
 	Query(ctx context.Context, sql string, args ...any) (pgx.Rows, error)
 }
 
-// readOwners reads the rows of the documents named, keyed by id: each one's original and the figure crops its chunks
-// cite, as object keys.
+// readowners reads the rows of the documents named, keyed by id: each one's original and the figure crops
+// its chunks cite, as object keys.
 func readOwners(ctx context.Context, db querier, ids []string) (map[string]owner, error) {
 	rows, err := db.Query(ctx, `SELECT d.id::text,d.object_key,d.status='indexing',
 		coalesce(array_agg(d.org_id||'/'||d.id||'/figures/'||c.image) FILTER (WHERE c.image IS NOT NULL),'{}')

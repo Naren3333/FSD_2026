@@ -1,6 +1,4 @@
-"""Shared transport, authentication and operational helpers for the Python services. No business models.
-
-Database pools live in `learning_transport.db`, imported only by services that have psycopg."""
+"""shared transport, authentication and operational helpers for the python services."""
 
 from learning_transport.app import OIDC_SETTINGS, application, placeholder_app, require_env
 from learning_transport.auth import AI_CLIENT, STUDENT, TEACHER, Claims, actor, caller, keyset, requires

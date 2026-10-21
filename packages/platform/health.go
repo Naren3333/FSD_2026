@@ -8,15 +8,13 @@ import (
 	"time"
 )
 
-// HealthcheckFlag is the argument that makes a service binary check its own readiness instead of serving. The
-// images are distroless, with no shell or curl, so docker-compose.yml's healthcheck runs `/app -healthcheck`.
+// healthcheckflag is the argument that makes a service binary check its own readiness instead of serving.
 const HealthcheckFlag = "-healthcheck"
 
-// healthcheckTimeout bounds the whole check, below the Compose healthcheck's own timeout.
+// healthchecktimeout bounds the whole check, below the compose healthcheck's own timeout.
 const healthcheckTimeout = 3 * time.Second
 
-// Healthcheck returns at once unless the process was started with HealthcheckFlag. Then it asks the service in this
-// container, on PORT, for /health/ready and exits: 0 when it answers 200, 1 otherwise. Serve calls it first.
+// healthcheck returns at once unless the process was started with healthcheckflag.
 func Healthcheck() {
 	if len(os.Args) < 2 || os.Args[1] != HealthcheckFlag {
 		return
@@ -28,7 +26,7 @@ func Healthcheck() {
 	os.Exit(0)
 }
 
-// checkReady returns nil when url answers 200 within healthcheckTimeout.
+// checkready returns nil when url answers 200 within healthchecktimeout.
 func checkReady(url string) error {
 	ctx, cancel := context.WithTimeout(context.Background(), healthcheckTimeout)
 	defer cancel()

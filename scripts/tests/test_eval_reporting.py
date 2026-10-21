@@ -1,4 +1,4 @@
-"""Paid evals must support bounded selections and retain usable partial results."""
+"""paid evals must support bounded selections and retain usable partial results."""
 
 import json
 import sys

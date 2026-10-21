@@ -6,7 +6,7 @@ import (
 	"testing"
 )
 
-// answersByTopic answers each topic from a table; a topic not in it is invalid.
+// answersbytopic answers each topic from a table; a topic not in it is invalid.
 type answersByTopic map[string]topicStatus
 
 func (a answersByTopic) check(_ *http.Request, topic string) topicStatus {

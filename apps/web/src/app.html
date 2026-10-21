@@ -97,7 +97,7 @@
       <app-status [state]="state" />
       <router-outlet />
     } @else if (session.signedIn) {
-      <!-- Signed in with Keycloak, waiting for Identity to return the profile: not the signed-out welcome. -->
+      <!-- signed in with keycloak, waiting for identity to return the profile: not the signed-out welcome. -->
       <section class="signing-in" [attr.aria-busy]="state.busy()">
         @if (state.error()) {
           <h1>Your workspace didn't load</h1>

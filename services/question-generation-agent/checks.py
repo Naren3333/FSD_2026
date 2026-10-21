@@ -1,7 +1,4 @@
-"""Deterministic checks on the model's replies (ADR 0006). A question that breaks a rule is dropped and counted under
-its reason; nothing is repaired into a question the model did not write, and nothing is invented to fill the count.
-The limits are Assessment's own, counted in code points as it counts them, and it still checks every question again
-when the teacher saves."""
+"""deterministic checks on the model's replies (adr 0006)."""
 
 import json
 from collections import Counter
@@ -40,7 +37,7 @@ from prompts import Passage
 MIN_EVIDENCE = 20  # characters of quoted evidence, after normalizing
 DUPLICATE_RATIO = 0.9  # prompts at least this similar are the same question
 
-# Reasons a question is dropped.
+# reasons a question is dropped.
 INVALID_PROMPT = "INVALID_PROMPT"
 WRONG_TYPE = "WRONG_TYPE"
 UNKNOWN_SOURCE = "UNKNOWN_SOURCE"
@@ -52,7 +49,7 @@ DUPLICATE = "DUPLICATE"
 
 
 class UnreadableOutputError(Exception):
-    """The reply as a whole could not be read."""
+    """the reply as a whole could not be read."""
 
 
 class RuleBrokenError(Exception):
@@ -62,7 +59,7 @@ class RuleBrokenError(Exception):
 
 
 def normalize(text: str) -> str:
-    """Text as compared: typographic quotes made plain, whitespace collapsed, case folded."""
+    """text as compared: typographic quotes made plain, whitespace collapsed, case folded."""
     for fancy, plain in (("‘", "'"), ("’", "'"), ("“", '"'), ("”", '"')):
         text = text.replace(fancy, plain)
     return " ".join(text.split()).casefold()
@@ -91,8 +88,7 @@ def _texts(item: dict[str, Any], key: str) -> list[str]:
 
 
 def cited(item: dict[str, Any], passages: list[Passage]) -> list[Passage]:
-    """The passages the reply cites, in its order, each once. Breaks UNKNOWN_SOURCE when it cites none, or one it
-    was not given."""
+    """the passages the reply cites, in its order, each once."""
     numbers = item.get("source_passages")
     by_number = {p.number: p for p in passages}
     if not isinstance(numbers, list) or not numbers:
@@ -107,10 +103,7 @@ def cited(item: dict[str, Any], passages: list[Passage]) -> list[Passage]:
 
 
 def evidenced_excerpts(evidence: str, sources: list[Passage]) -> list[Excerpt]:
-    """The cited passages as the question stores them, at most MAX_SOURCES of MAX_EXCERPT_TEXT characters each. The
-    evidence must be quoted from one of them as stored, so the answer rests on the teacher's material and the
-    teacher sees it: a long passage is stored as the window around the evidence, and a passage holding the evidence
-    is kept when more than MAX_SOURCES are cited."""
+    """the cited passages as the question stores them, at most max_sources of max_excerpt_text characters each."""
     quote = normalize(evidence)
     if len(quote) < MIN_EVIDENCE:
         raise RuleBrokenError(EVIDENCE_NOT_FOUND)
@@ -133,8 +126,7 @@ def evidenced_excerpts(evidence: str, sources: list[Passage]) -> list[Excerpt]:
 
 
 def _excerpt_text(text: str, quote: str) -> tuple[str, bool]:
-    """At most MAX_EXCERPT_TEXT characters of `text`, and whether they hold the normalized `quote`: the whole text
-    when it fits, else the window centred on the quote, else (no quote in it) its start."""
+    """at most max_excerpt_text characters of `text`, and whether they hold the normalized `quote`: the whole text when it fits, else the window centred on the quote, else (no quote in it) its start."""
     if len(text) <= MAX_EXCERPT_TEXT:
         return text, quote in normalize(text)
     folded, positions = _normalized_positions(text)
@@ -168,7 +160,7 @@ def _normalized_positions(text: str) -> tuple[str, list[int]]:
 
 
 def points(item: dict[str, Any]) -> int:
-    """The suggested marks, or 1 when the model gave none in range; the teacher sets them in the editor."""
+    """the suggested marks, or 1 when the model gave none in range; the teacher sets them in the editor."""
     value = item.get("points")
     return value if isinstance(value, int) and not isinstance(value, bool) and 1 <= value <= MAX_POINTS else 1
 
@@ -193,8 +185,7 @@ def accepted(item: dict[str, Any]) -> list[str]:
 
 
 def rubric(item: dict[str, Any]) -> Rubric:
-    """The rubric and model answer as Assessment takes them: 1 to 10 criteria of 2 to 6 levels with their
-    own points, adding up to at most 100 marks, and a model answer."""
+    """the rubric and model answer as assessment takes them: 1 to 10 criteria of 2 to 6 levels with their own points, adding up to at most 100 marks, and a model answer."""
     raw, model_answer = item.get("criteria"), _text(item, "model_answer")
     if not isinstance(raw, list) or not 1 <= len(raw) <= MAX_CRITERIA:
         raise RuleBrokenError(INVALID_RUBRIC)
@@ -218,14 +209,15 @@ def rubric(item: dict[str, Any]) -> Rubric:
         if len({lv.points for lv in parsed}) != len(parsed):
             raise RuleBrokenError(INVALID_RUBRIC)
         criteria.append(Criterion(title=title, levels=sorted(parsed, key=lambda lv: lv.points)))
-    # Levels have distinct points from 0 up, so every criterion is worth at least 1 and only the top can break.
+    # levels have distinct points from 0 up, so every criterion is worth at least 1 and only the top can
+    # break.
     if rubric_total(criteria) > MAX_POINTS or not model_answer or len(model_answer) > MAX_MODEL_ANSWER:
         raise RuleBrokenError(INVALID_RUBRIC)
     return Rubric(criteria=criteria, model_answer=model_answer)
 
 
 def rubric_total(criteria: list[Criterion]) -> int:
-    """A rubric's marks: the sum of each criterion's top level, as Assessment counts them."""
+    """a rubric's marks: the sum of each criterion's top level, as assessment counts them."""
     return sum(max(lv.points for lv in c.levels) for c in criteria)
 
 
@@ -241,7 +233,7 @@ def similar(a: str, b: str) -> bool:
 
 
 def question(item: Any, request: GenerateRequest, passages: list[Passage], seen: list[str]) -> Generated:
-    """One question of the reply, checked; raises RuleBrokenError with the first rule it breaks."""
+    """one question of the reply, checked; raises rulebrokenerror with the first rule it breaks."""
     if not isinstance(item, dict):
         raise RuleBrokenError(INVALID_PROMPT)
     prompt, kind = _text(item, "prompt"), item.get("type")
@@ -284,7 +276,7 @@ def question(item: Any, request: GenerateRequest, passages: list[Passage], seen:
 def questions(
     output: str, request: GenerateRequest, passages: list[Passage]
 ) -> tuple[list[Generated], Counter[str]]:
-    """The reply's questions that pass every check, at most the number asked for, and the rest counted by reason."""
+    """the reply's questions that pass every check, at most the number asked for, and the rest counted by reason."""
     items = read_reply(output).get("questions")
     if not isinstance(items, list):
         raise UnreadableOutputError
@@ -305,8 +297,7 @@ def questions(
 
 
 def guidance(output: str, request: GuidanceRequest, passages: list[Passage]) -> Guidance:
-    """The drafted guidance, checked like a generated question; raises RuleBrokenError with the first rule it
-    breaks."""
+    """the drafted guidance, checked like a generated question; raises rulebrokenerror with the first rule it breaks."""
     item = read_reply(output)
     sources = cited(item, passages)
     evidence = _text(item, "evidence")

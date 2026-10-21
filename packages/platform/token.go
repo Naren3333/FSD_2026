@@ -14,11 +14,11 @@ import (
 	"golang.org/x/sync/singleflight"
 )
 
-// fetchTimeout bounds one token fetch, which runs apart from its callers' contexts (see Get).
+// fetchtimeout bounds one token fetch, which runs apart from its callers' contexts (see get).
 const fetchTimeout = 10 * time.Second
 
-// ServiceToken is a service account's client-credentials access token, cached until shortly before it expires.
-// Services that call the private AI service use one (docs/decisions/0002-ai-integration.md).
+// servicetoken is a service account's client-credentials access token, cached until shortly before it
+// expires.
 type ServiceToken struct {
 	URL, ID, Secret string
 	Client          *http.Client
@@ -28,9 +28,7 @@ type ServiceToken struct {
 	fetches         singleflight.Group
 }
 
-// Get returns the cached token, or fetches a new one from the token endpoint. Only one fetch runs at a time, shared
-// by every caller that needs it: it runs apart from any one caller's ctx (up to fetchTimeout), and each caller waits
-// for it only as long as its own ctx allows. A failed fetch is not cached, so the next caller fetches again.
+// get returns the cached token, or fetches a new one from the token endpoint.
 func (t *ServiceToken) Get(ctx context.Context) (string, error) {
 	t.mu.Lock()
 	token, valid := t.token, t.token != "" && time.Now().Before(t.expires)
@@ -78,13 +76,13 @@ func (t *ServiceToken) fetch(ctx context.Context) (string, time.Time, error) {
 	if res.StatusCode != http.StatusOK || json.NewDecoder(io.LimitReader(res.Body, 1<<20)).Decode(&body) != nil || body.AccessToken == "" {
 		return "", time.Time{}, fmt.Errorf("token endpoint answered %d", res.StatusCode)
 	}
-	// Renewed 30 seconds early, or halfway through a token that lives a minute or less, so a short-lived token is still
-	// reused rather than fetched again on every call.
+	// renewed 30 seconds early, or halfway through a token that lives a minute or less, so a short-lived token
+	// is still reused rather than fetched again on every call.
 	lifetime := time.Duration(body.ExpiresIn) * time.Second
 	return body.AccessToken, time.Now().Add(lifetime - min(30*time.Second, lifetime/2)), nil
 }
 
-// Reset drops the cached token, so the next Get fetches a new one (after the token was refused, say).
+// reset drops the cached token, so the next get fetches a new one (after the token was refused, say).
 func (t *ServiceToken) Reset() {
 	t.mu.Lock()
 	t.token = ""

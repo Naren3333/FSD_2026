@@ -1,6 +1,4 @@
-"""Question generation (ADR 0006): a classroom's teacher generates assessment questions, or marking guidance for a
-question they wrote, from the classroom's documents they choose. Reached through Kong at /api/question-generation
-with the teacher's own token. Stateless: the drafts go back to the editor, and the teacher decides what is kept."""
+"""question generation (adr 0006): a classroom's teacher generates assessment questions, or marking guidance for a question they wrote, from the classroom's documents they choose."""
 
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
@@ -40,7 +38,7 @@ async def lifespan(app: Any) -> AsyncIterator[None]:
 
 app = application("question-generation-agent", lifespan=lifespan)
 
-# Teachers only; students and service accounts may not (ADR 0006).
+# teachers only; students and service accounts may not (adr 0006).
 TEACHER_ONLY = requires(TEACHER)
 
 
@@ -56,7 +54,7 @@ async def ready() -> dict[str, str]:
 
 @app.post("/v1/questions", response_model=GenerateResponse, responses=ERRORS)
 async def generate(body: GenerateRequest, request: Request, claims: Claims = Depends(TEACHER_ONLY)) -> Any:
-    """Questions from the chosen documents, checked, for the teacher to review; nothing is saved."""
+    """questions from the chosen documents, checked, for the teacher to review; nothing is saved."""
     return await pipeline(request, claims).generate(body)
 
 
@@ -64,5 +62,5 @@ async def generate(body: GenerateRequest, request: Request, claims: Claims = Dep
 async def marking_guidance(
     body: GuidanceRequest, request: Request, claims: Claims = Depends(TEACHER_ONLY)
 ) -> Any:
-    """A rubric or accepted answers, and marking points, for a question the teacher wrote; nothing is saved."""
+    """a rubric or accepted answers, and marking points, for a question the teacher wrote; nothing is saved."""
     return await pipeline(request, claims).guidance(body)

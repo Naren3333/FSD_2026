@@ -1,12 +1,4 @@
-"""Structured ingestion for PDFs and native Markdown/PPTX/DOCX teaching materials.
-
-Content owns business rows, originals, vectors and crops. ai-core keeps operational caches
-for prepared structure, vision results and exact embedding inputs. Native readers are local;
-PDFs retain their existing selective-vision path. All uncached model work uses ai-core billing.
-
-Source-unit and chunk limits fail before embeddings. Native source anchors are slides or
-logical sections, not inferred Word/Markdown pages; see ADR 0013.
-"""
+"""structured ingestion for pdfs and native markdown/pptx/docx teaching materials."""
 
 import asyncio
 import base64
@@ -38,16 +30,16 @@ class VisionConfig:
     model: str
     cache_dir: Path
     max_pages: int
-    figure_model: str | None = None  # None: figures aren't described, so not indexed
-    ocr_model: str | None = None  # None: pages without a text layer aren't transcribed
-    # lays out tables no method could read (ingest.rescue); None (tests only: the service always sets it): they
-    # stay prose
+    figure_model: str | None = None  # none: figures aren't described, so not indexed
+    ocr_model: str | None = None  # none: pages without a text layer aren't transcribed
+    # lays out tables no method could read (ingest.rescue); none (tests only: the service always sets it):
+    # they stay prose
     table_model: str | None = None
     selective: bool = False  # explicit test/legacy configs retain the full pass
 
 
 def vision_config(settings: Settings) -> VisionConfig | None:
-    """The vision pass's settings, or None when TABLE_VISION is off (tables then come from "lines" only)."""
+    """the vision pass's settings, or none when table_vision is off (tables then come from \"lines\" only)."""
     if not settings.table_vision:
         return None
     return VisionConfig(
@@ -68,21 +60,19 @@ class IngestResult:
     chunks: list[Chunk]
     embed_texts: list[str]  # what each chunk's vector was computed from; also the reranker's input
     vectors: list[list[float]]
-    figures: dict[str, bytes]  # crop name → PNG, only the crops a chunk points at
+    figures: dict[str, bytes]  # crop name → png, only the crops a chunk points at
     embedding_model: str
 
 
 async def ingest(
     path: Path, title: str, vision_cfg: VisionConfig | None, mime: str = "application/pdf"
 ) -> IngestResult:
-    """The document's chunks and vectors. Raises IngestError for a PDF that cannot be indexed (its reason is
-    the document's), and anything else (a provider outage) for the caller to retry. Call inside
-    costs.recording() to get the ingest's cost record."""
+    """the document's chunks and vectors."""
     record = costs.current()
     if record:
         record.title = title
     settings = get_settings()
-    # a bad or oversized PDF fails with its own reason, before any vision call
+    # a bad or oversized pdf fails with its own reason, before any vision call
     if mime == "application/pdf":
         await pdf.in_thread(_check, path, settings.ingest_max_pages)
         pages, ocr_pages, chunks, crops = await _prepared(path, vision_cfg)
@@ -189,7 +179,7 @@ async def _native_prepared(path: Path, mime: str) -> tuple[int, int, list[Chunk]
 
 
 async def _see(path: Path, cfg: VisionConfig | None) -> list[vision.PageVision | None] | None:
-    """The vision pass over the PDF, or None when it is off."""
+    """the vision pass over the pdf, or none when it is off."""
     if cfg is None:
         return None
     selected = await pdf.in_thread(select_pages, path, cfg.max_pages) if cfg.selective else None
@@ -225,7 +215,7 @@ def _parse_and_chunk(path: Path, seen: list[vision.PageVision | None] | None) ->
     paras = outline(document.pages, document.tables, document.figures, document.toc, document.columns)
     settings = get_settings()
     with open_checked(path) as raw:
-        # Landscape decks use page boundaries; prose keeps section-aware packing across pages.
+        # landscape decks use page boundaries; prose keeps section-aware packing across pages.
         slides = (
             settings.slide_chunks
             and sum(raw.load_page(n).rect.width > raw.load_page(n).rect.height for n in range(raw.page_count))
@@ -276,7 +266,7 @@ async def _prepared(path: Path, cfg: VisionConfig | None) -> tuple[int, int, lis
             document, chunks = await pdf.in_thread(_parse_and_chunk, path, seen)
         crops = {f.image: f.png for page in document.figures for f in page}
         record = costs.current()
-        # A partial provider failure must remain retryable, rather than freezing a degraded result in cache.
+        # a partial provider failure must remain retryable, rather than freezing a degraded result in cache.
         if not record or not any(k.failed for k in record.kinds.values()):
             await asyncio.to_thread(
                 local_cache.write,
@@ -294,11 +284,7 @@ async def _prepared(path: Path, cfg: VisionConfig | None) -> tuple[int, int, lis
 
 
 def _storage_chunks(chunks: list[Chunk]) -> list[Chunk]:
-    """Normalize missing PDF glyphs before embedding and storage, including older prepared-cache entries.
-
-    PostgreSQL text cannot contain NUL. Keep an explicit replacement glyph instead of silently joining words.
-    Exact embedding keys change only for affected chunks, so retrying need not pay for vision again.
-    """
+    """normalize missing pdf glyphs before embedding and storage, including older prepared-cache entries."""
 
     def optional(text: str | None) -> str | None:
         return text.replace("\x00", "\ufffd") if text is not None else None
@@ -329,10 +315,7 @@ def embed_text(title: str, chunk: Chunk) -> str:
 
 
 def passage_text(title: str, section_path: str | None, content: str, source: str = "pdf") -> str:
-    """Native structure retains the full heading path for both embedding and reranking.
-    PDFs retain the existing deepest-heading rule: where font sizes don't follow a document's real structure
-    (GAO-style reports), the ancestors in section_path can be wrong, and as model input they'd pull unrelated
-    chunks toward queries about those headings."""
+    """native structure retains the full heading path for both embedding and reranking."""
     leaf = (
         (section_path if source in native.FORMATS.values() else section_path.rsplit(PATH_SEPARATOR, 1)[-1])
         if section_path

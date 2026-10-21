@@ -1,9 +1,4 @@
-"""The calls an AI agent makes to Identity, Content and ai-core, and the settings they need. Transport only: what to
-search for, which prompts to send and whose allowance pays are each agent's own.
-
-Identity and Content get the user's own token, so their access rules decide what the agent may see; ai-core gets the
-agent's service-account token (role ai-client), never the user's. Every ai-core inference names the user it is
-billed to (ADR 0003)."""
+"""the calls an ai agent makes to identity, content and ai-core, and the settings they need."""
 
 import os
 from dataclasses import dataclass
@@ -17,7 +12,7 @@ from learning_transport.errors import UpstreamError, upstream_error
 from learning_transport.identity import IdentityClient
 from learning_transport.tokens import ServiceToken
 
-# The settings every agent reads, by field and environment variable.
+# the settings every agent reads, by field and environment variable.
 AGENT_ENV = {
     "identity_url": "IDENTITY_URL",
     "content_url": "CONTENT_URL",
@@ -33,13 +28,13 @@ class AgentSettings:
     identity_url: str
     content_url: str
     ai_core_url: str
-    token_url: str  # Keycloak's token endpoint, for the agent's own service account (ai-core calls only)
+    token_url: str  # keycloak's token endpoint, for the agent's own service account (ai-core calls only)
     client_id: str
     client_secret: str
 
 
 def read_settings(required: dict[str, str]) -> dict[str, str]:
-    """Each field's environment variable, without a trailing slash. Fails startup when any is unset."""
+    """each field's environment variable, without a trailing slash."""
     require_env(*required.values())
     return {field: os.environ[name].rstrip("/") for field, name in required.items()}
 
@@ -50,8 +45,7 @@ def billed_to(claims: Claims, role: str) -> dict[str, str]:
 
 
 class AgentClients:
-    """Identity (classroom access is learning_transport.require_relation with `identity`), Content's search and
-    ai-core, over one shared httpx client. `generate_timeout` is the agent's longest structured reply."""
+    """share authenticated identity, search and inference clients with bounded generation timeouts."""
 
     generate_timeout = 30.0
 
@@ -65,8 +59,7 @@ class AgentClients:
     async def search_content(
         self, authorization: str, body: dict[str, Any], correlation: str, timeout: float
     ) -> tuple[list[dict[str, Any]], bool]:
-        """Content's search results for `body`, and whether its rerank fell back (then `score` is an RRF score,
-        not comparable to a relevance floor). A reply without the fields a passage is made from is a 502."""
+        """content's search results for `body`, and whether its rerank fell back (then `score` is an rrf score, not comparable to a relevance floor)."""
         try:
             resp = await self.http.post(
                 f"{self.settings.content_url}/v1/search",
@@ -98,7 +91,7 @@ class AgentClients:
         correlation: str,
         payer: dict[str, str],
     ) -> str:
-        """One structured reply: the model's output as text, matching `schema`, billed to `payer` (billed_to())."""
+        """one structured reply: the model's output as text, matching `schema`, billed to `payer` (billed_to())."""
         body = {
             "operation": "generate",
             "messages": messages,
@@ -119,7 +112,7 @@ class AgentClients:
     async def ai_core(
         self, method: str, path: str, correlation: str, timeout: float, **request: Any
     ) -> httpx.Response:
-        """A 200 response from ai-core, or its error as UpstreamError."""
+        """a 200 response from ai-core, or its error as upstreamerror."""
         headers = await self.ai_core_headers(correlation)
         try:
             resp = await self.http.request(
@@ -142,7 +135,7 @@ class AgentClients:
 
 
 def _hit(result: object) -> bool:
-    """Whether a search result has the fields a passage is made from."""
+    """whether a search result has the fields a passage is made from."""
     return (
         isinstance(result, dict)
         and all(isinstance(result.get(k), str) for k in ("chunk_id", "document_id", "content"))

@@ -63,7 +63,7 @@
     "/v1/questions": {
       "post": {
         "summary": "Generate",
-        "description": "Questions from the chosen documents, checked, for the teacher to review; nothing is saved.",
+        "description": "questions from the chosen documents, checked, for the teacher to review; nothing is saved.",
         "operationId": "generate_v1_questions_post",
         "requestBody": {
           "content": {
@@ -152,7 +152,7 @@
     "/v1/marking-guidance": {
       "post": {
         "summary": "Marking Guidance",
-        "description": "A rubric or accepted answers, and marking points, for a question the teacher wrote; nothing is saved.",
+        "description": "a rubric or accepted answers, and marking points, for a question the teacher wrote; nothing is saved.",
         "operationId": "marking_guidance_v1_marking_guidance_post",
         "requestBody": {
           "content": {
@@ -374,7 +374,7 @@
           "sources"
         ],
         "title": "DraftQuestion",
-        "description": "A question as Assessment takes it in a draft, with its sources and origin (ADR 0006)."
+        "description": "a question as assessment takes it in a draft, with its sources and origin (adr 0006)."
       },
       "ErrorBody": {
         "properties": {
@@ -470,7 +470,7 @@
           "text"
         ],
         "title": "Excerpt",
-        "description": "A passage, as Assessment stores it: from a document (with its ids and page), or written with no ids."
+        "description": "a passage, as assessment stores it: from a document (with its ids and page), or written with no ids."
       },
       "GenerateRequest": {
         "properties": {
@@ -724,7 +724,7 @@
           "type"
         ],
         "title": "GuidanceRequest",
-        "description": "Marking guidance for a question the teacher wrote, drafted from the documents they choose."
+        "description": "marking guidance for a question the teacher wrote, drafted from the documents they choose."
       },
       "Level": {
         "properties": {

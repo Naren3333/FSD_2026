@@ -11,7 +11,7 @@ import { UsageComponent } from './features/usage/usage';
 import { ActionState } from './shared/action-state';
 import { StatusComponent } from './shared/status';
 
-/** The workspace shell: navigation, the signed-in user, the current classroom and the open section. */
+/* the workspace shell: navigation, the signed-in user, the current classroom and the open section. */
 @Component({
   selector: 'app-root',
   standalone: true,
@@ -25,7 +25,7 @@ export class AppComponent implements OnInit {
   private readonly usage = inject(AiUsage);
   private readonly router = inject(Router);
   readonly state = new ActionState();
-  /** The last load failed, so the route guards may have refused the address. */
+  /* the last load failed, so the route guards may have refused the address. */
   private failed = false;
   readonly sections = computed(() =>
     SECTIONS.filter(
@@ -36,7 +36,7 @@ export class AppComponent implements OnInit {
   );
 
   constructor() {
-    // A section may have spent AI allowance (indexing, chat) since the meter last loaded.
+    // a section may have spent ai allowance (indexing, chat) since the meter last loaded.
     this.router.events
       .pipe(
         filter((event) => event instanceof NavigationEnd),
@@ -51,16 +51,17 @@ export class AppComponent implements OnInit {
     this.load();
   }
 
-  /** Loads the signed-in user's profile and classrooms; also the retry when that fails. */
+  /* loads the signed-in user's profile and classrooms; also the retry when that fails. */
   load(): void {
     const retry = this.failed;
     void this.state
       .run(async () => {
         await this.session.ready();
         if (!this.session.profile()) return;
-        // Each section that needs a classroom shows this failure in place, with Try again.
+        // each section that needs a classroom shows this failure in place, with try again.
         await this.context.refresh().catch(() => undefined);
-        // The route guards refused the address while the profile was missing; open it now that the role is known.
+        // the route guards refused the address while the profile was missing; open it now that the role is
+        // known.
         if (retry) await this.router.navigateByUrl(location.pathname + location.search);
       })
       .then(() => (this.failed = !!this.state.error()));
@@ -78,7 +79,7 @@ export class AppComponent implements OnInit {
     void this.state.run(() => this.session.logout());
   }
 
-  /** Students have no Classrooms page, so they reload the picker here after a teacher enrolls them. */
+  /* students have no classrooms page, so they reload the picker here after a teacher enrolls them. */
   refreshClassrooms(): void {
     void this.state.run(() => this.context.refresh());
   }

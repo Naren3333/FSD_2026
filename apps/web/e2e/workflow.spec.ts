@@ -15,7 +15,7 @@ test('teacher and student complete a real assessment through Kong', async ({ bro
     student = await browser.newPage();
   await login(student, 'student', env.STUDENT_PASSWORD);
   const studentUsername = await student.locator('.identity-note code').innerText();
-  // Each role lands on its own page and sees only its own menu.
+  // each role lands on its own page and sees only its own menu.
   await expect(student).toHaveURL(/\/home$/);
   const studentMenu = student.getByRole('navigation', { name: 'Workspace' });
   await expect(studentMenu.getByRole('link', { name: 'Classrooms', exact: true })).toHaveCount(0);
@@ -25,11 +25,11 @@ test('teacher and student complete a real assessment through Kong', async ({ bro
   await expect(teacher.locator('.identity-note')).toHaveCount(0);
   await expect(teacher.getByRole('link', { name: 'My results', exact: true })).toHaveCount(0);
   await expect(studentMenu.getByRole('link', { name: 'Class dashboard', exact: true })).toHaveCount(0);
-  // The dashboard links to Classrooms too, so the menu link is the one to use.
+  // the dashboard links to classrooms too, so the menu link is the one to use.
   const teacherMenu = teacher.getByRole('navigation', { name: 'Workspace' });
   const suffix = Date.now().toString();
   await createClassroom(teacher, 'Browser ' + suffix);
-  // The teacher finds the student in the school's list by username and enrolls them.
+  // the teacher finds the student in the school's list by username and enrolls them.
   const everyone = teacher.getByRole('region', { name: 'All students' });
   await everyone.getByLabel('Search students').fill(studentUsername);
   await everyone.getByRole('button', { name: 'Enroll Student Local in Browser ' + suffix }).click();
@@ -50,7 +50,7 @@ test('teacher and student complete a real assessment through Kong', async ({ bro
   await first.getByLabel('Question', { exact: true }).fill('What is 0.1 plus 0.2?');
   await first.getByLabel('Curriculum topic').selectOption({ label: 'Browser topic ' + suffix });
   await first.getByLabel('Correct answer').fill('0.3');
-  // A written response is marked by the teacher against its rubric; the new question keeps the topic.
+  // a written response is marked by the teacher against its rubric; the new question keeps the topic.
   await teacher.getByRole('button', { name: 'Add question', exact: true }).click();
   const second = teacher.getByRole('group', { name: 'Question 2' });
   await expect(second.getByLabel('Question', { exact: true })).toBeFocused();
@@ -59,7 +59,7 @@ test('teacher and student complete a real assessment through Kong', async ({ bro
   await second.getByLabel('Criterion 1', { exact: true }).fill('Reasoning');
   await second.getByLabel('Criterion 1 levels').fill('0: Missing\n2: Explains rounding');
   await expect(second.getByLabel('Marks')).toHaveValue('2');
-  // A marking point the teacher writes, for AI suggestions only.
+  // a marking point the teacher writes, for ai suggestions only.
   const points = second.getByRole('group', { name: 'Marking points (optional)' });
   await expect(points.getByText(/No marking points yet/)).toBeVisible();
   await points.getByLabel('Add a marking point').fill('Full marks need rounding in binary named.');
@@ -67,7 +67,7 @@ test('teacher and student complete a real assessment through Kong', async ({ bro
   await expect(points.getByText('Written by you', { exact: true })).toBeVisible();
   await expect(points.getByRole('button', { name: 'Remove marking point 1 from question 2' })).toBeVisible();
   await teacher.screenshot({ path: 'test-results/editor-desktop.png', fullPage: true });
-  // A draft stays with the teacher until it is published.
+  // a draft stays with the teacher until it is published.
   await teacher.getByRole('button', { name: 'Create draft', exact: true }).click();
   await expect(teacher.getByText('Draft created.', { exact: true })).toBeVisible();
   await expect(
@@ -77,7 +77,7 @@ test('teacher and student complete a real assessment through Kong', async ({ bro
   await expect(teacher.getByText('Assessment published.', { exact: true })).toBeVisible();
   await student.getByRole('button', { name: 'Refresh classrooms' }).click();
   await student.getByLabel('Current classroom').selectOption({ label: 'Browser ' + suffix });
-  // Home lists the new assessment as to do and opens it.
+  // home lists the new assessment as to do and opens it.
   const todo = student.getByRole('region', { name: 'To do' });
   await todo.getByRole('link', { name: 'Start Browser assessment ' + suffix }).click();
   await expect(student).toHaveURL(/\/assessments\?open=/);
@@ -86,7 +86,7 @@ test('teacher and student complete a real assessment through Kong', async ({ bro
   await student
     .getByLabel('Why is 0.1 plus 0.2 not exactly 0.3 in binary?')
     .fill('Neither number has an exact binary form, so both are rounded.');
-  // Work is saved as the student types.
+  // work is saved as the student types.
   await expect(student.getByText(/^Saved at /)).toBeVisible();
   await student.getByRole('button', { name: 'Submit answers', exact: true }).click();
   await expect(
@@ -103,18 +103,18 @@ test('teacher and student complete a real assessment through Kong', async ({ bro
       timeout: 5000,
     });
   }).toPass({ timeout: 60000 });
-  // The review shows names, not ids: the student, the assessment, the question and its topic.
+  // the review shows names, not ids: the student, the assessment, the question and its topic.
   await expect(teacher.getByRole('heading', { name: 'Student Local', exact: true })).toBeVisible();
   await expect(
     teacher.locator('article').getByText('Browser assessment ' + suffix, { exact: false }),
   ).toBeVisible();
   await expect(teacher.getByText('What is 0.1 plus 0.2?', { exact: false })).toBeVisible();
   await expect(teacher.getByText('Topic: Browser topic ' + suffix, { exact: true })).toHaveCount(2);
-  // A draft is the teacher's alone until it is finalized.
+  // a draft is the teacher's alone until it is finalized.
   await student.getByRole('link', { name: 'My results', exact: true }).click();
   await student.getByRole('button', { name: 'Refresh results' }).click();
   await expect(student.getByText(/No finalized results yet/)).toBeVisible();
-  // The written response waits for the teacher, who marks it with the rubric and then finalizes.
+  // the written response waits for the teacher, who marks it with the rubric and then finalizes.
   await expect(teacher.getByText('1 to mark', { exact: true })).toBeVisible();
   await teacher.getByRole('button', { name: 'Review grade', exact: true }).click();
   await expect(
@@ -148,8 +148,8 @@ test('teacher and student complete a real assessment through Kong', async ({ bro
   await expect(
     student.getByRole('rowheader', { name: 'Browser topic ' + suffix, exact: true }),
   ).toBeVisible();
-  // The class dashboard counts the finalized grade and shows the class's topics; a student's name opens their
-  // full performance.
+  // the class dashboard counts the finalized grade and shows the class's topics; a student's name opens
+  // their full performance.
   await teacher.getByRole('link', { name: 'Class dashboard', exact: true }).click();
   const topics = teacher.getByRole('region', { name: 'Class topics table' });
   await expect(async () => {
@@ -166,13 +166,13 @@ test('teacher and student complete a real assessment through Kong', async ({ bro
   await expect(teacher.getByRole('cell', { name: '100%' })).toBeVisible();
   await student.screenshot({ path: 'test-results/performance-desktop.png', fullPage: true });
   await expectNoHorizontalScroll(student, 'test-results/performance-mobile.png');
-  // The editor and the grading review fit a phone screen.
+  // the editor and the grading review fit a phone screen.
   await teacherMenu.getByRole('link', { name: 'Assessments', exact: true }).click();
   await expect(teacher.getByRole('heading', { name: 'Create an assessment' })).toBeVisible();
   await expectNoHorizontalScroll(teacher, 'test-results/assessments-mobile.png');
   await teacherMenu.getByRole('link', { name: 'Grading review', exact: true }).click();
   await expectNoHorizontalScroll(teacher, 'test-results/review-mobile.png');
-  // Removing asks first, with Cancel focused; the student then no longer sees the classroom.
+  // removing asks first, with cancel focused; the student then no longer sees the classroom.
   await teacherMenu.getByRole('link', { name: 'Classrooms', exact: true }).click();
   await roster.getByRole('button', { name: 'Remove Student Local from the classroom' }).click();
   await expect(teacher.getByRole('button', { name: 'Cancel', exact: true })).toBeFocused();

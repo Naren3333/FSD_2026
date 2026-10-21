@@ -1,19 +1,4 @@
-"""The one AsyncOpenAI client per process, with our own retries: embeddings, chat (plain, streamed or
-structured) and the ingest's vision calls. Ported from fsd_test's shared/openai_client.py.
-
-SDK retries are off (max_retries=0) so the loop here counts attempts. Retried: 429, 5xx and connection
-errors, twice, with full-jitter backoff; Retry-After is honoured up to 10s and anything longer fails at
-once. Not retried: timeouts (a retry would outlast the caller, and the call may still be billed) and 429
-insufficient_quota (billing, not load). Errors are raised as the SDK's own exceptions. A stream is retried
-only around create(), before the first token: a retry after it would repeat text the caller already relayed.
-
-Time limits. A non-streamed reply sends nothing until it is complete, so its read timeout bounds the whole
-generation: generate() gets generation_budget(max_tokens) seconds in all, retries included (each attempt gets what
-is left, and no retry starts with less than MIN_ATTEMPT left). A stream gets TIMEOUT per read, and a retry of its
-opening starts only while a whole attempt still fits in STREAM_OPEN_BUDGET. Callers wait longer than these worst
-cases: the question-generation agent's and the chatbot's GENERATE_TIMEOUT, the chatbot's STREAM_TIMEOUT and
-Grading's markingCall.
-"""
+"""the one asyncopenai client per process, with our own retries: embeddings, chat (plain, streamed or structured) and the ingest's vision calls."""
 
 import asyncio
 import functools
@@ -33,15 +18,14 @@ from settings import get_settings
 log = logging.getLogger("ai-core.openai_client")
 
 TIMEOUT = 30.0  # per read: embeddings and a stream's chunks; also the shortest generation budget
-# A non-streamed reply's budget: GENERATE_BASE seconds plus GENERATE_RATE output tokens a second, between TIMEOUT
-# and GENERATE_CAP. 6000 tokens (question generation) get 120 s, 1500 (Grading's marking) 45 s.
+# scale generation timeouts with output size within the configured bounds.
 GENERATE_BASE, GENERATE_RATE, GENERATE_CAP = 20.0, 60.0, 150.0
 MIN_ATTEMPT = 10.0  # a generation retry starts only with at least this many seconds of its budget left
 STREAM_OPEN_BUDGET = 45.0  # seconds by which a stream has opened or failed, retries included
-EMBED_BATCH = 128  # inputs per request; OpenAI also caps a request at 300k tokens in total
+EMBED_BATCH = 128  # inputs per request; openai also caps a request at 300k tokens in total
 
 MAX_ATTEMPTS = 3  # first try + 2 retries
-MAX_DELAY = 10.0  # a longer Retry-After fails at once instead of spending the caller's time
+MAX_DELAY = 10.0  # a longer retry-after fails at once instead of spending the caller's time
 BASE_DELAY, BACKOFF_CAP = 0.5, 8.0
 
 _sleep = asyncio.sleep  # tests patch this
@@ -50,12 +34,11 @@ _client: AsyncOpenAI | None = None
 
 
 class NotConfiguredError(Exception):
-    """OPENAI_API_KEY is unset. The process still starts; only the calls fail."""
+    """openai_api_key is unset."""
 
 
 class StructuredOutputError(Exception):
-    """A refusal, or a cut-off or filtered reply, in JSON-schema mode. Not an OpenAIError, so never retried. OpenAI
-    still bills the reply, so it carries the reply's `usage` and `text` for the caller to charge."""
+    """a refusal, or a cut-off or filtered reply, in json-schema mode."""
 
     def __init__(self, message: str, usage: "Usage | None" = None, text: str = "") -> None:
         super().__init__(message)
@@ -64,8 +47,7 @@ class StructuredOutputError(Exception):
 
 @dataclass(frozen=True)
 class Usage:
-    """OpenAI's token counts for one call; None when the stream ended without its usage chunk. `cached_in` is the
-    part of `tokens_in` served from OpenAI's prompt cache, which is billed at the cached rate."""
+    """openai's token counts for one call; none when the stream ended without its usage chunk. `cached_in` is the part of `tokens_in` served from openai's prompt cache, which is billed at the cached rate."""
 
     tokens_in: int | None
     tokens_out: int | None
@@ -73,8 +55,7 @@ class Usage:
 
 
 def usage_of(usage: Any) -> Usage:
-    """The token counts of an SDK response's (or stream chunk's) usage object, including cached prompt tokens;
-    Usage(None, None) when there is none."""
+    """the token counts of an sdk response's (or stream chunk's) usage object, including cached prompt tokens; usage(none, none) when there is none."""
     if usage is None:
         return Usage(None, None)
     details = getattr(usage, "prompt_tokens_details", None)
@@ -94,15 +75,13 @@ def get_client() -> AsyncOpenAI:
 
 @dataclass
 class Tally:
-    """The prompt tokens of the embedding batches answered so far: what the caller owes even when a later batch
-    fails."""
+    """the prompt tokens of the embedding batches answered so far: what the caller owes even when a later batch fails."""
 
     tokens: int = 0
 
 
 async def embed(texts: list[str], tally: Tally | None = None) -> tuple[list[list[float]], int]:
-    """Vectors in input order, and the prompt tokens they took. Batches of EMBED_BATCH are sent one after
-    another, each retried on its own; `tally` counts the tokens of each batch as it is answered."""
+    """vectors in input order, and the prompt tokens they took."""
     if not texts:
         return [], 0
     client, model = get_client(), get_settings().embedding_model
@@ -110,10 +89,10 @@ async def embed(texts: list[str], tally: Tally | None = None) -> tuple[list[list
     tokens = 0
     for start in range(0, len(texts), EMBED_BATCH):
         batch = texts[start : start + EMBED_BATCH]
-        # encoding_format left unset: the SDK then requests base64 and decodes it to floats itself.
+        # encoding_format left unset: the sdk then requests base64 and decodes it to floats itself.
         create = functools.partial(client.embeddings.create, model=model, input=batch, timeout=TIMEOUT)
         result = await call(functools.partial(budget.guarded, create, model, batch))
-        # Place by OpenAI's index rather than trusting the order of `data`.
+        # place by openai's index rather than trusting the order of `data`.
         placed: list[list[float]] = [[] for _ in batch]
         for item in result.data:
             placed[item.index] = item.embedding
@@ -134,7 +113,7 @@ async def embed(texts: list[str], tally: Tally | None = None) -> tuple[list[list
 
 
 async def stream_chat(messages: list[Any], max_tokens: int) -> AsyncGenerator[str | Usage, None]:
-    """Text deltas in order, then one Usage. Breaking out early closes the HTTP stream."""
+    """text deltas in order, then one usage."""
     client, settings = get_client(), get_settings()
     stream = await call(
         lambda: budget.guarded(
@@ -185,7 +164,7 @@ async def stream_chat(messages: list[Any], max_tokens: int) -> AsyncGenerator[st
 
 
 def generation_budget(max_tokens: int) -> float:
-    """Seconds a non-streamed reply of up to `max_tokens` may take in all, retries included."""
+    """seconds a non-streamed reply of up to `max_tokens` may take in all, retries included."""
     return min(max(GENERATE_BASE + max_tokens / GENERATE_RATE, TIMEOUT), GENERATE_CAP)
 
 
@@ -199,9 +178,7 @@ class Completion:
 async def generate(
     messages: list[Any], max_tokens: int, schema: dict | None = None, *, name: str = ""
 ) -> Completion:
-    """One reply. With `schema`, OpenAI's strict JSON-schema mode: a refusal or a cut-off or filtered reply then
-    raises StructuredOutputError, and the caller re-validates the JSON. `name` is the prompt version, e.g.
-    "query_rewrite.v1" (OpenAI rejects dots in schema names, so they become underscores)."""
+    """one reply."""
     client, settings = get_client(), get_settings()
     extra: dict[str, Any] = {}
     if schema is not None:
@@ -250,7 +227,7 @@ async def generate(
 
 @dataclass
 class Attempts:
-    """How many times call has tried its function so far: attempts beyond the first are retries."""
+    """how many times call has tried its function so far: attempts beyond the first are retries."""
 
     count: int = 0
 
@@ -263,11 +240,7 @@ async def call[T](
     deadline: float | None = None,
     min_attempt: float = MIN_ATTEMPT,
 ) -> T:
-    """Run one SDK call with retries. `delay` gives the seconds to wait after a failed attempt (numbered from 1)
-    before the next, or None to raise the error; the default is this module's policy (see the module docstring).
-    Errors that aren't OpenAI's are never retried. `attempts`, when given, counts the attempts made. With
-    `deadline` (on the _now() clock) the error is raised instead of a retry that would start with less than
-    `min_attempt` seconds left."""
+    """retry a provider call using the supplied delay policy; stop when it returns no delay."""
     wait = delay or default_delay
     if attempts is None:
         attempts = Attempts()
@@ -287,8 +260,7 @@ async def call[T](
 
 
 def default_delay(exc: openai.OpenAIError, attempt: int) -> float | None:
-    """This module's policy: MAX_ATTEMPTS attempts at retryable errors, after OpenAI's Retry-After when it sends
-    one (up to MAX_DELAY) and otherwise exponential backoff with full jitter."""
+    """this module's policy: max_attempts attempts at retryable errors, after openai's retry-after when it sends one (up to max_delay) and otherwise exponential backoff with full jitter."""
     if attempt >= MAX_ATTEMPTS or not retryable(exc):
         return None
     after = retry_after(exc)
@@ -298,8 +270,7 @@ def default_delay(exc: openai.OpenAIError, attempt: int) -> float | None:
 
 
 def deterministic_options(model: str) -> dict[str, Any]:
-    """Request options for repeatable answers: low reasoning effort for reasoning models, otherwise temperature 0
-    (reasoning models reject a temperature)."""
+    """request options for repeatable answers: low reasoning effort for reasoning models, otherwise temperature 0 (reasoning models reject a temperature)."""
     if model.startswith(("gpt-5", "gpt-6", "o")):
         return {"reasoning_effort": "low"}
     return {"temperature": 0}
@@ -307,7 +278,7 @@ def deterministic_options(model: str) -> dict[str, Any]:
 
 def retryable(exc: openai.OpenAIError) -> bool:
     match exc:
-        case openai.APITimeoutError():  # subclass of APIConnectionError, so it must come first
+        case openai.APITimeoutError():  # subclass of apiconnectionerror, so it must come first
             return False
         case openai.APIConnectionError():
             return True
@@ -320,7 +291,7 @@ def retryable(exc: openai.OpenAIError) -> bool:
 
 
 def retry_after(exc: openai.OpenAIError) -> float | None:
-    """OpenAI's Retry-After, in seconds, when the error carries one."""
+    """openai's retry-after, in seconds, when the error carries one."""
     if isinstance(exc, openai.APIStatusError):
         headers = exc.response.headers
         try:
@@ -328,11 +299,11 @@ def retry_after(exc: openai.OpenAIError) -> float | None:
                 return float(ms) / 1000
             if (s := headers.get("retry-after")) is not None:
                 return float(s)
-        except ValueError:  # e.g. the HTTP-date form, which OpenAI doesn't send
+        except ValueError:  # e.g. the http-date form, which openai doesn't send
             pass
     return None
 
 
 def backoff(attempt: int) -> float:
-    """Exponential backoff with full jitter."""
+    """exponential backoff with full jitter."""
     return random.uniform(0, min(BACKOFF_CAP, BASE_DELAY * 2 ** (attempt - 1)))

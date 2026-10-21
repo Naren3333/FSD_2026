@@ -1,5 +1,4 @@
-"""Per-user spend: every paid call is charged to the user it was made for, and a user over today's allowance is
-refused before any provider call (ADR 0003)."""
+"""per-user spend: every paid call is charged to the user it was made for, and a user over today's allowance is refused before any provider call (adr 0003)."""
 
 import asyncio
 import inspect
@@ -43,7 +42,7 @@ RERANK = {
 
 
 def settle(ledger: MemoryLedger, n: int) -> None:
-    """Charges are written by a background task: wait until `n` have landed."""
+    """charges are written by a background task: wait until `n` have landed."""
     deadline = time.monotonic() + 2
     while len(ledger.charges) < n and time.monotonic() < deadline:
         time.sleep(0.01)
@@ -54,7 +53,7 @@ def test_prices() -> None:
     assert spend.cost("gpt-6-luna", 1_000_000, 1_000_000) == pytest.approx(0.60)
     assert spend.cost("gpt-5.4-mini", 1_000_000, 0, cached_in=1_000_000) == pytest.approx(0.075)
     assert spend.cost("text-embedding-3-small", 1_000_000) == pytest.approx(0.02)
-    # An unknown model is never free: it is charged the most expensive known rates.
+    # an unknown model is never free: it is charged the most expensive known rates.
     assert spend.cost("gpt-next", 1_000_000, 1_000_000) == pytest.approx(0.75 + 4.50)
 
 
@@ -138,7 +137,7 @@ def test_a_timed_out_reply_is_charged_its_prompt_and_whole_output(
     test_settings: settings.Settings,
     stream: bool,
 ) -> None:
-    """OpenAI may still run, and bill, a reply nobody waited for: it is charged as if it used all of max_tokens."""
+    """openai may still run, and bill, a reply nobody waited for: it is charged as if it used all of max_tokens."""
     openai_fake.replies.append(hang)
     resp = api.post("/v1/inference", json={**GENERATE, "max_tokens": 6000, "stream": stream})
     assert (resp.status_code, resp.json()["error"]["code"]) == (502, "AI_PROVIDER_FAILED")
@@ -177,7 +176,7 @@ def test_a_timed_out_embedding_is_charged_its_input(
 
 
 def test_prompt_tokens_count_with_the_tokenizer() -> None:
-    # Counted by cl100k_base, plus each message's framing; special-token text is just text.
+    # counted by cl100k_base, plus each message's framing; special-token text is just text.
     one = billing.prompt_tokens([{"role": "user", "content": "hello world"}])
     assert one == 2 + billing.MESSAGE_OVERHEAD
     assert billing.prompt_tokens([{"role": "user", "content": "<|endoftext|>"}]) > billing.MESSAGE_OVERHEAD
@@ -282,7 +281,7 @@ SCHEMA = {
 def test_a_rejected_structured_reply_is_still_charged(
     api: TestClient, openai_fake: FakeOpenAI, ledger: MemoryLedger, reply: dict
 ) -> None:
-    """OpenAI bills it like any other reply; the error code stays AI_OUTPUT_REJECTED (Grading doesn't retry it)."""
+    """openai bills it like any other reply; the error code stays ai_output_rejected (grading doesn't retry it)."""
     openai_fake.reply(json=reply)
     resp = api.post("/v1/inference", json={**GENERATE, "response_schema": SCHEMA})
     assert (resp.status_code, resp.json()["error"]["code"]) == (502, "AI_OUTPUT_REJECTED")
@@ -321,8 +320,7 @@ def test_rerank_without_usage_is_charged_an_estimate(
 def test_a_stream_the_caller_leaves_before_it_starts_is_charged_and_closed(
     openai_fake: FakeOpenAI, ledger: MemoryLedger
 ) -> None:
-    """Starlette never starts the events generator when the caller is gone first: ClosingStream still bills the
-    reply and closes the provider's stream."""
+    """starlette never starts the events generator when the caller is gone first: closingstream still bills the reply and closes the provider's stream."""
     import main
 
     openai_fake.replies.append(chat_stream(["Hel", "lo"]))
@@ -360,8 +358,7 @@ def test_a_stream_the_caller_leaves_before_it_starts_is_charged_and_closed(
 def test_ingest_rechecks_the_allowance_once_it_has_a_slot(
     api: TestClient, openai_fake: FakeOpenAI, ledger: MemoryLedger, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """Uploads queued behind others passed the first check long ago; the one that finds the allowance used up
-    when its turn comes makes no model call."""
+    """uploads queued behind others passed the first check long ago; the one that finds the allowance used up when its turn comes makes no model call."""
     from conftest import post, textbook
 
     checks: list[str] = []
@@ -398,7 +395,7 @@ def test_embedding_batches_answered_before_a_failure_are_charged(
 
 
 class SlowLedger(MemoryLedger):
-    """Writes take a while, as over a network to Postgres."""
+    """writes take a while, as over a network to postgres."""
 
     def __init__(self, delay: float = 0.2) -> None:
         super().__init__()
@@ -420,7 +417,7 @@ def test_the_next_call_sees_the_last_ones_charge(
     test_settings: settings.Settings,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """The charge is written before the response ends, so a caller's next call is checked against it."""
+    """the charge is written before the response ends, so a caller's next call is checked against it."""
     from conftest import SERVICE_CLAIMS
     from learning_transport.testing import as_caller
 
@@ -442,8 +439,7 @@ def test_overshoot_is_bounded_by_the_calls_in_flight(
     test_settings: settings.Settings,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Calls already past the check when the allowance runs out still finish and are charged; once they are
-    recorded, nothing more runs. The overshoot is at most what the in-flight calls cost (ADR 0003)."""
+    """calls already past the check when the allowance runs out still finish and are charged; once they are recorded, nothing more runs."""
     from conftest import SERVICE_CLAIMS
     from learning_transport.testing import as_caller
 
@@ -494,7 +490,7 @@ def test_a_users_running_calls_are_capped(monkeypatch: pytest.MonkeyPatch) -> No
 def test_calls_beyond_the_cap_are_busy_until_one_ends(
     openai_fake: FakeOpenAI, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """A call holds its slot until its charge is written, so a burst runs at most AI_USER_CONCURRENCY calls."""
+    """a call holds its slot until its charge is written, so a burst runs at most ai_user_concurrency calls."""
     from conftest import SERVICE_CLAIMS
     from learning_transport.testing import as_caller
 
@@ -554,7 +550,7 @@ def test_every_call_frees_its_slot_however_it_ends(
 
 
 def test_a_failed_ledger_write_is_logged(caplog: pytest.LogCaptureFixture) -> None:
-    """The money is already spent: the call still succeeds, and the lost charge is in the log for reconciling."""
+    """the money is already spent: the call still succeeds, and the lost charge is in the log for reconciling."""
 
     class Unwritable(MemoryLedger):
         async def record(self, billed: spend.Billed, charge: spend.Charge, correlation_id: str) -> None:

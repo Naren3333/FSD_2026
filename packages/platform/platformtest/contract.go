@@ -11,13 +11,13 @@ import (
 	"time"
 )
 
-// Schema is a JSON schema read from the repository's contracts (scripts/export_contracts.py writes them).
+// schema is a json schema read from the repository's contracts (scripts/export_contracts.py writes them).
 type Schema struct {
 	node map[string]any
 	doc  map[string]any // the document the schema is in, for its $refs
 }
 
-// HTTPSchema is the named schema components/schemas/<name> of contracts/http/<service>.openapi.json.
+// httpschema is the named schema components/schemas/<name> of contracts/http/<service>.openapi.json.
 func HTTPSchema(t testing.TB, service, name string) Schema {
 	t.Helper()
 	doc := readContract(t, filepath.Join("contracts", "http", service+".openapi.json"))
@@ -28,7 +28,7 @@ func HTTPSchema(t testing.TB, service, name string) Schema {
 	return Schema{node, doc}
 }
 
-// EventData is the schema of the data of contracts/events/<topic>.schema.json.
+// eventdata is the schema of the data of contracts/events/<topic>.schema.json.
 func EventData(t testing.TB, topic string) Schema {
 	t.Helper()
 	doc := readContract(t, filepath.Join("contracts", "events", topic+".schema.json"))
@@ -39,8 +39,8 @@ func EventData(t testing.TB, topic string) Schema {
 	return Schema{node, doc}
 }
 
-// Property is the object schema of one of the schema's properties: the property itself, its array items or map
-// values, or its non-null choice.
+// property is the object schema of one of the schema's properties: the property itself, its array items or
+// map values, or its non-null choice.
 func (s Schema) Property(t testing.TB, name string) Schema {
 	t.Helper()
 	property, _ := dig(s.resolve(s.node), "properties", name).(map[string]any)
@@ -51,10 +51,8 @@ func (s Schema) Property(t testing.TB, name string) Schema {
 	return Schema{node, s.doc}
 }
 
-// MatchesSchema checks that the JSON fields of value's struct type are the schema's properties, and that the ones
-// the struct always writes (no omitempty) are the ones the schema requires. Struct fields holding structs, or slices,
-// maps or pointers of them, are checked against their property's schema the same way, so one call covers a
-// response and everything in it. It catches a field added, renamed or made optional on one side only.
+// matchesschema checks that the json fields of value's struct type are the schema's properties, and that
+// the ones the struct always writes (no omitempty) are the ones the schema requires.
 func MatchesSchema(t testing.TB, schema Schema, value any) {
 	t.Helper()
 	for _, problem := range schema.compare(reflect.TypeOf(value), reflect.TypeOf(value).Name()) {
@@ -100,7 +98,8 @@ func (s Schema) compare(typ reflect.Type, at string) []string {
 	return problems
 }
 
-// object is the object schema a property holds: itself, its array items or map values, or its non-null choice.
+// object is the object schema a property holds: itself, its array items or map values, or its non-null
+// choice.
 func (s Schema) object(property map[string]any) (map[string]any, bool) {
 	property = s.resolve(property)
 	if _, ok := property["properties"]; ok {
@@ -143,7 +142,7 @@ type jsonField struct {
 	typ    reflect.Type
 }
 
-// jsonFields are the fields encoding/json writes for a struct type, embedded structs' included.
+// jsonfields are the fields encoding/json writes for a struct type, embedded structs' included.
 func jsonFields(typ reflect.Type) []jsonField {
 	var fields []jsonField
 	for i := range typ.NumField() {
@@ -165,7 +164,8 @@ func jsonFields(typ reflect.Type) []jsonField {
 	return fields
 }
 
-// structType is the struct a field holds, directly or through pointers, slices and maps; nil for anything else.
+// structtype is the struct a field holds, directly or through pointers, slices and maps; nil for anything
+// else.
 func structType(typ reflect.Type) reflect.Type {
 	for typ.Kind() == reflect.Pointer || typ.Kind() == reflect.Slice || typ.Kind() == reflect.Map {
 		typ = typ.Elem()

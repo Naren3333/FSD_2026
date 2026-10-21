@@ -16,7 +16,7 @@ const (
 	room         = "7a2d6e3f-9b5c-4d4e-8f3a-2b3c4d5e6f70"
 )
 
-// memoryStore holds one draft evaluation; finalize fails with the error it is given.
+// memorystore holds one draft evaluation; finalize fails with the error it is given.
 type memoryStore struct {
 	finalizeErr error
 	finalized   []string // reasons
@@ -27,7 +27,7 @@ type memoryStore struct {
 	page        [2]int   // the offset and limit the last list was given
 }
 
-// draft is the store's one evaluation, with an answer and an AI suggestion.
+// draft is the store's one evaluation, with an answer and an ai suggestion.
 var draft = Evaluation{ID: evaluationID, Assessment: assessmentID, Classroom: room, Answers: map[string]string{"q1": "an answer"}, Evidence: []Evidence{{Question: "q1", Suggestion: &Suggestion{Status: suggestionReady, Feedback: "AI words"}}}}
 
 func (m *memoryStore) listEvaluations(_ context.Context, _, _, assessment string, students []string, offset, limit int) ([]Evaluation, int, error) {
@@ -48,8 +48,7 @@ func (m *memoryStore) findEvaluation(_ context.Context, _, id string) (Evaluatio
 	return draft, nil
 }
 
-// listReleased answers for student-1 only, so a test sees whose results were asked for. The evidence carries what
-// students must never see: a suggestion and rubric criteria.
+// listreleased answers for student-1 only, so a test sees whose results were asked for.
 func (m *memoryStore) listReleased(_ context.Context, _, _, student string) ([]Evaluation, error) {
 	if student != "student-1" {
 		return []Evaluation{}, nil
@@ -246,14 +245,14 @@ func TestTeacherListsAndCountsOnlyEnrolledStudents(t *testing.T) {
 		if w := platformtest.Serve(s.routes, http.MethodGet, path, "", "teacher-1", "teacher"); w.Code != http.StatusOK || strings.Join(store.students, ",") != "student-1,student-2" {
 			t.Errorf("%s: %d, store given %v", path, w.Code, store.students)
 		}
-		// One assessment's list and counts are of the same evaluations.
+		// one assessment's list and counts are of the same evaluations.
 		if w := platformtest.Serve(s.routes, http.MethodGet, path+"&assessment_id="+assessmentID, "", "teacher-1", "teacher"); w.Code != http.StatusOK || store.assessment != assessmentID {
 			t.Errorf("%s for one assessment: %d, store given %q", path, w.Code, store.assessment)
 		}
 		if w := platformtest.Serve(s.routes, http.MethodGet, path+"&assessment_id=nope", "", "teacher-1", "teacher"); w.Code != http.StatusUnprocessableEntity {
 			t.Errorf("%s for a malformed assessment: %d", path, w.Code)
 		}
-		// Without the roster nothing is listed rather than everyone.
+		// without the roster nothing is listed rather than everyone.
 		s.roster = platformtest.Roster(nil)
 		if w := platformtest.Serve(s.routes, http.MethodGet, path, "", "teacher-1", "teacher"); w.Code != http.StatusForbidden {
 			t.Errorf("%s without a roster: %d", path, w.Code)
@@ -315,7 +314,7 @@ func TestOnlyTheClassroomTeacherReleasesResults(t *testing.T) {
 			t.Errorf("%s: %v %s, roster %v", relation, store.released, w.Body.String(), store.students)
 		}
 	}
-	// Without the roster nothing is released rather than everyone's.
+	// without the roster nothing is released rather than everyone's.
 	store := &memoryStore{}
 	noRoster := server{store: store, access: platformtest.Access(platform.RelationTeacher), roster: platformtest.Roster(nil)}
 	if w := platformtest.Serve(noRoster.routes, http.MethodPost, "/v1/evaluations/release", body, "teacher-1", "teacher"); w.Code != http.StatusForbidden || len(store.released) != 0 {

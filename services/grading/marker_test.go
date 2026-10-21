@@ -84,22 +84,23 @@ func tddQuestion() (Question, Rubric) {
 func TestAHedgedAnswerCannotKeepTheMark(t *testing.T) {
 	q, r := tddQuestion()
 	answer := "green red refactor"
-	// The model saw the competing answers but still gave the mark: it broke its own rule, so nothing is suggested.
+	// the model saw the competing answers but still gave the mark: it broke its own rule, so nothing is
+	// suggested.
 	output := reply(t, []map[string]any{against(criterion("match", 1, "green"), "red", "refactor")}, "")
 	if s, err := checkSuggestion(q, r, answer, output, "m"); !errors.Is(err, errContradicted) {
 		t.Fatalf("kept %+v %v", s, err)
 	}
-	// Giving the lowest level with the competing answers quoted is a suggestion of 0.
+	// giving the lowest level with the competing answers quoted is a suggestion of 0.
 	output = reply(t, []map[string]any{against(criterion("match", 0), "red", "refactor")}, "")
 	if s, err := checkSuggestion(q, r, answer, output, "m"); err != nil || s.Awarded != 0 {
 		t.Fatalf("%+v %v", s, err)
 	}
-	// Quotes against the answer must be in it too.
+	// quotes against the answer must be in it too.
 	output = reply(t, []map[string]any{against(criterion("match", 0), "blue")}, "")
 	if _, err := checkSuggestion(q, r, answer, output, "m"); !errors.Is(err, errUngrounded) {
 		t.Fatalf("invented quote against the answer kept: %v", err)
 	}
-	// A committed answer keeps its mark.
+	// a committed answer keeps its mark.
 	output = reply(t, []map[string]any{against(criterion("match", 1, "Green"))}, "")
 	if s, err := checkSuggestion(q, r, "Green", output, "m"); err != nil || s.Awarded != 1 {
 		t.Fatalf("%+v %v", s, err)
@@ -116,10 +117,10 @@ func TestQuotesAgainstTheAnswerAreChecked(t *testing.T) {
 		criteria []map[string]any
 		want     error
 	}{
-		// One contradicted criterion refuses the whole suggestion, though the other is fine.
+		// one contradicted criterion refuses the whole suggestion, though the other is fine.
 		"one criterion contradicted": {[]map[string]any{criterion("c1", 2, "both read the counter"), against(criterion("c2", 3, "lost"), "one update is lost")}, errContradicted},
 		"a blank quote against":      {[]map[string]any{criterion("c1", 0), against(criterion("c2", 0), "  ")}, errUngrounded},
-		// Matching ignores how whitespace runs but not case, so a quote in other case is not in the answer.
+		// matching ignores how whitespace runs but not case, so a quote in other case is not in the answer.
 		"other case":       {[]map[string]any{criterion("c1", 0), against(criterion("c2", 0), "TWO THREADS")}, errUngrounded},
 		"other whitespace": {[]map[string]any{criterion("c1", 0), against(criterion("c2", 0), "both  read the\ncounter")}, nil},
 		"too many quotes":  {[]map[string]any{criterion("c1", 0), against(criterion("c2", 0), tooMany...)}, errors.New("INVALID_OUTPUT")},
@@ -244,7 +245,7 @@ func TestTooManyQuotesAreRefused(t *testing.T) {
 	}
 }
 
-// fakeAI is ai-core and the token endpoint: it keeps the last inference body and answers it with answer.
+// fakeai is ai-core and the token endpoint: it keeps the last inference body and answers it with answer.
 type fakeAI struct {
 	*httptest.Server
 	body map[string]any

@@ -1,5 +1,4 @@
-"""Classroom access, decided by the Identity service. Callers forward the user's own token, so Identity's rules
-decide; a service never works out classroom membership itself."""
+"""classroom access, decided by the identity service."""
 
 from collections.abc import Collection
 
@@ -18,9 +17,7 @@ class IdentityClient:
     async def relation(
         self, authorization: str, classroom_id: str, correlation: str, student_id: str | None = None
     ) -> str | None:
-        """How the caller may access the classroom (optionally on behalf of a student): RELATION_TEACHER for its
-        own teacher, RELATION_STUDENT for an enrolled student, None when access is denied. Raises UpstreamError
-        when Identity is unavailable."""
+        """how the caller may access the classroom (optionally on behalf of a student): relation_teacher for its own teacher, relation_student for an enrolled student, none when access is denied."""
         try:
             resp = await self.http.get(
                 f"{self.base_url}/v1/classrooms/{classroom_id}/access",
@@ -43,8 +40,7 @@ class IdentityClient:
         return str(relation)
 
     async def roster(self, authorization: str, classroom_id: str, correlation: str) -> list[str] | None:
-        """The ids of all the classroom's students, in Identity's order (by name), for its own teacher: None when
-        access is denied. Raises UpstreamError when Identity is unavailable or answers out of contract."""
+        """the ids of all the classroom's students, in identity's order (by name), for its own teacher: none when access is denied."""
         try:
             resp = await self.http.get(
                 f"{self.base_url}/v1/classrooms/{classroom_id}/student-ids",
@@ -75,9 +71,7 @@ async def require_relation(
     allowed: Collection[str] = (RELATION_TEACHER, RELATION_STUDENT),
     denied: tuple[str, str] = ("FORBIDDEN", "You do not have access to this classroom."),
 ) -> str:
-    """The caller's relation to the classroom (optionally on behalf of a student), as Identity decides it with the
-    request's own token. 503 when Identity is unavailable; 403 with the `denied` code and message when access is
-    denied or the relation is not one of `allowed`."""
+    """verify classroom access through identity using the caller's token; reject unavailable or disallowed relations."""
     authorization, correlation = request.headers["authorization"], request.state.correlation_id
     try:
         relation = await identity.relation(authorization, classroom_id, correlation, student_id)

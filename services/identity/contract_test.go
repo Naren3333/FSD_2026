@@ -5,7 +5,7 @@ import (
 	"testing"
 )
 
-// The structs Identity writes match the named schemas of its contract, so the web's generated types (and
+// the structs identity writes match the named schemas of its contract, so the web's generated types (and
 // integration.py's response checks) describe what it really sends.
 func TestResponsesMatchTheContract(t *testing.T) {
 	for name, value := range map[string]any{

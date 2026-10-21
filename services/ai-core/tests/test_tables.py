@@ -1,5 +1,4 @@
-"""Tables: extraction from the text layer, the parser, the outline and the chunker.
-No DB, no OpenAI: the vision pass's results are given directly."""
+"""tables: extraction from the text layer, the parser, the outline and the chunker."""
 
 from pathlib import Path
 from typing import Any
@@ -119,14 +118,14 @@ def test_a_page_holding_only_a_table_has_text(tmp_path: Path) -> None:
     data, _ = make_table_pdf(HEADER, RUBRIC)
     path = tmp_path / "t.pdf"
     path.write_bytes(data)
-    doc = read_pages(path)  # would be NO_TEXT_LAYER if table text didn't count
+    doc = read_pages(path)  # would be no_text_layer if table text didn't count
     assert doc.pages == [[]] and len(doc.tables[0]) == 1
 
 
 def test_cells_lose_their_ligatures() -> None:
     assert clean_cell("eﬃcient\nﬁne-tuning") == "efficient fine-tuning"
     assert unligature("ﬀ ﬄ ﬆ") == "ff ffl st"
-    assert unligature("10²⁰") == "10²⁰"  # superscripts are left alone (not NFKC)
+    assert unligature("10²⁰") == "10²⁰"  # superscripts are left alone (not nfkc)
 
 
 # ---- outline
@@ -224,7 +223,7 @@ def test_a_layout_with_an_invented_or_missing_word_is_rejected(tmp_path: Path) -
     assert "not in the box" in (
         verify_layout(tuple(SPARSE_HEADER), invented, words, seen(box, 4, 4, "borderless")) or ""
     )
-    dropped = tuple(tuple(r) for r in SPARSE[:2])  # the (B) row left out
+    dropped = tuple(tuple(r) for r in SPARSE[:2])  # the (b) row left out
     assert "leaves out" in (
         verify_layout(tuple(SPARSE_HEADER), dropped, words, seen(box, 4, 4, "borderless")) or ""
     )

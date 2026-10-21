@@ -1,23 +1,4 @@
-"""PDF → styled text blocks and tables per page with PyMuPDF. Blocking: run it
-in a thread.
-
-Tables come from ingest.tables (inside the vision pass's boxes, or find_tables "lines" without one); their
-text, and their caption line, are taken out of the prose so cells never turn into headings or paragraphs. A
-table continued on the next page (the model says so, and the next page opens with a table of the same width)
-is joined into one. Described figures (ingest.figures) take their words and caption line out of the prose
-the same way, unless they cover most of the page. Repeated headers and footers are dropped here; headings are
-detected from the blocks' styles in ingest.headings.
-
-A page without a text layer that the vision pass transcribed (OCR) takes its text from
-the transcript instead: headings become blocks sized above the document's body text (by level), paragraphs
-body-size blocks, and tables vision tables, laid out top to bottom in the page's middle band (so they are
-never mistaken for headers or footers). Transcribed pages are listed in `Document.ocr_pages`.
-
-A page set in two columns has a gutter: a vertical strip in the middle of the page that no
-column's text crosses (`_columns`). Its blocks are put in reading order (the left column, then the right, band by
-band between blocks spanning both), and `reading_key` places tables and figures by the same order; a page without
-a gutter keeps the PDF's own order and is placed top to bottom.
-"""
+"""pdf → styled text blocks and tables per page with pymupdf."""
 
 import re
 from collections import Counter
@@ -35,12 +16,12 @@ from ingest.strings import join_lines, unligature
 from ingest.tables import Table
 from ingest.vision import PageVision, SeenText
 
-MAX_EMPTY_SHARE = 0.5  # more empty pages than this → NO_TEXT_LAYER
+MAX_EMPTY_SHARE = 0.5  # more empty pages than this → no_text_layer
 REPEAT_SHARE = 0.6  # a header/footer appears on more than this share of pages...
 MARGIN_BAND = 0.15  # ...within this share of the page height from the top or bottom edge...
 MIN_REPEAT_PAGES = 3  # ...in a document with at least this many pages (else every block "repeats"),
-# and is short and no bigger than the body text (so "Chapter 1", "Chapter 2"… at the top of each page,
-# or each page's first paragraph, stay)
+# and is short and no bigger than the body text (so "chapter 1", "chapter 2"… at the top of each page, or
+# each page's first paragraph, stay)
 MAX_REPEAT_CHARS = 120
 BOLD_FLAG = 16
 MAX_INLINE_CHARS = 12  # a one-span block this short, inside another block's line, is an inline word
@@ -63,7 +44,7 @@ SPAN_SHARE = (
 
 @dataclass(frozen=True)
 class Block:
-    """A run of same-style lines from one PyMuPDF text block, whitespace-normalised."""
+    """a run of same-style lines from one pymupdf text block, whitespace-normalised."""
 
     text: str
     size: float  # of the line's longest span, rounded to 0.5pt
@@ -87,7 +68,7 @@ class Document:
     )  # 1-based: pages with text the vision model transcribed (all or part)
     toc: list[tuple[int, str, int]] = field(
         default_factory=list
-    )  # the PDF outline: (level, title, 1-based page)
+    )  # the pdf outline: (level, title, 1-based page)
     columns: list["Columns | None"] = field(
         default_factory=list
     )  # columns[i]: page i + 1's gutter, if two-column
@@ -95,7 +76,7 @@ class Document:
 
 @dataclass(frozen=True)
 class Columns:
-    """A two-column page: the gutter's x, and the tops of the blocks spanning both columns (band boundaries)."""
+    """a two-column page: the gutter's x, and the tops of the blocks spanning both columns (band boundaries)."""
 
     gutter: float
     cuts: tuple[float, ...] = ()
@@ -105,7 +86,7 @@ PYMUPDF_ERRORS = (RuntimeError, pymupdf.mupdf.FzErrorBase)
 
 
 class IngestError(Exception):
-    """A failure with a `failure_reason` of its own (anything else becomes INTERNAL)."""
+    """a failure with a `failure_reason` of its own (anything else becomes internal)."""
 
     def __init__(self, reason: str, detail: str) -> None:
         super().__init__(detail)
@@ -114,18 +95,17 @@ class IngestError(Exception):
 
 @contextmanager
 def open_checked(path: Path) -> Iterator[pymupdf.Document]:
-    """The PDF, opened; ENCRYPTED or CORRUPT when it can't be read. Ingest also runs this before the vision
-    pass, so a bad file fails with its own reason and costs no vision calls."""
+    """the pdf, opened; encrypted or corrupt when it can't be read."""
     if not path.exists():
-        # deleted mid-ingest: INTERNAL, if the row survives
+        # deleted mid-ingest: internal, if the row survives
         raise FileNotFoundError(f"{path.name} is missing")
     problem: str | None = None
     try:
         doc = pymupdf.open(path)
     except Exception as e:
         problem = str(e)
-    # Raised outside the except block: the failed open's traceback would otherwise keep the file open, and
-    # Windows then cannot delete the temporary copy.
+    # raised outside the except block: the failed open's traceback would otherwise keep the file open, and
+    # windows then cannot delete the temporary copy.
     if problem is not None:
         raise IngestError("CORRUPT", f"PyMuPDF could not open the file: {problem}")
     with doc:
@@ -135,8 +115,7 @@ def open_checked(path: Path) -> Iterator[pymupdf.Document]:
 
 
 def read_pages(path: Path, vision: list[PageVision | None] | None = None) -> Document:
-    """The document's prose, tables and figures. `vision` is the vision pass per page (None, or None for a
-    page: that page falls back to find_tables "lines" and has no figures)."""
+    """the document's prose, tables and figures. `vision` is the vision pass per page (none, or none for a page: that page falls back to find_tables \"lines\" and has no figures)."""
     with open_checked(path) as doc:
         try:
             doc_pages = list(doc.pages())
@@ -158,9 +137,9 @@ def read_pages(path: Path, vision: list[PageVision | None] | None = None) -> Doc
             heights = [page.rect.height for page in doc_pages]
             widths = [page.rect.width for page in doc_pages]
             toc = [(e[0], unligature(" ".join(str(e[1]).split())), e[2]) for e in doc.get_toc()]
-        # Only MuPDF's own errors (RuntimeError, FileDataError and the mupdf bindings' FzErrorBase) mean a broken
-        # file. Anything else is a bug here, or bad model output: a 500 the caller retries, never a permanent CORRUPT.
-        except (RecursionError, NotImplementedError):  # RuntimeErrors that are never MuPDF's
+        # only mupdf's own errors (runtimeerror, filedataerror and the mupdf bindings' fzerrorbase) mean a
+        # broken file.
+        except (RecursionError, NotImplementedError):  # runtimeerrors that are never mupdf's
             raise
         except PYMUPDF_ERRORS as e:
             raise IngestError("CORRUPT", f"PyMuPDF could not read the text: {e}") from e
@@ -201,9 +180,7 @@ def read_pages(path: Path, vision: list[PageVision | None] | None = None) -> Doc
 
 
 def reading_key(columns: "Columns | None", box: tuple[float, float, float, float]) -> tuple[int, int, float]:
-    """Where a box comes in the page's reading order: (band, column, top). Without columns, top to bottom. On a
-    two-column page a band runs from one spanning block to the next; in it the spanning block comes first, then
-    the left column, then the right."""
+    """where a box comes in the page's reading order: (band, column, top)."""
     if columns is None:
         return (0, 0, box[1])
     band = sum(1 for c in columns.cuts if c <= box[1])
@@ -213,7 +190,7 @@ def reading_key(columns: "Columns | None", box: tuple[float, float, float, float
 
 
 def _columns(blocks: list[Block], width: float, body: float) -> Columns | None:
-    """The page's column gutter (see the module docstring), or None for a single-column page."""
+    """the page's column gutter (see the module docstring), or none for a single-column page."""
     text = [b for b in blocks if b.x1 > b.x0]
     if len(text) < 2 * GUTTER_MIN_BLOCKS:
         return None
@@ -238,7 +215,7 @@ def _columns(blocks: list[Block], width: float, body: float) -> Columns | None:
 
 
 def _column_like(side: list[Block], body: float) -> bool:
-    """Enough body text on one side of a gutter to be a column."""
+    """enough body text on one side of a gutter to be a column."""
     prose = [b for b in side if abs(b.size - body) <= 1]
     lines = sum(max(1, round((b.bottom - b.top) / (b.size * 1.2))) for b in prose if b.size)
     return len(prose) >= GUTTER_MIN_BLOCKS and lines >= GUTTER_MIN_LINES
@@ -247,7 +224,7 @@ def _column_like(side: list[Block], body: float) -> bool:
 def _laid_out(
     transcript: tuple[SeenText, ...], body: float, box: tuple[float, float, float, float]
 ) -> tuple[list[Block], list[Table]]:
-    """A transcript as blocks and tables, each given an equal slot down `box` (the page's middle band)."""
+    """a transcript as blocks and tables, each given an equal slot down `box` (the page's middle band)."""
     blocks: list[Block] = []
     tables: list[Table] = []
     x0, top, x1, bottom = box
@@ -270,14 +247,12 @@ def _page_tables(page: pymupdf.Page, seen: PageVision | None) -> list[Table]:
 
 
 def _caption_key(text: str) -> str:
-    """Letters and digits only, lower case: the model writes "Figure 7:" where the PDF has "Figure 7.", and
-    some text layers run the words together ("Thedataefficiencyof")."""
+    """letters and digits only, lower case: the model writes \"figure 7:\" where the pdf has \"figure 7.\", and some text layers run the words together (\"thedataefficiencyof\")."""
     return re.sub(r"[^0-9a-z]", "", unligature(text).lower())
 
 
 def _without_regions(page_dict: dict, tables: list[Table], figures: list[Figure] | None = None) -> dict:
-    """The page's text minus the lines inside a table or a (stripped) figure, and minus the tables' and figures'
-    caption lines."""
+    """the page's text minus the lines inside a table or a (stripped) figure, and minus the tables' and figures' caption lines."""
     regions: list[Table | Figure] = [*tables, *(figures or [])]
     if not regions:
         return page_dict
@@ -320,9 +295,7 @@ def _table_chars(t: Table) -> int:
 
 
 def _join_continued(tables: list[list[Table]]) -> list[list[Table]]:
-    """A table the model says goes on, followed by a table of the same width at the top of the next page,
-    is one table: the second's rows are appended (its header too, unless it repeats the first's). The joined
-    table stays open while it goes on, so a table over three or more pages ends up as one."""
+    """a table the model says goes on, followed by a table of the same width at the top of the next page, is one table: the second's rows are appended (its header too, unless it repeats the first's)."""
     out = [list(page) for page in tables]
     open_at: tuple[int, int] | None = None  # (page index, table index) of a table going on to the next page
     for i, page in enumerate(out):
@@ -349,8 +322,7 @@ def _join_continued(tables: list[list[Table]]) -> list[list[Table]]:
 
 
 def _blocks(page_dict: dict) -> list[Block]:
-    """Text blocks (type 0) split wherever the line style changes, so a heading line at the top of a
-    paragraph's block becomes a block of its own."""
+    """text blocks (type 0) split wherever the line style changes, so a heading line at the top of a paragraph's block becomes a block of its own."""
     out: list[Block] = []
     for block in _inline_words([b for b in page_dict["blocks"] if b["type"] == 0]):
         run: list[tuple[str, float, bool, float, float, float, float]] = []
@@ -371,10 +343,7 @@ def _blocks(page_dict: dict) -> list[Block]:
 
 
 def _inline_words(blocks: list[dict]) -> list[dict]:
-    """Put one-word blocks back into the line they sit in. Some PDFs (RFC 9110's MUST / SHOULD / MAY)
-    typeset an inline word as a block of its own, which would pull it out of its sentence. A block is
-    such a word when it is a single short span whose vertical middle falls inside a line of another
-    block, horizontally within or touching that block (a word opening a line sits just left of it)."""
+    """put one-word blocks back into the line they sit in."""
     kept: list[dict] = []
     for word in blocks:
         lines = word["lines"]
@@ -416,7 +385,7 @@ def _join(run: list[tuple[str, float, bool, float, float, float, float]]) -> Blo
 
 
 def body_size(pages: Pages) -> float:
-    """The median font size, weighted by characters."""
+    """the median font size, weighted by characters."""
     sizes = sorted((b.size, len(b.text)) for blocks in pages for b in blocks)
     half, seen = sum(n for _, n in sizes) / 2, 0
     for size, n in sizes:
@@ -435,9 +404,7 @@ def _repeat_key(block: Block, height: float, body: float) -> tuple[str, int] | N
 
 
 def _strip_repeated(pages: Pages, heights: list[float]) -> Pages:
-    """Drop headers/footers: the same text (digits ignored, so page numbers match) at the same
-    y-position, in the top or bottom margin band, short and no bigger than body text, on more than
-    REPEAT_SHARE of the pages."""
+    """remove short, body-sized margin text repeated across enough pages."""
     if len(pages) < MIN_REPEAT_PAGES:
         return pages
     body = body_size(pages)

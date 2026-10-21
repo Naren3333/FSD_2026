@@ -41,8 +41,7 @@ const grade = (student: string, status: Evaluation['status']): Evaluation => ({
   released_at: status === 'finalized' ? '2026-10-16T00:00:00Z' : null,
 });
 
-/** The Grading review page for classroom c1, whose grades load as `grades` says, all on one page; `grading`
- * replaces any of Grading's calls. */
+/* the grading review page for classroom c1, whose grades load as `grades` says, all on one page; `grading` replaces any of grading's calls. */
 function render(grades: Promise<Evaluation[]>, grading: Record<string, unknown> = {}) {
   TestBed.resetTestingModule();
   const evaluations = vi.fn(
@@ -102,7 +101,7 @@ function render(grades: Promise<Evaluation[]>, grading: Record<string, unknown> 
     await new Promise((resolve) => setTimeout(resolve));
     fixture.detectChanges();
   };
-  /** The grade card of the student with this name. */
+  /* the grade card of the student with this name. */
   const card = (name: string) =>
     [...root.querySelectorAll('article.grade')].find((a) =>
       a.querySelector('h3')?.textContent?.includes(name),
@@ -194,7 +193,7 @@ describe('pages of grades', () => {
     next.focus();
     next.click();
     page.fixture.detectChanges();
-    // The button keeps focus while the page loads.
+    // the button keeps focus while the page loads.
     expect(next.disabled).toBe(false);
     expect(document.activeElement).toBe(next);
     await page.settle();

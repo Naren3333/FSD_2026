@@ -1,11 +1,10 @@
-"""JSON log lines. A call such as `log.error("ledger_write_failed", extra={"model": m})` becomes one JSON object
-with the service name, level, logger, message and the extra fields."""
+"""json log lines."""
 
 import json
 import logging
 from typing import Any
 
-# Attributes every LogRecord has; anything else on a record came from `extra=`.
+# attributes every logrecord has; anything else on a record came from `extra=`.
 _STANDARD = set(logging.makeLogRecord({}).__dict__) | {"message", "asctime", "taskName"}
 
 
@@ -28,7 +27,7 @@ class JsonFormatter(logging.Formatter):
 
 
 def configure(service: str) -> None:
-    """Log JSON lines at INFO to stderr, unless logging is already set up (for example under pytest)."""
+    """log json lines at info to stderr, unless logging is already set up (for example under pytest)."""
     handler = logging.StreamHandler()
     handler.setFormatter(JsonFormatter(service))
     logging.basicConfig(level=logging.INFO, handlers=[handler])

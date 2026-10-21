@@ -3,7 +3,7 @@ import { IdentityApi } from '../api/clients';
 import type { Profile } from '../api/models';
 import { Auth } from './auth';
 
-/** The signed-in user: their profile and role, once Identity has registered them. */
+/* the signed-in user: their profile and role, once identity has registered them. */
 @Injectable({ providedIn: 'root' })
 export class Session {
   private readonly auth = inject(Auth);
@@ -12,7 +12,7 @@ export class Session {
   readonly isTeacher = computed(() => this.profile()?.role === 'teacher');
   readonly isStudent = computed(() => this.profile()?.role === 'student');
 
-  /** The sign-in has expired; signing in again is the way back. */
+  /* the sign-in has expired; signing in again is the way back. */
   readonly expired = this.auth.expired;
 
   get signedIn(): boolean {
@@ -21,7 +21,7 @@ export class Session {
 
   private loading: Promise<void> | null = null;
 
-  /** Registers the signed-in user with Identity and loads their profile, once; a failed load can be retried. */
+  /* registers the signed-in user with identity and loads their profile, once; a failed load can be retried. */
   ready(): Promise<void> {
     this.loading ??= this.load().catch((error: unknown) => {
       this.loading = null;

@@ -23,7 +23,8 @@ func TestFuseRanksByReciprocalRankThenBestLegThenID(t *testing.T) {
 	for _, h := range got {
 		ids = append(ids, h.ChunkID)
 	}
-	// c is in both legs; a (vector 1) and b (vector 2) and d (keyword 2) follow by single-leg rank, b before d by id.
+	// c is in both legs; a (vector 1) and b (vector 2) and d (keyword 2) follow by single-leg rank, b before d
+	// by id.
 	if strings.Join(ids, ",") != "c,a,b,d" {
 		t.Fatalf("order %v", ids)
 	}
@@ -118,7 +119,7 @@ func TestValidateRejectsWhatCannotBeStored(t *testing.T) {
 	}
 }
 
-// fakeAICore is ai-core and Keycloak's token endpoint for the client tests.
+// fakeaicore is ai-core and keycloak's token endpoint for the client tests.
 type fakeAICore struct {
 	*httptest.Server
 	tokens  atomic.Int32
@@ -236,7 +237,7 @@ func TestRerankSendsThePassagePartsForAICoreToJoin(t *testing.T) {
 	}
 }
 
-// testBilled is the user test calls to ai-core are made for.
+// testbilled is the user test calls to ai-core are made for.
 var testBilled = billed{UserID: "teacher-1", OrgID: "org", Role: "teacher"}
 
 func TestTheBilledUserIsSentAndTheSpendLimitIsRecognised(t *testing.T) {

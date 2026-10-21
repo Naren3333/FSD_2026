@@ -1,5 +1,4 @@
-"""Fakes for the chatbot's tests: an in-memory store, and Identity, Content, ai-core and Keycloak's token
-endpoint behind one httpx MockTransport. The application's own Services client talks to them unchanged."""
+"""fakes for the chatbot's tests: an in-memory store, and identity, content, ai-core and keycloak's token endpoint behind one httpx mocktransport."""
 
 import json
 from collections.abc import Iterator
@@ -124,15 +123,14 @@ def rewrite(
 
 
 class Fakes:
-    """What the other services answer. `replies` are ai-core's answers in order: a Response, or a str for a
-    stream. Every request is recorded."""
+    """what the other services answer. `replies` are ai-core's answers in order: a response, or a str for a stream."""
 
     def __init__(self) -> None:
         self.access = {("Bearer s1", ROOM), ("Bearer t1", ROOM)}
         self.results: list[dict[str, Any]] = []
         self.by_query: dict[str, list[dict[str, Any]]] = {}  # a search's results by its query; else `results`
         self.fallback = False
-        # Searches whose rerank fell back, besides all when `fallback`.
+        # searches whose rerank fell back, besides all when `fallback`.
         self.fallback_queries: set[str] = set()
         self.search_status = 200
         self.search_error: dict[str, Any] = {"error": {"code": "X", "message": "x"}}
@@ -200,13 +198,12 @@ def api(fakes: Fakes, store: MemoryStore) -> Iterator[TestClient]:
 
 
 def fake_actor(request: Request) -> dict[str, Any]:
-    """Verified claims for the user named in the test's Authorization header: t… is a teacher, x… has neither
-    role, anyone else is a student. Real JWT verification is tested in packages/python-platform."""
+    """verified claims for the user named in the test's authorization header: t… is a teacher, x… has neither role, anyone else is a student."""
     user = request.headers["authorization"].removeprefix("Bearer ")
     role = "teacher" if user.startswith("t") else "parent" if user.startswith("x") else "student"
     return token_claims(role, sub=user, org="org")
 
 
 def as_user(user: str = "s1") -> dict[str, str]:
-    """The Authorization header for a test user; the actor override reads the user (and t… = teacher) from it."""
+    """the authorization header for a test user; the actor override reads the user (and t… = teacher) from it."""
     return {"Authorization": f"Bearer {user}"}

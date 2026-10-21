@@ -4,10 +4,7 @@ import type { Topic } from '../api/models';
 import { topicNames } from '../shared/names';
 import { Session } from './session';
 
-/** The organization's topics, active and archived, read once per signed-in user and shared by every page that names
- * topics. Archived topics are never offered for new questions, but older questions and evidence still name them. They
- * are read again when a page needs a topic it does not know yet (another teacher may have added it) and whenever the
- * curriculum page refreshes or changes them. */
+/* the organization's topics, active and archived, read once per signed-in user and shared by every page that names topics. */
 @Injectable({ providedIn: 'root' })
 export class CurriculumNames {
   private readonly api = inject(CurriculumApi);
@@ -21,18 +18,18 @@ export class CurriculumNames {
     const cache = this.cache();
     return cache && cache.user === this.user() ? cache : null;
   });
-  /** The signed-in user's active topics; empty until read, and never another user's. */
+  /* the signed-in user's active topics; empty until read, and never another user's. */
   readonly topics = computed(() => this.mine()?.topics ?? []);
-  /** The signed-in user's archived topics, in the same way. */
+  /* the signed-in user's archived topics, in the same way. */
   readonly archived = computed(() => this.mine()?.archived ?? []);
   private readonly names = computed(() => topicNames([...this.topics(), ...this.archived()]));
 
-  /** The topic's name, or '' when the curriculum has no such topic. */
+  /* the topic's name, or '' when the curriculum has no such topic. */
   topicName(topicId: string): string {
     return this.names().get(topicId) ?? '';
   }
 
-  /** Reads the topics now, and shares what it read with every page. Resolves to the active ones. */
+  /* reads the topics now, and shares what it read with every page. */
   refresh(): Promise<Topic[]> {
     const user = this.user();
     const request = ++this.request;
@@ -48,8 +45,7 @@ export class CurriculumNames {
     return topics;
   }
 
-  /** Resolves once the topics have been read for this user and name each of these topics, reading them again
-   * (or joining a read already under way) when they do not. */
+  /* resolves once the topics have been read for this user and name each of these topics, reading them again (or joining a read already under way) when they do not. */
   async need(topicIds: Iterable<string>): Promise<void> {
     const user = this.user();
     const known = this.cache()?.user === user;

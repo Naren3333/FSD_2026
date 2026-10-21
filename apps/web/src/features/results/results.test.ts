@@ -17,7 +17,7 @@ beforeAll(() => {
   TestBed.initTestEnvironment(BrowserTestingModule, platformBrowserTesting());
 });
 
-/** The results page for a classroom whose results load as `results` says. */
+/* the results page for a classroom whose results load as `results` says. */
 async function render(
   results: Promise<Evaluation[]>,
   need: () => Promise<void> = () => Promise.resolve(),
@@ -39,7 +39,7 @@ async function render(
   const fixture = TestBed.createComponent(ResultsComponent);
   fixture.detectChanges();
   const text = () => (fixture.nativeElement as HTMLElement).textContent ?? '';
-  /** Lets the page's pending reads finish, then renders what they left. */
+  /* lets the page's pending reads finish, then renders what they left. */
   const settle = async () => {
     await new Promise((resolve) => setTimeout(resolve));
     fixture.detectChanges();

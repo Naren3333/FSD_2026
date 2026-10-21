@@ -15,7 +15,7 @@ import (
 
 const consumerTopic = "test.happened"
 
-// envelope is a valid event message of consumerTopic, changed by edit before it is encoded.
+// envelope is a valid event message of consumertopic, changed by edit before it is encoded.
 func envelope(t *testing.T, edit func(map[string]any)) kafka.Message {
 	t.Helper()
 	e := map[string]any{"event_id": uuid.NewString(), "event_type": consumerTopic, "schema_version": 1, "timestamp": time.Now().UTC(), "correlation_id": uuid.NewString(), "resource_id": "r1", "data": map[string]any{}}

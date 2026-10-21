@@ -1,11 +1,4 @@
-"""Delete the golden eval's classrooms ("Golden eval C1" and "Golden eval C2") from the local stack.
-
-    python scripts/eval/delete_corpus.py
-
-Deletes the classrooms load_corpus.py created, by the ids in .local/eval-corpus.json, as `teacher` through Identity's
-API, so every service purges their documents and data. Their ids and documents leave the eval's state, keeping the
-second student's password, so load_corpus.py creates them again (indexing again costs embeddings).
-"""
+"""delete the eval classrooms through authorized apis so each service purges its own data."""
 
 import argparse
 

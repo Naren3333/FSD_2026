@@ -8,7 +8,7 @@ import (
 	"unicode/utf8"
 )
 
-// server answers Grading's HTTP routes from its store, with classroom access from Identity.
+// server answers grading's http routes from its store, with classroom access from identity.
 type server struct {
 	store  store
 	access platform.ClassroomAccess
@@ -25,13 +25,10 @@ func (s server) routes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /v1/evaluations/{id}/finalize", s.finalize)
 }
 
-// maxPage is the most evaluations one page of a teacher's list holds; each carries its student's answers.
+// maxpage is the most evaluations one page of a teacher's list holds; each carries its student's answers.
 const maxPage = 100
 
-// list is, for the classroom's teacher only, one page of its evaluations with the students' answers, newest first, or
-// of one assessment's, oldest first: ?offset= and ?limit= (default 20, at most 100) choose the page, and total says
-// how many there are. Only enrolled students' are listed: a removed student's evaluations are kept, and come back if
-// they are enrolled again.
+// list authorized evaluations with pagination and submission ordering.
 func (s server) list(w http.ResponseWriter, r *http.Request) {
 	classroom, assessment, students, ok := s.enrolledWork(w, r)
 	if !ok {
@@ -49,9 +46,7 @@ func (s server) list(w http.ResponseWriter, r *http.Request) {
 	platform.JSON(w, http.StatusOK, map[string]any{"evaluations": result, "total": total})
 }
 
-// enrolledWork checks the caller is the teacher of the classroom ?classroom_id= names, and reads the optional
-// ?assessment_id= and the classroom's enrolled students, whose work alone a teacher's lists and counts hold. On
-// failure the response is written.
+// authorize the classroom teacher and load the current roster and optional assessment filter.
 func (s server) enrolledWork(w http.ResponseWriter, r *http.Request) (classroom, assessment string, students []string, ok bool) {
 	classroom = r.URL.Query().Get("classroom_id")
 	assessment = r.URL.Query().Get("assessment_id")
@@ -66,8 +61,8 @@ func (s server) enrolledWork(w http.ResponseWriter, r *http.Request) (classroom,
 	return classroom, assessment, students, ok
 }
 
-// get is one evaluation with its student's answers, for the classroom's teacher only, so an open grade can be read
-// again (for AI suggestions still being prepared) wherever it is in the list.
+// get is one evaluation with its student's answers, for the classroom's teacher only, so an open grade can
+// be read again (for ai suggestions still being prepared) wherever it is in the list.
 func (s server) get(w http.ResponseWriter, r *http.Request) {
 	if !s.teacherOfEvaluation(w, r) {
 		return
@@ -78,8 +73,7 @@ func (s server) get(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-// counts is, for the classroom's teacher only, how many of its enrolled students' evaluations need grading and how
-// many are final, in the classroom or, with ?assessment_id=, in one assessment: the same evaluations its list holds.
+// count draft and finalized evaluations for currently enrolled students.
 func (s server) counts(w http.ResponseWriter, r *http.Request) {
 	classroom, assessment, students, ok := s.enrolledWork(w, r)
 	if !ok {
@@ -117,10 +111,9 @@ func (s server) mine(w http.ResponseWriter, r *http.Request) {
 	platform.JSON(w, http.StatusOK, own)
 }
 
-// teacherOfEvaluation checks the caller is the teacher of the classroom of the evaluation the path names. On
-// failure the response is written.
+// teacherofevaluation checks the caller is the teacher of the classroom of the evaluation the path names.
 func (s server) teacherOfEvaluation(w http.ResponseWriter, r *http.Request) bool {
-	// The role check comes first so a student is refused before any lookup; TeacherOf decides below.
+	// the role check comes first so a student is refused before any lookup; teacherof decides below.
 	if !platform.Teacher(w, r) {
 		return false
 	}
@@ -176,7 +169,8 @@ func (s server) finalize(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-// writeMarkingError writes the response for a failed marking or finalization and reports whether err was nil.
+// writemarkingerror writes the response for a failed marking or finalization and reports whether err was
+// nil.
 func writeMarkingError(w http.ResponseWriter, err error) bool {
 	switch {
 	case err == nil:
@@ -199,8 +193,8 @@ func writeMarkingError(w http.ResponseWriter, err error) bool {
 	return false
 }
 
-// release shows an assessment's finalized grades to its enrolled students, for the classroom's teacher only: the ones
-// its counts report as unreleased. A removed student's grades stay unreleased.
+// release shows an assessment's finalized grades to its enrolled students, for the classroom's teacher
+// only: the ones its counts report as unreleased.
 func (s server) release(w http.ResponseWriter, r *http.Request) {
 	if !platform.Teacher(w, r) {
 		return

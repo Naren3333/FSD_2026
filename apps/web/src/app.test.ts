@@ -19,8 +19,7 @@ afterEach(() => vi.unstubAllGlobals());
 const json = (status: number, body: unknown) =>
   new Response(JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json' } });
 
-/** The shell for a user signed in with Keycloak, whose API calls `fetch` answers; Identity, Gateway and Session are
- * the real ones. */
+/* the shell for a user signed in with keycloak, whose api calls `fetch` answers; identity, gateway and session are the real ones. */
 function render(fetch: (url: string) => Response) {
   const calls: string[] = [];
   vi.stubGlobal(
@@ -84,7 +83,7 @@ describe('an account signing in with a role it was not registered with', () => {
     expect(page.text()).toContain("Your workspace didn't load");
     expect(page.text()).toContain(message);
     expect(page.text()).not.toContain('Loading your workspace…');
-    // Not stuck: neither control waits on anything, and signing out works.
+    // not stuck: neither control waits on anything, and signing out works.
     expect(page.button('Try again').disabled).toBe(false);
     expect(page.button('Sign out').disabled).toBe(false);
     page.button('Sign out').click();

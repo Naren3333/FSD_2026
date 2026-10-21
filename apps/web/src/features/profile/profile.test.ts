@@ -37,8 +37,7 @@ const student: Profile = {
   display_name: 'Ada L',
 };
 
-/** The Profile page for this user, whose deletion answers as `remove` does. `rooms` is the user's classrooms, or
- * where loading them stands. */
+/* the profile page for this user, whose deletion answers as `remove` does. `rooms` is the user's classrooms, or where loading them stands. */
 function render(
   profile: Profile,
   rooms: Classroom[] | 'loading' | 'failed' = [],
@@ -140,7 +139,7 @@ describe('the Profile page', () => {
     expect(page.root.textContent).toContain('Checking your classrooms');
     expect(page.button('Delete account').disabled).toBe(true);
     expect(page.button('Delete account').getAttribute('aria-describedby')).toBe('delete-account-blocked');
-    // A student has no classrooms of their own to wait for.
+    // a student has no classrooms of their own to wait for.
     expect(render(student, 'loading').button('Delete account').disabled).toBe(false);
   });
 

@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { Section } from './section';
 
-/** A promise and the functions that settle it, for holding a load open. */
+/* a promise and the functions that settle it, for holding a load open. */
 function deferred<T>() {
   let resolve!: (value: T) => void, reject!: (error: unknown) => void;
   const promise = new Promise<T>((yes, no) => ((resolve = yes), (reject = no)));

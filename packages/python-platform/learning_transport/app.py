@@ -1,4 +1,4 @@
-"""The FastAPI application every Python service starts from: error envelopes, request telemetry, liveness."""
+"""the fastapi application every python service starts from: error envelopes, request telemetry, liveness."""
 
 import logging
 import os
@@ -22,7 +22,7 @@ OIDC_SETTINGS = ("OIDC_ISSUER", "OIDC_AUDIENCE", "OIDC_JWKS_URL")
 
 
 def require_env(*names: str) -> None:
-    """Fail startup when any of these environment variables is unset or empty."""
+    """fail startup when any of these environment variables is unset or empty."""
     missing = [name for name in names if not os.environ.get(name)]
     if missing:
         raise RuntimeError("Missing configuration: " + ", ".join(missing))
@@ -44,7 +44,7 @@ def application(name: str, **kwargs: Any) -> FastAPI:
 
     @app.exception_handler(RequestValidationError)
     async def validation_error(request: Request, error: RequestValidationError) -> JSONResponse:
-        # Never include Pydantic's input value: it can contain confidential documents.
+        # never include pydantic's input value: it can contain confidential documents.
         return JSONResponse(
             status_code=422,
             content={
@@ -107,9 +107,7 @@ def application(name: str, **kwargs: Any) -> FastAPI:
 def placeholder_app(
     name: str, path: str, capability: str, request_model: type[BaseModel], response_model: type[BaseModel]
 ) -> FastAPI:
-    """An AI agent whose capability is not authorized yet: `POST path` validates the versioned request contract
-    for an ai-client caller, then answers 501 for `capability`. No private data is fetched and no inference is
-    attempted; references in the request stay untrusted until a future workflow authorizes and resolves them."""
+    """an ai agent whose capability is not authorized yet: `post path` validates the versioned request contract for an ai-client caller, then answers 501 for `capability`."""
 
     @asynccontextmanager
     async def lifespan(app: FastAPI) -> AsyncIterator[None]:

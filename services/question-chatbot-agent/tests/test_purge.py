@@ -14,7 +14,7 @@ def test_malformed_classroom_deletions_are_dead_lettered() -> None:
         "resource_id": str(uuid4()),  # not the deleted classroom
         "data": {"classroom_id": str(uuid4()), "org_id": "o"},
     }
-    # The pool is never reached: the message is rejected first.
+    # the pool is never reached: the message is rejected first.
     assert purge(None, json.dumps(deletion).encode()) is False  # type: ignore[arg-type]
     assert purge(None, b"{}") is False  # type: ignore[arg-type]
 
@@ -68,7 +68,7 @@ def test_malformed_document_deletions_are_dead_lettered() -> None:
     }
     assert redact(None, json.dumps(deletion).encode()) is False  # type: ignore[arg-type]
     assert redact(None, b"{}") is False  # type: ignore[arg-type]
-    # A classroom deletion on the document topic is not a document deletion, and the other way round.
+    # a classroom deletion on the document topic is not a document deletion, and the other way round.
     deletion["resource_id"] = document
     assert handle(None, "identity.classroom.deleted.v1", json.dumps(deletion).encode()) is False  # type: ignore[arg-type]
 
@@ -88,6 +88,6 @@ def test_malformed_account_deletions_are_dead_lettered() -> None:
     deletion["resource_id"] = user
     deletion["data"] = {"user_id": user, "org_id": "o", "role": "admin"}
     assert purge_user(None, json.dumps(deletion).encode()) is False  # type: ignore[arg-type]
-    # An account deletion on the classroom topic is not a classroom deletion.
+    # an account deletion on the classroom topic is not a classroom deletion.
     deletion["data"] = {"user_id": user, "org_id": "o", "role": "student"}
     assert handle(None, "identity.classroom.deleted.v1", json.dumps(deletion).encode()) is False  # type: ignore[arg-type]

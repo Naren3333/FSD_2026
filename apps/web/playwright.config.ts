@@ -1,10 +1,6 @@
 import { defineConfig } from '@playwright/test';
 
-// The browser tests create classrooms, documents and assessments, so they run against the disposable test stack:
-// `python scripts/stack_tests.py e2e` starts it, runs them with COMPOSE_PROJECT_NAME naming it and its ports in
-// KONG_PORT, KEYCLOAK_PORT and WEB_PORT, and removes it. E2E_DEV_STACK=1 runs them against the development stack.
-// Both must name the test stack: its project name alone would send the topic cleanup's psql to the test stack but
-// the browser and the classroom cleanup to the development stack's ports. TEST_PORTS is scripts/local_stack.py's.
+// run browser tests against the isolated test stack to protect development data.
 const TEST_PORTS: Record<string, string> = { KONG_PORT: '18000', KEYCLOAK_PORT: '18081', WEB_PORT: '14200' };
 if (process.env['E2E_DEV_STACK'] !== '1') {
   if (process.env['COMPOSE_PROJECT_NAME'] !== 'learning-test') {

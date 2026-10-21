@@ -1,4 +1,4 @@
-"""No paid calls: local selection, exact reuse and configurable chunk boundaries."""
+"""no paid calls: local selection, exact reuse and configurable chunk boundaries."""
 
 from pathlib import Path
 from types import SimpleNamespace

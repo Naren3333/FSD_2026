@@ -13,16 +13,16 @@ import (
 	"github.com/segmentio/kafka-go"
 )
 
-// Consumer reads a topic into a service's database, recording each event in the inbox table.
+// consumer reads a topic into a service's database, recording each event in the inbox table.
 type Consumer struct {
 	DB    *pgxpool.Pool
-	Group string // the Kafka consumer group, one per service
-	// Timeout bounds one attempt at an event, its transaction included; zero means defaultEventTimeout. A handler
-	// whose work grows with the data, such as a classroom purge, sets a longer one so a large event can finish.
+	Group string // the kafka consumer group, one per service
+	// timeout bounds one attempt at an event, its transaction included; zero means defaulteventtimeout.
 	Timeout time.Duration
 }
 
-// defaultEventTimeout is how long one attempt at an event may take unless the Consumer sets its own Timeout.
+// defaulteventtimeout is how long one attempt at an event may take unless the consumer sets its own
+// timeout.
 const defaultEventTimeout = 10 * time.Second
 
 func (c Consumer) eventTimeout() time.Duration {
@@ -32,10 +32,7 @@ func (c Consumer) eventTimeout() time.Duration {
 	return defaultEventTimeout
 }
 
-// Consume processes a topic for as long as ctx lives. A session stops without committing when an event keeps
-// failing (the database is down, say); Consume then waits, backing off to a minute, and starts a new session from
-// the last committed offset, so the event is retried rather than skipped and the consumer never stays down.
-// healthy, if given, is true while a session runs and false while it waits to restart.
+// consume processes a topic for as long as ctx lives.
 func (c Consumer) Consume(ctx context.Context, topic string, handler Handler, healthy *atomic.Bool) {
 	backoff := 5 * time.Second
 	for ctx.Err() == nil {
@@ -62,7 +59,8 @@ func (c Consumer) Consume(ctx context.Context, topic string, handler Handler, he
 	}
 }
 
-// consumeSession reads until ctx ends or an event cannot be completed, and reports whether it committed anything.
+// consumesession reads until ctx ends or an event cannot be completed, and reports whether it committed
+// anything.
 func (c Consumer) consumeSession(ctx context.Context, topic string, handler Handler) bool {
 	reader := kafka.NewReader(kafka.ReaderConfig{Brokers: strings.Split(Required("KAFKA_BROKERS"), ","), Topic: topic, GroupID: c.Group, MinBytes: 1, MaxBytes: 2 << 20, CommitInterval: 0})
 	defer reader.Close()
@@ -92,7 +90,8 @@ func (c Consumer) consumeSession(ctx context.Context, topic string, handler Hand
 	return progressed
 }
 
-// settle handles one message, or dead-letters it when it is invalid, and reports whether it may be committed.
+// settle handles one message, or dead-letters it when it is invalid, and reports whether it may be
+// committed.
 func (c Consumer) settle(ctx context.Context, topic string, msg kafka.Message, handler Handler, dlq messageWriter) bool {
 	event, valid := decodeEvent(msg.Value, topic)
 	if valid {
@@ -106,7 +105,7 @@ func (c Consumer) settle(ctx context.Context, topic string, msg kafka.Message, h
 	return err == nil
 }
 
-// decodeEvent reads an event envelope and reports whether it is a well-formed event of this topic.
+// decodeevent reads an event envelope and reports whether it is a well-formed event of this topic.
 func decodeEvent(value []byte, topic string) (Event, bool) {
 	var event Event
 	if json.Unmarshal(value, &event) != nil {
@@ -115,8 +114,7 @@ func decodeEvent(value []byte, topic string) (Event, bool) {
 	return event, ID(event.ID) && event.Type == topic && event.Version == 1 && ID(event.Correlation) && !event.Timestamp.IsZero() && event.Resource != ""
 }
 
-// handle runs the handler with retries. It reports whether the event was completed, and whether the handler
-// declared it invalid (so it belongs in the dead-letter topic rather than being retried).
+// handle runs the handler with retries.
 func (c Consumer) handle(ctx context.Context, event Event, handler Handler) (completed, invalid bool) {
 	for attempt := 0; attempt < 5 && ctx.Err() == nil; attempt++ {
 		err := c.handleOnce(ctx, event, handler)
@@ -137,7 +135,8 @@ func (c Consumer) handle(ctx context.Context, event Event, handler Handler) (com
 	return false, false
 }
 
-// handleOnce records the event in the inbox and runs the handler in the same transaction; a duplicate is a no-op.
+// handleonce records the event in the inbox and runs the handler in the same transaction; a duplicate is a
+// no-op.
 func (c Consumer) handleOnce(ctx context.Context, event Event, handler Handler) error {
 	workCtx, cancel := context.WithTimeout(context.WithValue(ctx, correlationKey, event.Correlation), c.eventTimeout())
 	defer cancel()

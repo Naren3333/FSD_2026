@@ -29,8 +29,7 @@ const evidence = (topics: Performance['topics']): Performance => ({
   topics,
 });
 
-/** A teacher's performance page for classroom c1, opened from a link to Ana's evidence, whose roster and evidence
- * load as given. */
+/* a teacher's performance page for classroom c1, opened from a link to ana's evidence, whose roster and evidence load as given. */
 function render(
   roster: Promise<Student[]>,
   performance: Promise<Performance>,

@@ -1,4 +1,4 @@
-// Command identity is the Identity & Classroom service: users, classrooms, enrollment, and the classroom
+// command identity is the identity & classroom service: users, classrooms, enrollment, and the classroom
 // access decisions the other services ask it for.
 package main
 

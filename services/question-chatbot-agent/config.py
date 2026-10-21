@@ -4,10 +4,9 @@ from dataclasses import dataclass
 from learning_transport.agents import AGENT_ENV, AgentSettings, read_settings
 
 ANSWER_MAX_TOKENS = 800
-# Below this top rerank score a turn is refused without a model call (fsd_test's golden-set floor).
+# below this top rerank score a turn is refused without a model call (fsd_test's golden-set floor).
 RELEVANCE_FLOOR = 0.61
-# Once a turn passed RELEVANCE_FLOOR, the search for one of its topics adds passages if its best one reaches this
-# (question generation's floor): a narrow topic query scores lower than a whole question about it.
+# allow narrower topic searches to add evidence after the overall question passes its relevance gate.
 TOPIC_FLOOR = 0.5
 
 

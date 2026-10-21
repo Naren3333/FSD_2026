@@ -1,11 +1,4 @@
-"""What each user's model calls cost, and the daily cap (ADR 0003). ai-core is the one place every paid call
-passes through, so it keeps the ledger: one row per billable call, priced from the provider's token counts, in its
-own `aicore` database. The cap is per user per day: SPEND_LIMIT_STUDENT_USD (default 5) and
-SPEND_LIMIT_TEACHER_USD (default 10), and the day starts at midnight in SPEND_TIMEZONE (default Asia/Singapore).
-
-PostgreSQL reserves a conservative estimate before each provider attempt and transfers it to recorded usage
-afterwards. The same database serializes AI_USER_CONCURRENCY (default 10) across replicas, including ingest.
-Uncertain outcomes retain reservations until accounted for or past the budget day and lease (ADR 0012)."""
+"""record every paid model call and enforce the billed user's daily allowance."""
 
 import logging
 from dataclasses import dataclass
@@ -25,9 +18,7 @@ log = logging.getLogger("ai-core.spend")
 MIGRATIONS = Path(__file__).parent / "migrations"
 Role = Literal["student", "teacher"]
 
-# USD per million tokens: input, cached input, output. Checked against third-party price listings on 2026-10-13;
-# OpenAI's and Voyage's own price pages are authoritative. MODEL_PRICES (JSON, same shape) overrides or adds
-# models. A model missing from the table is billed at the most expensive known rate, never for free.
+# usd per million tokens: input, cached input, output.
 DEFAULT_PRICES: dict[str, tuple[float, float, float]] = {
     "gpt-6-luna": (0.10, 0.01, 0.50),
     "gpt-5.4-mini": (0.75, 0.075, 4.50),
@@ -37,8 +28,7 @@ DEFAULT_PRICES: dict[str, tuple[float, float, float]] = {
 
 
 class Billed(Contract):
-    """The user a call is made for. Callers are trusted service accounts (role ai-client) that took this from the
-    user's verified token: it decides whose allowance pays, never what the call may read."""
+    """the user a call is made for."""
 
     user_id: str = Field(min_length=1, max_length=200)
     org_id: str = Field(min_length=1, max_length=200)
@@ -80,7 +70,7 @@ def cost(model: str, tokens_in: int, tokens_out: int = 0, cached_in: int = 0) ->
 
 
 def estimate_tokens(text: str) -> int:
-    """About four characters a token: for a stream that ended without OpenAI's usage numbers."""
+    """about four characters a token: for a stream that ended without openai's usage numbers."""
     return (len(text) + 3) // 4
 
 
@@ -137,7 +127,8 @@ class PostgresLedger(AsyncPooled):
         async with self.pool.connection() as conn, conn.transaction():
             total_limit = get_settings().total_spend_limit_usd
             if total_limit is not None:
-                # Lock before the per-user lock so users and replicas cannot spend the same global allowance.
+                # lock before the per-user lock so users and replicas cannot spend the same global
+                # allowance.
                 await lock_async(conn, "ai-budget", "all-users")
                 total = await (
                     await conn.execute(
@@ -192,7 +183,7 @@ class PostgresLedger(AsyncPooled):
             expires_at=now()+interval '30 minutes'""",
                 (reservation, billed.org_id, billed.user_id, amount),
             )
-            # Old abandoned reservations are no longer counted after their budget day and lease have passed.
+            # old abandoned reservations are no longer counted after their budget day and lease have passed.
             await conn.execute("DELETE FROM budget_reservations WHERE expires_at<now()-interval '2 days'")
 
     async def release(self, reservation: str) -> None:
@@ -232,8 +223,7 @@ class PostgresLedger(AsyncPooled):
             )
 
     async def today(self, billed: Billed) -> Usage:
-        # The day boundaries are computed by PostgreSQL, which carries the time zone database, on local dates in
-        # SPEND_TIMEZONE (adding a day to a timestamptz would follow the session's zone across a DST change).
+        # compute allowance boundaries from local calendar dates in the configured database time zone.
         async with self.pool.connection() as conn:
             cur = await conn.execute(
                 """WITH local AS (SELECT date_trunc('day', now() AT TIME ZONE %(tz)s) AS midnight),

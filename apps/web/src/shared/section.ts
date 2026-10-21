@@ -2,17 +2,16 @@ import { computed, signal } from '@angular/core';
 import type { ActionState } from './action-state';
 import { messageOf } from './errors';
 
-/** One part of a page that loads on its own: whether it is loading, its value, or the error that stopped it. Only the newest
- * request lands, so a slow answer for a classroom the user has left never replaces the current one. */
+/* one part of a page that loads on its own: whether it is loading, its value, or the error that stopped it. */
 export class Section<T> {
   readonly value = signal<T | null>(null);
   readonly loading = signal(false);
   readonly error = signal('');
-  /** Neither loading nor failed: the value, or its absence, is what there is to show. */
+  /* neither loading nor failed: the value, or its absence, is what there is to show. */
   readonly ready = computed(() => !this.loading() && !this.error());
   private request = 0;
 
-  /** Loads the value. `work` can ask whether its request is still the newest before it changes anything else. */
+  /* loads the value. `work` can ask whether its request is still the newest before it changes anything else. */
   async load(work: (current: () => boolean) => Promise<T>): Promise<void> {
     const request = ++this.request;
     const current = () => request === this.request;
@@ -30,8 +29,7 @@ export class Section<T> {
     }
   }
 
-  /** Re-reads the value without showing it as loading. It lands only if nothing newer started meanwhile; a failure
-   * keeps what is on show and is only reported to the caller, as false. */
+  /* re-reads the value without showing it as loading. */
   async poll(work: () => Promise<T>): Promise<boolean> {
     const request = this.request;
     try {
@@ -43,10 +41,7 @@ export class Section<T> {
     }
   }
 
-  /** Re-reads the value after a mutation, in place of any pending load. Like a load, it lands only if nothing newer
-   * started meanwhile, so a list re-read for a classroom the user has since left never replaces the current one. A
-   * failure keeps what is on show and is thrown to the caller; when nothing is on show yet (the re-read replaced a
-   * first load still under way), the section reports the failure too, rather than show an empty list. */
+  /* re-reads the value after a mutation, in place of any pending load. */
   async reload(work: () => Promise<T>): Promise<void> {
     const request = ++this.request;
     try {
@@ -63,7 +58,7 @@ export class Section<T> {
     }
   }
 
-  /** Shows a value the page already has, such as a list it just changed locally, in place of any pending load. */
+  /* shows a value the page already has, such as a list it just changed locally, in place of any pending load. */
   set(value: T): void {
     this.request++;
     this.value.set(value);
@@ -79,9 +74,7 @@ export class Section<T> {
   }
 }
 
-/** Re-reads a list with `reread` after the item `id` was deleted from it. When that fails (the deletion itself is
- * done), the list on show leaves the item out, unless `current` says the page has moved on, and `state` says the list
- * could not be refreshed: "The `what` could not be refreshed. Choose Refresh `what` to try again." */
+/* re-reads a list with `reread` after the item `id` was deleted from it. */
 export async function rereadAfterDelete<T extends { id: string }>(
   list: Section<T[]>,
   id: string,

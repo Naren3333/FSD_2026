@@ -23,7 +23,8 @@ describe('SseParser', () => {
     expect(parser.push('event: citations\ndata: {"citations":\ndata: [],\ndata: "n": 2}\n\n')).toEqual([
       { event: 'citations', data: { citations: [], n: 2 } },
     ]);
-    // A newline inside a JSON string must arrive escaped; the line break between data lines is not part of it.
+    // a newline inside a json string must arrive escaped; the line break between data lines is not part of
+    // it.
     expect(parser.push('data: {"text":\ndata: "line"}\n\n')).toEqual([
       { event: 'message', data: { text: 'line' } },
     ]);
@@ -50,7 +51,7 @@ describe('SseParser', () => {
     const parser = new SseParser();
     expect(parser.push('event: token\r')).toEqual([]);
     expect(parser.push('\ndata: {"text":"a"}\r')).toEqual([]);
-    // The CR that starts the blank line already ends the frame; the LF after it is not another blank line.
+    // the cr that starts the blank line already ends the frame; the lf after it is not another blank line.
     expect(parser.push('\n\r')).toEqual([{ event: 'token', data: { text: 'a' } }]);
     expect(parser.push('\nevent: done\r\ndata: {"outcome":"answered"}\r\n\r\n')).toEqual([
       { event: 'done', data: { outcome: 'answered' } },

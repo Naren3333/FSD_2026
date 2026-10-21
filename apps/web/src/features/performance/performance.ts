@@ -37,10 +37,10 @@ export class PerformanceComponent {
   private readonly identity = inject(IdentityApi);
   private readonly curriculum = inject(CurriculumNames);
   readonly classroomId = inject(ClassroomContext).classroomId;
-  /** Only the form's validation; the evidence and roster report their own loading and errors. */
+  /* only the form's validation; the evidence and roster report their own loading and errors. */
   readonly state = new ActionState();
   readonly result = new Section<Performance>();
-  /** The classroom's students a teacher can choose from. */
+  /* the classroom's students a teacher can choose from. */
   readonly roster = new Section<Student[]>();
   readonly rosterHint = computed(() =>
     this.roster.loading()
@@ -50,7 +50,7 @@ export class PerformanceComponent {
         : '',
   );
   readonly studentName = studentName;
-  /** The student a link such as the class dashboard asked to open, until they are found on the roster. */
+  /* the student a link such as the class dashboard asked to open, until they are found on the roster. */
   private requested = '';
   readonly form = new FormGroup({
     student: new FormControl('', { nonNullable: true, validators: [Validators.required] }),
@@ -60,7 +60,7 @@ export class PerformanceComponent {
     onClassroomChange((classroomId) => {
       this.result.clear();
       this.roster.clear();
-      // Students only ever see their own performance; teachers choose from the classroom's roster.
+      // students only ever see their own performance; teachers choose from the classroom's roster.
       const profile = this.session.profile();
       if (profile && this.session.isStudent()) {
         this.form.controls.student.setValue(profile.id);
@@ -79,7 +79,7 @@ export class PerformanceComponent {
       });
   }
 
-  /** Shows the requested student's evidence once they are on the current classroom's roster. */
+  /* shows the requested student's evidence once they are on the current classroom's roster. */
   private openRequested(): void {
     if (!this.requested || !this.roster.value()?.some((s) => s.id === this.requested)) return;
     this.form.controls.student.setValue(this.requested);
@@ -99,7 +99,7 @@ export class PerformanceComponent {
     this.result.clear();
     void this.result.load(async () => {
       const performance = await this.analytics.performance(studentId, classroomId);
-      // Without the curriculum, topics show their ids.
+      // without the curriculum, topics show their ids.
       await this.curriculum.need(performance.topics.map((s) => s.topic_id)).catch(() => undefined);
       this.form.markAsPristine();
       return performance;

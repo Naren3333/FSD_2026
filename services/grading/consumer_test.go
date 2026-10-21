@@ -15,7 +15,7 @@ const (
 	topicID      = "3f405162-7c8d-4e9f-8a1b-2c3d4e5f6071"
 )
 
-// submittedEvent is an assessment.submitted.v4 event, with data replacing the defaults it names.
+// submittedevent is an assessment.submitted.v4 event, with data replacing the defaults it names.
 func submittedEvent(t *testing.T, data map[string]any) platform.Event {
 	t.Helper()
 	base := map[string]any{

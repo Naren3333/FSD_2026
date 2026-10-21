@@ -1,8 +1,4 @@
--- The curriculum becomes one level, topics (ADR 0007, decided by the project owner on 2026-10-18). DESTRUCTIVE, and
--- authorized as such: subjects, courses, units, topics and learning objectives of the old tree are deleted, archived or
--- not, and the old skills become the topics, keeping their ids, names, archived flags and prerequisites. Nothing
--- outside Curriculum referred to the deleted levels: questions, grades, analytics and the AI agents name skills only,
--- by the same ids the topics keep.
+-- the curriculum becomes one level, topics (adr 0007, decided by the project owner on 2026-10-18).
 DELETE FROM prerequisites
 WHERE skill_id IN (SELECT id FROM nodes WHERE kind <> 'skill')
    OR prerequisite_id IN (SELECT id FROM nodes WHERE kind <> 'skill');

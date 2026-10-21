@@ -46,7 +46,7 @@ from settings import get_settings
 log = logging.getLogger("ai-core")
 
 MAX_PDF_BYTES = 50 * 1024 * 1024
-INGEST_CONCURRENCY = 2  # PDFs at once; more callers wait for a slot
+INGEST_CONCURRENCY = 2  # pdfs at once; more callers wait for a slot
 DISCONNECT_POLL = 2.0  # seconds between checks that an ingest's caller is still there
 ERRORS: dict[int | str, dict[str, Any]] = {
     code: {"model": ErrorResponse} for code in (401, 403, 413, 415, 422, 429, 502, 503)
@@ -74,14 +74,14 @@ async def lifespan(app: Any) -> AsyncIterator[None]:
 
 app = application("ai-core", lifespan=lifespan)
 
-# Only service accounts holding ai-client call ai-core; each call names the user it is billed to.
+# only service accounts holding ai-client call ai-core; each call names the user it is billed to.
 SERVICE = requires(AI_CLIENT)
 
 
 @app.get("/health/ready", responses={503: {"model": ErrorResponse}})
 async def ready(request: Request) -> dict[str, str]:
-    # The ledger must answer (no call runs without it); for the providers only whether keys are configured:
-    # probing paid APIs on every health check would cost money and latency.
+    # the ledger must answer (no call runs without it); for the providers only whether keys are configured:
+    # probing paid apis on every health check would cost money and latency.
     try:
         await asyncio.wait_for(billing_of(request).ledger.ping(), 2)
     except Exception:
@@ -95,7 +95,7 @@ async def ready(request: Request) -> dict[str, str]:
 
 
 def provider_error(error: Exception) -> NoReturn:
-    """Provider failures as errors the caller can retry or fall back on; never a made-up result."""
+    """provider failures as errors the caller can retry or fall back on; never a made-up result."""
     if isinstance(error, openai_client.NotConfiguredError | rerank.RerankNotConfiguredError):
         raise failure(503, "AI_PROVIDER_NOT_CONFIGURED", "The AI provider is not configured.")
     if isinstance(error, openai_client.StructuredOutputError):
@@ -140,7 +140,7 @@ async def usage_today(
     role: spend.Role = Query(),
     _caller: Claims = Depends(SERVICE),
 ) -> spend.Usage:
-    """A user's spend today, their daily limit and when it resets, for a service showing it to that user."""
+    """a user's spend today, their daily limit and when it resets, for a service showing it to that user."""
     try:
         return await billing_of(request).ledger.today(spend.Billed(user_id=user_id, org_id=org_id, role=role))
     except Exception:
@@ -181,7 +181,7 @@ async def infer(request: RequestContract, http: Request, slot: Slot) -> Any:
             else [{"role": "user", "content": request.input}]
         )
         if request.stream:
-            # Opened before the response starts, so a provider failure is still a plain error status.
+            # opened before the response starts, so a provider failure is still a plain error status.
             stream = openai_client.stream_chat(messages, request.max_tokens)
             first = await anext(stream)
             bill = StreamBill(billing, billed, correlation, settings.chat_model, messages, request.max_tokens)
@@ -200,7 +200,7 @@ async def infer(request: RequestContract, http: Request, slot: Slot) -> Any:
             messages, request.max_tokens, request.response_schema, name=request.schema_name or ""
         )
     except openai_client.StructuredOutputError as error:
-        # OpenAI bills a refused or cut-off reply like any other: charge it, then refuse it.
+        # openai bills a refused or cut-off reply like any other: charge it, then refuse it.
         prompt = message_text(messages)
         await billing.charge(
             billed,
@@ -209,7 +209,8 @@ async def infer(request: RequestContract, http: Request, slot: Slot) -> Any:
         )
         provider_error(error)
     except openai.APITimeoutError as error:
-        # OpenAI may still finish, and bill, a reply nobody waited for: charge what it could cost (ADR 0003).
+        # openai may still finish, and bill, a reply nobody waited for: charge what it could cost (adr
+        # 0003).
         if request.operation == "embed":
             embedded = [{"content": request.input}]
             await billing.charge_timeout(billed, correlation, "embed", settings.embedding_model, embedded, 0)
@@ -232,9 +233,7 @@ async def infer(request: RequestContract, http: Request, slot: Slot) -> Any:
 
 
 class ClosingStream(StreamingResponse):
-    """Server-sent events that run `finish` however the response ends. A caller hanging up before the body starts
-    means the events generator never runs, so its own `finally` can't bill the reply or close the provider
-    stream."""
+    """server-sent events that run `finish` however the response ends."""
 
     def __init__(self, content: AsyncIterator[str], finish: Callable[[], Awaitable[None]]) -> None:
         super().__init__(content, media_type="text/event-stream")
@@ -306,7 +305,7 @@ async def rerank_billed(request: RerankRequest, http: Request, billing: Billing)
         provider_error(error)
     model = get_settings().reranker_model
     if tokens is None:
-        # Voyage counts the query once per document.
+        # voyage counts the query once per document.
         guess = sum(spend.estimate_tokens(request.query) + spend.estimate_tokens(d) for d in documents)
         charge = priced("rerank", model, guess, estimated=True)
     else:
@@ -334,9 +333,7 @@ async def ingest_pdf(
     billed_role: spend.Role = Query(),
     _caller: Claims = Depends(SERVICE),
 ) -> IngestResponse:
-    """One supported document (the raw body) → chunks with embeddings and the figure crops they point at. Stateless: the caller
-    stores the result. A document problem is a `failed` outcome; a provider outage is an error to retry. The
-    model calls are charged to `billed_user` (the teacher who uploaded the document), whatever the outcome."""
+    """one supported document (the raw body) → chunks with embeddings and the figure crops they point at."""
     billed = spend.Billed(user_id=billed_user, org_id=billed_org, role=billed_role)
     return await budgeted(request, billed, lambda: ingest_reserved(request, title, billed))
 
@@ -424,7 +421,7 @@ async def budgeted(http: Request, billed: spend.Billed, work: Callable[[], Await
 
 
 def indexed_response(result: IngestResult) -> IngestResponse:
-    """The ingest result as the contract sends it: chunks with their embed text and vector, and figure crops."""
+    """the ingest result as the contract sends it: chunks with their embed text and vector, and figure crops."""
     return IngestResponse(
         outcome="indexed",
         page_count=result.pages,
@@ -462,8 +459,7 @@ async def _ingest(
     check: Callable[[], Awaitable[None]],
     mime: str = "application/pdf",
 ) -> IngestResult:
-    """The ingest, once one of the slots is free. The allowance is checked again then: the check before the wait
-    may be long out of date, as other uploads by the same user ran (and were charged) in the meantime."""
+    """the ingest, once one of the slots is free."""
     with costs.stage("queued"):
         await slots.acquire()
     try:
@@ -475,14 +471,13 @@ async def _ingest(
 
 
 class CallerGoneError(Exception):
-    """The caller hung up before the work finished."""
+    """the caller hung up before the work finished."""
 
 
 async def unless_disconnected[T](
     request: Request, work: Coroutine[Any, Any, T], poll: float = DISCONNECT_POLL
 ) -> T:
-    """Await `work`, cancelling it if the caller disconnects first. Content gives up on an ingest after 20 minutes
-    and retries it later; without this the abandoned run would keep a slot and keep paying for model calls."""
+    """await `work`, cancelling it if the caller disconnects first."""
     task = asyncio.ensure_future(work)
     try:
         while not task.done():
@@ -498,7 +493,7 @@ async def unless_disconnected[T](
 
 
 async def receive(request: Request, path: Path, max_bytes: int | None = None) -> None:
-    """Stream the body to disk, refusing more than MAX_PDF_BYTES without reading it all into memory."""
+    """stream the body to disk, refusing more than max_pdf_bytes without reading it all into memory."""
     size = 0
     with path.open("wb") as out:
         async for part in request.stream():

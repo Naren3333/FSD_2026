@@ -15,8 +15,7 @@ import (
 	"github.com/jackc/pgx/v5"
 )
 
-// These tests run pgStore against real PostgreSQL in a throwaway schema. They need ASSESSMENT_TEST_DATABASE_URL
-// and are skipped without it.
+// these tests run pgstore against real postgresql in a throwaway schema.
 
 func testStore(t *testing.T) pgStore {
 	return pgStore{platformtest.DB(t, "ASSESSMENT_TEST_DATABASE_URL", migrations)}
@@ -141,7 +140,7 @@ func TestAnUnsubmittedAssessmentIsDeletedWithItsSavedWork(t *testing.T) {
 		if err := p.deleteAssessment(ctx, "org", v.ID, false); err != nil {
 			t.Fatalf("%s: %v", status, err)
 		}
-		// A save that checked the assessment before the deletion finds it gone, not a broken reference.
+		// a save that checked the assessment before the deletion finds it gone, not a broken reference.
 		if _, err := p.saveAnswers(ctx, v.ID, "s", map[string]string{v.Questions[0].ID: "1"}); !errors.Is(err, platform.ErrNotFound) {
 			t.Fatalf("%s: saved work on a deleted assessment: %v", status, err)
 		}
@@ -151,8 +150,8 @@ func TestAnUnsubmittedAssessmentIsDeletedWithItsSavedWork(t *testing.T) {
 	}
 }
 
-// Deleting with its submissions takes them, their unpublished events and saved work, and announces it in the same
-// transaction; a draft's deletion is not announced.
+// deleting with its submissions takes them, their unpublished events and saved work, and announces it in
+// the same transaction; a draft's deletion is not announced.
 func TestAnAssessmentIsDeletedWithItsSubmissions(t *testing.T) {
 	p, ctx := testStore(t), context.Background()
 	v := stored(t, p, "org", statusPublished, nil)
@@ -168,7 +167,7 @@ func TestAnAssessmentIsDeletedWithItsSubmissions(t *testing.T) {
 	if _, err := p.db.Exec(ctx, "UPDATE outbox SET published_at=now() WHERE id=(SELECT id FROM outbox LIMIT 1)"); err != nil {
 		t.Fatal(err)
 	}
-	// An event written as an older version before an upgrade holds answers too.
+	// an event written as an older version before an upgrade holds answers too.
 	if _, err := p.db.Exec(ctx, `INSERT INTO outbox(id,topic,partition_key,body) VALUES($1::uuid,'assessment.submitted.v3',$1::text,jsonb_build_object('data',jsonb_build_object('assessment_id',$2::text,'org_id','org')))`, uuid.NewString(), v.ID); err != nil {
 		t.Fatal(err)
 	}
@@ -211,8 +210,7 @@ func TestAnAssessmentIsDeletedWithItsSubmissions(t *testing.T) {
 	}
 }
 
-// A submission whose answers are to questions the teacher has since changed, or to an assessment since deleted, is
-// refused; one racing a teacher's change either lands first (and the change is refused) or is refused itself.
+// a submission racing an assessment edit must either win or be rejected as stale.
 func TestASubmissionIsToTheQuestionsAsTheyAre(t *testing.T) {
 	p, ctx := testStore(t), context.Background()
 	v := stored(t, p, "org", statusPublished, nil)
@@ -222,7 +220,7 @@ func TestASubmissionIsToTheQuestionsAsTheyAre(t *testing.T) {
 	if err := p.updateAssessment(ctx, "org", v, changed); err != nil {
 		t.Fatal(err)
 	}
-	// A second editor working from the version before that change is refused, so it cannot undo it unseen.
+	// a second editor working from the version before that change is refused, so it cannot undo it unseen.
 	stale := v
 	stale.Title = "From another tab"
 	if err := p.updateAssessment(ctx, "org", v, stale); !errors.Is(err, errAssessmentChanged) {
@@ -309,7 +307,7 @@ func TestStudentsListOnlyWhatIsOpen(t *testing.T) {
 			t.Errorf("%+v", v)
 		}
 	}
-	// A student since removed from the classroom keeps their submission, which the counts leave out.
+	// a student since removed from the classroom keeps their submission, which the counts leave out.
 	progress, err = p.listProgress(ctx, "org", room, []string{"someone else"})
 	list, err2 := p.listAssessments(ctx, "org", room, "s", true, []string{}, now)
 	if err != nil || err2 != nil {
@@ -324,15 +322,15 @@ func TestStudentsListOnlyWhatIsOpen(t *testing.T) {
 		if *v.Submissions != 0 {
 			t.Errorf("a removed student counted in the list: %+v", v)
 		}
-		// Their submission still stops a replacement or a plain deletion, which the list says.
+		// their submission still stops a replacement or a plain deletion, which the list says.
 		if *v.HasSubmissions != (v.ID == open.ID) {
 			t.Errorf("has_submissions without the roster: %+v", v)
 		}
 	}
 }
 
-// A new due date decides again which submissions are late, here and, announced once per change, in Grading; a
-// submission made against the old due date takes the new one.
+// a new due date decides again which submissions are late, here and, announced once per change, in grading;
+// a submission made against the old due date takes the new one.
 func TestANewDueDateDecidesLatenessAgain(t *testing.T) {
 	p, ctx := testStore(t), context.Background()
 	v := stored(t, p, "org", statusPublished, nil)
@@ -358,7 +356,7 @@ func TestANewDueDateDecidesLatenessAgain(t *testing.T) {
 	if lateCount() != 0 {
 		t.Fatal("the extension left the submission late")
 	}
-	// Only a changed due date is announced: a new title is not.
+	// only a changed due date is announced: a new title is not.
 	if err := p.updateDetails(ctx, "org", v.ID, Details{Title: "Renamed", DueAt: &due, LatePolicy: lateAccept}); err != nil {
 		t.Fatal(err)
 	}
@@ -386,7 +384,7 @@ func TestANewDueDateDecidesLatenessAgain(t *testing.T) {
 			t.Errorf("event %d: %v", i, data)
 		}
 	}
-	// A submission checked against the old, passed due date is judged against the one stored when it commits.
+	// a submission checked against the old, passed due date is judged against the one stored when it commits.
 	sub = Submission{ID: uuid.NewString(), Org: "org", Student: "s2", Answers: map[string]string{v.Questions[0].ID: "2"}, Late: true, SubmittedAt: time.Now()}
 	if _, _, err = p.insertSubmission(ctx, v, sub); err != nil {
 		t.Fatal(err)
@@ -403,7 +401,8 @@ func TestANewDueDateDecidesLatenessAgain(t *testing.T) {
 	}
 }
 
-// A replacement of a published assessment with a new due date is announced like a details change; a draft's is not.
+// a replacement of a published assessment with a new due date is announced like a details change; a draft's
+// is not.
 func TestAReplacementsNewDueDateIsAnnounced(t *testing.T) {
 	p, ctx := testStore(t), context.Background()
 	events := func(id string) int {
@@ -436,7 +435,7 @@ func TestAReplacementsNewDueDateIsAnnounced(t *testing.T) {
 	if data["assessment_id"] != v.ID || data["classroom_id"] != room || data["org_id"] != "org" || data["due_at"] != due.Format(time.RFC3339Nano) {
 		t.Errorf("%v", data)
 	}
-	// One whose replacement fails (another change landed first) announces nothing.
+	// one whose replacement fails (another change landed first) announces nothing.
 	stale := v
 	stale.Questions = slices.Clone(v.Questions)
 	stale.Questions[0].Answer = "9"
@@ -451,8 +450,8 @@ func TestAReplacementsNewDueDateIsAnnounced(t *testing.T) {
 	}
 }
 
-// A submission is judged against the due date and late policy stored when it commits, which the teacher may have
-// changed since the handler read them, and reports the late flag it stored.
+// a submission is judged against the due date and late policy stored when it commits, which the teacher may
+// have changed since the handler read them, and reports the late flag it stored.
 func TestASubmissionTakesTheLatePolicyAsStored(t *testing.T) {
 	p, ctx := testStore(t), context.Background()
 	v := stored(t, p, "org", statusPublished, nil)
@@ -593,8 +592,8 @@ func TestTheListCountsQuestionsAndPointsLikeDecoding(t *testing.T) {
 	}
 }
 
-// Migration 004 renames the key of questions stored before topics without changing anything else, and running it
-// again changes nothing.
+// migration 004 renames the key of questions stored before topics without changing anything else, and
+// running it again changes nothing.
 func TestTheTopicsMigrationRenamesStoredQuestions(t *testing.T) {
 	p, ctx := testStore(t), context.Background()
 	id, topic := uuid.NewString(), uuid.NewString()
@@ -625,7 +624,7 @@ func TestTheTopicsMigrationRenamesStoredQuestions(t *testing.T) {
 	}
 }
 
-// A student who deleted their account loses their submissions, saved work and submission events, twice over
+// a student who deleted their account loses their submissions, saved work and submission events, twice over
 // harmlessly, and cannot submit or save again; other students and organizations keep theirs.
 func TestADeletedAccountsWorkIsPurged(t *testing.T) {
 	p, ctx := testStore(t), context.Background()

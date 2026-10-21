@@ -1,5 +1,4 @@
-"""PostgresStore against a real PostgreSQL. Needs CHATBOT_TEST_DATABASE_URL, a scratch database (the tests add
-rows under unique users and leave them); skipped without it. See docs/development/operations.md."""
+"""postgresstore against a real postgresql."""
 
 import asyncio
 import json
@@ -103,7 +102,7 @@ async def test_a_purged_thread_takes_no_more_messages(store: PostgresStore) -> N
 async def test_a_turn_racing_a_purge_waits_for_it_instead_of_breaking_the_foreign_key(
     store: PostgresStore,
 ) -> None:
-    """The purge has deleted the thread but not committed: the turn waits, then sees the thread gone."""
+    """the purge has deleted the thread but not committed: the turn waits, then sees the thread gone."""
     tid = str((await store.create_thread("org", str(uuid4()), "student", ROOM))["id"])
     await store.start_turn(tid, "q", 6)
     async with store.pool.connection() as purge, purge.transaction():
@@ -205,7 +204,7 @@ async def test_one_answer_at_a_time_per_user(store: PostgresStore) -> None:
     user = str(uuid4())
     first, second = [str((await store.create_thread("org", user, "student", ROOM))["id"]) for _ in range(2)]
     other = str((await store.create_thread("org", str(uuid4()), "student", ROOM))["id"])
-    # Two tabs at once: exactly one gets the answer slot, in either thread.
+    # two tabs at once: exactly one gets the answer slot, in either thread.
     assert sorted(await asyncio.gather(store.claim_turn(first), store.claim_turn(second))) == [False, True]
     assert await store.claim_turn(other) is True  # another user isn't held up
     assert await store.claim_turn(first) is False

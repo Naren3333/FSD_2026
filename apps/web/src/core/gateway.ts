@@ -4,7 +4,7 @@ import { Auth } from './auth';
 import { APP_CONFIG } from './config';
 import { SseParser } from './sse';
 
-/** The backends behind Kong, by their path under /api. */
+/* the backends behind kong, by their path under /api. */
 export type Service =
   | 'identity'
   | 'curriculum'
@@ -17,14 +17,14 @@ export type Service =
 
 export interface RequestOptions {
   method?: 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE';
-  /** JSON, or a File sent as is with `contentType`. */
+  /* json, or a file sent as is with `contenttype`. */
   body?: unknown;
   contentType?: string;
-  /** Bounds the whole call, upload included. Defaults to the configured request timeout. */
+  /* bounds the whole call, upload included. */
   timeout?: number;
 }
 
-/** A failure the API answered: its readable message, its status and, when it named one, its error code. */
+/* a failure the api answered: its readable message, its status and, when it named one, its error code. */
 export class ApiError extends Error {
   constructor(
     message: string,
@@ -35,7 +35,7 @@ export class ApiError extends Error {
   }
 }
 
-/** Authenticated calls to the backends through Kong, with their failures turned into readable messages. */
+/* authenticated calls to the backends through kong, with their failures turned into readable messages. */
 @Injectable({ providedIn: 'root' })
 export class Gateway {
   private readonly auth = inject(Auth);
@@ -44,18 +44,18 @@ export class Gateway {
   async request<T>(service: Service, path: string, options: RequestOptions = {}): Promise<T> {
     const timeout = AbortSignal.timeout(options.timeout ?? this.config.requestTimeout);
     const response = await this.send(service, path, options, timeout);
-    // 204 No Content, such as an archive, has no body to read.
+    // 204 no content, such as an archive, has no body to read.
     if (response.status === 204) return undefined as T;
     return response.json() as Promise<T>;
   }
 
-  /** A file the API serves, such as a figure crop, as an object URL the caller revokes. */
+  /* a file the api serves, such as a figure crop, as an object url the caller revokes. */
   async objectUrl(service: Service, path: string): Promise<string> {
     const response = await this.send(service, path, {}, AbortSignal.timeout(this.config.requestTimeout));
     return URL.createObjectURL(await response.blob());
   }
 
-  /** Posts JSON and reads the server-sent events of the reply as they arrive. */
+  /* posts json and reads the server-sent events of the reply as they arrive. */
   async stream(
     service: Service,
     path: string,
@@ -108,7 +108,7 @@ function unreachable(signal: AbortSignal): string {
     : 'The service could not be reached. Check your connection and retry.';
 }
 
-/** The API's own message and code, or a message for the status. */
+/* the api's own message and code, or a message for the status. */
 async function failure(response: Response): Promise<ApiError> {
   const detail: { error?: { code?: string; message?: string } } = await response.json().catch(() => ({}));
   const fail = (message: string) => new ApiError(message, response.status, detail.error?.code ?? '');

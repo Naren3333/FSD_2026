@@ -10,7 +10,7 @@ import (
 
 var decimal = regexp.MustCompile(`^-?[0-9]{1,12}(\.[0-9]{1,8})?$`)
 
-// Question types, as Assessment publishes them.
+// question types, as assessment publishes them.
 const (
 	typeMultipleChoice = "multiple_choice"
 	typeNumerical      = "numerical"
@@ -18,8 +18,7 @@ const (
 	typeFreeResponse   = "free_response"
 )
 
-// questionKind marks answers to one question type. A new type is a new kind registered in questionKinds;
-// evaluate doesn't change. An error means the event carried a question or answer the kind cannot read.
+// questionkind marks answers to one question type.
 type questionKind interface {
 	// mark reports whether the answer earns the question's points, or that only the teacher can decide.
 	mark(q Question, answer string) (correct, needsTeacher bool, err error)
@@ -32,7 +31,7 @@ var questionKinds = map[string]questionKind{
 	typeFreeResponse:   freeResponse{},
 }
 
-// multipleChoice: the chosen option must be the answer key.
+// multiplechoice: the chosen option must be the answer key.
 type multipleChoice struct{}
 
 func (multipleChoice) mark(q Question, answer string) (bool, bool, error) {
@@ -61,8 +60,7 @@ func (numerical) mark(q Question, answer string) (bool, bool, error) {
 	return new(big.Rat).Abs(new(big.Rat).Sub(a, key)).Cmp(tolerance) <= 0, false, nil
 }
 
-// shortAnswer: an answer matching an accepted answer (after normalizeShort) earns the points. Any other answer
-// may still be right in other words, so the teacher decides; it is never marked wrong automatically.
+// shortanswer: an answer matching an accepted answer (after normalizeshort) earns the points.
 type shortAnswer struct{}
 
 func (shortAnswer) mark(q Question, answer string) (bool, bool, error) {
@@ -74,7 +72,8 @@ func (shortAnswer) mark(q Question, answer string) (bool, bool, error) {
 	return matched, !matched, nil
 }
 
-// normalizeShort is Assessment's rule: trimmed, inner whitespace collapsed, and lowercased unless case matters.
+// normalizeshort is assessment's rule: trimmed, inner whitespace collapsed, and lowercased unless case
+// matters.
 func normalizeShort(answer string, caseSensitive bool) string {
 	answer = strings.Join(strings.Fields(answer), " ")
 	if !caseSensitive {
@@ -83,7 +82,7 @@ func normalizeShort(answer string, caseSensitive bool) string {
 	return answer
 }
 
-// freeResponse: always marked by the teacher against its rubric.
+// freeresponse: always marked by the teacher against its rubric.
 type freeResponse struct{}
 
 func (freeResponse) mark(q Question, _ string) (bool, bool, error) {
@@ -93,8 +92,8 @@ func (freeResponse) mark(q Question, _ string) (bool, bool, error) {
 	return false, true, nil
 }
 
-// evaluate marks one answer: the question's points when its kind says it is correct, none when wrong, and none
-// yet when it needs the teacher.
+// evaluate marks one answer: the question's points when its kind says it is correct, none when wrong, and
+// none yet when it needs the teacher.
 func evaluate(q Question, answer string) (Evidence, error) {
 	e := Evidence{Question: q.ID, Topic: q.Topic, Possible: max(q.Points, 1)}
 	kind, ok := questionKinds[q.Type]

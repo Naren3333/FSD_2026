@@ -1,4 +1,4 @@
-"""ai-core settings, read once from the environment. Provider keys exist only here (ADR 0002)."""
+"""ai-core settings, read once from the environment."""
 
 import json
 import math
@@ -7,11 +7,11 @@ from dataclasses import dataclass, field
 from functools import lru_cache
 from pathlib import Path
 
-# The daily AI allowance defaults (ADR 0003), in USD per user per day, and the zone whose midnight starts the day.
+# the daily ai allowance defaults (adr 0003), in usd per user per day, and the zone whose midnight starts
+# the day.
 SPEND_LIMIT_STUDENT_USD, SPEND_LIMIT_TEACHER_USD, SPEND_TIMEZONE = 5.0, 10.0, "Asia/Singapore"
 USER_CONCURRENCY = 10
-# The largest PDF ingest takes, in pages and in chunks: past either it fails TOO_LARGE. Pages are checked before any
-# model call; chunks before the embeddings.
+# the largest pdf ingest takes, in pages and in chunks: past either it fails too_large.
 INGEST_MAX_PAGES, INGEST_MAX_CHUNKS = 500, 5000
 
 
@@ -33,31 +33,31 @@ class Settings:
     voyage_api_key: str | None
     voyage_base_url: str
     reranker_model: str
-    # The vision pass (tables, figures, OCR). Off, or past the page cap: tables come from find_tables "lines" only.
-    # Not CHAT_MODEL: OpenAI rate limits are per model, so a big ingest doesn't starve chat.
+    # the vision pass (tables, figures, ocr).
     table_vision: bool
     table_vision_model: str
     table_vision_max_pages: int
     figures: bool
     figure_model: str
     ocr: bool
-    # Model answers keyed by page content, so a reindex is free. Operational cache only, never business data.
+    # model answers keyed by page content, so a reindex is free.
     cache_dir: Path
-    # The daily AI allowance (ADR 0003): per role, with the day starting at midnight in spend_timezone.
+    # the daily ai allowance (adr 0003): per role, with the day starting at midnight in spend_timezone.
     spend_limit_student_usd: float = SPEND_LIMIT_STUDENT_USD
     spend_limit_teacher_usd: float = SPEND_LIMIT_TEACHER_USD
     spend_timezone: str = SPEND_TIMEZONE
-    # Running requests per user, shared across replicas through PostgreSQL reservations (including ingest).
+    # running requests per user, shared across replicas through postgresql reservations (including ingest).
     user_concurrency: int = USER_CONCURRENCY
     ingest_max_pages: int = INGEST_MAX_PAGES
     ingest_max_chunks: int = INGEST_MAX_CHUNKS
-    # USD per million tokens (input, cached input, output) that override or add to spend.DEFAULT_PRICES.
+    # usd per million tokens (input, cached input, output) that override or add to spend.default_prices.
     model_prices: dict[str, tuple[float, float, float]] = field(default_factory=dict)
     selective_vision: bool = True
     chunk_tokens: int = 600
     chunk_overlap: int = 90
     slide_chunks: bool = True
-    # Optional operational ceiling across every user and all usage retained in this ledger; never a daily reset.
+    # optional operational ceiling across every user and all usage retained in this ledger; never a daily
+    # reset.
     total_spend_limit_usd: float | None = None
 
     def __post_init__(self) -> None:
@@ -74,7 +74,7 @@ class Settings:
 
 
 def _prices(raw: str) -> dict[str, tuple[float, float, float]]:
-    """MODEL_PRICES: a JSON object of model name to [input, cached input, output] USD per million tokens."""
+    """model_prices: a json object of model name to [input, cached input, output] usd per million tokens."""
     if not raw.strip():
         return {}
     return {model: (float(a), float(b), float(c)) for model, (a, b, c) in json.loads(raw).items()}

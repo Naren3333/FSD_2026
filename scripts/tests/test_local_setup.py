@@ -1,5 +1,4 @@
-"""The local stack's setup scripts, Compose file and Kong configuration agree with each other. None of these tests
-needs Docker or the running stack."""
+"""the local stack's setup scripts, compose file and kong configuration agree with each other."""
 
 import json
 import re
@@ -20,7 +19,7 @@ COMPOSE = (ROOT / "docker-compose.yml").read_text(encoding="utf-8")
 
 
 def required_variables() -> set[str]:
-    """Every ${NAME:?message} in docker-compose.yml: Compose refuses to start without it."""
+    """every ${name:?message} in docker-compose.yml: compose refuses to start without it."""
     return set(re.findall(r"\$\{(\w+):\?", COMPOSE))
 
 
@@ -33,7 +32,7 @@ def test_every_value_compose_requires_is_generated_and_in_the_example() -> None:
 
 
 def test_no_unguarded_secret_in_compose() -> None:
-    """A plain ${NAME} would silently become empty; only optional values carry a default."""
+    """a plain ${name} would silently become empty; only optional values carry a default."""
     assert re.findall(r"\$\{\w+\}", COMPOSE) == []
     optional = set(re.findall(r"\$\{(\w+):-", COMPOSE))
     assert optional == {
@@ -67,7 +66,7 @@ def test_read_env_reads_values_as_compose_does(tmp_path: Path) -> None:
 
 
 def test_every_application_has_a_healthcheck() -> None:
-    """The Go images are distroless, so their binary checks itself; the Python images ask with Python."""
+    """the go images are distroless, so their binary checks itself; the python images ask with python."""
     go = {"identity", "curriculum", "content", "assessment", "grading"}
     for name in wait_ready.SERVICES:
         block = re.search(
@@ -92,7 +91,7 @@ def test_upgrade_adds_only_what_env_lacks(tmp_path: Path) -> None:
     lines = env_path.read_text(encoding="utf-8").splitlines()
     assert lines[:2] == ["# old setup", "POSTGRES_PASSWORD=kept"]
     assert sum(line.startswith("POSTGRES_PASSWORD=") for line in lines) == 1
-    # Running it again adds nothing.
+    # running it again adds nothing.
     before = env_path.read_text(encoding="utf-8")
     upgrade_local.add_missing_secrets(env_path)
     assert env_path.read_text(encoding="utf-8") == before
@@ -148,8 +147,7 @@ def test_psql_json_keeps_tabs_and_line_breaks(monkeypatch: pytest.MonkeyPatch) -
 
 
 def test_people_leave_the_attribute_policy_on(monkeypatch: pytest.MonkeyPatch) -> None:
-    """ensure_person turns on admin-editable unmanaged attributes once and never back off, so people created by two
-    scripts at once both keep their org_id."""
+    """ensure_person turns on admin-editable unmanaged attributes once and never back off, so people created by two scripts at once both keep their org_id."""
     profiles: list[dict[str, object]] = []
     profile: dict[str, object] = {"attributes": []}
 
@@ -186,15 +184,14 @@ def test_upgrade_updates_the_web_client() -> None:
     assert updated["redirectUris"] == [f"{setup.WEB_ORIGIN}/*"]
     assert updated["webOrigins"] == [setup.WEB_ORIGIN]
     assert updated["attributes"] == {**setup.WEB_ATTRIBUTES, "kept": "1"}
-    # Running again changes nothing.
+    # running again changes nothing.
     assert upgrade_local.updated_web_client(updated, development=True) == updated
-    # The test stack's own realm keeps its origin.
+    # the test stack's own realm keeps its origin.
     assert upgrade_local.updated_web_client(old, development=False)["webOrigins"] == old["webOrigins"]
 
 
 class FakeKeycloak:
-    """The parts of the learning realm's admin API that upgrade_local uses: clients by clientId, their service
-    accounts, and role mappings (which Keycloak keeps as a set, so a repeated mapping changes nothing)."""
+    """simulate the account, client and role-mapping endpoints used by local upgrades."""
 
     def __init__(self, clients: set[str]) -> None:
         self.clients = {name: f"id-{name}" for name in {*clients, setup.ACCOUNTS_ROLE[0]}}
@@ -227,14 +224,13 @@ class FakeKeycloak:
 
 
 def test_upgrade_assigns_the_accounts_role_after_a_half_finished_run(monkeypatch: pytest.MonkeyPatch) -> None:
-    """An earlier run created identity-accounts and stopped before giving its service account manage-users: the
-    next run assigns it without creating the client again."""
+    """an earlier run created identity-accounts and stopped before giving its service account manage-users: the next run assigns it without creating the client again."""
     keycloak = FakeKeycloak({setup.ACCOUNTS_CLIENT})
     monkeypatch.setattr(upgrade_local, "admin_client", keycloak.admin)
     upgrade_local.add_missing_accounts_client(generate_secrets())
     assert keycloak.created == []
     assert keycloak.mappings == {(f"account-id-{setup.ACCOUNTS_CLIENT}", setup.ACCOUNTS_ROLE[1])}
-    # A fresh Keycloak gets the client and the role; running again changes nothing.
+    # a fresh keycloak gets the client and the role; running again changes nothing.
     keycloak = FakeKeycloak(set())
     monkeypatch.setattr(upgrade_local, "admin_client", keycloak.admin)
     upgrade_local.add_missing_accounts_client(generate_secrets())

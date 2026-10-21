@@ -1,4 +1,4 @@
-"""Reuse exact embedding inputs, including document title/heading and embedding model identity."""
+"""reuse exact embedding inputs, including document title/heading and embedding model identity."""
 
 import asyncio
 import math

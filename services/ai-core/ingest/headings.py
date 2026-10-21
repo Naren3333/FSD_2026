@@ -1,32 +1,4 @@
-"""Headings and section paths from block styles.
-
-A heading is a short block that is clearly bigger than the body text, or bold at body size, and not a
-bullet point. Its level comes from its size: the biggest heading size in the document is level 0, the
-next one level 1, and so on, with bold body-size headings last. In a document of 3+ pages, only sizes
-used on two or more pages, at least one past the first two, are section levels: a size used once (a
-one-off banner or callout) or only on the cover/title pages is body text. So a slide deck's slide titles
-become the top level, and a report's cover title doesn't sit above everything. Consecutive heading lines
-in the same style (a heading wrapped over two lines) are one heading.
-
-A PDF outline (bookmarks) with several levels, when its entries are found on the page,
-takes over from the sizes: each entry's heading gets its outline level. Fonts don't always follow a document's
-structure (NIST's "1.1" and "1.2.1" are the same bold body size; GAO's summary headings are bigger than its
-sections). Headings the outline doesn't list are kept only when smaller than every listed one (subheadings below
-it); a bigger or equal one is a banner or a run-in label, so body text. A flat outline (a deck: one entry per
-slide) adds nothing to the slide titles the sizes already find, so it is ignored.
-
-Contents pages (a "Contents" / "Table of Contents" / "List of Figures" title followed mostly by entries
-like "1.2. Purpose" or "Framing Risk 4", and the pages that continue it) are dropped: their entries are
-not headings, and as text they only make keyword-dense noise chunks.
-
-Body text is tidied on the way: a line that continues the previous one (slides put every wrapped line in
-a block of its own) is joined back to it, and a bare page number opening or closing a page is dropped.
-
-Tables (ingest.tables) and described figures (ingest.figures) take no part in any of this: each is
-placed between the paragraphs by its position on the page, under the headings in force there. A table without
-a caption borrows the last sentence of the paragraph just before it, which usually introduces it; a figure
-keeps only a printed caption.
-"""
+"""headings and section paths from block styles."""
 
 import re
 from collections import defaultdict
@@ -69,7 +41,7 @@ NUMBERING = re.compile(
     r"^((part|chapter|section|appendix)\s+)?([0-9]+|[ivxlc]+|[a-z])([.:)]|(\.[0-9]+)+\.?)?\s+"
 )
 
-TocEntry = tuple[int, str, int]  # (level, title, 1-based page), as PyMuPDF's get_toc gives them
+TocEntry = tuple[int, str, int]  # (level, title, 1-based page), as pymupdf's get_toc gives them
 
 
 @dataclass(frozen=True)
@@ -77,14 +49,14 @@ class Para:
     text: str
     page: int
     path: tuple[str, ...]  # the headings this paragraph sits under; a heading's own path ends with itself
-    level: int | None = None  # None for body text; 0 is the top level
-    table: Table | None = None  # set for a table, whose text is its Markdown
+    level: int | None = None  # none for body text; 0 is the top level
+    table: Table | None = None  # set for a table, whose text is its markdown
     figure: Figure | None = None  # set for a figure, whose text is its description
-    toc: bool = False  # a heading whose level came from the PDF outline
+    toc: bool = False  # a heading whose level came from the pdf outline
 
     @property
     def region(self) -> bool:
-        """A table or a figure: a chunk of its own, never text."""
+        """a table or a figure: a chunk of its own, never text."""
         return self.table is not None or self.figure is not None
 
 
@@ -94,7 +66,7 @@ def mostly_bold(pages: Pages) -> bool:
 
 
 def _heading_size(block: Block, body: float, bold_body: bool) -> float | None:
-    """The size that ranks this block among the headings, or None for body text."""
+    """the size that ranks this block among the headings, or none for body text."""
     if (
         len(block.text) > MAX_HEADING_CHARS
         or block.text[-1] in NOT_HEADING_ENDINGS
@@ -115,8 +87,7 @@ def outline(
     toc: list[TocEntry] | None = None,
     columns: list[Columns | None] | None = None,
 ) -> list[Para]:
-    """The document as paragraphs, headings, tables and figures in reading order. `columns[i]` is page i + 1's
-    two-column layout (tables and figures are then placed by column, not just by height)."""
+    """the document as paragraphs, headings, tables and figures in reading order. `columns[i]` is page i + 1's two-column layout (tables and figures are then placed by column, not just by height)."""
     pages = _without_contents(pages)
     body, bold_body = body_size(pages), mostly_bold(pages)
     raw = [_page_sizes(blocks, body, bold_body) for blocks in pages]
@@ -131,8 +102,8 @@ def outline(
     paras: list[Para] = []
     stack: list[tuple[int, str]] = []
     for page_no, (blocks, page_levels) in enumerate(zip(pages, levels, strict=False), start=1):
-        prev: Block | None = None  # the previous body block on this page, while paras[-1] is its Para
-        prev_heading: Block | None = None  # the previous block, if it was a heading (paras[-1] is its Para)
+        prev: Block | None = None  # the previous body block on this page, while paras[-1] is its para
+        prev_heading: Block | None = None  # the previous block, if it was a heading (paras[-1] is its para)
         cols = columns[page_no - 1] if columns and page_no <= len(columns) else None
         waiting: list[Table | Figure] = sorted(
             [
@@ -176,9 +147,7 @@ def outline(
 def _toc_levels(
     pages: Pages, raw: list[list[float | None]], sizes: list[list[float | None]], toc: list[TocEntry]
 ) -> list[list[int | None]] | None:
-    """Each block's heading level from the outline (see the module docstring), or None when the outline isn't
-    usable: too short, flat, or too few of its entries found as headings on their pages. `raw` are the blocks'
-    heading sizes, `sizes` the same with the title-page sizes demoted (_without_titles)."""
+    """use matched outline levels when coverage is sufficient; otherwise retain style-based levels."""
     if len(toc) < TOC_MIN_ENTRIES or len({lvl for lvl, _, _ in toc}) < TOC_MIN_LEVELS:
         return None
     top = min(lvl for lvl, _, _ in toc)
@@ -216,10 +185,7 @@ def _toc_levels(
 def _find_entry(
     pages: Pages, raw: list[list[float | None]], title: str, page: int, cursor: tuple[int, int]
 ) -> tuple[tuple[int, int], bool] | None:
-    """The first heading candidate after `cursor`, from the entry's page (or the cursor's, if later) up to
-    TOC_REACH pages on, whose text (alone, or with the next line for a wrapped heading) is the entry's title;
-    with whether the next line was needed. Some outlines point at the wrong page (NIST's first entries all say
-    page 1), hence the reach."""
+    """match the next outline title to a heading candidate, including wrapped headings."""
     if not title or not pages:
         return None
     start = max(cursor[0], min(page, len(pages) - 1))
@@ -238,13 +204,13 @@ def _find_entry(
 
 
 def _normal(text: str) -> str:
-    """Casefolded, whitespace collapsed, and without leading numbering ("3.2", "Part 1:", "A.")."""
+    """casefolded, whitespace collapsed, and without leading numbering (\"3.2\", \"part 1:\", \"a.\")."""
     text = " ".join(text.casefold().split())
     return NUMBERING.sub("", text, count=1) or text
 
 
 def _alike(a: str, b: str) -> bool:
-    """The same title: one starts the other (most of it), or they are nearly the same text."""
+    """the same title: one starts the other (most of it), or they are nearly the same text."""
     short, long = sorted((a, b), key=len)
     if len(short) >= 4 and long.startswith(short) and len(short) >= 0.6 * len(long):
         return True
@@ -254,7 +220,8 @@ def _alike(a: str, b: str) -> bool:
 def _region_para(
     region: Table | Figure, page_no: int, stack: list[tuple[int, str]], paras: list[Para]
 ) -> Para:
-    # a figure keeps only a printed caption: on slides, the text before a figure is a bullet, not an introduction
+    # a figure keeps only a printed caption: on slides, the text before a figure is a bullet, not an
+    # introduction
     if (
         not region.caption
         and isinstance(region, Table)
@@ -281,9 +248,7 @@ def _page_sizes(blocks: list[Block], body: float, bold_body: bool) -> list[float
 
 
 def _without_titles(sizes: list[list[float | None]]) -> list[list[float | None]]:
-    """Demote to body text the heading sizes that aren't section levels: those used on one page only, or
-    only on the first FRONT_PAGES pages (see the module docstring). A document where no size qualifies
-    keeps all of them."""
+    """demote to body text the heading sizes that aren't section levels: those used on one page only, or only on the first front_pages pages (see the module docstring)."""
     if len(sizes) < MIN_TITLE_PAGES:
         return sizes
     pages_with: dict[float, set[int]] = defaultdict(set)
@@ -298,7 +263,7 @@ def _without_titles(sizes: list[list[float | None]]) -> list[list[float | None]]
 
 
 def _without_contents(pages: Pages) -> Pages:
-    """Drop contents pages from their title on (see the module docstring)."""
+    """drop contents pages from their title on (see the module docstring)."""
     out: Pages = []
     continuing = False
     for blocks in pages:
@@ -313,8 +278,7 @@ def _without_contents(pages: Pages) -> Pages:
 
 
 def _wraps(prev: Block, block: Block) -> bool:
-    """The second line of a heading: same style, not numbered as a heading of its own, and the joined
-    text still short enough for a heading."""
+    """the second line of a heading: same style, not numbered as a heading of its own, and the joined text still short enough for a heading."""
     return (
         (prev.size, prev.bold) == (block.size, block.bold)
         and not NUMBERED.match(block.text)
@@ -323,7 +287,7 @@ def _wraps(prev: Block, block: Block) -> bool:
 
 
 def _continues(prev: Block, block: Block) -> bool:
-    """A wrapped line: same style, starts in lower case, and the line before didn't end a sentence."""
+    """a wrapped line: same style, starts in lower case, and the line before didn't end a sentence."""
     return (
         (prev.size, prev.bold) == (block.size, block.bold)
         and block.text[0].islower()

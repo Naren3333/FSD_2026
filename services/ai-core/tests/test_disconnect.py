@@ -1,4 +1,4 @@
-"""An ingest stops when its caller hangs up (Content gives up after 20 minutes and retries later)."""
+"""an ingest stops when its caller hangs up (content gives up after 20 minutes and retries later)."""
 
 import asyncio
 from typing import cast
@@ -19,7 +19,7 @@ class FakeRequest:
 
 
 def caller(gone_after: int) -> Request:
-    """A request that reports its caller gone after `gone_after` checks; unless_disconnected uses nothing else."""
+    """a request that reports its caller gone after `gone_after` checks; unless_disconnected uses nothing else."""
     return cast(Request, FakeRequest(gone_after))
 
 

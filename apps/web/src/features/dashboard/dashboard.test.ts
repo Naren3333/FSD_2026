@@ -22,11 +22,11 @@ interface Parts {
   progress?: Promise<AssessmentProgress[]>;
   counts?: Promise<GradingCounts>;
   performance?: Promise<ClassPerformance>;
-  /** What the curriculum's names read answers; by default it has every topic. */
+  /* what the curriculum's names read answers; by default it has every topic. */
   need?: () => Promise<void>;
 }
 
-/** The user's classrooms: known by default, else still loading or failed with `error`. */
+/* the user's classrooms: known by default, else still loading or failed with `error`. */
 interface Rooms {
   known?: boolean;
   error?: string;
@@ -67,8 +67,7 @@ const performance: ClassPerformance = {
   ],
 };
 
-/** The class dashboard for classroom `classroomId`, each part answering as `parts` says (by default, a class with
- * data in every part). */
+/* the class dashboard for classroom `classroomid`, each part answering as `parts` says (by default, a class with data in every part). */
 async function render(parts: Parts = {}, classroomId = 'c1', rooms: Rooms = {}) {
   const classPerformance = vi.fn(
     (_classroomId: string, _offset: number, _limit: number) =>
@@ -136,7 +135,7 @@ async function render(parts: Parts = {}, classroomId = 'c1', rooms: Rooms = {}) 
     fixture.detectChanges();
   };
   const alerts = () => [...root.querySelectorAll('[role="alert"]')].map((a) => a.textContent?.trim());
-  /** A summary tile's value and caption, such as "3" and "5 finalized · Open Grading review". */
+  /* a summary tile's value and caption, such as "3" and "5 finalized · open grading review". */
   const stat = (label: string) => {
     const tile = [...root.querySelectorAll('.stat')].find(
       (t) => t.querySelector('.stat-label')?.textContent === label,
@@ -225,7 +224,7 @@ describe('class dashboard states', () => {
     await page.settle();
     expect(page.stat('Needs grading').value).toBe('0');
     expect(page.stat('Students enrolled').value).toBe('0');
-    // A draft has no submissions to count, so it is left out.
+    // a draft has no submissions to count, so it is left out.
     expect(page.stat('Published assessments').value).toBe('0');
     expect(page.text()).toContain('No published assessments yet.');
     expect(page.text()).toContain('No students enrolled yet.');
@@ -274,7 +273,7 @@ describe('class dashboard states', () => {
     page.button('Next').click();
     await page.settle();
     expect(page.text()).toContain('Page 3 of 3 · 45 students');
-    // Five students left: page 3 is now past the end.
+    // five students left: page 3 is now past the end.
     page.classPerformance.mockImplementation((_classroomId, offset) =>
       Promise.resolve({
         ...performance,

@@ -9,7 +9,7 @@ from domain import Evidence, TopicMetric, summarize
 
 
 def row(topic: str, correct: bool, awarded: int | None = None, possible: int = 1) -> dict[str, object]:
-    """An evidence row as the database returns it."""
+    """an evidence row as the database returns it."""
     return {
         "topic_id": topic,
         "correct": correct,
@@ -145,7 +145,7 @@ def test_evidence_may_be_worth_more_than_one_point():
 
 
 def finalized(event_type: str, possible: int) -> dict[str, object]:
-    """A finalized event of the given type, as Grading publishes grading.finalized.v3."""
+    """a finalized event of the given type, as grading publishes grading.finalized.v3."""
     evaluation = str(uuid4())
     return {
         "event_id": str(uuid4()),
@@ -218,12 +218,12 @@ def test_ids_longer_than_200_characters_are_valid():
 
 
 class Recorder:
-    """A pool whose one connection records each statement and finds nothing, except a tombstone when `purged`."""
+    """a pool whose one connection records each statement and finds nothing, except a tombstone when `purged`."""
 
     def __init__(self, purged: bool = False) -> None:
         self.statements: list[str] = []
         self.purged = purged
-        self.inboxed = False  # True: the event is already in the inbox
+        self.inboxed = False  # true: the event is already in the inbox
 
     def connection(self) -> "Recorder":
         return self
@@ -242,7 +242,7 @@ class Recorder:
         return self
 
     def fetchone(self) -> dict[str, object] | None:
-        # The inbox insert succeeds; nothing else is found but the tombstone, when there is one.
+        # the inbox insert succeeds; nothing else is found but the tombstone, when there is one.
         if len(self.statements) == 1 and self.inboxed:
             return None
         if len(self.statements) == 1 or (self.purged and "purged_classrooms" in self.statements[-1]):

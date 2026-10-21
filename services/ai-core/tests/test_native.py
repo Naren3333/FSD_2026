@@ -1,4 +1,4 @@
-"""Native structure, provenance and bounded parsing; fixtures contain actual OOXML parts."""
+"""native structure, provenance and bounded parsing; fixtures contain actual ooxml parts."""
 
 from io import BytesIO
 from pathlib import Path

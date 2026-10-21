@@ -54,7 +54,7 @@ describe('marking form', () => {
     form.controls['short'].controls.awarded.setValue(2);
     form.controls['free'].controls.criteria.setValue({ c1: 4, c2: null });
     form.controls['auto'].controls.feedback.setValue('Well done.');
-    // A rubric with a criterion left blank is not sent.
+    // a rubric with a criterion left blank is not sent.
     expect(marksOf(form, evidence)).toEqual({ short: { awarded: 2 }, auto: { feedback: 'Well done.' } });
     form.controls['free'].controls.criteria.setValue({ c1: 4, c2: 1 });
     form.controls['auto'].controls.awarded.setValue(0);

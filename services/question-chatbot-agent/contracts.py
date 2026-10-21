@@ -5,7 +5,7 @@ from uuid import UUID
 from learning_transport import Contract
 from pydantic import Field, StringConstraints
 
-# Content caps a search query at 1000 characters, and the raw message is the query when the rewrite fails.
+# content caps a search query at 1000 characters, and the raw message is the query when the rewrite fails.
 MAX_MESSAGE = 1000
 MAX_MESSAGES = 200  # the most messages one read of a thread returns: its latest, oldest first
 
@@ -32,7 +32,7 @@ class NewMessage(Contract):
 
 
 class Citation(Contract):
-    """A chunk the answer cites; `[doc:<chunk_id>]` in the message text marks where."""
+    """a chunk the answer cites; `[doc:<chunk_id>]` in the message text marks where."""
 
     chunk_id: UUID
     document_id: UUID
@@ -46,8 +46,8 @@ class Citation(Contract):
     kind: Literal["text", "table", "figure"]
     source: Literal["pdf", "vision", "markdown", "pptx", "docx"]
     content: str
-    image: str | None  # GET /api/content/documents/{document_id}/figures/{image}
-    # The teacher deleted the document: its passage and figure are gone (content and image are empty).
+    image: str | None  # get /api/content/documents/{document_id}/figures/{image}
+    # the teacher deleted the document: its passage and figure are gone (content and image are empty).
     removed: bool = False
 
 
@@ -61,14 +61,13 @@ class Message(Contract):
 
 
 class MessageList(Contract):
-    """A thread's latest messages, oldest first."""
+    """a thread's latest messages, oldest first."""
 
     messages: list[Message] = Field(max_length=MAX_MESSAGES)
 
 
 class Usage(Contract):
-    """The caller's AI spend today (chat, search and, for teachers, indexing their uploads), their daily limit
-    and when the day resets."""
+    """the caller's ai spend today (chat, search and, for teachers, indexing their uploads), their daily limit and when the day resets."""
 
     spent_usd: float = Field(ge=0)
     limit_usd: float = Field(gt=0)

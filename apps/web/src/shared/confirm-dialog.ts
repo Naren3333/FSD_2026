@@ -2,8 +2,7 @@ import { Component, ElementRef, EventEmitter, Input, Output, ViewChild, signal }
 import { ActionState } from './action-state';
 import { StatusComponent } from './status';
 
-/** The app-owned confirmation dialog: a question, what it means (and any fields the action needs, in the page's own
- * form), Cancel, focused first, and the action. */
+/* the app-owned confirmation dialog: a question, what it means (and any fields the action needs, in the page's own form), cancel, focused first, and the action. */
 @Component({
   selector: 'app-confirm-dialog',
   standalone: true,
@@ -11,19 +10,19 @@ import { StatusComponent } from './status';
   templateUrl: './confirm-dialog.html',
 })
 export class ConfirmDialogComponent {
-  /** Prefixes the title's id, such as "remove" for "remove-title". */
+  /* prefixes the title's id, such as "remove" for "remove-title". */
   @Input({ required: true }) dialogId = '';
   @Input({ required: true }) heading = '';
   @Input({ required: true }) confirmLabel = '';
-  /** The action's state: it disables the buttons while it runs and is announced inside the dialog. */
+  /* the action's state: it disables the buttons while it runs and is announced inside the dialog. */
   @Input({ required: true }) state!: ActionState;
   @Output() readonly confirm = new EventEmitter<void>();
-  /** However the dialog closed: Cancel, Escape (not while the action runs) or the page closing it. */
+  /* however the dialog closed: cancel, escape (not while the action runs) or the page closing it. */
   @Output() readonly closed = new EventEmitter<void>();
   @ViewChild('dialog', { static: true }) private dialog!: ElementRef<HTMLDialogElement>;
   readonly isOpen = signal(false);
 
-  /** Opens the dialog without the action's earlier message or error. */
+  /* opens the dialog without the action's earlier message or error. */
   show(): void {
     this.state.error.set('');
     this.state.message.set('');
@@ -35,7 +34,7 @@ export class ConfirmDialogComponent {
     this.dialog.nativeElement.close();
   }
 
-  /** Escape would close the dialog while its action is still running; it waits until the action ends. */
+  /* escape would close the dialog while its action is still running; it waits until the action ends. */
   onCancel(event: Event): void {
     if (this.state.busy()) event.preventDefault();
   }

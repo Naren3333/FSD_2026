@@ -10,14 +10,13 @@ import { NoClassroomComponent } from '../../shared/no-classroom';
 import { Section } from '../../shared/section';
 import { SectionStateComponent } from '../../shared/section-state';
 
-/** A student's finalized results with the assessments they belong to. */
+/* a student's finalized results with the assessments they belong to. */
 interface Results {
   results: OwnResult[];
   assessments: Map<string, Assessment>;
 }
 
-/** A student's own released grades in the current classroom. Drafts stay with the teacher until finalized, and some
- * assessments' grades until the teacher releases them. */
+/* a student's own released grades in the current classroom. */
 @Component({
   selector: 'app-results',
   standalone: true,
@@ -45,10 +44,10 @@ export class ResultsComponent {
     if (!classroomId) return;
     void this.results.load(async () => {
       const results = await this.grading.mine(classroomId);
-      // The student's copy of each assessment: prompts and options, never the answer key.
+      // the student's copy of each assessment: prompts and options, never the answer key.
       const [assessments] = await Promise.all([
         assessmentsOf(results, (id) => this.assessmentApi.get(id)),
-        // Without the curriculum, topics show their ids.
+        // without the curriculum, topics show their ids.
         this.curriculum
           .need(results.flatMap((r) => r.evidence.map((e) => e.topic_id)))
           .catch(() => undefined),

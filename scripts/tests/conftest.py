@@ -1,5 +1,4 @@
-"""The scripts import each other as top-level modules (`python scripts/<name>.py` puts scripts/ on the path), and
-the Kong generator lives in infra/kong; put both on the path for the tests."""
+"""make script and gateway modules importable by the test fixtures."""
 
 import sys
 from pathlib import Path

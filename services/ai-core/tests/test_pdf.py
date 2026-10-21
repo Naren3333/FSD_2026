@@ -1,4 +1,4 @@
-"""PyMuPDF calls in worker threads never overlap (Overlapping calls changed results)."""
+"""pymupdf calls in worker threads never overlap (overlapping calls changed results)."""
 
 import asyncio
 import threading

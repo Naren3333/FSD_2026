@@ -1,7 +1,4 @@
-"""The document's own sentences that cite a figure.
-
-A numbered figure ("Figure 7: ...") is described with the document's sentences that cite it ("Figure 7 shows
-...") as context, so its parts and axes get the document's names."""
+"""the document's own sentences that cite a figure."""
 
 import re
 from collections.abc import Sequence
@@ -26,19 +23,14 @@ ABBREVIATION = re.compile(r"\(?(figs?|e\.g|i\.e|al|cf|vs|resp|eq|sec)\.", re.IGN
 
 
 def page_text(page: pymupdf.Page) -> list[str]:
-    """The page's running text, line by line: lines smaller than the page's body text (chart and diagram labels)
-    are left out, so they don't run into the sentences around them."""
+    """the page's running text, line by line: lines smaller than the page's body text (chart and diagram labels) are left out, so they don't run into the sentences around them."""
     lines = _lines(page)
     body = _body_size(lines)
     return [t for _, t, font in lines if font > SNAP_LABEL_RATIO * body]
 
 
 def figure_context(pages: Sequence[Sequence[str]], caption: str | None, page: int) -> str:
-    """The document's sentences citing the figure by its caption's number ("In Figure 7, we show ..."), nearest
-    pages first: at most CONTEXT_SENTENCES of them and CONTEXT_WORDS words. "" for a figure without a numbered
-    caption, or one nothing cites. A sentence is the words around the citation, back to the previous sentence end
-    and on to the next (CONTEXT_REACH words at most each way: some text layers drop the spaces, so real sentence
-    ends can't always be found); a line opening with the label and a colon or full stop is the caption itself."""
+    """collect nearby sentences referencing a numbered figure within the context limits."""
     label = FIGURE_LABEL.match(caption.strip()) if caption else None
     if not label:
         return ""

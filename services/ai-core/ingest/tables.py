@@ -1,18 +1,4 @@
-"""Table extraction. Blocking: runs while parsing.
-
-The vision pass (ingest.vision) says where each table is and what it looks like; the cells are read from
-the PDF's own text layer inside each box, and a grid that doesn't match the model's description stays prose:
-a missed table is indexed as prose like before, a wrong one would be a regression. The model never writes
-cell text, except for a table that is a picture (there is no text layer to read): those come transcribed
-from the vision pass and are marked source="vision".
-
-A page without a vision result falls back to find_tables "lines", which the table audit found has no
-false positives.
-
-A table no method could read may come with a layout from ingest.rescue: the model's
-arrangement of the PDF's own words into cells, checked here (`verify_layout`) before it was accepted. It is used
-only when every method fails, and is source "pdf": its cells are the text layer's words.
-"""
+"""extract and validate table cells using native geometry and optional vision layout."""
 
 import re
 import unicodedata
@@ -30,15 +16,13 @@ from ingest.vision import MIN_TEXT_WORDS, SeenTable
 Box = tuple[float, float, float, float]
 
 MIN_ROWS, MIN_COLS = 2, 2
-MAX_EMPTY_SHARE = 0.5  # of the cells, counting merged cells (None) as filled
+MAX_EMPTY_SHARE = 0.5  # of the cells, counting merged cells (none) as filled
 MAX_PAGE_SHARE = 0.9  # a "table" covering the whole page is a layout box (fallback only)
 MIN_COVER = 0.6  # the grid covers at least this share of the model's box, and vice versa (loosely)
 COL_SLACK = 1  # the grid's column count may differ from the model's by this much
-THIN = 2.5  # a filled shape this thin is a ruling line (RFC-style grey cell borders)
+THIN = 2.5  # a filled shape this thin is a ruling line (rfc-style grey cell borders)
 
-# Extraction methods to try, in order, per style the model reports; the first grid that matches wins.
-#   lines:   find_tables "lines" in the box (plus thin filled shapes as lines)
-#   aligned: text rows + the model's column count, split at whitespace gutters (_aligned)
+# try ruled, aligned and model-assisted extraction in the order appropriate to each table style.
 METHODS: dict[str, tuple[str, ...]] = {
     "bordered": ("lines", "aligned"),
     "shaded": ("lines", "aligned"),
@@ -62,12 +46,12 @@ MAX_HEADER_WORDS = 4  # ...of short cells...
 NUMERIC = re.compile(r"\d[\d.,·%]*\d|\d")  # ...with no numbers in them
 CAPTION = re.compile(r"(table|exhibit|figure|fig\.)\s*[\dA-Z]", re.IGNORECASE)
 LAYOUT_FOUND = (
-    0.98  # a layout's cell words found among the box's PDF words, at least; and it uses every one of
+    0.98  # a layout's cell words found among the box's pdf words, at least; and it uses every one of
 )
-# them but the caption's: a word left out is how a shifted header looks (CLIP Table 11 lost "DTD", so every
+# them but the caption's: a word left out is how a shifted header looks (clip table 11 lost "dtd", so every
 # dataset name from there on sat over its neighbour's column)
 LAYOUT_EMPTY = (
-    0.8  # a laid-out table may be this empty (Attention's Table 3 lists only what each variant changes)
+    0.8  # a laid-out table may be this empty (attention's table 3 lists only what each variant changes)
 )
 LAYOUT_PLACED = (
     0.5  # at least this share of its body cells must be found on the page, each nearest its own column
@@ -94,8 +78,7 @@ class PageResult:
 
 
 def page_tables(page: pymupdf.Page, seen: list[SeenTable] | None) -> PageResult:
-    """The tables on a page, read from its text layer: inside the model's boxes, or with find_tables "lines"
-    when there is no vision result for the page."""
+    """the tables on a page, read from its text layer: inside the model's boxes, or with find_tables \"lines\" when there is no vision result for the page."""
     lines = thin_lines(page)
     if seen is None:
         return _fallback(page, lines)
@@ -131,7 +114,7 @@ def page_tables(page: pymupdf.Page, seen: list[SeenTable] | None) -> PageResult:
 
 
 def _ruled(page: pymupdf.Page, clip: Box, s: SeenTable, lines: list) -> dict | None:
-    """find_tables "lines" inside the box, with the page's thin filled shapes added as lines."""
+    """find_tables \"lines\" inside the box, with the page's thin filled shapes added as lines."""
     extra = [ln for ln in lines if _within(ln, clip)] or None
     grids = page.find_tables(clip=pymupdf.Rect(clip), strategy="lines", add_lines=extra).tables
     best = max(grids, key=lambda g: overlap(tuple(g.bbox), s.bbox), default=None)
@@ -139,7 +122,7 @@ def _ruled(page: pymupdf.Page, clip: Box, s: SeenTable, lines: list) -> dict | N
 
 
 def _free_columns(rows: list[dict], x0: float, width: int) -> list[int]:
-    """For each 1pt column of x from x0, how many rows have no word over it."""
+    """for each 1pt column of x from x0, how many rows have no word over it."""
     free = [0] * width
     for r in rows:
         used = [False] * width
@@ -164,7 +147,7 @@ def _gaps(free: list[int], need: float) -> list[tuple[int, int, int]]:
 
 
 def _split_rows(rows: list[dict], cuts: list[float], ncols: int) -> list[dict]:
-    """Each row's words put into `ncols` cells at the x positions in `cuts`."""
+    """each row's words put into `ncols` cells at the x positions in `cuts`."""
     cells = []
     for r in rows:
         cols: list[list[str]] = [[] for _ in range(ncols)]
@@ -177,8 +160,7 @@ def _split_rows(rows: list[dict], cuts: list[float], ncols: int) -> list[dict]:
 
 
 def _aligned(page: pymupdf.Page, clip: Box, s: SeenTable) -> dict | None:
-    """Rows from text lines and the model's number of columns, split where (nearly) every row has
-    whitespace. For tables without vertical lines, where find_tables "text" splits cells apart."""
+    """rows from text lines and the model's number of columns, split where (nearly) every row has whitespace."""
     if s.cols < MIN_COLS:
         return None
     words = [w for w in page.get_text("words") if center_in(w, clip)]  # whole words: clip= cuts them
@@ -230,7 +212,7 @@ def _aligned(page: pymupdf.Page, clip: Box, s: SeenTable) -> dict | None:
 
 
 def _text_rows(words: list, caption: str | None) -> list[dict]:
-    """Words grouped into visual lines by vertical centre; a line that is the table's caption is dropped."""
+    """words grouped into visual lines by vertical centre; a line that is the table's caption is dropped."""
     rows: list[dict] = []
     for w in sorted(words, key=lambda w: ((w[1] + w[3]) / 2, w[0])):
         mid, h = (w[1] + w[3]) / 2, w[3] - w[1]
@@ -248,9 +230,7 @@ def _text_rows(words: list, caption: str | None) -> list[dict]:
 
 
 def _trim_prose(rows: list[dict], cols: int) -> list[dict]:
-    """Drop the lines at the top and bottom of the box that read as prose rather than table rows: a
-    caption, a page header, footnotes. A table row has a word gap wider than ordinary spacing; with 3+
-    columns, a line spanning most of the width with no such gap is prose."""
+    """drop the lines at the top and bottom of the box that read as prose rather than table rows: a caption, a page header, footnotes."""
 
     def prose(r: dict) -> bool:
         ws = r["words"]
@@ -274,8 +254,7 @@ def _line(r: dict) -> str:
 
 
 def _header_lines(page: pymupdf.Page, box: Box, lines: list[dict]) -> int:
-    """How many text lines sit above the table's first rule that has lines both above and below it (the
-    rule under the header), or 0 when there is none within MAX_HEADER_LINES lines of the top."""
+    """how many text lines sit above the table's first rule that has lines both above and below it (the rule under the header), or 0 when there is none within max_header_lines lines of the top."""
     width = box[2] - box[0]
     rules = sorted(
         y
@@ -304,9 +283,7 @@ def _horizontal_rules(page: pymupdf.Page) -> list[tuple[float, float, float]]:
 
 
 def _header_rows(header: tuple[str, ...], rows: list[tuple[str, ...]]) -> tuple[tuple[str, ...], list]:
-    """Fold a header that runs over several lines into one: a following line with no numbers joins it when it
-    is sparse ("Sequential" over "Operations") or the header so far has gaps (a spanning "BLEU" over
-    "EN-DE | EN-FR"). At most MAX_HEADER_LINES lines."""
+    """join sparse, nonnumeric header continuations into the preceding header."""
     for _ in range(MAX_HEADER_LINES - 1):
         if not rows:
             break
@@ -322,10 +299,7 @@ def _header_rows(header: tuple[str, ...], rows: list[tuple[str, ...]]) -> tuple[
 
 
 def _merge_wrapped(rows: list[dict]) -> list[list[str]]:
-    """A line that continues the row above it is merged into it: it sits tight under the previous line and
-    carries on a cell of running text (without that, the rows of a group under one row label, "Finetune":
-    5 models each with numbers, would collapse into one). Its first cell must be empty too, unless the
-    table spaces its rows apart: then a tight line is a wrapped line in every column."""
+    """merge tightly spaced continuation lines only when they extend a prose cell."""
     gaps = [b["top"] - a["bottom"] for a, b in pairwise(rows)]
     height = sorted(r["bottom"] - r["top"] for r in rows)[len(rows) // 2] if rows else 0.0
     spaced = any(g < WRAP_GAP * height for g in gaps) and any(g >= ROW_GAP * height for g in gaps)
@@ -347,7 +321,7 @@ def _merge_wrapped(rows: list[dict]) -> list[list[str]]:
 
 
 def thin_lines(page: pymupdf.Page) -> list[tuple[pymupdf.Point, pymupdf.Point]]:
-    """Ruling lines drawn as thin filled shapes, which find_tables doesn't treat as lines by itself."""
+    """ruling lines drawn as thin filled shapes, which find_tables doesn't treat as lines by itself."""
     out = []
     for path in page.get_drawings():
         if path.get("fill") is None or path.get("color") is not None:
@@ -403,9 +377,7 @@ def _grid(tab: Any) -> dict:
 
 
 def _without_empty_columns(cells: list[list]) -> list[list]:
-    """find_tables makes a column for every vertical line, so a ruled-off margin is an empty column, and a
-    stray line through a header cell splits it ("Last na" | "me"). A column empty below the first row is
-    dropped; its header text joins the column on its left."""
+    """find_tables makes a column for every vertical line, so a ruled-off margin is an empty column, and a stray line through a header cell splits it (\"last na\" | \"me\")."""
     width = max((len(r) for r in cells), default=0)
     rows = [[(r[i] if i < len(r) else "") for i in range(width)] for r in cells]
     keep: list[int] = []
@@ -422,7 +394,7 @@ def _without_empty_columns(cells: list[list]) -> list[list]:
 
 
 def _fill_down(rows: list[tuple[str, ...]], raw: list[list]) -> list[tuple[str, ...]]:
-    """A merged cell in the first column (a row group, e.g. a rubric criterion) is repeated down its rows."""
+    """a merged cell in the first column (a row group, e.g. a rubric criterion) is repeated down its rows."""
     out: list[tuple[str, ...]] = []
     for i, row in enumerate(rows):
         merged = i and out and raw[i] and raw[i][0] is None and row and not row[0]
@@ -439,7 +411,7 @@ def _shape_problem(grid: dict) -> str | None:
 
 
 def _verify(grid: dict | None, s: SeenTable) -> str | None:
-    """Why the grid doesn't match what the model saw (None: it does)."""
+    """why the grid doesn't match what the model saw (none: it does)."""
     if grid is None:
         return "no grid found in the box"
     if problem := _shape_problem(grid):
@@ -456,11 +428,7 @@ def _verify(grid: dict | None, s: SeenTable) -> str | None:
 def verify_layout(
     header: tuple[str, ...] | None, rows: tuple[tuple[str, ...], ...], words: list, s: SeenTable
 ) -> str | None:
-    """Why a model's layout of a table can't be trusted (None: it can). `words` are the box's PDF words (box +
-    text). The cells must be made of those words (a word hyphenated over two lines may be joined) and use every one
-    of them but the caption's; and the body cells must sit on the page where the layout puts them: each one found,
-    nearest the column the layout gives it (`_misplaced`). Words are compared casefolded, without the punctuation
-    around them."""
+    """why a model's layout of a table can't be trusted (none: it can). `words` are the box's pdf words (box + text)."""
     grid = [list(header)] + [list(r) for r in rows] if header else [list(r) for r in rows]
     if len(grid) < MIN_ROWS or max((len(r) for r in grid), default=0) < MIN_COLS:
         return "too small"
@@ -468,7 +436,8 @@ def verify_layout(
     if sum(1 for c in cells if not c) / len(cells) > LAYOUT_EMPTY:
         return "mostly empty"
     box = [_token(w[4]) for w in words]
-    # a word hyphenated over two lines, or set as two (a footnote mark: "Unicoder-VL" + "a" for "Unicoder-VLᵃ")
+    # a word hyphenated over two lines, or set as two (a footnote mark: "unicoder-vl" + "a" for
+    # "unicoder-vlᵃ")
     known = (
         set(box)
         | {a[:-1] + b for a, b in pairwise(box) if a.endswith("-")}
@@ -490,10 +459,7 @@ def verify_layout(
 
 
 def _misplaced(rows: list[list[str]], words: list) -> str | None:
-    """Why the body cells don't sit where the layout puts them (None: they do). A cell is found by its first word;
-    a word printed more than once is taken from the row's own line, whose height comes from the row's words found
-    only once in the box and in no other row. A found cell must be nearer its own column's middle than any other
-    column's: a value moved one empty cell over (Attention's Table 3) is nearer its neighbour's."""
+    """why the body cells don't sit where the layout puts them (none: they do)."""
     at: dict[str, list[tuple[float, float]]] = {}
     for w in words:
         at.setdefault(_token(w[4]), []).append(((w[0] + w[2]) / 2, (w[1] + w[3]) / 2))
@@ -514,8 +480,8 @@ def _misplaced(rows: list[list[str]], words: list) -> str | None:
         if not unique:
             continue
         y = sorted(unique)[len(unique) // 2]
-        # each word's spots on the row's line, left to right: a word printed several times in the row ("-" for no
-        # result) takes them in the cells' order
+        # each word's spots on the row's line, left to right: a word printed several times in the row ("-"
+        # for no result) takes them in the cells' order
         line = {t: sorted(x for x, wy in at.get(t, ()) if abs(wy - y) <= reach) for _, t in firsts}
         for j, t in firsts:
             if line[t]:
@@ -533,8 +499,7 @@ def _misplaced(rows: list[list[str]], words: list) -> str | None:
 
 
 def _token(word: str) -> str:
-    """A word as compared by verify_layout: compatibility-normalised (superscripts as plain letters), casefolded,
-    without the punctuation around it. Only for the comparison: the cells keep the text as written."""
+    """a word as compared by verify_layout: compatibility-normalised (superscripts as plain letters), casefolded, without the punctuation around it."""
     return unicodedata.normalize("NFKC", word).strip(".,;:!?()[]{}\"'“”‘’").casefold()
 
 
@@ -557,12 +522,12 @@ def width(table: Table) -> int:
 
 
 def markdown(table: Table) -> str:
-    """The table as a Markdown grid (a missing header becomes an empty one: Markdown needs a header row)."""
+    """the table as a markdown grid (a missing header becomes an empty one: markdown needs a header row)."""
     return "\n".join(markdown_lines(table))
 
 
 def markdown_lines(table: Table, rows: tuple[tuple[str, ...], ...] | None = None) -> list[str]:
-    """Header, separator and one line per row (all of the table's rows, or the ones given)."""
+    """header, separator and one line per row (all of the table's rows, or the ones given)."""
     n = width(table)
 
     def row(cells: tuple[str, ...]) -> str:

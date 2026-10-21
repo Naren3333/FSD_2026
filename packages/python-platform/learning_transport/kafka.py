@@ -1,6 +1,4 @@
-"""Kafka consumption for the Python services: one consumer group reading a few topics, committing each message only
-after it was processed or dead-lettered, and restarting itself with a backoff when a session stops. Import this
-module only from a service that has confluent-kafka and psycopg installed."""
+"""commit only processed or durably dead-lettered messages; restart failed sessions with backoff."""
 
 import logging
 import os
@@ -19,23 +17,20 @@ from learning_transport.errors import Contract
 RESTART_FIRST, RESTART_MAX = 5.0, 60.0  # seconds a stopped consumer waits before its next session
 PROCESS_ATTEMPTS = 5  # tries to process a message before the session stops uncommitted
 DEAD_LETTER_TIMEOUT = 12  # seconds to wait for the broker to confirm a dead-lettered message
-# Database errors that retrying the same message cannot fix: a value the schema refuses (DataError) or a broken
-# constraint (IntegrityError, CheckViolation among them). A message failing with one on every attempt is
-# dead-lettered instead of blocking its partition forever.
+# database errors that retrying the same message cannot fix: a value the schema refuses (dataerror) or a
+# broken constraint (integrityerror, checkviolation among them).
 PERMANENT_ERRORS: tuple[type[Exception], ...] = (DataError, IntegrityError)
 
-# handle(topic, value) processes one message durably. It returns False when the message does not match the topic's
-# contract, which sends it to <topic>.dlq, and raises when it cannot be processed now, which retries it.
+# handle(topic, value) processes one message durably.
 Handler = Callable[[str, bytes | None], bool]
-# What became of one message: processed, not matching its contract, failing permanently, or failing for now.
+# what became of one message: processed, not matching its contract, failing permanently, or failing for now.
 Outcome = Literal["processed", "invalid", "poison", "failed"]
 
 log = logging.getLogger("learning_transport.kafka")
 
 
 class Envelope(Contract):
-    """The fields every business event carries (contracts/events). A service's event model extends this with its own
-    `data` payload model, and narrows `event_type` and checks `resource_id` against its payload itself."""
+    """the fields every business event carries (contracts/events)."""
 
     event_id: UUID
     event_type: str
@@ -52,8 +47,8 @@ class Envelope(Contract):
         return timestamp
 
 
-# Identity's events that every service keeping data for a classroom or a user consumes to purge it
-# (packages/platform/classrooms.go has the Go side).
+# identity's events that every service keeping data for a classroom or a user consumes to purge it
+# (packages/platform/classrooms.go has the go side).
 CLASSROOM_DELETED = "identity.classroom.deleted.v1"
 USER_DELETED = "identity.user.deleted.v1"
 
@@ -64,7 +59,7 @@ class ClassroomDeleted(Contract):
 
 
 class ClassroomDeletedEvent(Envelope):
-    """A deleted classroom: every service that keeps data for it purges it."""
+    """a deleted classroom: every service that keeps data for it purges it."""
 
     event_type: Literal["identity.classroom.deleted.v1"]
     data: ClassroomDeleted
@@ -83,7 +78,7 @@ class UserDeleted(Contract):
 
 
 class UserDeletedEvent(Envelope):
-    """A user who deleted their own account (ADR 0011): every service that keeps data for them purges it."""
+    """a user who deleted their own account (adr 0011): every service that keeps data for them purges it."""
 
     event_type: Literal["identity.user.deleted.v1"]
     data: UserDeleted
@@ -96,8 +91,7 @@ class UserDeletedEvent(Envelope):
 
 
 def parse[M: BaseModel](model: type[M], value: bytes | None) -> M | None:
-    """A message's value validated against its contract, or None when it does not match: the handler then returns
-    False, so the message is dead-lettered rather than retried."""
+    """a message's value validated against its contract, or none when it does not match: the handler then returns false, so the message is dead-lettered rather than retried."""
     try:
         return model.model_validate_json(value or b"")
     except (ValidationError, ValueError):
@@ -105,8 +99,7 @@ def parse[M: BaseModel](model: type[M], value: bytes | None) -> M | None:
 
 
 def restart_wait(previous: float | None, progressed: bool) -> float:
-    """How long to wait before the next session: the first wait after a session that made progress, otherwise
-    double the previous wait, up to a minute."""
+    """how long to wait before the next session: the first wait after a session that made progress, otherwise double the previous wait, up to a minute."""
     if progressed or previous is None:
         return RESTART_FIRST
     return min(2 * previous, RESTART_MAX)
@@ -115,9 +108,7 @@ def restart_wait(previous: float | None, progressed: bool) -> float:
 def consume(
     group: str, topics: list[str], handle: Handler, stop: threading.Event, connected: threading.Event
 ) -> None:
-    """Keep consuming until shutdown. A session that stops on a message it cannot process (the database is down,
-    say) or on a broker error is followed, after a backoff, by a new one from the last committed offset: the
-    message is retried rather than skipped, and the consumer never stays down while the process looks alive."""
+    """keep consuming until shutdown."""
     wait: float | None = None
     while not stop.is_set():
         progressed = consume_session(group, topics, handle, stop, connected)
@@ -130,8 +121,7 @@ def consume(
 
 
 def dead_letter(producer: Producer, msg: Message, reason: str = "invalid_event") -> None:
-    """Send a message that cannot be processed to its topic's dead-letter topic, raising unless the broker confirmed
-    it."""
+    """send a message that cannot be processed to its topic's dead-letter topic, raising unless the broker confirmed it."""
     delivery_errors: list[Any] = []
 
     def delivered(error: Any, _: Any) -> None:
@@ -145,9 +135,7 @@ def dead_letter(producer: Producer, msg: Message, reason: str = "invalid_event")
 
 
 def attempt(handle: Handler, topic: str, value: bytes | None, stop: threading.Event) -> Outcome:
-    """Process one message, retrying with a doubling wait. `poison` when every one of PROCESS_ATTEMPTS attempts
-    failed with one of PERMANENT_ERRORS; `failed` when they failed otherwise (the database is down, say) or shutdown
-    began, so the message is tried again in a later session."""
+    """retry processing with backoff; dead-letter permanent failures and retain transient failures for replay."""
     permanent = True
     for n in range(PROCESS_ATTEMPTS):
         try:
@@ -167,7 +155,7 @@ def attempt(handle: Handler, topic: str, value: bytes | None, stop: threading.Ev
 def consume_session(
     group: str, topics: list[str], handle: Handler, stop: threading.Event, connected: threading.Event
 ) -> bool:
-    """One consumer session; returns whether it committed anything."""
+    """one consumer session; returns whether it committed anything."""
     progressed = False
     consumer = Consumer(
         {
@@ -198,7 +186,7 @@ def consume_session(
                 dead_letter(producer, msg)
             elif outcome == "poison":
                 dead_letter(producer, msg, "unprocessable_event")
-            # Committed only once processed or confirmed in the dead-letter topic.
+            # committed only once processed or confirmed in the dead-letter topic.
             consumer.commit(message=msg, asynchronous=False)
             progressed = True
     except Exception:

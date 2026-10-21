@@ -1,4 +1,4 @@
-"""The vision pass: caching and rendering. OpenAI is the mock transport."""
+"""the vision pass: caching and rendering."""
 
 import asyncio
 import json
@@ -65,8 +65,7 @@ def test_an_answer_that_is_not_json_is_not_cached(tmp_path: Path, openai_fake: F
 
 
 def test_the_cache_is_keyed_by_what_the_page_shows(tmp_path: Path, openai_fake: FakeOpenAI) -> None:
-    """The same page in another file (a revised deck) reuses the answer; a changed word
-    doesn't."""
+    """the same page in another file (a revised deck) reuses the answer; a changed word doesn't."""
     cache = tmp_path / "cache"
     first, second, changed = tmp_path / "a.pdf", tmp_path / "b.pdf", tmp_path / "c.pdf"
     first.write_bytes(make_pdf(paragraphs=[["Some text on the page."]]))
@@ -88,7 +87,7 @@ def test_the_cache_is_keyed_by_what_the_page_shows(tmp_path: Path, openai_fake: 
 
 
 def test_odd_fields_in_an_answer_are_coerced_not_fatal() -> None:
-    """Answers are cached by page content: a field that fails once would fail the same page on every reindex."""
+    """answers are cached by page content: a field that fails once would fail the same page on every reindex."""
     box = {"bbox": [0.1, 0.1, 0.5, 0.5]}
     table = vision.SeenTable.from_json({**box, "rows": 2, "cols": 2, "caption": 7, "header": 5}, 100, 100)
     assert table is not None and (table.caption, table.header) == ("7", ())
@@ -116,8 +115,7 @@ RATE_LIMITED = {"error": {"message": "Rate limit reached", "code": "rate_limit_e
 
 
 def test_a_rate_limited_call_is_retried_without_nesting(tmp_path: Path, openai_fake: FakeOpenAI) -> None:
-    """RATE_RETRIES attempts in all (not the shared client's retries for each of them), each wait slept outside
-    the vision slots."""
+    """rate_retries attempts in all (not the shared client's retries for each of them), each wait slept outside the vision slots."""
     openai_fake.reply(429, json=RATE_LIMITED, times=vision_calls.RATE_RETRIES)
     assert see(pdf(tmp_path), tmp_path / "cache") == [None]
     assert len(openai_fake.requests) == vision_calls.RATE_RETRIES

@@ -1,4 +1,4 @@
-"""The ingest cost record: calls, hits, failures, tokens and retries by kind."""
+"""the ingest cost record: calls, hits, failures, tokens and retries by kind."""
 
 import asyncio
 import json
@@ -62,7 +62,7 @@ def test_a_model_call_and_a_cache_hit_are_counted_by_kind(tmp_path: Path, openai
 
 
 def test_a_failed_call_is_counted_with_its_retries(tmp_path: Path, openai_fake: FakeOpenAI) -> None:
-    """The page then goes without vision and the ingest carries on; the record is where the loss shows."""
+    """the page then goes without vision and the ingest carries on; the record is where the loss shows."""
     openai_fake.reply(500, json={"error": {"message": "boom"}}, times=3)  # the first try and both retries
     page = see(pdf(tmp_path), tmp_path / "cache").kinds["page"]
     assert (page.calls, page.failed, page.retries, page.prompt_tokens) == (0, 1, 2, 0)
@@ -115,7 +115,7 @@ def test_write_logs_and_appends_a_json_line(tmp_path: Path) -> None:
 
 @pytest.fixture
 def written(monkeypatch: pytest.MonkeyPatch) -> list[dict]:
-    """The cost records /v1/ingest writes (logged; ai-core keeps no cost file)."""
+    """the cost records /v1/ingest writes (logged; ai-core keeps no cost file)."""
     out: list[dict] = []
     monkeypatch.setattr(costs, "write", lambda record, path: out.append(record.to_json()))
     return out

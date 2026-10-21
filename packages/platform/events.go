@@ -11,16 +11,15 @@ import (
 	"github.com/segmentio/kafka-go"
 )
 
-// EventMigration creates the outbox and inbox tables; services that publish or consume events pass it to New. The
-// partial index serves the outbox's search for unpublished rows by topic and key (dueRows). created_at is the
-// clock time of the Emit, not the transaction's start, so two events emitted in one transaction keep their order.
+// eventmigration creates the outbox and inbox tables; services that publish or consume events pass it to
+// new.
 const EventMigration = `
 CREATE TABLE IF NOT EXISTS outbox (id uuid PRIMARY KEY, topic text NOT NULL, partition_key text NOT NULL, body jsonb NOT NULL, created_at timestamptz NOT NULL DEFAULT clock_timestamp(), published_at timestamptz, attempts integer NOT NULL DEFAULT 0, next_attempt timestamptz NOT NULL DEFAULT now());
 ALTER TABLE outbox ALTER COLUMN created_at SET DEFAULT clock_timestamp();
 CREATE INDEX IF NOT EXISTS outbox_unpublished ON outbox (topic, partition_key, created_at) WHERE published_at IS NULL;
 CREATE TABLE IF NOT EXISTS inbox (event_id uuid PRIMARY KEY, processed_at timestamptz NOT NULL DEFAULT now());`
 
-// Event is the envelope of every business event on Kafka.
+// event is the envelope of every business event on kafka.
 type Event struct {
 	ID          string          `json:"event_id"`
 	Type        string          `json:"event_type"`
@@ -31,7 +30,8 @@ type Event struct {
 	Data        json.RawMessage `json:"data"`
 }
 
-// Emit writes an event to the outbox inside the caller's transaction, so it is published only if the change commits.
+// emit writes an event to the outbox inside the caller's transaction, so it is published only if the change
+// commits.
 func Emit(ctx context.Context, tx pgx.Tx, topic, key string, data any) error {
 	payload, err := json.Marshal(data)
 	if err != nil {
@@ -46,13 +46,12 @@ func Emit(ctx context.Context, tx pgx.Tx, topic, key string, data any) error {
 	return err
 }
 
-// Writer sends synchronously with every replica's acknowledgement. BatchTimeout matters: kafka-go otherwise holds
-// a partial batch for a second before sending it, so every write took about a second.
+// writer sends synchronously with every replica's acknowledgement.
 func Writer() *kafka.Writer {
 	return &kafka.Writer{Addr: kafka.TCP(strings.Split(Required("KAFKA_BROKERS"), ",")...), Balancer: &kafka.Hash{}, RequiredAcks: kafka.RequireAll, MaxAttempts: 3, BatchTimeout: 10 * time.Millisecond, ReadTimeout: 5 * time.Second, WriteTimeout: 5 * time.Second}
 }
 
-// KafkaReady is a readiness check: the first broker answers a metadata request.
+// kafkaready is a readiness check: the first broker answers a metadata request.
 func KafkaReady(ctx context.Context) error {
 	dialer := &kafka.Dialer{Timeout: 2 * time.Second}
 	conn, err := dialer.DialContext(ctx, "tcp", strings.Split(Required("KAFKA_BROKERS"), ",")[0])
@@ -67,10 +66,11 @@ func KafkaReady(ctx context.Context) error {
 	return err
 }
 
-// InvalidEvent is a handler's verdict that an event can never be processed: it is dead-lettered, not retried.
+// invalidevent is a handler's verdict that an event can never be processed: it is dead-lettered, not
+// retried.
 type InvalidEvent struct{ Reason string }
 
 func (e InvalidEvent) Error() string { return e.Reason }
 
-// Handler applies one event inside the transaction that also records it in the inbox.
+// handler applies one event inside the transaction that also records it in the inbox.
 type Handler func(ctx context.Context, tx pgx.Tx, event Event) error

@@ -16,18 +16,16 @@ import type { Section } from '../../shared/section';
 import { requiredText } from '../../shared/validators';
 import { marksText } from './editor';
 
-/** How long a student's typing rests before their work is saved. */
+/* how long a student's typing rests before their work is saved. */
 const SAVE_DELAY = 1500;
-/** How often the open assessment's due state is looked at again, so Submit closes when a due date passes. */
+/* how often the open assessment's due state is looked at again, so submit closes when a due date passes. */
 const DUE_CHECK = 30 * 1000;
-/** Why a student's submission was refused when the teacher changed the assessment after the student opened it. */
+/* why a student's submission was refused when the teacher changed the assessment after the student opened it. */
 const CHANGED =
   'This assessment changed since you opened it. Open it again to see the current questions; your answers to ' +
   'questions that did not change are kept.';
 
-/** The open assessment: a student answering it (saved as they type until they submit) or reading what they
- * submitted, or a teacher trying their preview, which is never saved. The assessments page lists the assessments and
- * opens one here. */
+/* the open assessment: a student answering it (saved as they type until they submit) or reading what they submitted, or a teacher trying their preview, which is never saved. */
 @Component({
   selector: 'app-answer-sheet',
   standalone: true,
@@ -38,30 +36,30 @@ export class AnswerSheetComponent {
   readonly session = inject(Session);
   private readonly assessmentApi = inject(AssessmentApi);
   readonly classroomId = inject(ClassroomContext).classroomId;
-  /** The classroom's assessments, which say whether the student has submitted each; a submission marks it so. */
+  /* the classroom's assessments, which say whether the student has submitted each; a submission marks it so. */
   @Input({ required: true }) assessments!: Section<AssessmentSummary[]>;
-  /** The page's own state, where opening and submitting report how they went. */
+  /* the page's own state, where opening and submitting report how they went. */
   @Input({ required: true }) state!: ActionState;
-  /** Clearing the student's answers, in its confirmation dialog. */
+  /* clearing the student's answers, in its confirmation dialog. */
   readonly clearState = new ActionState();
   readonly selected = signal<Assessment | null>(null);
   readonly submitted = signal(false);
-  /** The student's own submission of the open assessment, read back once they have submitted it. */
+  /* the student's own submission of the open assessment, read back once they have submitted it. */
   readonly submission = signal<OwnSubmission | null>(null);
-  /** The autosave's last outcome, for the student. */
+  /* the autosave's last outcome, for the student. */
   readonly saveNote = signal('');
-  /** Whether the teacher changed the open assessment since the student opened it, so it must be opened again. */
+  /* whether the teacher changed the open assessment since the student opened it, so it must be opened again. */
   readonly changed = signal(false);
   @ViewChild('clearDialog') clearDialog?: ConfirmDialogComponent;
   private saveTimer: ReturnType<typeof setTimeout> | undefined;
-  /** Saves the student's answers as they type, while the open assessment still takes them. */
+  /* saves the student's answers as they type, while the open assessment still takes them. */
   private autosave: Subscription | undefined;
-  /** Saves run one after another, so an older save never lands after a newer one. */
+  /* saves run one after another, so an older save never lands after a newer one. */
   private saving: Promise<unknown> = Promise.resolve();
   answers = new FormGroup<Record<string, FormControl<string>>>({});
-  /** The time the due state is judged at: now, moved on every DUE_CHECK while the page is open. */
+  /* the time the due state is judged at: now, moved on every due_check while the page is open. */
   private readonly now = signal(new Date());
-  /** Where the open assessment stands with its due date. */
+  /* where the open assessment stands with its due date. */
   readonly due = computed<DueState>(() => {
     const a = this.selected();
     return dueState(a?.due_at, a?.late_policy, this.now());
@@ -70,7 +68,7 @@ export class AnswerSheetComponent {
   readonly schedule = schedule;
 
   constructor() {
-    // A teacher's preview answers are thrown away, so only a student's answers are unsaved work.
+    // a teacher's preview answers are thrown away, so only a student's answers are unsaved work.
     inject(UnsavedChanges).track(() => this.answersUnsaved());
     const dueCheck = setInterval(() => this.now.set(new Date()), DUE_CHECK);
     inject(DestroyRef).onDestroy(() => {
@@ -80,21 +78,19 @@ export class AnswerSheetComponent {
     onClassroomChange(() => this.close());
   }
 
-  /** Opens the teacher's preview of an assessment, or closes it when it is the one open. */
+  /* opens the teacher's preview of an assessment, or closes it when it is the one open. */
   togglePreview(id: string): void {
     if (this.selected()?.id === id) this.closePreview();
     else this.open(id);
   }
 
-  /** Closes the assessment, as when it is deleted; its answers were saved as they were typed, or (a teacher's
-   * preview) never. */
+  /* closes the assessment, as when it is deleted; its answers were saved as they were typed, or (a teacher's preview) never. */
   close(): void {
     this.stopAutosave();
     this.selected.set(null);
   }
 
-  /** Closes the teacher's preview; its answers were never saved. From the preview's own button, focus goes back to
-   * the button in the list that opened it. */
+  /* closes the teacher's preview; its answers were never saved. */
   closePreview(returnFocus = false): void {
     const id = this.selected()?.id;
     this.stopAutosave();
@@ -102,19 +98,18 @@ export class AnswerSheetComponent {
     if (returnFocus && id) this.focusLater('preview-' + id);
   }
 
-  /** Whether a student has answers here that are not submitted; a teacher's preview never counts. */
+  /* whether a student has answers here that are not submitted; a teacher's preview never counts. */
   answersUnsaved(): boolean {
     return this.session.isStudent() && this.answers.dirty;
   }
 
-  /** Opens the assessment again after the teacher changed it, keeping the student's answers to the questions that are
-   * still there. */
+  /* opens the assessment again after the teacher changed it, keeping the student's answers to the questions that are still there. */
   reopen(): void {
     const assessment = this.selected();
     if (assessment) this.open(assessment.id, this.answers.getRawValue());
   }
 
-  /** Opens an assessment. `keep` holds answers the student has on the page, which win over their saved work. */
+  /* opens an assessment. `keep` holds answers the student has on the page, which win over their saved work. */
   open(id: string, keep?: Record<string, string>): void {
     if (!keep && this.answersUnsaved()) {
       this.state.error.set('Submit your current answers before opening another assessment.');
@@ -148,14 +143,14 @@ export class AnswerSheetComponent {
           ]),
         ),
       );
-      // Submitted or closed work can only be read; a teacher's preview can be tried but is never saved.
+      // submitted or closed work can only be read; a teacher's preview can be tried but is never saved.
       if (this.session.isStudent() && !answering) this.answers.disable({ emitEvent: false });
       if (answering)
         this.autosave = this.answers.valueChanges.subscribe(() => this.scheduleSave(assessment.id));
       this.selected.set(assessment);
       this.submitted.set(submitted);
       this.changed.set(false);
-      // Kept answers are still unsubmitted work, and those that differ from the saved work are saved now.
+      // kept answers are still unsubmitted work, and those that differ from the saved work are saved now.
       if (answering && keep) {
         this.answers.markAsDirty();
         if (assessment.questions.some((q) => q.id in keep && keep[q.id] !== (saved[q.id] ?? '')))
@@ -164,7 +159,7 @@ export class AnswerSheetComponent {
     });
   }
 
-  /** The student's own submitted answers, or null when Assessment has none (the list was out of date). */
+  /* the student's own submitted answers, or null when assessment has none (the list was out of date). */
   private async ownSubmission(id: string): Promise<OwnSubmission | null> {
     try {
       return await this.assessmentApi.submission(id);
@@ -174,14 +169,14 @@ export class AnswerSheetComponent {
     }
   }
 
-  /** Stops saving the open answers: no pending save, and typing (or a reset) no longer starts one. */
+  /* stops saving the open answers: no pending save, and typing (or a reset) no longer starts one. */
   private stopAutosave(): void {
     clearTimeout(this.saveTimer);
     this.autosave?.unsubscribe();
     this.autosave = undefined;
   }
 
-  /** Saves the student's work once their typing rests. A failure keeps the answers and says so. */
+  /* saves the student's work once their typing rests. */
   private scheduleSave(assessmentId: string): void {
     clearTimeout(this.saveTimer);
     this.saveNote.set('Saving…');
@@ -198,7 +193,8 @@ export class AnswerSheetComponent {
         (error: unknown) => {
           if (!stillOpen()) return;
           if (changedError(error)) {
-            // As for a submission: the questions changed, so nothing more is saved until it is opened again.
+            // as for a submission: the questions changed, so nothing more is saved until it is opened
+            // again.
             this.stopAutosave();
             this.changed.set(true);
             this.saveNote.set(CHANGED);
@@ -210,7 +206,7 @@ export class AnswerSheetComponent {
     }, SAVE_DELAY);
   }
 
-  /** Replaces the student's saved work, after any save still on its way. */
+  /* replaces the student's saved work, after any save still on its way. */
   private persist(assessmentId: string, answers: Record<string, string>): Promise<SavedAnswers> {
     const save = this.saving.then(
       () => this.assessmentApi.save(assessmentId, answers),
@@ -220,24 +216,25 @@ export class AnswerSheetComponent {
     return save;
   }
 
-  /** The student's Clear form: their saved work goes too, so it asks first. */
+  /* the student's clear form: their saved work goes too, so it asks first. */
   confirmClear(): void {
     if (this.session.isStudent()) {
       this.clearDialog?.show();
       return;
     }
-    // A teacher's preview has nothing saved.
+    // a teacher's preview has nothing saved.
     this.answers.reset();
   }
 
-  /** Empties the answers and saves that, as the student asked; a failure keeps their answers on the page. */
+  /* empties the answers and saves that, as the student asked; a failure keeps their answers on the page. */
   clearAnswers(): void {
     const assessment = this.selected();
     if (!assessment || this.submitted()) return;
     void this.clearState.run(async () => {
       clearTimeout(this.saveTimer);
       await this.persist(assessment.id, {});
-      // Empty, not each control's first value (the saved answer); the reset is not typing, so it starts no save.
+      // empty, not each control's first value (the saved answer); the reset is not typing, so it starts no
+      // save.
       const empty = Object.fromEntries(Object.keys(this.answers.controls).map((id) => [id, '']));
       this.answers.reset(empty, { emitEvent: false });
       this.saveNote.set('Your answers are cleared.');
@@ -248,7 +245,7 @@ export class AnswerSheetComponent {
   submit(): void {
     const assessment = this.selected();
     if (!assessment) return;
-    // The due date may have passed since the page last looked.
+    // the due date may have passed since the page last looked.
     this.now.set(new Date());
     if (this.due() === 'closed') {
       this.state.error.set('This assessment is past its due date and no longer takes submissions.');
@@ -268,7 +265,7 @@ export class AnswerSheetComponent {
             throw new Error(CHANGED);
           });
         late = submission.late;
-        // Submitted answers are final: they can be read, no longer changed or saved.
+        // submitted answers are final: they can be read, no longer changed or saved.
         this.stopAutosave();
         this.answers.disable({ emitEvent: false });
         this.answers.markAsPristine();
@@ -297,7 +294,7 @@ export class AnswerSheetComponent {
     return marksText(question.points);
   }
 
-  /** The help line under a student's answer: its marks, and for written answers how much is left. */
+  /* the help line under a student's answer: its marks, and for written answers how much is left. */
   answerHint(question: Question): string {
     const value = this.answers.get(question.id)?.value ?? '';
     if (question.type === 'free_response')
@@ -306,7 +303,7 @@ export class AnswerSheetComponent {
   }
 }
 
-/** "Due 13 Oct 2026, 3:00 pm", "Opens …", or '' when the assessment has no dates. */
+/* "due 13 oct 2026, 3:00 pm", "opens …", or '' when the assessment has no dates. */
 export function schedule(item: { opens_at?: string | null; due_at?: string | null }): string {
   const parts = [];
   if (item.opens_at && new Date(item.opens_at) > new Date()) parts.push(`Opens ${dateTime(item.opens_at)}`);
@@ -314,12 +311,12 @@ export function schedule(item: { opens_at?: string | null; due_at?: string | nul
   return parts.join(' · ');
 }
 
-/** Whether the server refused the student's answers because the teacher changed the assessment meanwhile. */
+/* whether the server refused the student's answers because the teacher changed the assessment meanwhile. */
 function changedError(error: unknown): boolean {
   return error instanceof ApiError && error.code === 'ASSESSMENT_CHANGED';
 }
 
-/** The most characters a student may give the question, as Assessment allows. */
+/* the most characters a student may give the question, as assessment allows. */
 function limitOf(question: Question): number {
   return question.type === 'free_response' ? (question.max_length ?? 5000) : 500;
 }

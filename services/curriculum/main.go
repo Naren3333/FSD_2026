@@ -1,4 +1,4 @@
-// Command curriculum is the Curriculum service: an organization's topics and their prerequisites.
+// command curriculum is the curriculum service: an organization's topics and their prerequisites.
 package main
 
 import (

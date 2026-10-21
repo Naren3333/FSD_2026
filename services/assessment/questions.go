@@ -12,9 +12,7 @@ import (
 
 var decimal = regexp.MustCompile(`^-?[0-9]{1,12}(\.[0-9]{1,8})?$`)
 
-// Question types. Multiple choice and numerical are marked by Grading alone; a short answer is marked by Grading
-// when it matches an accepted answer, and otherwise by the teacher; a free response is always marked by the teacher
-// against its rubric (docs/decisions/0004-assessment-lifecycle-and-ai-marking.md).
+// question types.
 const (
 	typeMultipleChoice = "multiple_choice"
 	typeNumerical      = "numerical"
@@ -22,7 +20,7 @@ const (
 	typeFreeResponse   = "free_response"
 )
 
-// Rubric and free-response limits.
+// rubric and free-response limits.
 const (
 	maxAccepted      = 20
 	maxCriteria      = 10
@@ -33,19 +31,18 @@ const (
 	maxModelAnswer   = 5000
 	defaultMaxLength = 5000
 	maxFreeResponse  = 20000
-	// Marking-scheme passages: per question, per passage and per assessment, which keeps the submission event
-	// within maxSubmittedEvent.
+	// marking-scheme passages: per question, per passage and per assessment, which keeps the submission event
+	// within maxsubmittedevent.
 	maxExcerpts           = 5
 	maxExcerptText        = 2000
 	maxExcerptPage        = 100000
 	maxAssessmentExcerpts = 20
-	// Source passages of a generated question (ADR 0006). They stay in Assessment, so they don't count towards the
-	// assessment's marking-scheme passages.
+	// source passages of a generated question (adr 0006).
 	maxSources = 5
 )
 
-// questionKind holds one question type's rules: when a question of that type is well formed, and which answers a
-// student may submit to it. A new type is a new kind registered in questionKinds; the callers don't change.
+// questionkind holds one question type's rules: when a question of that type is well formed, and which
+// answers a student may submit to it.
 type questionKind interface {
 	validate(q Question) error
 	accepts(q Question, answer string) bool
@@ -70,7 +67,7 @@ func objective(q Question) error {
 	return nil
 }
 
-// multipleChoice: 2–8 distinct options, and the answer key is one of them.
+// multiplechoice: 2–8 distinct options, and the answer key is one of them.
 type multipleChoice struct{}
 
 func (multipleChoice) validate(q Question) error {
@@ -119,8 +116,8 @@ func (numerical) accepts(_ Question, answer string) bool { return decimal.MatchS
 
 func (numerical) limit(Question) int { return maxAnswer }
 
-// shortAnswer: a list of accepted answers, matched after normalizeShort (and case-insensitively unless the
-// teacher says case matters). Grading marks an unmatched answer as needing the teacher.
+// shortanswer: a list of accepted answers, matched after normalizeshort (and case-insensitively unless the
+// teacher says case matters).
 type shortAnswer struct{}
 
 func (shortAnswer) validate(q Question) error {
@@ -147,8 +144,7 @@ func (shortAnswer) accepts(_ Question, answer string) bool {
 
 func (shortAnswer) limit(Question) int { return maxAnswer }
 
-// normalizeShort trims an answer and collapses its inner whitespace, and lowercases it unless case matters.
-// Grading applies the same rule when it marks the answer.
+// normalizeshort trims an answer and collapses its inner whitespace, and lowercases it unless case matters.
 func normalizeShort(answer string, caseSensitive bool) string {
 	answer = strings.Join(strings.Fields(answer), " ")
 	if !caseSensitive {
@@ -157,8 +153,7 @@ func normalizeShort(answer string, caseSensitive bool) string {
 	return answer
 }
 
-// freeResponse: written work marked against a rubric of criteria, each with 2–6 levels. The question's points
-// are the sum of each criterion's top level (set by normalize).
+// freeresponse: written work marked against a rubric of criteria, each with 2–6 levels.
 type freeResponse struct{}
 
 func (freeResponse) validate(q Question) error {
@@ -182,13 +177,13 @@ func (freeResponse) validate(q Question) error {
 	return validateScheme(q.MarkingScheme)
 }
 
-// validateScheme checks a question's marking-scheme passages: up to maxExcerpts, each with text, and a chunk only
-// with the document it came from.
+// validatescheme checks a question's marking-scheme passages: up to maxexcerpts, each with text, and a
+// chunk only with the document it came from.
 func validateScheme(excerpts []Excerpt) error {
 	return validateExcerpts(excerpts, maxExcerpts, "marking-scheme passage")
 }
 
-// validateSources checks a generated question's source passages, which have the same shape.
+// validatesources checks a generated question's source passages, which have the same shape.
 func validateSources(sources []Excerpt) error {
 	return validateExcerpts(sources, maxSources, "source passage")
 }

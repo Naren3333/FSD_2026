@@ -1,5 +1,4 @@
-"""PDF parsing, header/footer stripping and the ingest failure reasons.
-No DB, no OpenAI."""
+"""pdf parsing, header/footer stripping and the ingest failure reasons."""
 
 from pathlib import Path
 
@@ -88,7 +87,7 @@ def test_missing_file_is_not_a_failure_reason(tmp_path: Path) -> None:
 def test_only_pymupdf_errors_mean_a_corrupt_file(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, error: Exception, corrupt: bool
 ) -> None:
-    """A bug here, or a model answer it trips over, is a 500 the caller retries, not a permanent CORRUPT."""
+    """a bug here, or a model answer it trips over, is a 500 the caller retries, not a permanent corrupt."""
     import ingest.parse
 
     def broken(*args: object) -> list[Table]:
@@ -107,7 +106,7 @@ PARA = "Leaves are the main site of photosynthesis in most plants and hold many 
 
 
 def paged(pages: int) -> list[tuple[str, str]]:
-    """One heading + paragraphs per page."""
+    """one heading + paragraphs per page."""
     return [e for n in range(pages) for e in [("page", ""), ("h1", f"Chapter {n + 1}"), *[("p", PARA)] * 3]]
 
 
@@ -123,7 +122,7 @@ def test_blocks_carry_size_and_weight(tmp_path: Path) -> None:
 def test_a_heading_line_inside_a_paragraph_block_is_its_own_block(tmp_path: Path) -> None:
     doc = pymupdf.open()
     page = doc.new_page()
-    # One insert_htmlbox → one PyMuPDF block holding a bold line, then plain lines.
+    # one insert_htmlbox → one pymupdf block holding a bold line, then plain lines.
     page.insert_htmlbox(pymupdf.Rect(50, 50, 545, 300), f"<b>Gas exchange</b><br>{PARA}")
     data = doc.tobytes()
     blocks = prose(write(tmp_path, data))[0]
@@ -144,7 +143,7 @@ def test_short_documents_keep_everything(tmp_path: Path) -> None:
 
 
 def test_repeated_body_text_is_kept(tmp_path: Path) -> None:
-    # "Key idea" sits mid-page on every page, so it is not a header or footer.
+    # "key idea" sits mid-page on every page, so it is not a header or footer.
     elements = [
         e
         for n in range(4)
@@ -155,7 +154,7 @@ def test_repeated_body_text_is_kept(tmp_path: Path) -> None:
 
 
 def test_a_footer_above_the_bottom_tenth_is_still_dropped(tmp_path: Path) -> None:
-    # Like RFC 9110: an A4 page whose footer sits ~87% of the way down.
+    # like rfc 9110: an a4 page whose footer sits ~87% of the way down.
     doc = pymupdf.open()
     for n in range(1, 5):
         page = doc.new_page(width=595, height=841)
@@ -207,7 +206,7 @@ def _block(*lines: list[dict]) -> dict:
 
 
 def test_inline_words_typeset_as_their_own_block_go_back_into_their_line() -> None:
-    # Like RFC 9110: "MAY" is its own block, sitting in the gap of a line of the paragraph's block.
+    # like rfc 9110: "may" is its own block, sitting in the gap of a line of the paragraph's block.
     para = _block(
         [_span("For historical reasons, a user agent ", 72, 300), _span(" change the method", 325, 500)],
         [_span("from POST to GET for the next request.", 72, 400, y0=114)],
@@ -294,7 +293,7 @@ COLUMN_TEXT = "Attention lets every position look at every other position in one
 
 
 def column_page() -> list[Block]:
-    """A spanning title, then two columns of four 3-line paragraphs each, interleaved as some PDFs store them."""
+    """a spanning title, then two columns of four 3-line paragraphs each, interleaved as some pdfs store them."""
     left = [Block(f"L{n} {COLUMN_TEXT}", 10, False, 100 + 50 * n, 136 + 50 * n, 50, 290) for n in range(4)]
     right = [Block(f"R{n} {COLUMN_TEXT}", 10, False, 100 + 50 * n, 136 + 50 * n, 310, 550) for n in range(4)]
     return [Block("Model architecture", 14, True, 60, 76, 50, 550)] + [

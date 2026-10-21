@@ -13,7 +13,7 @@ import (
 	"github.com/minio/minio-go/v7/pkg/credentials"
 )
 
-// documentFiles is what the handlers need from object storage: originals and figure crops, and removing an
+// documentfiles is what the handlers need from object storage: originals and figure crops, and removing an
 // original whose database row was never committed.
 type documentFiles interface {
 	objects
@@ -21,7 +21,7 @@ type documentFiles interface {
 	removeOrphan(documentID, key string)
 }
 
-// storage is the S3-compatible bucket holding originals and figure crops.
+// storage is the s3-compatible bucket holding originals and figure crops.
 type storage struct {
 	client *minio.Client
 	bucket string
@@ -58,7 +58,7 @@ func (s storage) upload(ctx context.Context, key string, body io.Reader, size in
 	return err
 }
 
-// removeOrphan deletes an object whose database row was never committed.
+// removeorphan deletes an object whose database row was never committed.
 func (s storage) removeOrphan(documentID, key string) {
 	cleanup, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
@@ -67,7 +67,7 @@ func (s storage) removeOrphan(documentID, key string) {
 	}
 }
 
-// removeAll deletes every object under prefix: a document's original and its figure crops.
+// removeall deletes every object under prefix: a document's original and its figure crops.
 func (s storage) removeAll(ctx context.Context, prefix string) error {
 	ctx, cancel := context.WithCancel(ctx) // stops the listing if a removal fails part way
 	defer cancel()
@@ -113,7 +113,7 @@ func (s storage) remove(ctx context.Context, key string) error {
 	return s.client.RemoveObject(ctx, s.bucket, key, minio.RemoveObjectOptions{})
 }
 
-// open returns the object stream and its size. The caller must Close it.
+// open returns the object stream and its size.
 func (s storage) open(ctx context.Context, key string) (io.ReadCloser, int64, error) {
 	object, err := s.client.GetObject(ctx, s.bucket, key, minio.GetObjectOptions{})
 	if err != nil {

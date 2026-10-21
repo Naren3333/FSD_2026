@@ -1,16 +1,4 @@
-"""Run the database-backed tests that check.py skips, against the local Compose PostgreSQL.
-
-- The Go modules' store tests (platform outbox, inbox and migrations; Identity, Curriculum, Assessment, Grading and
-  Content against real SQL, Content with pgvector), in a Go container.
-- The Python services' PostgreSQL tests (ai-core's usage ledger, Analytics, the chatbot's PostgresStore), in each
-  service's own image.
-
-Each suite gets its own scratch database, created once and owned by a service's role (`identity_test`,
-`grading_test`, ...), so no service's real data is touched; every test then works in a throwaway schema of it. The
-tests run in containers on the Compose network because PostgreSQL is not published to the host. ai-core is faked
-inside the tests. They use the stack that COMPOSE_PROJECT_NAME names (the development one if unset);
-scripts/stack_tests.py runs them in the disposable test stack.
-"""
+"""run real database suites against the isolated compose stack."""
 
 import os
 import subprocess
@@ -22,7 +10,7 @@ GO_IMAGE = "golang:1.25.7-alpine"
 NETWORK = f"{project()}_default"
 PYTEST = "pytest==8.4.1"  # the version in requirements-dev.lock
 
-# Go module directory, its tests' environment variable, the role owning its scratch database, extensions.
+# go module directory, its tests' environment variable, the role owning its scratch database, extensions.
 GO_SUITES = [
     ("packages/platform", "PLATFORM_TEST_DATABASE_URL", "identity", ()),
     ("services/identity", "IDENTITY_TEST_DATABASE_URL", "identity", ()),
@@ -34,8 +22,7 @@ GO_SUITES = [
 
 
 def scratch_database(name: str, owner: str, *extensions: str) -> str:
-    """Creates `<name>_test` owned by the owner's role if missing; returns its URL on the Compose network. As with
-    the services' own databases, no other role may connect to it (a database left by an older run is closed too)."""
+    """creates `<name>_test` owned by the owner's role if missing; returns its url on the compose network."""
     database = f"{name}_test"
     if psql_value(f"SELECT count(*) FROM pg_database WHERE datname='{database}'") == "0":
         psql_value(f"CREATE DATABASE {database} OWNER {owner}")
@@ -66,7 +53,7 @@ def go_suite(module: str, variable: str, owner: str, extensions: tuple[str, ...]
 
 
 def python_suite(service: str, variable: str, owner: str, tests: str) -> None:
-    """Runs the service's database tests in its own image, which has its dependencies but not pytest."""
+    """runs the service's database tests in its own image, which has its dependencies but not pytest."""
     url = scratch_database(owner, owner)
     directory = ROOT / "services" / service
     test = f"pip install --quiet --disable-pip-version-check {PYTEST} && python -m pytest -q -rs -p no:cacheprovider {tests}"
@@ -84,14 +71,14 @@ def python_suite(service: str, variable: str, owner: str, tests: str) -> None:
 
 
 def run(command: list[str], extra: dict[str, str]) -> str:
-    """Runs a test command, showing its output as it comes, and returns that output; stops the script if it fails."""
+    """runs a test command, showing its output as it comes, and returns that output; stops the script if it fails."""
     process = subprocess.Popen(
         command,
         cwd=ROOT,
         env={**os.environ, **extra},
         stdout=subprocess.PIPE,
         stderr=subprocess.STDOUT,
-        # Go and pytest write UTF-8; Windows would otherwise decode it with its locale code page.
+        # go and pytest write utf-8; windows would otherwise decode it with its locale code page.
         encoding="utf-8",
         errors="replace",
     )
@@ -105,8 +92,8 @@ def run(command: list[str], extra: dict[str, str]) -> str:
     return "".join(lines)
 
 
-# Python service (its Compose name), its tests' environment variable, the role owning its scratch database, the
-# test files that use the database.
+# python service (its compose name), its tests' environment variable, the role owning its scratch database,
+# the test files that use the database.
 PYTHON_SUITES = [
     ("question-chatbot-agent", "CHATBOT_TEST_DATABASE_URL", "chatbot", "tests/test_store.py"),
     ("ai-core", "AICORE_TEST_DATABASE_URL", "aicore", "tests/test_ledger.py"),

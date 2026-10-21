@@ -1,6 +1,4 @@
-"""The disposable test stack: the scripts that create and delete data refuse the development stack unless told, the
-test stack publishes its own ports, and scripts/stack_tests.py writes its volumes' first-start files. None of these
-tests needs Docker."""
+"""verify test-stack isolation, port selection and first-start configuration."""
 
 import importlib
 import json
@@ -33,7 +31,7 @@ def test_project_names_match_compose_and_the_browser_tests() -> None:
 
 
 def test_the_browser_tests_require_the_test_ports() -> None:
-    """The browser tests' guard names the same test ports as local_stack, so the project name alone is not enough."""
+    """the browser tests' guard names the same test ports as local_stack, so the project name alone is not enough."""
     playwright = (ROOT / "apps/web/playwright.config.ts").read_text(encoding="utf-8")
     ports = re.search(r"const TEST_PORTS: Record<string, string> = \{(.*)\};", playwright)
     assert ports, "playwright.config.ts lost its TEST_PORTS"
@@ -52,8 +50,7 @@ def test_data_writing_scripts_refuse_the_development_stack(monkeypatch: pytest.M
 
 
 def test_data_writing_scripts_refuse_the_development_ports(monkeypatch: pytest.MonkeyPatch) -> None:
-    """The test project name with the development ports would send psql to the test stack but HTTP to the
-    development stack's Kong and Keycloak."""
+    """the test project name with the development ports would send psql to the test stack but http to the development stack's kong and keycloak."""
     monkeypatch.setenv("COMPOSE_PROJECT_NAME", local_stack.TEST_PROJECT)
     monkeypatch.setattr(local_stack.subprocess, "run", lambda *_a, **_k: pytest.fail("checked docker first"))
     monkeypatch.setattr(local_stack, "KONG_PORT", "8000")
@@ -78,8 +75,7 @@ def test_data_writing_scripts_need_the_test_stack_running(monkeypatch: pytest.Mo
 
 
 def test_the_test_stack_publishes_its_own_ports() -> None:
-    """Every published port and every URL the stack hands out follows the port variables, and the test stack's
-    differ from the development stack's defaults, so both run at once."""
+    """every published port and every url the stack hands out follows the port variables, and the test stack's differ from the development stack's defaults, so both run at once."""
     compose = (ROOT / "docker-compose.yml").read_text(encoding="utf-8")
     published = re.findall(r"^    - 127\.0\.0\.1:(\S+):\d+$", compose, re.MULTILINE)
     assert published == ["${KEYCLOAK_PORT:-8081}", "${KONG_PORT:-8000}", "${WEB_PORT:-4200}"]
@@ -100,7 +96,7 @@ def test_each_stack_realm_allows_only_its_own_web_origin() -> None:
         assert web["clientId"] == "learning-web"
         assert web["webOrigins"] == [web_origin]
         assert web["redirectUris"] == [f"{web_origin}/*"]
-        # Sign out returns to a sign-in redirect URI.
+        # sign out returns to a sign-in redirect uri.
         assert web["attributes"]["post.logout.redirect.uris"] == "+"
 
 
@@ -123,7 +119,7 @@ def test_scripts_follow_the_port_variables(monkeypatch: pytest.MonkeyPatch) -> N
 
 
 def test_scripts_read_ports_from_env_file(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-    """As Compose does: the environment first, then .env, then the development default."""
+    """as compose does: the environment first, then .env, then the development default."""
     dotenv = tmp_path / ".env"
     dotenv.write_text("KONG_PORT=9000\n", encoding="utf-8")
     read = local_stack.read_env
@@ -140,8 +136,7 @@ def test_scripts_read_ports_from_env_file(monkeypatch: pytest.MonkeyPatch, tmp_p
 
 
 def test_fresh_volumes_get_every_database_and_client(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-    """The test stack's first-start files go to their own directory, which docker-compose.yml mounts for it, so the
-    development stack's realm import never names the test origin."""
+    """the test stack's first-start files go to their own directory, which docker-compose.yml mounts for it, so the development stack's realm import never names the test origin."""
     values = setup.generate_secrets()
     monkeypatch.setattr(stack_tests, "ROOT", tmp_path)
     monkeypatch.setattr(stack_tests, "env", lambda: values)
@@ -176,7 +171,7 @@ def test_rejects_an_unknown_suite(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 def test_the_scale_demo_runs_only_when_named(monkeypatch: pytest.MonkeyPatch) -> None:
-    """A run without suites leaves the load test out; naming it adds its Compose file after any already set."""
+    """a run without suites leaves the load test out; naming it adds its compose file after any already set."""
     assert "scale" in stack_tests.SUITES and "scale" not in stack_tests.DEFAULT_SUITES
     monkeypatch.setitem(stack_tests.TEST_ENV, "COMPOSE_FILE", "docker-compose.yml")
     stack_tests.with_scale_file()
@@ -187,8 +182,7 @@ def test_the_scale_demo_runs_only_when_named(monkeypatch: pytest.MonkeyPatch) ->
 
 
 def test_the_scaled_services_can_run_as_replicas() -> None:
-    """docker-compose.scale.yml replicates the services scale_demo.py measures, and none of them fixes a container
-    name or a host port, which only one replica could hold."""
+    """docker-compose.scale.yml replicates the services scale_demo.py measures, and none of them fixes a container name or a host port, which only one replica could hold."""
     base = yaml.safe_load((ROOT / "docker-compose.yml").read_text(encoding="utf-8"))["services"]
     scaled = yaml.safe_load((ROOT / "docker-compose.scale.yml").read_text(encoding="utf-8"))["services"]
     replicated = {name for name, service in scaled.items() if "replicas" in service.get("deploy", {})}

@@ -1,18 +1,4 @@
-"""Show the services scaling out: a class submitting at its deadline, against one replica and then three, and three
-again with a Grading replica killed while it marks.
-
-    python scripts/stack_tests.py scale                 # starts the test stack with docker-compose.scale.yml, runs this
-    python scripts/stack_tests.py scale --keep          # leaves the stack up to look at afterwards
-
-Runs against the disposable test stack only. It creates --students students in Keycloak, enrolls them in one
-classroom, and for each run publishes an auto-marked assessment that every student then submits at once while the
-class keeps reading (scripts/load/deadline.js, run in the k6 container). Identity, Assessment and Grading run as one
-replica or three, each capped at REPLICA_CPUS like a small node of its own (docker-compose.scale.yml).
-
-After each run it checks what must hold however many replicas there are: every submission was accepted once, every
-one was marked exactly once, no event is left in the outbox and Grading's consumers have no lag. It prints a report
-and writes it to .local/scale-demo/report.md. No AI path is exercised: those make paid calls.
-"""
+"""compare submission throughput across replica counts and a worker failure on the test stack."""
 
 import argparse
 import json
@@ -44,8 +30,8 @@ SCALED = ["identity", "assessment", "grading"]  # the services docker-compose.sc
 WORK = ROOT / ".local" / "scale-demo"  # run.json for k6, and the report
 MARKED_TIMEOUT = 180  # seconds for every submission of a run to be marked
 WARM_UP_REQUESTS = 200  # reads spread over the last tokens, a few per session
-TOKEN_SECONDS = 120  # how long the script uses one teacher token; Keycloak's last five minutes
-TEACHER_BUDGET = 100  # requests per teacher token: Kong allows each token 120 a minute
+TOKEN_SECONDS = 120  # how long the script uses one teacher token; keycloak's last five minutes
+TEACHER_BUDGET = 100  # requests per teacher token: kong allows each token 120 a minute
 STUDENT_PASSWORD_KEY = "STUDENT_PASSWORD"  # the load students share the local student's password
 QUESTIONS = [
     {"prompt": "0.1 + 0.2?", "type": "numerical", "answer": "0.3", "tolerance": "0", "options": []},
@@ -74,7 +60,8 @@ class Run:
     checks: dict[str, bool] = field(default_factory=dict)
 
 
-# --- Stack -------------------------------------------------------------------------------------------------------
+# --- stack
+# -------------------------------------------------------------------------------------------------------
 
 
 def compose(*args: str, timeout: float = 600) -> subprocess.CompletedProcess[str]:
@@ -90,13 +77,13 @@ def compose(*args: str, timeout: float = 600) -> subprocess.CompletedProcess[str
 
 
 def containers(service: str) -> list[str]:
-    """The names of a service's running containers."""
+    """the names of a service's running containers."""
     out = compose("ps", "--status", "running", "--format", "{{.Name}}", service).stdout
     return sorted(out.split())
 
 
 def scale(replicas: int) -> None:
-    """Runs `replicas` of each scaled service and waits until every one of them is healthy."""
+    """runs `replicas` of each scaled service and waits until every one of them is healthy."""
     flags = [arg for service in SCALED for arg in ("--scale", f"{service}={replicas}")]
     compose(
         "up", "--detach", "--no-build", "--no-recreate", "--wait", "--wait-timeout", "300", *flags, *SCALED
@@ -105,12 +92,12 @@ def scale(replicas: int) -> None:
         running = containers(service)
         if len(running) != replicas:
             raise SystemExit(f"{service} runs {len(running)} replicas, not {replicas}")
-    # Kong re-resolves service names every 5 s (KONG_DNS_VALID_TTL), so it sees the new replicas after that.
+    # kong re-resolves service names every 5 s (kong_dns_valid_ttl), so it sees the new replicas after that.
     time.sleep(6)
 
 
 def requests_served(names: list[str], since: str) -> dict[str, int]:
-    """How many requests each container logged since an RFC 3339 time: the Go services log one line per request."""
+    """how many requests each container logged since an rfc 3339 time: the go services log one line per request."""
     served = {}
     for name in names:
         logs = subprocess.run(
@@ -126,13 +113,13 @@ def requests_served(names: list[str], since: str) -> dict[str, int]:
 
 
 def consumer_group(group: str) -> list[dict[str, str]]:
-    """Each partition of a consumer group's topic: its lag, and the container whose consumer holds it."""
+    """each partition of a consumer group's topic: its lag, and the container whose consumer holds it."""
     out = compose(
         "exec", "-T", "kafka", "/opt/kafka/bin/kafka-consumer-groups.sh",
         "--bootstrap-server", "localhost:9092", "--describe", "--group", group,
     ).stdout  # fmt: skip
-    # A consumer id is "app@<container hostname> (github.com/segmentio/kafka-go)-<uuid>"; the hostname is the
-    # container's short id.
+    # a consumer id is "app@<container hostname> (github.com/segmentio/kafka-go)-<uuid>"; the hostname is
+    # the container's short id.
     ids = subprocess.run(
         ["docker", "ps", "--format", "{{.ID}} {{.Names}}"],
         text=True,
@@ -156,11 +143,12 @@ def consumer_group(group: str) -> list[dict[str, str]]:
     return rows
 
 
-# --- People and data ---------------------------------------------------------------------------------------------
+# --- people and data
+# ---------------------------------------------------------------------------------------------
 
 
 class Teacher:
-    """The local teacher, signing in again before Kong's per-token limit is reached."""
+    """the local teacher, signing in again before kong's per-token limit is reached."""
 
     def __init__(self) -> None:
         self.token = ""
@@ -168,7 +156,8 @@ class Teacher:
         self.signed_in = 0.0
 
     def request(self, method: str, path: str, **kwargs: Any) -> Any:
-        # Keycloak's access tokens last five minutes; sign in again well before that, or before Kong's limit.
+        # keycloak's access tokens last five minutes; sign in again well before that, or before kong's
+        # limit.
         if self.used >= TEACHER_BUDGET or time.monotonic() - self.signed_in > TOKEN_SECONDS:
             self.token = password_token("teacher", env()["TEACHER_PASSWORD"])
             self.used, self.signed_in = 0, time.monotonic()
@@ -179,12 +168,12 @@ class Teacher:
 
 
 def create_students(count: int) -> list[str]:
-    """Creates the load students in Keycloak and signs each in once, which registers them with Identity."""
+    """creates the load students in keycloak and signs each in once, which registers them with identity."""
     password = env()[STUDENT_PASSWORD_KEY]
     names = [f"load-student-{i:04d}" for i in range(1, count + 1)]
 
     def create(batch: list[str]) -> None:
-        # Keycloak's admin tokens last a minute, so each batch gets its own.
+        # keycloak's admin tokens last a minute, so each batch gets its own.
         with admin_client() as admin:
             for name in batch:
                 ensure_person(admin, name, "Load", name.rsplit("-", 1)[1], password)
@@ -199,8 +188,7 @@ def create_students(count: int) -> list[str]:
 
 
 def sign_in_all(names: list[str], sessions: int) -> list[str]:
-    """`sessions` fresh tokens per student, the first len(names) one per student in order. Keycloak's access tokens
-    last five minutes, and Kong limits each token separately, as it would each browser tab."""
+    """`sessions` fresh tokens per student, the first len(names) one per student in order."""
     password = env()[STUDENT_PASSWORD_KEY]
     with ThreadPoolExecutor(16) as pool:
         return list(pool.map(lambda name: password_token(name, password), names * sessions))
@@ -223,11 +211,12 @@ def assessment(teacher: Teacher, room: str, topic: str, label: str) -> dict[str,
     return created
 
 
-# --- One run -----------------------------------------------------------------------------------------------------
+# --- one run
+# -----------------------------------------------------------------------------------------------------
 
 
 def run_k6(run_file: dict[str, Any], args: argparse.Namespace) -> tuple[dict[str, Any], list[str]]:
-    """Runs scripts/load/deadline.js and returns its summary, and the failed submissions it reported."""
+    """runs scripts/load/deadline.js and returns its summary, and the failed submissions it reported."""
     WORK.mkdir(parents=True, exist_ok=True)
     path = WORK / "run.json"
     path.write_text(json.dumps(run_file), encoding="utf-8")
@@ -246,7 +235,7 @@ def run_k6(run_file: dict[str, Any], args: argparse.Namespace) -> tuple[dict[str
 
 
 def counts(assessment_id: str) -> tuple[int, int]:
-    """How many submissions of an assessment Assessment has stored, and how many of them Grading has marked."""
+    """how many submissions of an assessment assessment has stored, and how many of them grading has marked."""
     where = f"assessment_id='{UUID(assessment_id)}'"
     stored = psql_value(
         f"SELECT count(*) FROM submissions WHERE {where}", database="assessment", user="assessment"
@@ -256,8 +245,7 @@ def counts(assessment_id: str) -> tuple[int, int]:
 
 
 def kill_grading_replica_when_submitting(assessment_id: str, students: int, run: Run) -> None:
-    """Kills the last Grading replica as soon as the first submission is stored, so it dies with its share of the
-    burst still to mark."""
+    """kills the last grading replica as soon as the first submission is stored, so it dies with its share of the burst still to mark."""
     deadline = time.monotonic() + MARKED_TIMEOUT
     while time.monotonic() < deadline and counts(assessment_id)[0] == 0:
         time.sleep(0.1)
@@ -267,8 +255,7 @@ def kill_grading_replica_when_submitting(assessment_id: str, students: int, run:
 
 
 def warm_up(paths: list[str], tokens: list[str]) -> None:
-    """A few reads through Kong first, so each fresh replica has opened its database connections before the burst,
-    as a replica that has been serving would have."""
+    """a few reads through kong first, so each fresh replica has opened its database connections before the burst, as a replica that has been serving would have."""
     with ThreadPoolExecutor(30) as pool:
         list(
             pool.map(
@@ -283,7 +270,7 @@ def warm_up(paths: list[str], tokens: list[str]) -> None:
 
 
 def wait_marked(assessment_id: str) -> bool:
-    """Waits until Grading has marked every submission Assessment stored."""
+    """waits until grading has marked every submission assessment stored."""
     deadline = time.monotonic() + MARKED_TIMEOUT
     while time.monotonic() < deadline:
         stored, marked = counts(assessment_id)
@@ -294,7 +281,7 @@ def wait_marked(assessment_id: str) -> bool:
 
 
 def timings(run: Run, assessment_id: str) -> None:
-    """From the databases' own clocks: how long the burst took to store, and to mark."""
+    """from the databases' own clocks: how long the burst took to store, and to mark."""
     where = f"assessment_id='{UUID(assessment_id)}'"
     first, last = psql_value(
         f"SELECT extract(epoch FROM min(created_at)) || ',' || extract(epoch FROM max(created_at)) "
@@ -312,13 +299,13 @@ def timings(run: Run, assessment_id: str) -> None:
 
 
 def verify(run: Run, assessment_id: str, students: int) -> None:
-    """What must hold however many replicas ran: each student's submission accepted once and marked exactly once,
-    the outbox drained and Grading's consumers caught up."""
+    """what must hold however many replicas ran: each student's submission accepted once and marked exactly once, the outbox drained and grading's consumers caught up."""
     where = f"assessment_id='{UUID(assessment_id)}'"
     stored = psql_value(
         f"SELECT count(*) FROM submissions WHERE {where}", database="assessment", user="assessment"
     )
-    # An evaluation's id is its submission's id, so a submission marked twice would be a second row for one id.
+    # an evaluation's id is its submission's id, so a submission marked twice would be a second row for one
+    # id.
     evaluations = psql_value(
         f"SELECT count(*) || ',' || count(DISTINCT id) || ',' || count(DISTINCT student_id) FROM evaluations "
         f"WHERE {where}",
@@ -379,7 +366,8 @@ def one_run(
     print(report_run(run), flush=True)
 
 
-# --- Report ------------------------------------------------------------------------------------------------------
+# --- report
+# ------------------------------------------------------------------------------------------------------
 
 
 def ms(trend: dict[str, float] | None, key: str) -> str:

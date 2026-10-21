@@ -1,9 +1,4 @@
-"""Snapping a figure's box to its content.
-
-The model's figure boxes are rough and often too tight: a chart's axis title or the ends of its labels fall
-outside (CLIP's Figure 7 lost "KITTI" and its axis title, so its description named the axis "Distance"). Before a
-figure is described, its box is snapped to its content (`snap`): the drawings and pictures
-it mostly covers, the label lines its edges cut through, and the small label lines just outside it."""
+"""snapping a figure's box to its content."""
 
 import re
 from pathlib import Path
@@ -32,7 +27,7 @@ SNAP_LABEL_RATIO = (
 
 
 SNAP_SHORT_CHARS = (
-    25  # a bit smaller), or at most this many characters and SNAP_SHORT_WORDS words; not a bullet,
+    25  # a bit smaller), or at most this many characters and snap_short_words words; not a bullet,
 )
 
 
@@ -56,8 +51,7 @@ BULLET_START = "▪•◦‣●○■□►▸➢➤✓✔–"
 def snap(
     box: Box, graphics: list[Box], lines: list[Line], blockers: list[Box], size: tuple[float, float]
 ) -> Box:
-    """The figure's box grown to its content (see the module docstring), never by more than SNAP_GROW a side,
-    never past the page, and never further into `blockers` (the page's tables and other figures)."""
+    """the figure's box grown to its content (see the module docstring), never by more than snap_grow a side, never past the page, and never further into `blockers` (the page's tables and other figures)."""
     w, h = size
     limit = (
         max(0.0, box[0] - SNAP_GROW),
@@ -83,7 +77,8 @@ def snap(
         for lb, t, font in lines:
             small = font <= SNAP_LABEL_RATIO * body
             short = len(t) <= SNAP_SHORT_CHARS and len(t.split()) <= SNAP_SHORT_WORDS
-            # at body size, a short line ending a sentence or going on in lower case is a paragraph's last line
+            # at body size, a short line ending a sentence or going on in lower case is a paragraph's last
+            # line
             tail = t[-1] in ".?:)" or (t[0].islower() and len(t.split()) > 1)
             label = (small or (short and not tail)) and t[0] not in BULLET_START
             if within(lb, out, 1.0) or not label or len(t.split()) > SNAP_MAX_WORDS:
@@ -99,8 +94,7 @@ def snap(
 
 
 def _running_text(lb: Box, text: str, font: float, body: float, height: float) -> bool:
-    """A line no figure box may take in: a running header or footer, a caption, a bullet, or a long line at
-    about body size."""
+    """a line no figure box may take in: a running header or footer, a caption, a bullet, or a long line at about body size."""
     return (
         lb[1] < SNAP_MARGIN * height
         or lb[3] > (1 - SNAP_MARGIN) * height
@@ -111,12 +105,12 @@ def _running_text(lb: Box, text: str, font: float, body: float, height: float) -
 
 
 def _gaps(a: Box, b: Box) -> tuple[float, float]:
-    """The horizontal and vertical distance between two boxes (0 where they overlap)."""
+    """the horizontal and vertical distance between two boxes (0 where they overlap)."""
     return max(b[0] - a[2], a[0] - b[2], 0.0), max(b[1] - a[3], a[1] - b[3], 0.0)
 
 
 def _body_size(lines: list[Line]) -> float:
-    """The page's most common font size, weighted by characters."""
+    """the page's most common font size, weighted by characters."""
     sizes: dict[float, int] = {}
     for _, text, font in lines:
         sizes[round(font * 2) / 2] = sizes.get(round(font * 2) / 2, 0) + len(text)
@@ -124,20 +118,20 @@ def _body_size(lines: list[Line]) -> float:
 
 
 def geometry(path: Path, number: int) -> tuple[list[Box], list[Line]]:
-    """A page's drawings (clustered) and pictures, and its visible text lines, for `snap`."""
+    """a page's drawings (clustered) and pictures, and its visible text lines, for `snap`."""
     with pymupdf.open(path) as doc:
         page = doc[number]
         return [tuple(r) for r in page.cluster_drawings()] + pictures(page), _lines(page)
 
 
 def _lines(page: pymupdf.Page) -> list[Line]:
-    """The page's visible text lines, in the PDF's order."""
+    """the page's visible text lines, in the pdf's order."""
     lines = []
     for b in page.get_text("dict")["blocks"]:
         for ln in b.get("lines", ()):
             spans = [
                 sp for sp in ln["spans"] if sp["alpha"] != 0
-            ]  # whitespace-only spans too: some PDFs space so
+            ]  # whitespace-only spans too: some pdfs space so
             text = unligature(" ".join("".join(sp["text"] for sp in spans).split()))
             if text:
                 lines.append((tuple(ln["bbox"]), text, max(sp["size"] for sp in spans if sp["text"].strip())))

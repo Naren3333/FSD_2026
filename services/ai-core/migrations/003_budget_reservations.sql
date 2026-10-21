@@ -1,4 +1,4 @@
--- Per-operation reservations shared by all replicas. No provider calls run inside a transaction.
+-- per-operation reservations shared by all replicas.
 CREATE TABLE budget_reservations (
  id uuid PRIMARY KEY,
  org_id text NOT NULL,

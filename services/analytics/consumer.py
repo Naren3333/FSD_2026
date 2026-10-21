@@ -1,13 +1,4 @@
-"""Analytics' events: grading.finalized.v3 stores each finalized evaluation's evidence once (inbox), and
-identity.classroom.deleted.v1 purges a deleted classroom's evidence, assessment.deleted.v1 a deleted assessment's
-(ADR 0008), and identity.user.deleted.v1 the evidence of a student who deleted their account (ADR 0011). Messages
-that don't match the contract, or whose event type is not their Kafka topic's, are dead-lettered;
-learning_transport.kafka runs the consumer.
-
-Storing and purging take the same per-classroom lock (an assessment's purge takes its classroom's), so a purge and a
-finalized grade for its classroom never interleave across replicas: either the evidence is stored first and the purge
-removes it, or the purge commits first and the grade sees the tombstone. A deleted account's purge and the student's
-grades take the student's lock the same way."""
+"""deduplicate finalized evidence and purge it when its classroom, assessment or account is deleted."""
 
 import os
 import threading
@@ -31,12 +22,11 @@ from psycopg_pool import ConnectionPool
 from domain import FINALIZED, AssessmentDeletedEvent, Event
 
 ASSESSMENT_DELETED = "assessment.deleted.v1"
-DEFAULT_GROUP = "analytics-v1"  # KAFKA_GROUP overrides it, e.g. to rebuild from the start of the topics
+DEFAULT_GROUP = "analytics-v1"  # kafka_group overrides it, e.g. to rebuild from the start of the topics
 
 
 def process(pool: ConnectionPool[Any], event: Event) -> None:
-    """Store the evaluation's evidence, unless this event or this evaluation was already stored, or its classroom or
-    assessment was deleted, or its student deleted their account."""
+    """store the evaluation's evidence, unless this event or this evaluation was already stored, or its classroom or assessment was deleted, or its student deleted their account."""
     with pool.connection() as conn, conn.transaction():
         inserted = conn.execute(
             "INSERT INTO inbox(event_id) VALUES(%s) ON CONFLICT DO NOTHING RETURNING event_id",
@@ -82,8 +72,7 @@ def process(pool: ConnectionPool[Any], event: Event) -> None:
 
 
 def remove_evidence(conn: Connection[Any], where: str, params: tuple[Any, ...]) -> None:
-    """Delete the evidence `where` picks (a condition with %s placeholders for `params`) and the evaluations it was
-    stored under."""
+    """delete the evidence `where` picks (a condition with %s placeholders for `params`) and the evaluations it was stored under."""
     evaluations = conn.execute(
         f"DELETE FROM evidence WHERE {where} RETURNING evaluation_id", params
     ).fetchall()
@@ -95,8 +84,7 @@ def remove_evidence(conn: Connection[Any], where: str, params: tuple[Any, ...]) 
 
 
 def purge(pool: ConnectionPool[Any], event: ClassroomDeletedEvent) -> None:
-    """Remove a deleted classroom's evidence and remember the classroom, so a finalized grade that arrives later is
-    not stored. Deleting what is already gone changes nothing, so a repeated event is harmless."""
+    """remove a deleted classroom's evidence and remember the classroom, so a finalized grade that arrives later is not stored."""
     data = event.data
     with pool.connection() as conn, conn.transaction():
         lock(conn, LOCK_CLASSROOM, data.classroom_id)
@@ -108,8 +96,7 @@ def purge(pool: ConnectionPool[Any], event: ClassroomDeletedEvent) -> None:
 
 
 def purge_assessment(pool: ConnectionPool[Any], event: AssessmentDeletedEvent) -> None:
-    """Remove a deleted assessment's evidence and remember the assessment, so a finalized grade for it that arrives
-    later is not stored. Deleting what is already gone changes nothing, so a repeated event is harmless."""
+    """remove a deleted assessment's evidence and remember the assessment, so a finalized grade for it that arrives later is not stored."""
     data = event.data
     with pool.connection() as conn, conn.transaction():
         lock(conn, LOCK_CLASSROOM, data.classroom_id)
@@ -126,9 +113,7 @@ def purge_assessment(pool: ConnectionPool[Any], event: AssessmentDeletedEvent) -
 
 
 def purge_user(pool: ConnectionPool[Any], event: UserDeletedEvent) -> None:
-    """Remove the evidence of a student who deleted their account and remember them, so a finalized grade of theirs
-    that arrives later is not stored. A teacher's account holds no evidence. Deleting what is already gone changes
-    nothing, so a repeated event is harmless."""
+    """remove the evidence of a student who deleted their account and remember them, so a finalized grade of theirs that arrives later is not stored."""
     data = event.data
     with pool.connection() as conn, conn.transaction():
         lock(conn, LOCK_USER, str(data.user_id))
@@ -143,7 +128,7 @@ Purge = Callable[[ConnectionPool[Any], bytes | None], bool]
 
 
 def parsed[E: Envelope](model: type[E], apply: Callable[[ConnectionPool[Any], E], None]) -> Purge:
-    """A deletion topic's handling: its message parsed as `model` and applied, or False when it is not one."""
+    """a deletion topic's handling: its message parsed as `model` and applied, or false when it is not one."""
 
     def run(pool: ConnectionPool[Any], value: bytes | None) -> bool:
         deleted = parse(model, value)
@@ -155,7 +140,7 @@ def parsed[E: Envelope](model: type[E], apply: Callable[[ConnectionPool[Any], E]
     return run
 
 
-# Each deletion topic and the purge that applies its event.
+# each deletion topic and the purge that applies its event.
 PURGES: dict[str, Purge] = {
     CLASSROOM_DELETED: parsed(ClassroomDeletedEvent, purge),
     ASSESSMENT_DELETED: parsed(AssessmentDeletedEvent, purge_assessment),

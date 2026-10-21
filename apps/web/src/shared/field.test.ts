@@ -61,7 +61,7 @@ describe('field control', () => {
     const root = fixture.nativeElement as HTMLElement;
     const input = root.querySelector('input') as HTMLInputElement;
     expect(input.getAttribute('aria-invalid')).toBeNull();
-    // As a blur or submit would, which also asks for change detection.
+    // as a blur or submit would, which also asks for change detection.
     fixture.componentInstance.name.markAsTouched();
     fixture.componentRef.changeDetectorRef.markForCheck();
     fixture.detectChanges();

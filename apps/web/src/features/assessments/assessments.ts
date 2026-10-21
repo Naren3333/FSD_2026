@@ -52,7 +52,7 @@ import { QuestionGeneratorComponent } from './generator';
 import { MarkingGuidanceComponent } from './guidance';
 import { MarkingPointsComponent } from './marking-points';
 
-/** Why a published assessment's replacement was refused, after which the editor keeps only its details. */
+/* why a published assessment's replacement was refused, after which the editor keeps only its details. */
 const LOCKED =
   'Students have submitted this assessment, so only its title, due date and late policy can change now. Save ' +
   'again to keep those changes.';
@@ -83,28 +83,27 @@ export class AssessmentsComponent {
   private readonly curriculum = inject(CurriculumNames);
   readonly classroomId = inject(ClassroomContext).classroomId;
   readonly state = new ActionState();
-  /** Deleting an assessment, in its confirmation dialog. */
+  /* deleting an assessment, in its confirmation dialog. */
   readonly deleteState = new ActionState();
   readonly assessments = new PagedSection<AssessmentSummary>();
   readonly topics = this.curriculum.topics;
-  /** Reading the curriculum for the topic a new question uses. */
+  /* reading the curriculum for the topic a new question uses. */
   readonly topicsState = new Section<Topic[]>();
-  /** The classroom's documents, read once for generation, drafted guidance and where passages came from. */
+  /* the classroom's documents, read once for generation, drafted guidance and where passages came from. */
   readonly classDocs = new Section<DocumentRecord[]>();
-  /** The open assessment, answered or previewed. */
+  /* the open assessment, answered or previewed. */
   @ViewChild(AnswerSheetComponent, { static: true }) sheet?: AnswerSheetComponent;
-  /** The assessment the editor is changing; null while it creates a new one. */
+  /* the assessment the editor is changing; null while it creates a new one. */
   readonly editing = signal<Assessment | null>(null);
-  /** Whether anyone had submitted the assessment being edited when the teacher opened it. */
+  /* whether anyone had submitted the assessment being edited when the teacher opened it. */
   readonly editingSubmitted = signal(false);
-  /** Whether the editor changes a published assessment, which stays published. */
+  /* whether the editor changes a published assessment, which stays published. */
   readonly editingPublished = computed(() => this.editing()?.status === 'published');
-  /** Whether students have submitted the published assessment being edited, so only its title, due date and late
-   * policy can change: its questions and grading settings are what their answers are graded against. */
+  /* submitted assessments allow only title, due-date and late-policy edits. */
   readonly detailsOnly = computed(() => this.editingPublished() && this.editingSubmitted());
-  /** The assessment waiting for its deletion to be confirmed. */
+  /* the assessment waiting for its deletion to be confirmed. */
   readonly deleting = signal<AssessmentSummary | null>(null);
-  /** Whether deleting the assessment waiting for confirmation also deletes submissions and their grades. */
+  /* whether deleting the assessment waiting for confirmation also deletes submissions and their grades. */
   readonly deletingSubmitted = computed(() => {
     const item = this.deleting();
     return !!item && submittedBy(item);
@@ -115,15 +114,15 @@ export class AssessmentsComponent {
   readonly maxCriteria = MAX_CRITERIA;
   readonly maxMarkingPoints = MAX_ASSESSMENT_EXCERPTS;
   readonly usesScheme = usesScheme;
-  /** The assessment a link such as student Home asked to open, until the classroom's list has it. */
+  /* the assessment a link such as student home asked to open, until the classroom's list has it. */
   private requested = '';
   readonly form = assessmentForm();
-  /** Re-read on every change to the form's questions, so the AI marking option knows whether it applies. */
+  /* re-read on every change to the form's questions, so the ai marking option knows whether it applies. */
   private readonly questionTypes = signal(this.form.controls.questions.getRawValue().map((q) => q.type));
   readonly canSuggest = computed(() => teacherMarked(this.questionTypes().map((type) => ({ type }))));
 
   constructor() {
-    // The open assessment's answers are tracked by the answer sheet.
+    // the open assessment's answers are tracked by the answer sheet.
     inject(UnsavedChanges).track(() => this.form.dirty);
     this.form.controls.questions.valueChanges.pipe(takeUntilDestroyed()).subscribe(() => this.typesChanged());
     this.typesChanged();
@@ -140,7 +139,7 @@ export class AssessmentsComponent {
       });
   }
 
-  /** AI marking applies only to questions a teacher marks, so the option is off without one. */
+  /* ai marking applies only to questions a teacher marks, so the option is off without one. */
   private typesChanged(): void {
     this.questionTypes.set(this.form.controls.questions.getRawValue().map((q) => q.type));
     const option = this.form.controls.ai_marking;
@@ -152,12 +151,12 @@ export class AssessmentsComponent {
     return this.form.controls.questions;
   }
 
-  /** The topic's name when it is archived, or '' for an active (or unknown) topic. */
+  /* the topic's name when it is archived, or '' for an active (or unknown) topic. */
   archivedTopic(topicId: string): string {
     return this.curriculum.archived().find((t) => t.id === topicId)?.name ?? '';
   }
 
-  /** An archived topic is out of every picker for new questions, so a question that still has one must change it. */
+  /* an archived topic is out of every picker for new questions, so a question that still has one must change it. */
   private readonly activeTopic: ValidatorFn = (control) =>
     this.archivedTopic(control.value as string) ? { archived: true } : null;
 
@@ -174,13 +173,13 @@ export class AssessmentsComponent {
       )
       .then(() => this.openRequested());
     if (this.session.isTeacher()) {
-      // Read fresh, so a topic a colleague just added is there to choose.
+      // read fresh, so a topic a colleague just added is there to choose.
       void this.topicsState.load(() => this.curriculum.refresh());
       void this.classDocs.load(() => this.contentApi.documents(classroomId));
     }
   }
 
-  /** Opens the requested assessment once it is in the current classroom's list. */
+  /* opens the requested assessment once it is in the current classroom's list. */
   private openRequested(): void {
     if (!this.requested || !this.classroomId() || this.assessments.loading()) return;
     const id = this.requested;
@@ -190,7 +189,7 @@ export class AssessmentsComponent {
       this.sheet?.open(id);
       return;
     }
-    // A Home/deep link can name an assessment on another page; the server still authorizes the read.
+    // a home/deep link can name an assessment on another page; the server still authorizes the read.
     void this.assessmentApi
       .get(id)
       .then((item) => {
@@ -201,11 +200,13 @@ export class AssessmentsComponent {
       );
   }
 
-  // --- The teacher's editor --------------------------------------------------------------------------------
+  // --- the teacher's editor
+  // --------------------------------------------------------------------------------
 
   addQuestion(): void {
     if (this.questions.length >= MAX_QUESTIONS) return;
-    // A new question starts with the previous one's topic, which is usually the same, unless it is archived.
+    // a new question starts with the previous one's topic, which is usually the same, unless it is
+    // archived.
     const topic = this.questions.at(this.questions.length - 1)?.controls.topic_id.value ?? '';
     const q = questionForm();
     q.controls.topic_id.setValue(this.archivedTopic(topic) ? '' : topic);
@@ -214,8 +215,7 @@ export class AssessmentsComponent {
     this.focusLater(`question-${this.questions.length - 1}-prompt`);
   }
 
-  /** Adds a generated draft the teacher kept, in place of the editor's one question if the teacher has not started
-   * it. Its marking points are left out when the assessment already has all the marking points it can. */
+  /* adds a generated draft the teacher kept, in place of the editor's one question if the teacher has not started it. */
   addGenerated(question: Omit<Question, 'id'>): void {
     const replace = this.questions.length === 1 && untouched(this.questions.at(0));
     if (!replace && this.questions.length >= MAX_QUESTIONS) return;
@@ -238,17 +238,17 @@ export class AssessmentsComponent {
     );
   }
 
-  /** The editor's question prompts, so generation leaves out near-duplicates. */
+  /* the editor's question prompts, so generation leaves out near-duplicates. */
   prompts(): string[] {
     return this.questions.controls.map((q) => q.controls.prompt.value);
   }
 
-  /** Marking points across the editor's questions. */
+  /* marking points across the editor's questions. */
   markingPoints(): number {
     return schemeTotal(this.questions.getRawValue());
   }
 
-  /** Where a generated question's passage is from. */
+  /* where a generated question's passage is from. */
   sourceOf(excerpt: Excerpt): string {
     return excerptLabel(excerpt, this.classDocs.value());
   }
@@ -273,7 +273,7 @@ export class AssessmentsComponent {
     this.form.markAsDirty();
   }
 
-  /** A free response's points: its rubric's highest levels added up. */
+  /* a free response's points: its rubric's highest levels added up. */
   rubricPoints(question: QuestionForm): number {
     return rubricTotal(question.controls.criteria.getRawValue());
   }
@@ -282,8 +282,7 @@ export class AssessmentsComponent {
     setTimeout(() => document.getElementById(id)?.focus());
   }
 
-  /** Saves the editor as a draft (new or existing), publishes it, or saves the changes to a published assessment
-   * (only its details once students have submitted it). */
+  /* saves the editor as a draft (new or existing), publishes it, or saves the changes to a published assessment (only its details once students have submitted it). */
   save(publish: boolean): void {
     if (!this.state.validate(this.form, 'assessment-editor')) return;
     const editing = this.editing();
@@ -312,8 +311,7 @@ export class AssessmentsComponent {
     }, message);
   }
 
-  /** Saves the editor's changes to a published assessment. When a student submitted it while the teacher was
-   * editing, the replacement is refused; the editor then keeps only what can still change. */
+  /* saves the editor's changes to a published assessment. */
   private saveChanges(editing: Assessment): void {
     const classroomId = this.classroomId();
     const detailsOnly = this.detailsOnly();
@@ -351,18 +349,18 @@ export class AssessmentsComponent {
     const classroomId = this.classroomId();
     void this.state.run(async () => {
       const assessment = await this.assessmentApi.get(item.id);
-      // Know which of its topics are archived; without the curriculum, the server still refuses one.
+      // know which of its topics are archived; without the curriculum, the server still refuses one.
       await this.curriculum.need(assessment.questions.map((q) => q.topic_id)).catch(() => undefined);
-      // The user may have moved to another classroom while the assessment loaded.
+      // the user may have moved to another classroom while the assessment loaded.
       if (this.classroomId() !== classroomId) return;
-      // Whole again, in case the last assessment edited was locked to its details.
+      // whole again, in case the last assessment edited was locked to its details.
       this.form.enable({ emitEvent: false });
       fillForm(this.form, assessment);
       for (const q of this.questions.controls) {
         const topic = q.controls.topic_id;
         topic.addValidators(this.activeTopic);
         topic.updateValueAndValidity({ emitEvent: false });
-        // Say at once which questions need another topic.
+        // say at once which questions need another topic.
         if (topic.invalid) topic.markAsTouched();
       }
       this.editing.set(assessment);
@@ -372,8 +370,7 @@ export class AssessmentsComponent {
     });
   }
 
-  /** Records whether anyone has submitted the assessment being edited and, once anyone has, disables everything but
-   * its details, so the form checks and sends only those. */
+  /* records whether anyone has submitted the assessment being edited and, once anyone has, disables everything but its details, so the form checks and sends only those. */
   private lockTo(submitted: boolean): void {
     this.editingSubmitted.set(submitted);
     if (!this.detailsOnly()) return;
@@ -421,7 +418,8 @@ export class AssessmentsComponent {
       try {
         await this.assessmentApi.remove(item.id, submittedBy(item));
       } catch (error) {
-        // A student may have submitted since the list was read: the dialog then says what deleting now takes.
+        // a student may have submitted since the list was read: the dialog then says what deleting now
+        // takes.
         const refused = hasSubmissions(error);
         const reread = await this.assessments
           .reload(() =>
@@ -434,7 +432,7 @@ export class AssessmentsComponent {
             () => false,
           );
         const now = (reread && this.assessments.value()?.find((a) => a.id === item.id)) || item;
-        // Without a fresh count, who submitted is unknown: the dialog says so rather than guessing.
+        // without a fresh count, who submitted is unknown: the dialog says so rather than guessing.
         const counted = reread ? now : { ...now, submissions: undefined };
         if (this.deleting()?.id === item.id)
           this.deleting.set(refused ? { ...counted, has_submissions: true } : now);
@@ -445,7 +443,7 @@ export class AssessmentsComponent {
       this.closeDelete();
       this.state.error.set('');
       this.state.message.set(item.status === 'draft' ? 'Draft deleted.' : `${item.title} deleted.`);
-      // The dialog is closed, so a failure is reported on the page, without the deleted assessment.
+      // the dialog is closed, so a failure is reported on the page, without the deleted assessment.
       await rereadAfterDelete(
         this.assessments,
         item.id,
@@ -462,7 +460,8 @@ export class AssessmentsComponent {
     });
   }
 
-  // --- Labels ----------------------------------------------------------------------------------------------
+  // --- labels
+  // ----------------------------------------------------------------------------------------------
 
   readonly schedule = schedule;
 
@@ -473,13 +472,12 @@ export class AssessmentsComponent {
   }
 }
 
-/** Whether anyone has submitted the assessment, students since removed from the classroom included. A server that
- * does not say falls back to the count of enrolled students who have. */
+/* whether anyone has submitted the assessment, students since removed from the classroom included. */
 function submittedBy(item: AssessmentSummary): boolean {
   return item.has_submissions ?? !!item.submissions;
 }
 
-/** Whether the server refused a change because students have submitted the assessment. */
+/* whether the server refused a change because students have submitted the assessment. */
 function hasSubmissions(error: unknown): boolean {
   return error instanceof ApiError && error.code === 'HAS_SUBMISSIONS';
 }

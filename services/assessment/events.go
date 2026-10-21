@@ -5,32 +5,26 @@ import (
 	"time"
 )
 
-// maxSubmittedEvent is the largest submission event Assessment publishes, in bytes: below Kafka's default 1 MB
-// message limit with room for the event envelope. The event repeats every question with its rubric and model
-// answer, so a long assessment with long answers can pass it although each answer is within its own limit; such a
-// submission is refused rather than accepted and never graded.
+// maxsubmittedevent is the largest submission event assessment publishes, in bytes: below kafka's default 1
+// mb message limit with room for the event envelope.
 const maxSubmittedEvent = 900_000
 
-// topicSubmitted carries each submission to Grading with the assessment's questions as they were submitted, answer
-// keys, rubrics and marking-scheme passages included, and the settings Grading acts on
-// (contracts/events/assessment.submitted.v4.schema.json). v2 replaced v1 when questions gained points, short answers
-// and free responses (ADR 0004); v3 replaced v2 when they gained marking-scheme passages (ADR 0005); v4 replaced v3
-// when the curriculum became a single level of topics and each question named its topic in topic_id.
+// publish submitted questions, answer keys and marking guidance for grading.
 const topicSubmitted = "assessment.submitted.v4"
 
-// topicSubmittedAll matches every submission version's topic, for removing a deleted assessment's events from the
-// outbox whichever version they were written as.
+// topicsubmittedall matches every submission version's topic, for removing a deleted assessment's events
+// from the outbox whichever version they were written as.
 const topicSubmittedAll = "assessment.submitted.%"
 
-// topicDeleted announces a published assessment its teacher deleted, with its submissions
-// (contracts/events/assessment.deleted.v1.schema.json): Grading and Analytics delete what they hold for it (ADR 0008).
+// announce deleted assessments so grading and analytics purge their copies.
 const topicDeleted = "assessment.deleted.v1"
 
-// topicDueChanged announces a published assessment's new due date, or its removal (null)
-// (contracts/events/assessment.due_changed.v1.schema.json): Grading sets its evaluations' late flags against it.
+// topicduechanged announces a published assessment's new due date, or its removal (null)
+// (contracts/events/assessment.due_changed.v1.schema.json): grading sets its evaluations' late flags
+// against it.
 const topicDueChanged = "assessment.due_changed.v1"
 
-// submittedEventTooLarge reports whether the submission's event would be over maxSubmittedEvent.
+// submittedeventtoolarge reports whether the submission's event would be over maxsubmittedevent.
 func submittedEventTooLarge(v Assessment, sub Submission) bool {
 	body, err := json.Marshal(submittedEvent(v, sub))
 	return err != nil || len(body) > maxSubmittedEvent
@@ -53,8 +47,8 @@ func submittedEvent(v Assessment, sub Submission) map[string]any {
 	}
 }
 
-// eventQuestions are the questions as Grading gets them: without where a generated question came from, which only
-// the teacher's editor uses (ADR 0006) and the v4 contract does not carry.
+// eventquestions are the questions as grading gets them: without where a generated question came from,
+// which only the teacher's editor uses (adr 0006) and the v4 contract does not carry.
 func eventQuestions(questions []Question) []Question {
 	out := make([]Question, len(questions))
 	for i, q := range questions {

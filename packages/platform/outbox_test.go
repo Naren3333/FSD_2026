@@ -58,7 +58,7 @@ func publish(t *testing.T, db *pgxpool.Pool, w *fakeWriter) []string {
 	return names(t, w.sent)
 }
 
-// makeDue lets backed-off events be retried now.
+// makedue lets backed-off events be retried now.
 func makeDue(t *testing.T, db *pgxpool.Pool) {
 	t.Helper()
 	if _, err := db.Exec(context.Background(), "UPDATE outbox SET next_attempt=now()"); err != nil {

@@ -9,10 +9,8 @@ import (
 	"github.com/jackc/pgx/v5"
 )
 
-// removeStudent records that a teacher removed a student from a classroom (platform.TopicEnrollmentRemoved), at the
-// time Identity removed them. The student's evaluations stay, hidden from the teacher's lists while they are not
-// enrolled, and the marker stops each AI suggestion still waiting for work they submitted before (STUDENT_REMOVED),
-// so the teacher's allowance is not spent on it. A repeated or older removal changes nothing.
+// removestudent records that a teacher removed a student from a classroom
+// (platform.topicenrollmentremoved), at the time identity removed them.
 func removeStudent(ctx context.Context, tx pgx.Tx, event platform.Event) error {
 	v, err := platform.DecodeEnrollmentRemoved(event)
 	if err != nil {
@@ -24,11 +22,11 @@ func removeStudent(ctx context.Context, tx pgx.Tx, event platform.Event) error {
 	return err
 }
 
-// topicDueChanged is Assessment's event for a published assessment whose due date its teacher changed
+// topicduechanged is assessment's event for a published assessment whose due date its teacher changed
 // (contracts/events/assessment.due_changed.v1.schema.json).
 const topicDueChanged = "assessment.due_changed.v1"
 
-// DueChanged is the topicDueChanged event's data; DueAt is nil when the due date was removed.
+// duechanged is the topicduechanged event's data; dueat is nil when the due date was removed.
 type DueChanged struct {
 	Assessment string     `json:"assessment_id"`
 	Classroom  string     `json:"classroom_id"`
@@ -36,10 +34,8 @@ type DueChanged struct {
 	DueAt      *time.Time `json:"due_at"`
 }
 
-// changeDue keeps the assessment's latest due date and sets each of its evaluations' late flag against it: late
-// only when submitted after it, never when there is none. It holds the assessment's lock against insertEvaluation,
-// so a submission graded meanwhile either is updated here or takes the new due date itself. An older or repeated
-// change, or one for a deleted assessment, changes nothing.
+// changedue keeps the assessment's latest due date and sets each of its evaluations' late flag against it:
+// late only when submitted after it, never when there is none.
 func changeDue(ctx context.Context, tx pgx.Tx, event platform.Event) error {
 	var v DueChanged
 	if json.Unmarshal(event.Data, &v) != nil || !platform.ID(v.Assessment) || !platform.ID(v.Classroom) || v.Org == "" || event.Resource != v.Assessment {

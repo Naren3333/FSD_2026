@@ -50,27 +50,26 @@ export class ClassroomsComponent {
   readonly classroomName = this.context.classroomName;
   readonly state = new ActionState();
   readonly rosterState = new ActionState();
-  /** The page of the classroom's students on show, by name, and how many are enrolled. */
+  /* the page of the classroom's students on show, by name, and how many are enrolled. */
   readonly roster = new Section<StudentPage>();
   readonly rosterPage = signal(0);
   readonly rosterPageSize = 20;
-  /** Every enrolled student's id, however many pages the roster has, to mark them in the school list. */
+  /* every enrolled student's id, however many pages the roster has, to mark them in the school list. */
   readonly enrolledIds = new Section<string[]>();
-  /** The page of school students on show, fetched from the server ten at a time, and how many match the search
-   * across every page. */
+  /* the page of school students on show, fetched from the server ten at a time, and how many match the search across every page. */
   readonly everyone = new Section<StudentPage>();
   readonly enrolled = computed(() => new Set(this.enrolledIds.value() ?? []));
   readonly everyoneState = new ActionState();
-  /** What the teacher typed to narrow the list, matched by the server against names and usernames. */
+  /* what the teacher typed to narrow the list, matched by the server against names and usernames. */
   readonly search = signal('');
   readonly page = signal(0);
   readonly pageSize = 10;
   private searchTimer?: ReturnType<typeof setTimeout>;
-  /** The student the remove dialog is asking about. */
+  /* the student the remove dialog is asking about. */
   readonly removing = signal<Student | null>(null);
   readonly studentName = studentName;
   @ViewChild('removeDialog') removeDialog?: ConfirmDialogComponent;
-  /** The classroom the delete dialog is asking about. */
+  /* the classroom the delete dialog is asking about. */
   readonly deleting = signal<Classroom | null>(null);
   @ViewChild('deleteDialog') deleteDialog?: ConfirmDialogComponent;
   readonly form = new FormGroup({
@@ -86,7 +85,7 @@ export class ClassroomsComponent {
     this.loadEveryone();
   }
 
-  /** Narrows the list and goes back to its first page once the teacher pauses typing. */
+  /* narrows the list and goes back to its first page once the teacher pauses typing. */
   searchFor(words: string): void {
     this.search.set(words);
     clearTimeout(this.searchTimer);
@@ -96,7 +95,7 @@ export class ClassroomsComponent {
     }, 250);
   }
 
-  /** Fetches the page on show; a page past the end, after students leave, falls back to the last one. */
+  /* fetches the page on show; a page past the end, after students leave, falls back to the last one. */
   loadEveryone(): void {
     if (!this.session.isTeacher()) return;
     void this.everyone.load(async (current) => {
@@ -111,7 +110,7 @@ export class ClassroomsComponent {
     });
   }
 
-  /** Enrolls a student from the school list into the current classroom. */
+  /* enrolls a student from the school list into the current classroom. */
   enrollStudent(student: Student): void {
     const classroomId = this.classroomId();
     if (!classroomId) return;
@@ -128,7 +127,7 @@ export class ClassroomsComponent {
     void this.state.run(() => this.context.refresh());
   }
 
-  /** The current classroom's students, for its teacher: the page on show and every enrolled id. */
+  /* the current classroom's students, for its teacher: the page on show and every enrolled id. */
   loadRoster(): void {
     const classroomId = this.classroomId();
     this.roster.clear();
@@ -138,13 +137,13 @@ export class ClassroomsComponent {
     void this.enrolledIds.load(() => this.identity.rosterIds(classroomId));
   }
 
-  /** Shows the roster page the pager moved to. */
+  /* shows the roster page the pager moved to. */
   showRosterPage(): void {
     const classroomId = this.classroomId();
     if (classroomId) void this.roster.load((current) => this.readRoster(classroomId, current));
   }
 
-  /** The roster page on show; a page past the end, after students leave, falls back to the last one. */
+  /* the roster page on show; a page past the end, after students leave, falls back to the last one. */
   private async readRoster(classroomId: string, current: () => boolean): Promise<StudentPage> {
     const size = this.rosterPageSize;
     let result = await this.identity.rosterPage(classroomId, this.rosterPage() * size, size);
@@ -156,7 +155,7 @@ export class ClassroomsComponent {
     return result;
   }
 
-  /** Re-reads the roster page and the enrolled ids after a student joined or left. */
+  /* re-reads the roster page and the enrolled ids after a student joined or left. */
   private async rereadRoster(classroomId: string): Promise<void> {
     const same = () => this.classroomId() === classroomId;
     await Promise.all([

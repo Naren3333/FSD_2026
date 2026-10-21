@@ -11,7 +11,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
-// store is Content's documents, their index jobs and their indexed chunks.
+// store is content's documents, their index jobs and their indexed chunks.
 type store interface {
 	countDocuments(ctx context.Context, org, classroom string, teacher bool) (int, error)
 	insertDocument(ctx context.Context, d newDocument) (commitAttempted bool, err error)
@@ -26,15 +26,14 @@ type store interface {
 	attachRelated(ctx context.Context, f filter, hits []hit) error
 }
 
-// pgStore is the store in the service's own Postgres database.
+// pgstore is the store in the service's own postgres database.
 type pgStore struct{ db *pgxpool.Pool }
 
-// errClassroomPurged is insertDocument's answer for a classroom that has been deleted and purged.
+// errclassroompurged is insertdocument's answer for a classroom that has been deleted and purged.
 var errClassroomPurged = errors.New("the classroom was deleted")
 
-// insertDocument stores the document row, queues a PDF for indexing and emits the outbox event in one
-// transaction, unless the classroom has been purged (errClassroomPurged). commitAttempted reports whether Commit was
-// called: an uncertain commit may have succeeded, so callers must then keep the stored original.
+// store the document, queue indexing and emit its event atomically; retain originals after uncertain
+// commits.
 func (p pgStore) insertDocument(ctx context.Context, d newDocument) (commitAttempted bool, err error) {
 	tx, err := p.db.Begin(ctx)
 	if err != nil {
@@ -45,8 +44,8 @@ func (p pgStore) insertDocument(ctx context.Context, d newDocument) (commitAttem
 	if err != nil {
 		return false, err
 	}
-	// Shared with other uploads, exclusive against the classroom's purge: the purge removes every upload committed
-	// before it, and every later upload sees the classroom in purged_classrooms.
+	// shared with other uploads, exclusive against the classroom's purge: the purge removes every upload
+	// committed before it, and every later upload sees the classroom in purged_classrooms.
 	if err = platform.LockShared(ctx, tx, platform.LockClassroom, d.Classroom); err != nil {
 		return false, err
 	}
@@ -65,7 +64,7 @@ func (p pgStore) insertDocument(ctx context.Context, d newDocument) (commitAttem
 		err = platform.Emit(ctx, tx, "content.uploaded.v1", d.ID, map[string]any{"document_id": d.ID, "classroom_id": d.Classroom, "org_id": d.Org, "revision": d.Revision, "status": d.Status})
 	}
 	if err == nil {
-		// From here a failure may still have committed the row, so the caller must keep the original.
+		// from here a failure may still have committed the row, so the caller must keep the original.
 		commitAttempted = true
 		err = tx.Commit(ctx)
 	}
@@ -78,7 +77,7 @@ func scanDocument(row pgx.Row, v *Document, more ...any) error {
 	return row.Scan(append([]any{&v.ID, &v.Classroom, &v.Title, &v.Type, &v.Status, &v.Revision, &v.SHA, &v.DocType, &v.PageCount, &v.ChunkCount, &v.EmbeddingModel, &v.IndexedAt, &v.FailureReason}, more...)...)
 }
 
-// listDocuments lists a classroom's documents; students get teaching material only.
+// listdocuments lists a classroom's documents; students get teaching material only.
 func (p pgStore) listDocuments(ctx context.Context, org, classroom string, teacher bool, paging ...platform.ListWindow) ([]Document, error) {
 	window := platform.Window(paging, 100)
 	rows, err := p.db.Query(ctx, "SELECT "+documentColumns+" FROM documents WHERE classroom_id=$1 AND org_id=$2 AND ($3 OR doc_type='teaching_material') ORDER BY created_at DESC,id DESC OFFSET $4 LIMIT $5", classroom, org, teacher, window.Offset, window.Limit)
@@ -92,8 +91,8 @@ func (p pgStore) listDocuments(ctx context.Context, org, classroom string, teach
 	})
 }
 
-// findDocument returns the raw chunks JSON separately so the handler can
-// decode it only after the access check, as before.
+// finddocument returns the raw chunks json separately so the handler can decode it only after the access
+// check, as before.
 func (p pgStore) findDocument(ctx context.Context, org, id string) (Document, []byte, error) {
 	var v Document
 	var data []byte
@@ -101,23 +100,22 @@ func (p pgStore) findDocument(ctx context.Context, org, id string) (Document, []
 	return v, data, err
 }
 
-// findOriginal returns what serving the original needs: where it is stored, its media type, and its classroom and
-// type for the access check.
+// findoriginal returns what serving the original needs: where it is stored, its media type, and its
+// classroom and type for the access check.
 func (p pgStore) findOriginal(ctx context.Context, org, id string) (storedDocument, error) {
 	var v storedDocument
 	err := p.db.QueryRow(ctx, "SELECT id,classroom_id,object_key,mime_type,doc_type FROM documents WHERE id=$1 AND org_id=$2", id, org).Scan(&v.ID, &v.Classroom, &v.Key, &v.Type, &v.DocType)
 	return v, err
 }
 
-// findIndexed finds the document whose current chunks point at a figure crop.
+// findindexed finds the document whose current chunks point at a figure crop.
 func (p pgStore) findIndexed(ctx context.Context, org, id, image string) (Document, error) {
 	var v Document
 	err := p.db.QueryRow(ctx, "SELECT d.id,d.classroom_id,d.doc_type FROM documents d WHERE d.id=$1 AND d.org_id=$2 AND EXISTS(SELECT 1 FROM document_chunks c WHERE c.document_id=d.id AND c.image=$3)", id, org, image).Scan(&v.ID, &v.Classroom, &v.DocType)
 	return v, err
 }
 
-// queueIndex marks a PDF as indexing and queues its job, unless it is already indexing. Chunks from an earlier
-// index stay searchable until a new result replaces them; a failed reindex keeps them.
+// queueindex marks a pdf as indexing and queues its job, unless it is already indexing.
 func (p pgStore) queueIndex(ctx context.Context, org, id string) (bool, error) {
 	tx, err := p.db.Begin(ctx)
 	if err != nil {
@@ -134,8 +132,8 @@ func (p pgStore) queueIndex(ctx context.Context, org, id string) (bool, error) {
 	return true, tx.Commit(ctx)
 }
 
-// deleteDocument atomically removes searchable data and records both the deletion event and durable object
-// cleanup. Object storage is never touched before commit. pgx.ErrNoRows means the document is already gone.
+// deletedocument atomically removes searchable data and records both the deletion event and durable object
+// cleanup.
 func (p pgStore) deleteDocument(ctx context.Context, org, id string) error {
 	tx, err := p.db.Begin(ctx)
 	if err != nil {
@@ -155,8 +153,8 @@ func (p pgStore) deleteDocument(ctx context.Context, org, id string) error {
 	return tx.Commit(ctx)
 }
 
-// vectorLeg compares only vectors from the query's embedding model. relaxed_order lets the filtered HNSW scan
-// continue until enough rows pass the filter; the outer ORDER BY makes the ranks exact.
+// vectorleg compares only vectors from the query's embedding model. relaxed_order lets the filtered hnsw
+// scan continue until enough rows pass the filter; the outer order by makes the ranks exact.
 func (p pgStore) vectorLeg(ctx context.Context, f filter, vector []float32, model string) ([]hit, error) {
 	tx, err := p.db.Begin(ctx)
 	if err != nil {
@@ -181,8 +179,8 @@ func (p pgStore) keywordLeg(ctx context.Context, f filter, query string) ([]hit,
 	return scanHits(rows)
 }
 
-// attachRelated adds, for each hit that cites labels, the figures and tables of its document with those labels,
-// under the same filter. No query runs when no hit cites anything.
+// attachrelated adds, for each hit that cites labels, the figures and tables of its document with those
+// labels, under the same filter.
 func (p pgStore) attachRelated(ctx context.Context, f filter, hits []hit) error {
 	var citing []string
 	for _, h := range hits {

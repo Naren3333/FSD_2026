@@ -1,4 +1,4 @@
-"""Low-cardinality process measurements in Prometheus text format; no user, resource or prompt labels."""
+"""low-cardinality process measurements in prometheus text format; no user, resource or prompt labels."""
 
 import threading
 from typing import Any

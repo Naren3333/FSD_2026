@@ -1,8 +1,4 @@
-"""Local structure readers. No Office execution, external relationships or model calls.
-
-PDF-compatible numeric anchors mean slides for PPTX and logical sections for Markdown/DOCX,
-never rendered pages for unpaginated files. Consumers must use `source` when displaying them.
-"""
+"""preserve native headings, tables and notes from markdown and office documents."""
 
 import posixpath
 import re
@@ -98,7 +94,7 @@ class Package:
         if info.file_size > MAX_XML:
             raise IngestError("TOO_LARGE", "Office XML part exceeds size limit")
         raw = self.zip.read(info)
-        # Reject entity declarations before parsing, including UTF-16/32 encodings.
+        # reject entity declarations before parsing, including utf-16/32 encodings.
         if re.search(rb"<!\s*(?:DOCTYPE|ENTITY)", raw.replace(b"\x00", b""), re.I):
             raise IngestError("CORRUPT", "XML entity declarations are not supported")
         return ET.fromstring(raw)
@@ -199,7 +195,7 @@ def read_markdown(text: str) -> Structure:
             result.table(rows, header=True)
             continue
         else:
-            # Preserve lists, indented code and source syntax; never render embedded HTML.
+            # preserve lists, indented code and source syntax; never render embedded html.
             block = [line]
             while (
                 n + 1 < len(lines)

@@ -1,5 +1,4 @@
-"""Probe all ten applications from their private network, then the public Kong and Keycloak ports, with bounded
-startup wait."""
+"""probe all ten applications from their private network, then the public kong and keycloak ports, with bounded startup wait."""
 
 import argparse
 import json
@@ -24,14 +23,13 @@ SERVICES = [
     "student-performance-agent",
     "question-chatbot-agent",
 ]
-# What the tests and the browser call from the host, on the ports docker-compose.yml publishes for this stack. Kong
-# starts last and needs a few seconds to listen after its container starts, so the applications being ready says
-# nothing about it.
+# what the tests and the browser call from the host, on the ports docker-compose.yml publishes for this
+# stack.
 PUBLIC = {
     "kong": (f"http://127.0.0.1:{KONG_PORT}/api/identity/classrooms", 401),
     "keycloak": (f"http://127.0.0.1:{KEYCLOAK_PORT}/realms/learning", 200),
 }
-# Runs inside the analytics container, on the private network, and prints each service's readiness status.
+# runs inside the analytics container, on the private network, and prints each service's readiness status.
 PROBE = f"""
 import json, urllib.request
 result = {{}}
@@ -56,8 +54,7 @@ def status(url: str) -> int:
 
 
 def applications_ready() -> bool:
-    """Whether every application answers ready. A probe that hangs, or prints something other than its JSON
-    (analytics still starting, say), counts as not ready yet, to be asked again."""
+    """whether every application answers ready."""
     command = ["docker", "compose", "exec", "-T", "analytics", "python", "-c", PROBE]
     try:
         result = subprocess.run(

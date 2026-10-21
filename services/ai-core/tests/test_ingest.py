@@ -1,8 +1,4 @@
-"""POST /v1/ingest: a PDF in, chunks with vectors out. Ported from fsd_test's ingest tests; the storage half of
-those (documents, reindex, restart recovery) moves to Content with its indexing worker.
-
-OpenAI is the mock transport from conftest. The vision pass is off unless a test turns it on (`with_vision`).
-"""
+"""post /v1/ingest: a pdf in, chunks with vectors out."""
 
 from collections.abc import Callable
 from pathlib import Path
@@ -61,7 +57,7 @@ def test_text_pdf_is_indexed_with_chunks(api: TestClient, embeddings: FakeOpenAI
 
 
 def test_the_same_pdf_twice_gives_the_same_result(api: TestClient, embeddings: FakeOpenAI) -> None:
-    """Stateless: a retried or duplicated job gets an identical answer, so the caller may store either."""
+    """stateless: a retried or duplicated job gets an identical answer, so the caller may store either."""
     data = textbook()
     assert ingested(api, data) == ingested(api, data)
 
@@ -130,7 +126,7 @@ def test_a_pdf_over_the_chunk_cap_fails_before_its_embeddings(
 
 
 def test_provider_errors_are_errors_not_failed_documents(api: TestClient, openai_fake: FakeOpenAI) -> None:
-    """A quota or outage is the caller's to retry: it never marks the document failed or returns partial output."""
+    """a quota or outage is the caller's to retry: it never marks the document failed or returns partial output."""
     openai_fake.reply(429, json=QUOTA)
     resp = post(api, textbook())
     assert resp.status_code == 502 and resp.json()["error"]["code"] == "AI_PROVIDER_FAILED"
@@ -142,7 +138,7 @@ def test_missing_key_is_503(api: TestClient, monkeypatch: pytest.MonkeyPatch) ->
 
     monkeypatch.setattr(openai_client, "_client", None)
     monkeypatch.setattr(openai_client, "get_settings", lambda: configured(openai_api_key=None))
-    resp = post(api, make_pdf(password="secret"))  # refused before reading, even a PDF that needs no model
+    resp = post(api, make_pdf(password="secret"))  # refused before reading, even a pdf that needs no model
     assert resp.status_code == 503 and resp.json()["error"]["code"] == "AI_PROVIDER_NOT_CONFIGURED"
 
 
@@ -150,7 +146,7 @@ LEAF = "Leaves hold many chloroplasts, and stomata on their underside let carbon
 
 
 def structured() -> bytes:
-    """Four pages with a running footer: Chapter 1 (two subsections) and Chapter 2."""
+    """four pages with a running footer: chapter 1 (two subsections) and chapter 2."""
     return make_structured_pdf(
         [
             ("page", ""), ("h1", "Chapter 1 Plants"), ("h2", "Leaves"), *[("p", LEAF)] * 3,
@@ -195,7 +191,7 @@ def test_a_table_is_a_table_chunk(api: TestClient, embeddings: FakeOpenAI) -> No
     )
 
 
-# ---- the HTTP contract
+# ---- the http contract
 
 
 @pytest.mark.parametrize(

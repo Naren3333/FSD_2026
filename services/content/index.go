@@ -36,9 +36,8 @@ type objects interface {
 	removeAll(ctx context.Context, prefix string) error
 }
 
-// indexer sends PDFs with a pending index_jobs row to ai-core and stores the chunks, vectors and figure crops it
-// returns. Every write that ends a job checks the job's lease, so a run that lost its lease (it outlived it, or
-// another worker took the job over) changes nothing.
+// indexer sends pdfs with a pending index_jobs row to ai-core and stores the chunks, vectors and figure
+// crops it returns.
 type indexer struct {
 	db    *pgxpool.Pool
 	store objects
@@ -96,7 +95,7 @@ RETURNING j.document_id, j.attempts, d.org_id, d.classroom_id, d.title, d.object
 
 func (x indexer) process(ctx context.Context, j job) error {
 	result, err := x.ingest(ctx, j)
-	// Bookkeeping must land even when shutdown cancels ctx mid-ingest.
+	// bookkeeping must land even when shutdown cancels ctx mid-ingest.
 	book, cancel := context.WithTimeout(context.WithoutCancel(ctx), 30*time.Second)
 	defer cancel()
 	if ctx.Err() != nil {
@@ -125,7 +124,7 @@ func (x indexer) process(ctx context.Context, j job) error {
 		return x.fail(book, j, "INTERNAL", err.Error())
 	}
 	for _, f := range result.Figures {
-		// Crops are named by content hash, so a retried or repeated run rewrites identical objects.
+		// crops are named by content hash, so a retried or repeated run rewrites identical objects.
 		if err = x.store.put(ctx, figureKey(j.org, j.document, f.Image), f.PNG, mimePNG); err != nil {
 			return x.retry(book, j, "figure storage unavailable")
 		}
@@ -144,11 +143,11 @@ func (x indexer) ingest(ctx context.Context, j job) (ingestResult, error) {
 		return ingestResult{}, fmt.Errorf("original unavailable: %w", err)
 	}
 	defer object.Close()
-	// The teacher who uploaded the document pays for its model calls.
+	// the teacher who uploaded the document pays for its model calls.
 	return x.ai.ingest(ctx, j.title, j.mime, object, size, billed{UserID: j.owner, OrgID: j.org, Role: "teacher"})
 }
 
-// validate rejects an ingest result Content cannot store as-is, rather than storing part of it.
+// validate rejects an ingest result content cannot store as-is, rather than storing part of it.
 func validate(r ingestResult) error {
 	if r.PageCount == nil || r.EmbeddingModel == nil || *r.EmbeddingModel == "" || len(r.Chunks) == 0 {
 		return errors.New("indexed result without pages, model or chunks")
@@ -175,9 +174,8 @@ func figureKey(org, document, image string) string { return org + "/" + document
 
 var errLostLease = errors.New("the job's lease was lost")
 
-// complete replaces the document's chunks, marks it indexed, ends the job and emits content.indexed.v1 in one
-// transaction. When the run lost its lease because the document was purged meanwhile (its classroom was deleted),
-// the figure crops this run uploaded are removed too, since the purge may have run before they were stored.
+// complete replaces the document's chunks, marks it indexed, ends the job and emits content.indexed.v1 in
+// one transaction.
 func (x indexer) complete(ctx context.Context, j job, r ingestResult) error {
 	err := x.finish(ctx, j, func(tx pgx.Tx) error { return storeResult(ctx, tx, j, r) })
 	if !errors.Is(err, errLostLease) {
@@ -190,16 +188,14 @@ func (x indexer) complete(ctx context.Context, j job, r ingestResult) error {
 	if err = x.db.QueryRow(ctx, "SELECT EXISTS(SELECT 1 FROM documents WHERE id=$1)", j.document).Scan(&exists); err != nil || exists {
 		return err // a run that took the job over stores the same crops, by content hash
 	}
-	// The deletion's worker may already have cleaned this prefix before these late crops were written.
-	// Record fresh durable cleanup before the best-effort immediate removal.
+	// the deletion's worker may already have cleaned this prefix before these late crops were written.
 	if _, err = x.db.Exec(ctx, "INSERT INTO object_cleanup_jobs(prefix) VALUES($1) ON CONFLICT DO NOTHING", j.org+"/"+j.document+"/"); err != nil {
 		return err
 	}
 	return x.store.removeAll(ctx, j.org+"/"+j.document+"/")
 }
 
-// finish deletes the job and lets write record the outcome, in one transaction. When another run took the job over
-// or the document is gone, nothing is changed and it returns errLostLease.
+// finish deletes the job and lets write record the outcome, in one transaction.
 func (x indexer) finish(ctx context.Context, j job, write func(pgx.Tx) error) error {
 	tx, err := x.db.Begin(ctx)
 	if err != nil {
@@ -218,7 +214,7 @@ func (x indexer) finish(ctx context.Context, j job, write func(pgx.Tx) error) er
 	return tx.Commit(ctx)
 }
 
-// storeResult replaces the document's chunks with the new ones, marks the document indexed and emits
+// storeresult replaces the document's chunks with the new ones, marks the document indexed and emits
 // content.indexed.v1.
 func storeResult(ctx context.Context, tx pgx.Tx, j job, r ingestResult) error {
 	if _, err := tx.Exec(ctx, "DELETE FROM document_chunks WHERE document_id=$1", j.document); err != nil {
@@ -250,8 +246,7 @@ VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,CAST($18::text
 	return platform.Emit(ctx, tx, "content.indexed.v1", j.document, map[string]any{"document_id": j.document, "classroom_id": j.classroom, "org_id": j.org, "revision": j.revision, "doc_type": j.docType, "page_count": *r.PageCount, "chunk_count": len(r.Chunks), "embedding_model": *r.EmbeddingModel})
 }
 
-// fail marks the document failed with its reason and ends the job. Chunks from an earlier index stay searchable,
-// with the page and chunk counts, model and time of that index, until a later reindex succeeds.
+// fail marks the document failed with its reason and ends the job.
 func (x indexer) fail(ctx context.Context, j job, reason, detail string) error {
 	slog.Warn("index_failed", "document_id", j.document, "reason", reason, "attempts", j.attempts)
 	err := x.finish(ctx, j, func(tx pgx.Tx) error {
@@ -274,7 +269,7 @@ func (x indexer) retry(ctx context.Context, j job, reason string) error {
 	return err
 }
 
-// wait puts the job off until `until` (when the uploader's daily AI allowance resets) without counting the
+// wait puts the job off until `until` (when the uploader's daily ai allowance resets) without counting the
 // attempt: being over the allowance is not a failure of the document or of ai-core.
 func (x indexer) wait(ctx context.Context, j job, until time.Time, reason string) error {
 	if until.Before(time.Now()) {

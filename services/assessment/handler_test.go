@@ -39,7 +39,7 @@ func (m *memoryStore) insertAssessment(_ context.Context, _ string, v Assessment
 	return nil
 }
 
-// change applies a change allowed until a student submits, as pgStore.changeUnsubmitted decides.
+// change applies a change allowed until a student submits, as pgstore.changeunsubmitted decides.
 func (m *memoryStore) change(id string, apply func(v Assessment) error) error {
 	v, ok := m.assessments[id]
 	if !ok {
@@ -221,8 +221,8 @@ func call(t *testing.T, s server, method, path, body string, roles ...string) *h
 	return platformtest.Serve(s.routes, method, path, body, "user", roles...)
 }
 
-// step is one request of a scenario, sent to s with the caller's role, and the answer it expects: its status and, when
-// set, a part of the body it has (want) or must not have (absent).
+// step is one request of a scenario, sent to s with the caller's role, and the answer it expects: its
+// status and, when set, a part of the body it has (want) or must not have (absent).
 type step struct {
 	name                     string
 	s                        server
@@ -292,8 +292,8 @@ func TestOnlyTheTeacherSeesSubmissionCounts(t *testing.T) {
 	progress, list := "/v1/assessments/progress?classroom_id="+room, "/v1/assessments?classroom_id="+room
 	teacher := s
 	teacher.access = platformtest.Access(platform.RelationTeacher)
-	// Once the student is removed from the classroom, their kept submission is not counted, though the list still
-	// says one was made.
+	// once the student is removed from the classroom, their kept submission is not counted, though the list
+	// still says one was made.
 	removed := teacher
 	removed.roster = platformtest.Roster{}
 	run(t,
@@ -352,7 +352,7 @@ func TestADraftIsTheTeachersUntilPublished(t *testing.T) {
 	)
 }
 
-// twoQuestions is a published assessment of two questions, as a teacher would send it again with changes.
+// twoquestions is a published assessment of two questions, as a teacher would send it again with changes.
 const twoQuestions = `{"classroom_id":"` + room + `","title":"Fractions","status":"published","questions":[` +
 	`{"prompt":"1/2 + 1/2?","type":"numerical","options":[],"answer":"1","tolerance":"0","topic_id":"` + topic + `"},` +
 	`{"prompt":"1/4 + 1/4?","type":"numerical","options":[],"answer":"0.5","tolerance":"0","topic_id":"` + topic + `"}]}`
@@ -373,7 +373,8 @@ func TestAPublishedAssessmentChangesUntilAStudentSubmits(t *testing.T) {
 		t.Fatalf("save: %d %s", w.Code, w.Body.String())
 	}
 
-	// The teacher renames it and rewrites the second question: the first keeps its id and the work saved on it.
+	// the teacher renames it and rewrites the second question: the first keeps its id and the work saved on
+	// it.
 	changed := strings.Replace(strings.Replace(twoQuestions, "Fractions", "Halves", 1), "1/4 + 1/4?", "1/4 + 1/4 =", 1)
 	var got Assessment
 	if w = call(t, s, http.MethodPut, path, changed, "teacher"); w.Code != http.StatusOK || json.Unmarshal(w.Body.Bytes(), &got) != nil {
@@ -388,14 +389,14 @@ func TestAPublishedAssessmentChangesUntilAStudentSubmits(t *testing.T) {
 	unchanged := strings.Replace(changed, `"status":"published",`, "", 1)
 	run(t,
 		step{"saved work after the edit", student, http.MethodGet, path + "/saved-answers", "", "student", http.StatusOK, first, second},
-		// A student who opened it before the edit answers the old second question: they are told to open it again,
-		// and so is one whose page autosaves work on it.
+		// a student who opened it before the edit answers the old second question: they are told to open it
+		// again, and so is one whose page autosaves work on it.
 		step{"answers to a replaced question", student, http.MethodPost, path + "/submissions", saved, "student", http.StatusConflict, "ASSESSMENT_CHANGED", ""},
 		step{"saved work on a replaced question", student, http.MethodPut, path + "/saved-answers", saved, "student", http.StatusConflict, "ASSESSMENT_CHANGED", ""},
 		step{"an edit without a status", s, http.MethodPut, path, unchanged, "teacher", http.StatusOK, `"status":"published"`, ""},
 	)
 
-	// A student submits: the questions and grading settings are now fixed, and the assessment is kept.
+	// a student submits: the questions and grading settings are now fixed, and the assessment is kept.
 	got = store.assessments[v.ID]
 	answers := `{"answers":{"` + got.Questions[0].ID + `":"1","` + got.Questions[1].ID + `":"0.5"}}`
 	run(t,
@@ -407,14 +408,14 @@ func TestAPublishedAssessmentChangesUntilAStudentSubmits(t *testing.T) {
 		t.Fatal("a refused change changed the assessment")
 	}
 
-	// Its details still change: a new title, and a due date that is not already past.
+	// its details still change: a new title, and a due date that is not already past.
 	due := time.Now().Add(48 * time.Hour).UTC().Truncate(time.Second)
 	details := `{"title":"Halves and quarters","due_at":` + stamp(due) + `,"late_policy":"reject"}`
 	run(t, step{"details", s, http.MethodPatch, path, details, "teacher", http.StatusOK, `"title":"Halves and quarters"`, ""})
 	if v := store.assessments[v.ID]; v.DueAt == nil || !v.DueAt.Equal(due) || v.LatePolicy != lateReject || !sameMarking(v, got) {
 		t.Fatalf("details stored: %+v", v)
 	}
-	// Fields left out keep their values.
+	// fields left out keep their values.
 	run(t, step{"title only", s, http.MethodPatch, path, `{"title":"Only the title"}`, "teacher", http.StatusOK, "", ""})
 	if v := store.assessments[v.ID]; v.Title != "Only the title" || v.DueAt == nil || !v.DueAt.Equal(due) || v.LatePolicy != lateReject {
 		t.Fatalf("a title-only change changed the rest: %+v", v)
@@ -482,7 +483,7 @@ func TestADraftIsDeleted(t *testing.T) {
 	}
 }
 
-// scheduled creates a published assessment with the given extra JSON fields, as the classroom's teacher.
+// scheduled creates a published assessment with the given extra json fields, as the classroom's teacher.
 func scheduled(t *testing.T, fields string) (server, Assessment) {
 	t.Helper()
 	s, _ := newServer(platform.RelationTeacher, topicValid)
@@ -536,7 +537,7 @@ func TestSavedWorkUntilSubmission(t *testing.T) {
 	saved := `{"answers":{"` + v.Questions[0].ID + `":"0.5"}}`
 	run(t,
 		step{"nothing saved yet", s, http.MethodGet, path, "", "student", http.StatusOK, `{"answers":{},"saved_at":null}`, ""},
-		// An answer to a question it does not have was made against a version the teacher has since changed, as
+		// an answer to a question it does not have was made against a version the teacher has since changed, as
 		// for a submission.
 		step{"saved an answer to another question", s, http.MethodPut, path, `{"answers":{"elsewhere":"1"}}`, "student", http.StatusConflict, "ASSESSMENT_CHANGED", ""},
 		step{"saved no answers", s, http.MethodPut, path, `{}`, "student", http.StatusUnprocessableEntity, "", ""},
@@ -555,7 +556,7 @@ func TestOnlyTheSubmittingStudentReadsTheirSubmission(t *testing.T) {
 	run(t,
 		step{"read before submitting", s, http.MethodGet, path, "", "student", http.StatusNotFound, "", ""},
 		step{"submit", s, http.MethodPost, "/v1/assessments/" + v.ID + "/submissions", answer, "student", http.StatusCreated, "", ""},
-		// The student's own answer, never the answer key ("1").
+		// the student's own answer, never the answer key ("1").
 		step{"read", s, http.MethodGet, path, "", "student", http.StatusOK, `{"answers":{"` + v.Questions[0].ID + `":"0.5"},"submitted_at":"`, `"1"`},
 		step{"read as a teacher", s, http.MethodGet, path, "", "teacher", http.StatusForbidden, "", ""},
 		step{"an unknown assessment", s, http.MethodGet, "/v1/assessments/" + room + "/submission", "", "student", http.StatusNotFound, "", ""},
@@ -563,12 +564,12 @@ func TestOnlyTheSubmittingStudentReadsTheirSubmission(t *testing.T) {
 	if w := call(t, s, http.MethodGet, path, "", "student"); !strings.Contains(w.Body.String(), `"late":false`) || strings.Contains(w.Body.String(), `"answer":`) {
 		t.Fatalf("%s", w.Body.String())
 	}
-	// Another student of the classroom, who has not submitted, reads nothing of it.
+	// another student of the classroom, who has not submitted, reads nothing of it.
 	other := platformtest.ServeRequest(s.routes, platformtest.Request(platformtest.Claims("student-2", "student"), http.MethodGet, path, ""))
 	if other.Code != http.StatusNotFound {
 		t.Fatalf("another student: %d %s", other.Code, other.Body.String())
 	}
-	// Nor does a student who is not in the classroom.
+	// nor does a student who is not in the classroom.
 	outside := s
 	outside.access = platformtest.Access("")
 	if w := call(t, outside, http.MethodGet, path, "", "student"); w.Code != http.StatusForbidden {
@@ -628,7 +629,7 @@ func TestASubmissionTooLargeToPublishIsRefused(t *testing.T) {
 	}
 	answers := map[string]string{}
 	for _, q := range v.Questions {
-		answers[q.ID] = strings.Repeat("é", 20000) // two bytes each: 25 × 40 KB of JSON
+		answers[q.ID] = strings.Repeat("é", 20000) // two bytes each: 25 × 40 kb of json
 	}
 	data, _ := json.Marshal(map[string]any{"answers": answers})
 	s.access = platformtest.Access(platform.RelationStudent)
@@ -638,7 +639,7 @@ func TestASubmissionTooLargeToPublishIsRefused(t *testing.T) {
 	}
 }
 
-// allTypes has one question of each type, a manual release and AI marking.
+// alltypes has one question of each type, a manual release and ai marking.
 const allTypes = `{"classroom_id":"` + room + `","title":"Mixed","release_policy":"manual","ai_marking":true,"questions":[
 	{"prompt":"Pick the sum","type":"multiple_choice","options":["half","whole"],"answer":"whole","tolerance":"","topic_id":"` + topic + `","origin":"generated","sources":[{"document_id":"` + room + `","chunk_id":"` + topic + `","page":2,"text":"Two halves make one whole."}]},
 	{"prompt":"1/2 + 1/2?","type":"numerical","options":[],"answer":"1.00","tolerance":"0.01","points":2,"topic_id":"` + topic + `"},
@@ -656,7 +657,7 @@ func post(t *testing.T, s server, body string) Assessment {
 	return v
 }
 
-// mixedAnswers answers every question of allTypes.
+// mixedanswers answers every question of alltypes.
 func mixedAnswers(v Assessment) string {
 	answers := map[string]string{}
 	for _, q := range v.Questions {

@@ -1,5 +1,4 @@
--- Drafts, scheduling, due dates, release and AI-marking settings (docs/decisions/0004-assessment-lifecycle-and-ai-marking.md).
--- Additive only: existing assessments stay published and open, with today's policies.
+-- drafts, scheduling, due dates, release and ai-marking settings.
 ALTER TABLE assessments ADD COLUMN IF NOT EXISTS status text NOT NULL DEFAULT 'published' CHECK(status IN ('draft','published'));
 ALTER TABLE assessments ADD COLUMN IF NOT EXISTS opens_at timestamptz;
 ALTER TABLE assessments ADD COLUMN IF NOT EXISTS due_at timestamptz;
@@ -10,5 +9,5 @@ ALTER TABLE assessments ADD COLUMN IF NOT EXISTS published_at timestamptz;
 ALTER TABLE assessments ADD COLUMN IF NOT EXISTS created_by text;
 UPDATE assessments SET published_at=created_at WHERE status='published' AND published_at IS NULL;
 ALTER TABLE submissions ADD COLUMN IF NOT EXISTS late boolean NOT NULL DEFAULT false;
--- A student's unsubmitted answers, saved as they work. Removed when they submit.
+-- a student's unsubmitted answers, saved as they work.
 CREATE TABLE IF NOT EXISTS saved_answers(assessment_id uuid NOT NULL REFERENCES assessments(id), student_id text NOT NULL, answers jsonb NOT NULL, saved_at timestamptz NOT NULL DEFAULT now(), PRIMARY KEY(assessment_id, student_id));

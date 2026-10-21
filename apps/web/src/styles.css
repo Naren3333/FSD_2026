@@ -6,7 +6,7 @@
   --brand: #176b70;
   --border: #cbd7df;
   --danger: #a52b36;
-  /* Hover fill for light controls, the tint behind badges and the current item, the sidebar's accent, focus rings. */
+  /* hover fill for light controls, the tint behind badges and the current item, the sidebar's accent, focus rings. */
   --hover: #e8f0f3;
   --brand-tint: #e7f1f1;
   --accent: #91d4d2;
@@ -82,7 +82,7 @@ button:disabled {
   cursor: not-allowed;
   opacity: 0.55;
 }
-/* A link that leads to an action is styled as a secondary button. */
+/* a link that leads to an action is styled as a secondary button. */
 button.secondary,
 a.button-link {
   background: var(--surface);
@@ -680,7 +680,7 @@ dialog::backdrop {
   width: 100%;
   margin-bottom: 12px;
 }
-/* Lists laid out as grids, without bullets or indent. */
+/* lists laid out as grids, without bullets or indent. */
 .thread-list,
 .conversation,
 .sources,
@@ -913,7 +913,7 @@ dialog::backdrop {
 .cell-value {
   font-weight: 600;
 }
-/* The Profile page: the account's details, and deleting the account (ADR 0011). */
+/* the profile page: the account's details, and deleting the account (adr 0011). */
 .profile-details {
   display: grid;
   grid-template-columns: max-content minmax(0, 1fr);
@@ -937,7 +937,7 @@ button.danger {
 button.danger:hover:not(:disabled) {
   background: #7f1f29;
 }
-/* Breakpoints last, so they override every base rule above. */
+/* breakpoints last, so they override every base rule above. */
 @media (max-width: 1000px) {
   main {
     padding: 0 24px;
@@ -1038,7 +1038,7 @@ button.danger:hover:not(:disabled) {
     max-width: 100%;
   }
 }
-/* Assessment editor, answers and marking. */
+/* assessment editor, answers and marking. */
 .question-set {
   border: 1px solid var(--border);
   border-radius: 12px;

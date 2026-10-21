@@ -1,4 +1,4 @@
--- No foreign key: a cleanup job must survive deletion of its document.
+-- no foreign key: a cleanup job must survive deletion of its document.
 CREATE TABLE object_cleanup_jobs (
   prefix text PRIMARY KEY,
   attempts integer NOT NULL DEFAULT 0,

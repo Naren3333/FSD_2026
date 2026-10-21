@@ -226,7 +226,7 @@
     "/v1/threads/{thread_id}/messages": {
       "get": {
         "summary": "List Messages",
-        "description": "The thread's latest `limit` messages, oldest first.",
+        "description": "the thread's latest `limit` messages, oldest first.",
         "operationId": "list_messages_v1_threads__thread_id__messages_get",
         "parameters": [
           {
@@ -416,7 +416,7 @@
     "/v1/usage": {
       "get": {
         "summary": "Usage",
-        "description": "The caller's AI spend today against their daily allowance, from ai-core's ledger.",
+        "description": "the caller's ai spend today against their daily allowance, from ai-core's ledger.",
         "operationId": "usage_v1_usage_get",
         "responses": {
           "200": {
@@ -579,7 +579,7 @@
           "image"
         ],
         "title": "Citation",
-        "description": "A chunk the answer cites; `[doc:<chunk_id>]` in the message text marks where."
+        "description": "a chunk the answer cites; `[doc:<chunk_id>]` in the message text marks where."
       },
       "ErrorBody": {
         "properties": {
@@ -709,7 +709,7 @@
           "messages"
         ],
         "title": "MessageList",
-        "description": "A thread's latest messages, oldest first."
+        "description": "a thread's latest messages, oldest first."
       },
       "NewMessage": {
         "properties": {
@@ -839,7 +839,7 @@
           "resets_at"
         ],
         "title": "Usage",
-        "description": "The caller's AI spend today (chat, search and, for teachers, indexing their uploads), their daily limit\nand when the day resets."
+        "description": "the caller's ai spend today (chat, search and, for teachers, indexing their uploads), their daily limit and when the day resets."
       }
     }
   }

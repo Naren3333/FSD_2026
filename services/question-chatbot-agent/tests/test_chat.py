@@ -1,5 +1,4 @@
-"""A chat turn end to end against the fakes: rewrite, search with the user's token, streamed and cited answer, and
-what is saved. Ported from fsd_test's assistant tests."""
+"""a chat turn end to end against the fakes: rewrite, search with the user's token, streamed and cited answer, and what is saved."""
 
 import asyncio
 import json
@@ -25,7 +24,7 @@ DOC = str(uuid4())
 
 
 def result(chunk_id: str, content: str, page: int, **extra: Any) -> dict[str, Any]:
-    """A Content /v1/search result, with every field it returns."""
+    """a content /v1/search result, with every field it returns."""
     return {"chunk_id": chunk_id, "document_id": DOC, "title": "Biology: Photosynthesis",
             "doc_type": "teaching_material", "section_path": "Light reactions", "page_start": page, "page_end": page,
             "content": content, "kind": "text", "source": "pdf", "image": None, "score": 0.9, "related": [],
@@ -50,7 +49,7 @@ def thread(api: TestClient, user: str = "s1", classroom: str = ROOM) -> str:
 
 
 def post(api: TestClient, tid: str, content: str, user: str = "s1") -> list[tuple[str, dict[str, Any]]]:
-    """POST a message and parse the SSE stream into (event, data) pairs."""
+    """post a message and parse the sse stream into (event, data) pairs."""
     resp = api.post(f"/v1/threads/{tid}/messages", json={"content": content}, headers=as_user(user))
     assert resp.status_code == 200, resp.text
     assert resp.headers["content-type"].startswith("text/event-stream")
@@ -89,7 +88,8 @@ def test_answer_streams_cites_and_saves(api: TestClient, fakes: Fakes, store: Me
     assert answer["rewritten_query"] == "How do plants get energy from light?"
     assert answer["retrieved_chunk_ids"] == [C1, C2, C3]
 
-    # Content got the rewritten query and the student's own token; ai-core got the agent's (checked by the fake).
+    # content got the rewritten query and the student's own token; ai-core got the agent's (checked by the
+    # fake).
     [search] = fakes.calls("/v1/search")
     assert search == {"classroom_id": ROOM, "query": "How do plants get energy from light?", "top_k": 8,
                       "rerank": True}  # fmt: skip
@@ -137,7 +137,7 @@ def test_top_score_below_the_floor_is_refused_without_a_model_call(
 
 
 def test_rerank_fallback_fails_the_turn(api: TestClient, fakes: Fakes, store: MemoryStore) -> None:
-    """RRF scores can't be checked against the floor, so a fallback search is not answered."""
+    """rrf scores can't be checked against the floor, so a fallback search is not answered."""
     fakes.results, fakes.fallback = [result(C1, "Chlorophyll absorbs light.", 3, score=0.03)], True
     fakes.replies.append(rewrite("q"))
     tid = thread(api)
@@ -223,8 +223,7 @@ def test_disconnect_saves_an_interrupted_answer(api: TestClient, fakes: Fakes, s
 
 
 def test_a_client_gone_before_the_stream_starts_still_gets_an_answer_saved() -> None:
-    """Starlette never starts the events generator when sending the response start fails, so the response's
-    finish saves the turn instead: the user's message never stands alone."""
+    """starlette never starts the events generator when sending the response start fails, so the response's finish saves the turn instead: the user's message never stands alone."""
     from starlette.requests import ClientDisconnect
 
     from chat import SSEResponse, Turn, TurnRequest
@@ -252,7 +251,7 @@ def test_a_client_gone_before_the_stream_starts_still_gets_an_answer_saved() -> 
 
 
 async def post_then_disconnect(app: Any, tid: str) -> None:
-    """Drive the ASGI app directly: the client disconnects once the first token has been sent."""
+    """drive the asgi app directly: the client disconnects once the first token has been sent."""
     first_token = asyncio.Event()
     body_sent = False
 
@@ -289,7 +288,7 @@ def test_threads_need_classroom_access(api: TestClient, fakes: Fakes) -> None:
     resp = api.post("/v1/threads", json={"classroom_id": ROOM}, headers=as_user("t1"))
     assert resp.status_code == 201 and resp.json()["role"] == "teacher"
     access = next(r for p, _, r in fakes.requests if p.endswith("/access"))
-    assert access.headers["authorization"] == "Bearer s1"  # Identity decides, with the user's own token
+    assert access.headers["authorization"] == "Bearer s1"  # identity decides, with the user's own token
 
 
 def test_a_removed_student_loses_their_threads(api: TestClient, fakes: Fakes, store: MemoryStore) -> None:
@@ -302,7 +301,7 @@ def test_a_removed_student_loses_their_threads(api: TestClient, fakes: Fakes, st
 
 
 def test_a_removed_student_no_longer_lists_those_threads(api: TestClient, fakes: Fakes) -> None:
-    """The unfiltered list is checked too: a thread title is a question asked about that classroom's materials."""
+    """the unfiltered list is checked too: a thread title is a question asked about that classroom's materials."""
     fakes.access.add(("Bearer s1", OTHER_ROOM))
     kept = thread(api, "s1", classroom=OTHER_ROOM)
     thread(api, "s1", classroom=ROOM)
@@ -313,7 +312,7 @@ def test_a_removed_student_no_longer_lists_those_threads(api: TestClient, fakes:
 
 
 def answering(handler: Callable[[httpx.Request], httpx.Response]) -> None:
-    """The other services answer through `handler` from now on."""
+    """the other services answer through `handler` from now on."""
     http = httpx.AsyncClient(transport=httpx.MockTransport(handler))
     main.app.state.services = Services(SETTINGS, http)
 
@@ -457,7 +456,7 @@ def test_usage_is_503_when_ai_core_cannot_answer(
 def test_the_usage_meter_and_a_turn_use_the_same_allowance(
     api: TestClient, fakes: Fakes, user: str, role: str
 ) -> None:
-    """An account holds one role, so the meter shows the allowance its chat turns are billed to."""
+    """an account holds one role, so the meter shows the allowance its chat turns are billed to."""
     fakes.results = RESULTS
     fakes.replies += [rewrite("q"), chat_stream(["One [S1]."])]
     post(api, thread(api, user), "q", user=user)
@@ -528,8 +527,7 @@ def test_a_disconnect_during_the_final_save_keeps_the_answer(fakes: Fakes) -> No
 def test_results_that_do_not_fit_are_dropped_and_cannot_be_cited(
     api: TestClient, fakes: Fakes, store: MemoryStore
 ) -> None:
-    """Eight long passages: only the first five fit in one prompt message. A tag for a trimmed source ([S8]) is
-    dropped from the answer and is not among the citations or the retrieved chunks."""
+    """eight long passages: only the first five fit in one prompt message."""
     from chat import MAX_DOCUMENTS_CHARS, PASSAGE_OVERHEAD
 
     size = MAX_DOCUMENTS_CHARS // 5 - PASSAGE_OVERHEAD - 20  # with "passage n ": five fit, six do not
@@ -548,7 +546,7 @@ def test_results_that_do_not_fit_are_dropped_and_cannot_be_cited(
 
 
 def purge_first(store: MemoryStore, step: str, tid: str) -> None:
-    """The thread is purged (its classroom or user deleted) just before the store's `step` runs."""
+    """the thread is purged (its classroom or user deleted) just before the store's `step` runs."""
     original = getattr(store, step)
 
     async def purged(*args: Any) -> Any:
@@ -614,9 +612,7 @@ def topic(n: int, document: str, score: float, title: str) -> list[dict[str, Any
 def test_a_message_about_several_topics_searches_each_and_shares_the_prompt(
     api: TestClient, fakes: Fakes, store: MemoryStore
 ) -> None:
-    """The whole message and every topic are searched, and the searches take turns: the testing topic, which the
-    whole message's search never reaches, still gets passages, and no document has more than PER_DOCUMENT
-    (so two documents give ten passages, not MERGED_TOP_K)."""
+    """search each topic fairly while enforcing the per-document evidence limit."""
     from chat import MERGED_TOP_K, PER_DOCUMENT
 
     design, testing = str(uuid4()), str(uuid4())
@@ -644,13 +640,13 @@ def test_a_message_about_several_topics_searches_each_and_shares_the_prompt(
     docs = [by_id[c]["document_id"] for c in answer["retrieved_chunk_ids"]]
     assert len(docs) == len(set(answer["retrieved_chunk_ids"])) == 2 * PER_DOCUMENT <= MERGED_TOP_K
     assert docs.count(design) == docs.count(testing) == PER_DOCUMENT
-    # Turns: the whole message's best, then design's next new one, then testing's best, and so on.
+    # turns: the whole message's best, then design's next new one, then testing's best, and so on.
     assert docs[:3] == [design, design, testing]
     assert [c["title"] for c in events[-2][1]["citations"]] == ["Software Design", "Software Testing"]
     prompt = fakes.calls("/v1/inference")[1]["messages"]
     documents = prompt[2]["content"]
     assert "Software Testing passage 1" in documents and "explain the connection" in prompt[0]["content"]
-    # The topics are listed, and each passage a topic's search found names it; the whole message's don't.
+    # the topics are listed, and each passage a topic's search found names it; the whole message's don't.
     assert (
         "<topics><topic>design principles</topic><topic>unit testing with mocks</topic></topics>" in documents
     )
@@ -725,7 +721,7 @@ def test_merge_stops_at_merged_top_k() -> None:
 
 
 def test_a_topic_search_has_the_lower_topic_floor() -> None:
-    """A topic's search at 0.55 adds passages; the whole message's search at 0.55 doesn't."""
+    """a topic's search at 0.55 adds passages; the whole message's search at 0.55 doesn't."""
     from chat import merge
 
     whole, narrow = topic(2, str(uuid4()), 0.56, "Whole"), topic(2, str(uuid4()), 0.56, "Narrow")
@@ -755,7 +751,7 @@ def test_a_second_question_while_one_is_answering_is_refused(
     assert resp.status_code == 409
     assert resp.json()["error"]["code"] == "TURN_IN_PROGRESS"
     assert store.all(second) == [] and fakes.calls("/v1/search") == []
-    # Someone else's answer doesn't hold this user up.
+    # someone else's answer doesn't hold this user up.
     fakes.replies += [rewrite("stomata"), chat_stream(["Stomata let CO2 in [S2]."])]
     assert post(api, thread(api, "t1"), "and stomata?", "t1")[-1][0] == "done"
 

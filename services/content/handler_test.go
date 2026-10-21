@@ -23,8 +23,8 @@ const (
 	classID    = "8b3e7f40-ac6d-4e5f-9a4b-3c4d5e6f7081"
 )
 
-// documentStore serves two documents by id; the embedded interface leaves every other method unimplemented, so a
-// test fails loudly if a handler reaches one it shouldn't.
+// documentstore serves two documents by id; the embedded interface leaves every other method unimplemented,
+// so a test fails loudly if a handler reaches one it shouldn't.
 type documentStore struct {
 	store
 	listedForTeacher *bool
@@ -58,7 +58,7 @@ func TestStudentsCannotSeeRubrics(t *testing.T) {
 		{"teacher, rubric", platform.RelationTeacher, rubricID, []string{"teacher"}, http.StatusOK},
 		{"student, teaching material", platform.RelationStudent, teachingID, []string{"student"}, http.StatusOK},
 		{"student, rubric", platform.RelationStudent, rubricID, []string{"student"}, http.StatusNotFound},
-		// The token's teacher role is not enough: enrolled here, the account sees what students see.
+		// the token's teacher role is not enough: enrolled here, the account sees what students see.
 		{"teacher token, student relation, rubric", platform.RelationStudent, rubricID, []string{"teacher"}, http.StatusNotFound},
 		{"no access", "", teachingID, []string{"student"}, http.StatusForbidden},
 		{"unknown document", platform.RelationTeacher, classID, []string{"teacher"}, http.StatusNotFound},
@@ -113,7 +113,7 @@ func TestTooManyAICallsIsItsOwn429(t *testing.T) {
 	}
 }
 
-// uploadStore records the inserted document, or fails after or before attempting the commit.
+// uploadstore records the inserted document, or fails after or before attempting the commit.
 type uploadStore struct {
 	store
 	inserted        *newDocument
@@ -126,7 +126,7 @@ func (u uploadStore) insertDocument(_ context.Context, d newDocument) (bool, err
 	return u.commitAttempted, u.err
 }
 
-// fileStore records what was uploaded and what was removed.
+// filestore records what was uploaded and what was removed.
 type fileStore struct {
 	documentFiles
 	puts, removed []string
@@ -176,7 +176,7 @@ func TestUploadRemovesAnOriginalWhoseRowWasNeverCommitted(t *testing.T) {
 	if w := upload(t, uploadStore{inserted: &inserted, err: errors.New("db down")}, failed, "&title=Notes"); w.Code != http.StatusInternalServerError || len(failed.removed) != 1 {
 		t.Fatalf("%d, removed %v", w.Code, failed.removed)
 	}
-	// After an uncertain commit the row may exist, so the original stays.
+	// after an uncertain commit the row may exist, so the original stays.
 	uncertain := &fileStore{}
 	if w := upload(t, uploadStore{inserted: &inserted, err: errors.New("commit lost"), commitAttempted: true}, uncertain, "&title=Notes"); w.Code != http.StatusInternalServerError || len(uncertain.removed) != 0 {
 		t.Fatalf("%d, removed %v", w.Code, uncertain.removed)
@@ -202,7 +202,7 @@ func TestTitleLimitCountsCharacters(t *testing.T) {
 }
 
 func TestUploadValidatesItsFields(t *testing.T) {
-	// Marking schemes and rubrics are no longer uploaded (ADR 0009).
+	// marking schemes and rubrics are no longer uploaded (adr 0009).
 	for _, query := range []string{"&title=", "&title=Notes&doc_type=lesson", "&title=Notes&doc_type=rubric", "&title=Notes&doc_type=marking_scheme"} {
 		if w := upload(t, uploadStore{inserted: &newDocument{}}, &fileStore{}, query); w.Code != http.StatusUnprocessableEntity {
 			t.Errorf("%s: %d", query, w.Code)
@@ -213,7 +213,7 @@ func TestUploadValidatesItsFields(t *testing.T) {
 func TestUploadStoresAWholePDFAndItsHash(t *testing.T) {
 	var inserted newDocument
 	files := &fileStore{}
-	pdf := pdfMagic + "1.7\n" + strings.Repeat("x", 6<<20) // larger than the text limit, which PDFs don't share
+	pdf := pdfMagic + "1.7\n" + strings.Repeat("x", 6<<20) // larger than the text limit, which pdfs don't share
 	w := uploadBody(t, uploadStore{inserted: &inserted, commitAttempted: true}, files, "&title=Notes", mimePDF, pdf)
 	sum := sha256.Sum256([]byte(pdf))
 	if w.Code != http.StatusCreated || inserted.Status != statusIndexing || inserted.SHA != hex.EncodeToString(sum[:]) {
@@ -261,7 +261,8 @@ func TestReindexNeedsTheClassroomsTeacherAndAPDF(t *testing.T) {
 	}
 }
 
-// deletingStore records which document was deleted and passes removeFiles' error on, as the database store does.
+// deletingstore records which document was deleted and passes removefiles' error on, as the database store
+// does.
 type deletingStore struct {
 	documentStore
 	deleted *string
@@ -276,7 +277,7 @@ func (d deletingStore) deleteDocument(_ context.Context, _, id string) error {
 	return nil
 }
 
-// removedFiles records the prefixes removed, or fails every removal.
+// removedfiles records the prefixes removed, or fails every removal.
 type removedFiles struct {
 	documentFiles
 	prefixes []string
@@ -314,7 +315,7 @@ func TestDeletingADocumentNeedsTheClassroomsTeacher(t *testing.T) {
 }
 
 func TestDeletingADocumentRemovesItsRowAndObjects(t *testing.T) {
-	// A retired rubric is deleted like teaching material.
+	// a retired rubric is deleted like teaching material.
 	for _, id := range []string{teachingID, rubricID} {
 		var deleted string
 		files := &removedFiles{}
@@ -332,14 +333,14 @@ func TestADeleteDoesNotDependOnObjectStorage(t *testing.T) {
 	if w := platformtest.Serve(s.routes, http.MethodDelete, "/v1/documents/"+teachingID, "", "user", "teacher"); w.Code != http.StatusNoContent || deleted != teachingID {
 		t.Fatalf("%d, deleted %q", w.Code, deleted)
 	}
-	// Deleted meanwhile by another request.
+	// deleted meanwhile by another request.
 	s = server{store: deletingStore{deleted: &deleted, err: platform.ErrNotFound}, access: platformtest.Access(platform.RelationTeacher), files: &removedFiles{}}
 	if w := platformtest.Serve(s.routes, http.MethodDelete, "/v1/documents/"+teachingID, "", "user", "teacher"); w.Code != http.StatusNotFound {
 		t.Fatalf("already gone: %d", w.Code)
 	}
 }
 
-// refusingModels embeds fine and answers every rerank with err.
+// refusingmodels embeds fine and answers every rerank with err.
 type refusingModels struct{ err error }
 
 func (refusingModels) embed(context.Context, string, billed) ([]float32, string, error) {

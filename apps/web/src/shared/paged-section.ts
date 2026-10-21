@@ -6,8 +6,7 @@ export interface ListPage<T> {
   total: number;
 }
 
-/** Page metadata follows the same newest-request rule as Section. Empty last pages after deletion fall back
- * to the last remaining page. Owners retain the existing shared loading/error/empty presentation. */
+/* page metadata follows the same newest-request rule as section. */
 export class PagedSection<T> extends Section<T[]> {
   readonly page = signal(0);
   readonly total = signal(0);

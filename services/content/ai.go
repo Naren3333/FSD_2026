@@ -10,20 +10,21 @@ import (
 	"net/url"
 )
 
-// aiCore calls the private ai-core service as Content's own service account (content-indexer, role ai-client).
-// ai-core holds the model provider keys; Content stores what it returns (docs/decisions/0002-ai-integration.md).
+// aicore calls the private ai-core service as content's own service account (content-indexer, role
+// ai-client). ai-core holds the model provider keys; content stores what it returns.
 type aiCore struct{ platform.AICore }
 
 func newAICore() *aiCore { return &aiCore{platform.NewAICore()} }
 
-// searchModels is what search needs from ai-core: query embeddings and reranking, billed to the searching user.
+// searchmodels is what search needs from ai-core: query embeddings and reranking, billed to the searching
+// user.
 type searchModels interface {
 	embed(ctx context.Context, text string, who billed) ([]float32, string, error)
 	rerank(ctx context.Context, query string, passages []passage, who billed) ([]float64, error)
 }
 
-// passage is a search hit as the reranker needs it. ai-core builds the scored text from these parts with the same
-// rule it used for the embedded text, so Content doesn't keep a copy of that rule.
+// passage is a search hit as the reranker needs it. ai-core builds the scored text from these parts with
+// the same rule it used for the embedded text, so content doesn't keep a copy of that rule.
 type passage struct {
 	Title       string  `json:"title"`
 	SectionPath *string `json:"section_path"`
@@ -36,7 +37,7 @@ type ingester interface {
 	ingest(ctx context.Context, title string, kind string, pdf io.Reader, size int64, who billed) (ingestResult, error)
 }
 
-// aiError, billed and the checks on ai-core's answers are the platform's (shared with Grading's marking).
+// aierror, billed and the checks on ai-core's answers are the platform's (shared with grading's marking).
 type (
 	aiError = platform.AIError
 	billed  = platform.Billed
@@ -88,8 +89,8 @@ type ingestResult struct {
 	Figures        []ingestFigure `json:"figures"`
 }
 
-// ingest sends one supported document to ai-core: chunks with embeddings and the figure crops they point at, or a failed outcome
-// when the PDF itself cannot be indexed.
+// ingest sends one supported document to ai-core: chunks with embeddings and the figure crops they point
+// at, or a failed outcome when the pdf itself cannot be indexed.
 func (a *aiCore) ingest(ctx context.Context, title string, kind string, pdf io.Reader, size int64, who billed) (ingestResult, error) {
 	var out ingestResult
 	query := url.Values{"title": {title}, "billed_user": {who.UserID}, "billed_org": {who.OrgID}, "billed_role": {who.Role}}

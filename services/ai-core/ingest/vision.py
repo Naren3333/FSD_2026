@@ -1,21 +1,4 @@
-"""The ingest's vision pass: one call per page shows the rendered page to a vision model, which lists its tables
-and figures. Async; runs before parsing.
-
-Tables are then read from the PDF's text layer (ingest.tables). A table that is a picture (no text to read) is
-transcribed here, by a second call on its crop. Each informative figure is described here too: its crop, plus the
-PDF words inside it as grounding, go to the figure model, which may be a different one. Before that its box is
-snapped to its content (ingest.snap), and a numbered figure gets the document's sentences that cite it
-(ingest.figure_context). Photos and illustrations, mostly clip art in slide decks, are described only when they
-have a printed caption or such a citing sentence: a captioned photo in a textbook carries content.
-
-A page without a text layer (ingest.pages) is transcribed by one more call, whose blocks the parser uses as the
-page's text; its tables come back in the transcript. A picture of text on a page that does have a text layer (a
-scanned slide under typed text) is left to the figure pass.
-
-Every call is cached and rate limited (ingest.vision_calls), with its prompt from ingest.prompts. A page the model
-didn't look at (vision off, past the page cap, or the call failed) is None, and the parser falls back to
-find_tables "lines" for it; a vision failure never fails the ingest.
-"""
+"""the ingest's vision pass: one call per page shows the rendered page to a vision model, which lists its tables and figures."""
 
 import asyncio
 import hashlib
@@ -47,7 +30,7 @@ from ingest.vision_calls import FIGURE_CONCURRENCY, _semaphore, ask, cache_file,
 log = logging.getLogger("ai-core.ingest.vision")
 
 
-MIN_TEXT_WORDS = 3  # fewer PDF words than this in a table's box: it is a picture of a table
+MIN_TEXT_WORDS = 3  # fewer pdf words than this in a table's box: it is a picture of a table
 
 
 MIN_FIGURE_SHARE = 0.015  # a figure smaller than this share of the page isn't described (bullets, icons)
@@ -60,12 +43,12 @@ NOT_DESCRIBED = ("logo", "icon", "decoration")
 CAPTIONED_ONLY = ("illustration", "photo")  # described only with a printed caption or a citing sentence
 
 
-MAX_GROUND_WORDS = 400  # PDF words passed to the description call
+MAX_GROUND_WORDS = 400  # pdf words passed to the description call
 
 
 @dataclass(frozen=True)
 class SeenTable:
-    """One table as the model describes it. bbox in page points, top-left origin."""
+    """one table as the model describes it. bbox in page points, top-left origin."""
 
     bbox: Box
     rows: int
@@ -75,7 +58,7 @@ class SeenTable:
     caption: str | None = None
     continues_on_next: bool = False
     transcript: tuple[tuple[str, ...], ...] | None = None  # pictures of tables only: header row first
-    # a table every extraction method rejected, laid out by the model from the PDF's words (ingest.rescue)
+    # a table every extraction method rejected, laid out by the model from the pdf's words (ingest.rescue)
     layout: tuple[tuple[str, ...] | None, tuple[tuple[str, ...], ...]] | None = None
 
     @classmethod
@@ -100,7 +83,7 @@ class SeenTable:
 
 @dataclass(frozen=True)
 class SeenFigure:
-    """One figure as the model describes it; `description` is set once it has been described."""
+    """one figure as the model describes it; `description` is set once it has been described."""
 
     bbox: Box
     type: str
@@ -109,7 +92,7 @@ class SeenFigure:
     title: str | None = None
     description: str | None = None
     values: tuple[str, ...] = ()
-    words: str = ""  # the PDF's own words inside the figure, in reading order
+    words: str = ""  # the pdf's own words inside the figure, in reading order
     png: bytes | None = field(default=None, repr=False)  # the crop that was described
 
     @classmethod
@@ -128,7 +111,7 @@ class SeenFigure:
 
 @dataclass(frozen=True)
 class SeenText:
-    """One block of a page transcript (OCR): a heading (level 1-3), a paragraph, or a table."""
+    """one block of a page transcript (ocr): a heading (level 1-3), a paragraph, or a table."""
 
     kind: str  # "heading" | "text" | "table"
     text: str = ""
@@ -161,12 +144,11 @@ class SeenText:
 class PageVision:
     tables: list[SeenTable] = field(default_factory=list)
     figures: list[SeenFigure] = field(default_factory=list)
-    transcript: tuple[SeenText, ...] | None = None  # set for a page without a text layer (OCR)
+    transcript: tuple[SeenText, ...] | None = None  # set for a page without a text layer (ocr)
 
 
 def text_or_none(value: object) -> str | None:
-    """A text field of a model answer: a number becomes its text, anything else that isn't text (a list, an
-    object) None. The answers are cached, so one odd field must not fail the same page on every reindex."""
+    """a text field of a model answer: a number becomes its text, anything else that isn't text (a list, an object) none."""
     if isinstance(value, bool) or not isinstance(value, str | int | float):
         return None
     text = str(value)
@@ -174,7 +156,7 @@ def text_or_none(value: object) -> str | None:
 
 
 def items(value: object) -> list:
-    """A list field of a model answer; [] when the model sent something else."""
+    """a list field of a model answer; [] when the model sent something else."""
     return value if isinstance(value, list) else []
 
 
@@ -190,7 +172,7 @@ def _box(d: dict, width: float, height: float) -> Box | None:
 
 @dataclass(frozen=True)
 class PageRef:
-    """One page of the PDF being looked at: the file, the page's index, and where its model answers are cached."""
+    """one page of the pdf being looked at: the file, the page's index, and where its model answers are cached."""
 
     path: Path
     number: int
@@ -209,7 +191,7 @@ class PageRef:
 
 @dataclass(frozen=True)
 class VisionModels:
-    """Which model makes each kind of call; None turns that kind off."""
+    """which model makes each kind of call; none turns that kind off."""
 
     page: str
     figure: str | None = None  # describes figures
@@ -226,10 +208,7 @@ async def see_pages(  # noqa: PLR0913 - preserves the public vision options and 
     ocr_model: str | None = None,
     selected_pages: set[int] | None = None,
 ) -> list[PageVision | None]:
-    """Per page, what the model sees; None for a page it didn't look at. Pages are rendered only for a call
-    the cache can't answer, in a worker thread, one at a time per vision slot. With `figure_model`, the
-    page's informative figures come back described; with `ocr_model`, a page without a text layer comes back
-    with its transcript."""
+    """per page, what the model sees; none for a page it didn't look at."""
     sizes, words, keys, texts = await pdf.in_thread(_layout, path, max_pages)
     results: list[PageVision | None] = [None] * len(sizes)
     models = VisionModels(model, figure_model, ocr_model)
@@ -251,8 +230,7 @@ async def see_pages(  # noqa: PLR0913 - preserves the public vision options and 
 def _layout(
     path: Path, max_pages: int
 ) -> tuple[list[tuple[float, float]], list[list[Word]], list[str], list[list[str]]]:
-    """Every page's size and text (for figure context), and, for the pages the model looks at, the visible words
-    (box + text, reading order) and the page key."""
+    """every page's size and text (for figure context), and, for the pages the model looks at, the visible words (box + text, reading order) and the page key."""
     with pymupdf.open(path) as doc:
         sizes = [(p.rect.width, p.rect.height) for p in doc]
         texts = [page_text(p) for p in doc]
@@ -320,7 +298,7 @@ async def _see_page(
 
 
 async def _transcribed_page(page: PageRef, model: str) -> tuple[SeenText, ...] | None:
-    """The page's text as the OCR model reads it, or None if the call fails (the page then has no text)."""
+    """the page's text as the ocr model reads it, or none if the call fails (the page then has no text)."""
     try:
         raw = await cached(
             page.cache(model, f"ocr-v{OCR_PROMPT_VERSION}"),
@@ -341,9 +319,7 @@ async def _transcribed_page(page: PageRef, model: str) -> tuple[SeenText, ...] |
 
 
 def describable(f: SeenFigure, tables: list[SeenTable], page_area: float, context: str = "") -> bool:
-    """Worth describing: informative, not a logo, icon or decoration, a photo or illustration only with a printed
-    caption or a citing sentence, not tiny, and not a table the model also reported (a region is a table or a
-    figure, never both)."""
+    """describe informative figures; exclude tiny regions, decorations and detected tables."""
     return (
         f.informative
         and f.type not in NOT_DESCRIBED
@@ -356,8 +332,7 @@ def describable(f: SeenFigure, tables: list[SeenTable], page_area: float, contex
 async def _described(
     page: PageRef, i: int, f: SeenFigure, words: list[Word], model: str, context: str = ""
 ) -> SeenFigure:
-    """The figure with its description, crop and PDF words; unchanged (so not indexed) if the call fails or
-    the model finds nothing useful in it."""
+    """the figure with its description, crop and pdf words; unchanged (so not indexed) if the call fails or the model finds nothing useful in it."""
     inside = " ".join(w[4] for w in words if center_in(w, pad(f.bbox)))
     try:
         png = await page.render(pad(f.bbox))
@@ -368,8 +343,9 @@ async def _described(
             words=" ".join(inside.split()[:MAX_GROUND_WORDS]) or "(none)",
             context=context or "(none)",
         )
-        # the crop is the snapped box, and the context comes from elsewhere in the file (the same page in another
-        # document may be cited differently): both name the answer, so neither can be reused for another
+        # the crop is the snapped box, and the context comes from elsewhere in the file (the same page in
+        # another document may be cited differently): both name the answer, so neither can be reused for
+        # another
         what = hashlib.sha256(f"{[round(v, 1) for v in f.bbox]}|{context}".encode()).hexdigest()[:8]
         raw = await cached(
             page.cache(model, f"f{i}-d{DESCRIBE_PROMPT_VERSION}-{what}"),

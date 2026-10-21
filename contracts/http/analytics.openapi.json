@@ -63,7 +63,7 @@
     "/v1/performance": {
       "get": {
         "summary": "Class Performance",
-        "description": "One page of the classroom's enrolled students with their topic evidence, for its own teacher only. The\nroster comes from Identity with the teacher's token, so only currently enrolled students appear.",
+        "description": "one page of the classroom's enrolled students with their topic evidence, for its own teacher only.",
         "operationId": "class_performance_v1_performance_get",
         "parameters": [
           {
@@ -276,7 +276,7 @@
           "interpretation"
         ],
         "title": "ClassPerformanceResponse",
-        "description": "One page of a classroom's enrolled students, in Identity's roster order, each with their topic evidence."
+        "description": "one page of a classroom's enrolled students, in identity's roster order, each with their topic evidence."
       },
       "ErrorBody": {
         "properties": {
@@ -453,7 +453,7 @@
           "weakness_indicator"
         ],
         "title": "TopicMetric",
-        "description": "A topic's finalized evidence: questions attempted and answered with full marks, and the marks earned out of\nthe marks possible (which shows part marks)."
+        "description": "a topic's finalized evidence: questions attempted and answered with full marks, and the marks earned out of the marks possible (which shows part marks)."
       }
     }
   }

@@ -1,4 +1,4 @@
-"""Boxes on a PDF page, in points with a top-left origin: padding, area, overlap and containment."""
+"""boxes on a pdf page, in points with a top-left origin: padding, area, overlap and containment."""
 
 from collections.abc import Sequence
 from typing import Any
@@ -25,8 +25,7 @@ def area(b: Box) -> float:
 
 
 def overlap(a: Box, b: Box) -> float:
-    """How much two boxes are the same region: the intersection over the smaller one, discounted when one
-    is much bigger than the other (a grid swallowing the page, or a sliver of a big box)."""
+    """how much two boxes are the same region: the intersection over the smaller one, discounted when one is much bigger than the other (a grid swallowing the page, or a sliver of a big box)."""
     inter = area((max(a[0], b[0]), max(a[1], b[1]), min(a[2], b[2]), min(a[3], b[3])))
     small, big = sorted((area(a), area(b)))
     if not small:
@@ -35,7 +34,7 @@ def overlap(a: Box, b: Box) -> float:
 
 
 def within(a: Box, region: Box, share: float = TABLE_OVERLAP) -> bool:
-    """At least `share` of box `a` lies inside `region`."""
+    """at least `share` of box `a` lies inside `region`."""
     inter = area((max(a[0], region[0]), max(a[1], region[1]), min(a[2], region[2]), min(a[3], region[3])))
     return area(a) > 0 and inter / area(a) >= share
 

@@ -1,9 +1,9 @@
 import type { StreamEvent } from '../api/models';
 
-/** Splits a server-sent event stream into events; text may arrive in any pieces. */
+/* splits a server-sent event stream into events; text may arrive in any pieces. */
 export class SseParser {
   private buffer = '';
-  /** The last piece ended in CR, so an LF starting the next one is the rest of that CRLF, not a blank line. */
+  /* the last piece ended in cr, so an lf starting the next one is the rest of that crlf, not a blank line. */
   private afterCr = false;
   push(text: string): StreamEvent[] {
     if (this.afterCr && text.startsWith('\n')) text = text.slice(1);

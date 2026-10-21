@@ -8,13 +8,13 @@ import (
 	"github.com/coreos/go-oidc/v3/oidc"
 )
 
-// Authenticator verifies bearer tokens: RS256 signature against the realm's keys, issuer, audience and expiry,
-// and the presence of the subject and organization claims. An account is a teacher or a student, never both.
+// authenticator verifies bearer tokens: rs256 signature against the realm's keys, issuer, audience and
+// expiry, and the presence of the subject and organization claims.
 type Authenticator struct {
 	verifier *oidc.IDTokenVerifier
 }
 
-// NewAuthenticator reads OIDC_ISSUER, OIDC_JWKS_URL and OIDC_AUDIENCE. Keys are fetched with client.
+// newauthenticator reads oidc_issuer, oidc_jwks_url and oidc_audience.
 func NewAuthenticator(client *http.Client) *Authenticator {
 	ctx := oidc.ClientContext(context.Background(), client)
 	keys := oidc.NewRemoteKeySet(ctx, Required("OIDC_JWKS_URL"))
@@ -22,8 +22,8 @@ func NewAuthenticator(client *http.Client) *Authenticator {
 	return &Authenticator{oidc.NewVerifier(Required("OIDC_ISSUER"), keys, config)}
 }
 
-// Wrap passes requests with a valid bearer token to next, with the verified claims in the context (see Actor),
-// and answers everything else 401. A token holding both the teacher and the student role is refused with 403.
+// wrap passes requests with a valid bearer token to next, with the verified claims in the context (see
+// actor), and answers everything else 401.
 func (a *Authenticator) Wrap(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		auth := r.Header.Get("Authorization")
@@ -49,8 +49,8 @@ func (a *Authenticator) Wrap(next http.Handler) http.Handler {
 	})
 }
 
-// RoleConflict answers 403 ROLE_CONFLICT: an account holds both the teacher and the student role, which no service
-// accepts.
+// roleconflict answers 403 role_conflict: an account holds both the teacher and the student role, which no
+// service accepts.
 func RoleConflict(w http.ResponseWriter) {
 	Error(w, http.StatusForbidden, "ROLE_CONFLICT", "An account must be either a teacher or a student, not both.")
 }

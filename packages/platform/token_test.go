@@ -24,7 +24,7 @@ func TestServiceTokenFetchesOnceAndWaitersHonourTheirContext(t *testing.T) {
 	for fetches.Load() == 0 {
 		time.Sleep(time.Millisecond)
 	}
-	// A caller with a short deadline gives up while the slow fetch runs, instead of waiting for it.
+	// a caller with a short deadline gives up while the slow fetch runs, instead of waiting for it.
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Millisecond)
 	defer cancel()
 	if _, err := tokens.Get(ctx); err == nil {

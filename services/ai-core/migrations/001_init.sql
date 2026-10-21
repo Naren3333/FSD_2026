@@ -1,4 +1,4 @@
--- ai-core's own database (ADR 0003): what each user's model calls cost. No business records.
+-- ai-core's own database (adr 0003): what each user's model calls cost.
 CREATE TABLE IF NOT EXISTS usage(
   id bigserial PRIMARY KEY,
   org_id text NOT NULL,

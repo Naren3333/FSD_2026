@@ -28,7 +28,7 @@ class FakeMessage:
 
 
 class Stop(threading.Event):
-    """A shutdown flag whose retry waits return at once, recording how long they would have been."""
+    """a shutdown flag whose retry waits return at once, recording how long they would have been."""
 
     def __init__(self) -> None:
         super().__init__()
@@ -40,7 +40,7 @@ class Stop(threading.Event):
 
 
 class Broker:
-    """Fake confluent_kafka Consumer and Producer sharing one log of what happened, in order."""
+    """fake confluent_kafka consumer and producer sharing one log of what happened, in order."""
 
     def __init__(self, monkeypatch: Any, stop: Stop, messages: list[FakeMessage], dlq: str) -> None:
         self.log: list[str] = []
@@ -142,8 +142,7 @@ def test_a_handler_that_recovers_is_committed_once(monkeypatch: Any) -> None:
 def test_a_message_failing_permanently_is_dead_lettered_then_committed(
     monkeypatch: Any, error: Exception
 ) -> None:
-    """A constraint the message breaks on every attempt would block its partition forever: after PROCESS_ATTEMPTS
-    it goes to the dead-letter topic, and is committed only once the broker confirmed it there."""
+    """a constraint the message breaks on every attempt would block its partition forever: after process_attempts it goes to the dead-letter topic, and is committed only once the broker confirmed it there."""
     calls: list[bytes | None] = []
 
     def handle(_: str, value: bytes | None) -> bool:
@@ -167,7 +166,7 @@ def test_a_permanent_failure_is_not_committed_when_dead_lettering_fails(monkeypa
 
 
 def test_a_message_failing_for_any_other_reason_too_is_retried_later(monkeypatch: Any) -> None:
-    """One attempt failing for a passing reason (the database restarting) means the message may yet succeed."""
+    """one attempt failing for a passing reason (the database restarting) means the message may yet succeed."""
     errors: list[Exception] = [psycopg.errors.CheckViolation("check")] * 4 + [
         psycopg.OperationalError("down")
     ]
@@ -180,8 +179,7 @@ def test_a_message_failing_for_any_other_reason_too_is_retried_later(monkeypatch
 
 
 def test_a_duplicate_event_is_processed_and_committed_like_the_first(monkeypatch: Any) -> None:
-    """Handlers are idempotent (an inbox of event ids): a redelivered event is a no-op that is committed, never
-    dead-lettered."""
+    """handlers are idempotent (an inbox of event ids): a redelivered event is a no-op that is committed, never dead-lettered."""
     seen: set[bytes | None] = set()
     applied: list[bytes | None] = []
 

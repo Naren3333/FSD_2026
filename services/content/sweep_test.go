@@ -10,7 +10,7 @@ import (
 	"github.com/google/uuid"
 )
 
-// agedBucket is the fixture's objects, each written at the time given for it, or long ago.
+// agedbucket is the fixture's objects, each written at the time given for it, or long ago.
 type agedBucket struct {
 	store   *memoryStore
 	written map[string]time.Time
@@ -58,9 +58,8 @@ func (f *fixture) keys() []string {
 	return keys
 }
 
-// The sweeper removes, once they are old enough, the objects no row names: an orphaned original, the crops a
-// reindex no longer cites, anything outside a document's prefixes. A document's own original and cited crops stay,
-// and so does everything of a document being indexed.
+// the sweeper removes, once they are old enough, the objects no row names: an orphaned original, the crops
+// a reindex no longer cites, anything outside a document's prefixes.
 func TestTheSweeperRemovesOnlyObjectsNoRowNames(t *testing.T) {
 	f := newFixture(t)
 	ctx := context.Background()
@@ -93,7 +92,8 @@ func TestTheSweeperRemovesOnlyObjectsNoRowNames(t *testing.T) {
 	}
 }
 
-// restoredBucket is an agedBucket where a reindex stores the objects in restored again after the sweeper listed them.
+// restoredbucket is an agedbucket where a reindex stores the objects in restored again after the sweeper
+// listed them.
 type restoredBucket struct {
 	agedBucket
 	restored []string
@@ -107,7 +107,8 @@ func (b restoredBucket) list(ctx context.Context) ([]storedObject, error) {
 	return objects, err
 }
 
-// A crop stored again between the sweeper's listing and its removal is kept: the reindex that stored it may cite it.
+// a crop stored again between the sweeper's listing and its removal is kept: the reindex that stored it may
+// cite it.
 func TestTheSweeperKeepsACropStoredAgainMeanwhile(t *testing.T) {
 	f := newFixture(t)
 	ctx := context.Background()
@@ -124,8 +125,8 @@ func TestTheSweeperKeepsACropStoredAgainMeanwhile(t *testing.T) {
 	}
 }
 
-// A reindex queued after the sweep read the rows, before it removes anything, keeps every object of the document:
-// the rows are read again under the document's lock.
+// a reindex queued after the sweep read the rows, before it removes anything, keeps every object of the
+// document: the rows are read again under the document's lock.
 func TestTheSweeperJudgesAgainUnderTheDocumentsLock(t *testing.T) {
 	f := newFixture(t)
 	ctx := context.Background()
@@ -147,8 +148,8 @@ func TestTheSweeperJudgesAgainUnderTheDocumentsLock(t *testing.T) {
 	}
 }
 
-// lockCheckingBucket is an agedBucket that, as each object is removed, tries to queue a reindex of its document and
-// records whether that had to wait.
+// lockcheckingbucket is an agedbucket that, as each object is removed, tries to queue a reindex of its
+// document and records whether that had to wait.
 type lockCheckingBucket struct {
 	agedBucket
 	queue   func(ctx context.Context) error
@@ -162,8 +163,8 @@ func (b lockCheckingBucket) remove(ctx context.Context, key string) error {
 	return b.agedBucket.remove(ctx, key)
 }
 
-// A reindex cannot be queued while the sweeper removes a document's objects, so no run can store a crop again until
-// the removal is done; it is queued once the sweep has finished.
+// a reindex cannot be queued while the sweeper removes a document's objects, so no run can store a crop
+// again until the removal is done; it is queued once the sweep has finished.
 func TestAReindexWaitsForTheSweepersRemovals(t *testing.T) {
 	f := newFixture(t)
 	ctx := context.Background()

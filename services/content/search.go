@@ -15,10 +15,8 @@ import (
 	"github.com/jackc/pgx/v5"
 )
 
-// Hybrid search, ported from fsd_test's knowledge service: a vector leg and a keyword leg under the caller's
-// access filter, merged with reciprocal rank fusion, then optionally reranked by ai-core. If the rerank fails the
-// results stay in RRF order and rerank_fallback is set. A result that cites a figure or table of its document
-// ("as Figure 7 shows") comes back with that chunk in `related`.
+// hybrid search, ported from fsd_test's knowledge service: a vector leg and a keyword leg under the
+// caller's access filter, merged with reciprocal rank fusion, then optionally reranked by ai-core.
 const (
 	legLimit      = 50 // candidates per leg
 	rrfK          = 60
@@ -116,8 +114,7 @@ func (s server) search(w http.ResponseWriter, r *http.Request) {
 	platform.JSON(w, http.StatusOK, result)
 }
 
-// normalize trims the query and applies the defaults (top 8, reranked). It returns a message when the request is
-// out of bounds.
+// normalize trims the query and applies the defaults (top 8, reranked).
 func (req *searchRequest) normalize() (topK int, rerank bool, problem string) {
 	req.Query = strings.TrimSpace(req.Query)
 	topK, rerank = 8, true
@@ -143,8 +140,8 @@ func (req *searchRequest) normalize() (topK int, rerank bool, problem string) {
 	return topK, rerank, ""
 }
 
-// searchFailed answers a failed search: the user's AI allowance is used up, they have too many AI calls running,
-// ai-core is unavailable, or an internal error.
+// searchfailed answers a failed search: the user's ai allowance is used up, they have too many ai calls
+// running, ai-core is unavailable, or an internal error.
 func searchFailed(w http.ResponseWriter, err error) {
 	if platform.AIBusy(err) {
 		platform.Error(w, http.StatusTooManyRequests, "AI_BUSY", "Too many AI requests are running for you at once. Try again in a moment.")
@@ -168,7 +165,7 @@ func searchFailed(w http.ResponseWriter, err error) {
 
 func (s server) runSearch(ctx context.Context, f filter, query string, topK int, rerank bool, who billed) (searchResponse, error) {
 	started := time.Now()
-	// The keyword leg needs no vector, so it runs while the query is embedded.
+	// the keyword leg needs no vector, so it runs while the query is embedded.
 	type legResult struct {
 		rows []hit
 		err  error
@@ -220,7 +217,7 @@ func (s server) embedQuery(ctx context.Context, query string, who billed) ([]flo
 
 const legColumns = "id,document_id,doc_type,section_path,page_start,page_end,content,kind,source,image,cites"
 
-// resultColumns are a leg's hits with their document's title; the legs select from r JOIN documents d.
+// resultcolumns are a leg's hits with their document's title; the legs select from r join documents d.
 const resultColumns = "r.id,r.document_id,d.title,r.doc_type,r.section_path,r.page_start,r.page_end,r.content,r.kind,r.source,r.image,r.cites"
 
 func scanHits(rows pgx.Rows) ([]hit, error) {
@@ -237,8 +234,7 @@ func scanHits(rows pgx.Rows) ([]hit, error) {
 	return out, rows.Err()
 }
 
-// fuse merges the legs with reciprocal rank fusion, Σ 1/(rrfK + rank). Ties go to the better single-leg rank,
-// then the chunk id, so the order is deterministic.
+// fuse merges the legs with reciprocal rank fusion, σ 1/(rrfk + rank).
 func fuse(vector, keyword []hit) []hit {
 	byID := map[string]*hit{}
 	var order []string
@@ -284,8 +280,8 @@ func fuse(vector, keyword []hit) []hit {
 	return out
 }
 
-// distinct keeps the best-ranked of hits with the same text: a slide repeated in every deck of a course (its
-// schedule, say) would otherwise fill several result slots with one passage.
+// distinct keeps the best-ranked of hits with the same text: a slide repeated in every deck of a course
+// (its schedule, say) would otherwise fill several result slots with one passage.
 func distinct(hits []hit) []hit {
 	seen := map[string]bool{}
 	out := hits[:0:0]
@@ -299,8 +295,8 @@ func distinct(hits []hit) []hit {
 	return out
 }
 
-// rerankHits reorders hits by ai-core's rerank scores and reports whether it fell back: on failure the RRF order
-// stays. A user over their daily AI allowance, or with too many AI calls running, is an error, not a fallback.
+// rerankhits reorders hits by ai-core's rerank scores and reports whether it fell back: on failure the rrf
+// order stays.
 func (s server) rerankHits(ctx context.Context, query string, hits []hit, who billed) (bool, error) {
 	ctx, cancel := context.WithTimeout(ctx, rerankTimeout)
 	defer cancel()

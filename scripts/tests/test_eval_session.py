@@ -1,4 +1,4 @@
-"""The golden evals' gateway session signs in again whenever its token expires, even after waiting out 429s."""
+"""the golden evals' gateway session signs in again whenever its token expires, even after waiting out 429s."""
 
 import sys
 from pathlib import Path

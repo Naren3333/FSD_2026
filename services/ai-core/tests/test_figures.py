@@ -1,5 +1,4 @@
-"""Figures: description, the parser, the chunker and /v1/ingest's crops.
-The tests give the vision pass's results directly, use the mock OpenAI transport, or stub the vision pass."""
+"""figures: description, the parser, the chunker and /v1/ingest's crops."""
 
 import asyncio
 import base64
@@ -195,12 +194,12 @@ def test_a_figure_without_a_caption_borrows_nothing(tmp_path: Path) -> None:
     assert figure.content.startswith(f"[diagram, {DESCRIBED}]")
 
 
-# ---- POST /v1/ingest (storing crops and serving images moves to Content)
+# ---- post /v1/ingest (storing crops and serving images moves to content)
 
 
 @pytest.fixture
 def figures_on(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> dict:
-    """The vision pass stubbed to describe the diagram; `crop["png"]` is the crop it returns."""
+    """the vision pass stubbed to describe the diagram; `crop[\"png\"]` is the crop it returns."""
     crop = {"png": PNG}
 
     async def see_pages(path: Path, **kw: object) -> list[PageVision]:
@@ -243,7 +242,7 @@ CHART = (
     67.0,
     285.0,
     243.0,
-)  # the model's box for CLIP's Figure 7: labels cut at the left, no axis title
+)  # the model's box for clip's figure 7: labels cut at the left, no axis title
 
 
 def chart_lines() -> list:

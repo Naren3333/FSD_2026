@@ -63,7 +63,7 @@ func TestRoles(t *testing.T) {
 	}
 }
 
-// identityStub answers every access check with the given status and body.
+// identitystub answers every access check with the given status and body.
 func identityStub(t *testing.T, status int, body string) *Identity {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(status)
@@ -89,7 +89,7 @@ func TestTeacherOfNeedsTheTeacherRelation(t *testing.T) {
 		code   int
 	}{
 		{200, `{"allowed":true,"relation":"teacher"}`, true, 200},
-		// Identity decides: a teacher-role token it answers "student" for gets no teacher powers.
+		// identity decides: a teacher-role token it answers "student" for gets no teacher powers.
 		{200, `{"allowed":true,"relation":"student"}`, false, 403},
 		{200, `{"allowed":true}`, false, 503},
 		{403, `{}`, false, 403},
@@ -139,7 +139,8 @@ func TestRosterReadsTheEnrolledStudents(t *testing.T) {
 	}
 }
 
-// A roster over maxRoster is refused like an unreadable one, and the log says it was the size, for which classroom.
+// a roster over maxroster is refused like an unreadable one, and the log says it was the size, for which
+// classroom.
 func TestAnOversizedRosterIsLoggedAsOverTheLimit(t *testing.T) {
 	var logged bytes.Buffer
 	previous := slog.Default()

@@ -24,13 +24,11 @@ import type {
 } from '../../api/models';
 import { requiredText } from '../../shared/validators';
 
-/** The assessment editor's form and its conversion to and from what Assessment stores. Limits mirror Assessment's
- * own checks so a teacher hears about a problem before saving; Assessment still decides. */
+/* the assessment editor's form and its conversion to and from what assessment stores. */
 
 export const MAX_QUESTIONS = 50;
 export const MAX_CRITERIA = 10;
-/** Marking points (the questions' `marking_scheme` passages): per question, characters per point, and per
- * assessment. */
+/* marking points (the questions' `marking_scheme` passages): per question, characters per point, and per assessment. */
 export const MAX_EXCERPTS = 5;
 export const MAX_EXCERPT_TEXT = 2000;
 export const MAX_ASSESSMENT_EXCERPTS = 20;
@@ -40,7 +38,7 @@ const DEFAULT_MAX_LENGTH = 5000;
 
 export type CriterionForm = FormGroup<{
   title: FormControl<string>;
-  /** One level per line, "points: description". */
+  /* one level per line, "points: description". */
   levels: FormControl<string>;
 }>;
 
@@ -57,9 +55,9 @@ export type QuestionForm = FormGroup<{
   max_length: FormControl<number>;
   model_answer: FormControl<string>;
   criteria: FormArray<CriterionForm>;
-  /** Short answers and free responses: marking points for AI suggestions. */
+  /* short answers and free responses: marking points for ai suggestions. */
   marking_scheme: FormControl<Excerpt[]>;
-  /** Generated questions: the passages they were drawn from, kept for the teacher (ADR 0006). */
+  /* generated questions: the passages they were drawn from, kept for the teacher (adr 0006). */
   sources: FormControl<Excerpt[]>;
   origin: FormControl<'' | 'generated'>;
 }>;
@@ -74,7 +72,7 @@ export type AssessmentForm = FormGroup<{
   questions: FormArray<QuestionForm>;
 }>;
 
-/** Multiple-choice options or accepted answers: one per non-blank line. */
+/* multiple-choice options or accepted answers: one per non-blank line. */
 export function optionLines(text: string): string[] {
   return text
     .split('\n')
@@ -82,7 +80,7 @@ export function optionLines(text: string): string[] {
     .filter(Boolean);
 }
 
-/** A criterion's levels from lines such as "2: Partly right", or null when a line cannot be read. */
+/* a criterion's levels from lines such as "2: partly right", or null when a line cannot be read. */
 export function parseLevels(text: string): { points: number; descriptor: string }[] | null {
   const levels = [];
   for (const line of optionLines(text)) {
@@ -97,7 +95,7 @@ export function levelLines(criterion: Criterion): string {
   return criterion.levels.map((l) => `${l.points}: ${l.descriptor}`).join('\n');
 }
 
-/** 2–6 levels, each "points: description" with its own points from 0 to 100. */
+/* 2–6 levels, each "points: description" with its own points from 0 to 100. */
 const levelsValidator: ValidatorFn = (control: AbstractControl<string>): ValidationErrors | null => {
   const levels = parseLevels(control.value);
   if (!levels || levels.length < 2 || levels.length > 6) return { levels: true };
@@ -107,7 +105,7 @@ const levelsValidator: ValidatorFn = (control: AbstractControl<string>): Validat
   return null;
 };
 
-/** The highest level of each criterion, added up: a free response's points. */
+/* the highest level of each criterion, added up: a free response's points. */
 export function rubricTotal(criteria: readonly { levels: string }[]): number {
   return criteria.reduce((sum, c) => {
     const levels = parseLevels(c.levels) ?? [];
@@ -173,7 +171,7 @@ export function questionForm(question?: Omit<Question, 'id'>): QuestionForm {
   return form;
 }
 
-/** Turns on the controls the question's type uses and turns off the rest, so only they are validated. */
+/* turns on the controls the question's type uses and turns off the rest, so only they are validated. */
 function applyType(form: QuestionForm): void {
   const type = form.controls.type.value;
   const c = form.controls;
@@ -202,7 +200,7 @@ function applyType(form: QuestionForm): void {
   c.accepted.updateValueAndValidity({ emitEvent: false });
 }
 
-/** At most five marking points, each with 1–2,000 characters of text. */
+/* at most five marking points, each with 1–2,000 characters of text. */
 const schemeValidator: ValidatorFn = (control: AbstractControl<Excerpt[]>) => {
   const excerpts = control.value;
   return excerpts.length <= MAX_EXCERPTS &&
@@ -211,46 +209,43 @@ const schemeValidator: ValidatorFn = (control: AbstractControl<Excerpt[]>) => {
     : { scheme: true };
 };
 
-/** Characters as Assessment counts them (code points, not UTF-16 units). */
+/* characters as assessment counts them (code points, not utf-16 units). */
 export function characters(text: string): number {
   return Array.from(text).length;
 }
 
-/** The text cut to at most `limit` characters. */
+/* the text cut to at most `limit` characters. */
 export function clipText(text: string, limit: number): string {
   return characters(text) <= limit ? text : Array.from(text).slice(0, limit).join('');
 }
 
-/** Marking points across the assessment's questions, counting only questions that keep them. */
+/* marking points across the assessment's questions, counting only questions that keep them. */
 export function schemeTotal(
   questions: readonly { type: QuestionType; marking_scheme?: readonly Excerpt[] }[],
 ): number {
   return questions.reduce((sum, q) => sum + (usesScheme(q.type) ? (q.marking_scheme?.length ?? 0) : 0), 0);
 }
 
-/** At most twenty marking points across the assessment's questions. */
+/* at most twenty marking points across the assessment's questions. */
 const assessmentSchemeValidator: ValidatorFn = (control: AbstractControl) =>
   schemeTotal((control as FormArray<QuestionForm>).getRawValue()) <= MAX_ASSESSMENT_EXCERPTS
     ? null
     : { schemeTotal: true };
 
-/** Whether a question is still as the editor made it: no wording and nothing the teacher set. */
+/* whether a question is still as the editor made it: no wording and nothing the teacher set. */
 export function untouched(question: QuestionForm): boolean {
   return question.pristine && !question.controls.prompt.value.trim();
 }
 
-/** "1 mark" or "N marks". */
+/* "1 mark" or "n marks". */
 export function marksText(points: number): string {
   return points === 1 ? '1 mark' : `${points} marks`;
 }
 
-/** Who wrote each of a question's marking points, for this session: AI (drafted guidance or a kept generated
- * question) or the teacher. Neither carries a document, so once the assessment is reloaded they can no longer be told
- * apart. */
+/* who wrote each of a question's marking points, for this session: ai (drafted guidance or a kept generated question) or the teacher. */
 const writtenBy = new WeakMap<FormControl<Excerpt[]>, Map<string, 'ai' | 'teacher'>>();
 
-/** A passage from the question-generation agent as Assessment takes it, without the nulls the agent sends for what
- * it doesn't name. */
+/* a passage from the question-generation agent as assessment takes it, without the nulls the agent sends for what it doesn't name. */
 export function fromAgent(excerpt: AgentExcerpt): Excerpt {
   const { document_id, chunk_id, page, text } = excerpt;
   return {
@@ -261,7 +256,7 @@ export function fromAgent(excerpt: AgentExcerpt): Excerpt {
   };
 }
 
-/** A drafted question as the editor keeps it: no nulls, and its passages as Assessment takes them. */
+/* a drafted question as the editor keeps it: no nulls, and its passages as assessment takes them. */
 export function draftQuestion(draft: DraftQuestion): Omit<Question, 'id'> {
   const { rubric, max_length, marking_scheme, sources, ...rest } = draft;
   return {
@@ -278,8 +273,7 @@ export function markWrittenBy(control: FormControl<Excerpt[]>, excerpt: Excerpt,
   writtenBy.set(control, new Map([...(writtenBy.get(control) ?? []), [excerpt.text, by]]));
 }
 
-/** Where a passage is from: its document and page, or that AI or the teacher wrote it, or, when that is no longer
- * known, that it was written for the question. */
+/* where a passage is from: its document and page, or that ai or the teacher wrote it, or, when that is no longer known, that it was written for the question. */
 export function excerptLabel(
   excerpt: Excerpt,
   documents: readonly DocumentRecord[] | null | undefined,
@@ -293,12 +287,12 @@ export function excerptLabel(
   return excerpt.page ? `${title}, page ${excerpt.page}` : title;
 }
 
-/** Whether questions of the type can carry marking points: the ones a teacher (or AI) marks. */
+/* whether questions of the type can carry marking points: the ones a teacher (or ai) marks. */
 export function usesScheme(type: QuestionType): boolean {
   return type === 'short_answer' || type === 'free_response';
 }
 
-/** 2–8 unique options. */
+/* 2–8 unique options. */
 const optionsValidator: ValidatorFn = (control: AbstractControl<string>) => {
   const options = optionLines(control.value);
   return options.length >= 2 && options.length <= 8 && new Set(options).size === options.length
@@ -306,7 +300,7 @@ const optionsValidator: ValidatorFn = (control: AbstractControl<string>) => {
     : { options: true };
 };
 
-/** 1–20 accepted answers. */
+/* 1–20 accepted answers. */
 const acceptedValidator: ValidatorFn = (control: AbstractControl<string>) => {
   const accepted = optionLines(control.value);
   return accepted.length >= 1 && accepted.length <= MAX_ACCEPTED ? null : { accepted: true };
@@ -324,7 +318,7 @@ export function assessmentForm(): AssessmentForm {
   });
 }
 
-/** Fills the editor with a draft to change. */
+/* fills the editor with a draft to change. */
 export function fillForm(form: AssessmentForm, draft: Assessment): void {
   form.controls.questions.clear();
   for (const q of draft.questions) form.controls.questions.push(questionForm(q));
@@ -338,14 +332,14 @@ export function fillForm(form: AssessmentForm, draft: Assessment): void {
   });
 }
 
-/** Empties the editor back to one blank question. */
+/* empties the editor back to one blank question. */
 export function clearForm(form: AssessmentForm): void {
   form.controls.questions.clear();
   form.controls.questions.push(questionForm());
   form.reset();
 }
 
-/** The assessment the editor describes, as a draft or to publish. */
+/* the assessment the editor describes, as a draft or to publish. */
 export function toAssessment(
   form: AssessmentForm,
   classroomId: string,
@@ -360,13 +354,13 @@ export function toAssessment(
     due_at: isoOrNull(v.due_at),
     late_policy: v.late_policy,
     release_policy: v.release_policy,
-    // Only questions a teacher marks can have suggestions.
+    // only questions a teacher marks can have suggestions.
     ai_marking: v.ai_marking && teacherMarked(v.questions),
     questions: v.questions.map(toQuestion),
   };
 }
 
-/** The details the editor describes, which can change after students have submitted. */
+/* the details the editor describes, which can change after students have submitted. */
 export function toDetails(form: AssessmentForm): AssessmentDetails {
   const v = form.getRawValue();
   return { title: v.title, due_at: isoOrNull(v.due_at), late_policy: v.late_policy };
@@ -402,7 +396,7 @@ function toQuestion(q: ReturnType<QuestionForm['getRawValue']>): Omit<Question, 
         answer: '',
         tolerance: '',
         max_length: q.max_length,
-        // Assessment sets a free response's points to its rubric's total.
+        // assessment sets a free response's points to its rubric's total.
         points: rubricTotal(q.criteria),
         rubric: {
           criteria: q.criteria.map((c) => ({ title: c.title, levels: parseLevels(c.levels) ?? [] })),
@@ -413,7 +407,7 @@ function toQuestion(q: ReturnType<QuestionForm['getRawValue']>): Omit<Question, 
   }
 }
 
-/** The marking_scheme field, left out when there are no passages. */
+/* the marking_scheme field, left out when there are no passages. */
 function scheme(excerpts: Excerpt[]): { marking_scheme?: Excerpt[] } {
   return excerpts.length ? { marking_scheme: excerpts } : {};
 }
@@ -422,12 +416,12 @@ export function teacherMarked(questions: readonly { type: QuestionType }[]): boo
   return questions.some((q) => usesScheme(q.type));
 }
 
-/** A datetime-local value (the viewer's own time zone) as an ISO instant, or null when empty. */
+/* a datetime-local value (the viewer's own time zone) as an iso instant, or null when empty. */
 export function isoOrNull(local: string): string | null {
   return local ? new Date(local).toISOString() : null;
 }
 
-/** An ISO instant as a datetime-local value in the viewer's own time zone. */
+/* an iso instant as a datetime-local value in the viewer's own time zone. */
 export function localInput(iso: string | null): string {
   if (!iso) return '';
   const at = new Date(iso);

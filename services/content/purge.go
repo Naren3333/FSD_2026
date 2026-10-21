@@ -8,7 +8,7 @@ import (
 	"github.com/jackc/pgx/v5"
 )
 
-// purgeTimeout bounds deleting a large classroom's rows and recording durable object cleanup jobs.
+// purgetimeout bounds deleting a large classroom's rows and recording durable object cleanup jobs.
 const purgeTimeout = 5 * time.Minute
 
 // folders is what purging needs from object storage.
@@ -16,19 +16,16 @@ type folders interface {
 	removeAll(ctx context.Context, prefix string) error
 }
 
-// purger removes a deleted classroom's documents: their rows (the chunks, vectors and indexing jobs go with them),
-// their originals and figure crops in object storage, and any of their events not yet published. It records the
-// classroom as purged, so an upload still under way is refused.
+// purge classroom documents, chunks, jobs, objects and unpublished events.
 type purger struct{}
 
-// purge runs in the consumer's transaction. Durable cleanup jobs commit with the rows' deletion and inbox;
-// a duplicate event cannot lose cleanup work or remove objects before a successful commit.
+// purge runs in the consumer's transaction.
 func (p purger) purge(ctx context.Context, tx pgx.Tx, event platform.Event) error {
 	v, err := platform.DecodeClassroomDeleted(event)
 	if err != nil {
 		return err
 	}
-	// Waits for uploads into the classroom that are committing, and makes later ones see it purged.
+	// waits for uploads into the classroom that are committing, and makes later ones see it purged.
 	if err = platform.Lock(ctx, tx, platform.LockClassroom, v.Classroom); err != nil {
 		return err
 	}

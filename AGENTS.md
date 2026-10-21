@@ -1,5 +1,6 @@
 # Engineering boundaries
 
+- Keep explanatory comments necessary, brief and lowercase. Preserve case-sensitive directives and license notices.
 - Read docs/requirements.md, docs/architecture, and the current handover before changes.
 - Exactly ten business applications; adding another requires an ADR and user authorization.
 - Keep domain rules inside their owning service. Never access another service's database. Shared packages may contain transport, authentication and operational helpers only.

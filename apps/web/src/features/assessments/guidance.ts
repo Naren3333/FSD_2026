@@ -20,7 +20,7 @@ import {
 } from './editor';
 import { MAX_SOURCE_DOCUMENTS, sourceDocuments } from './generator';
 
-/** The accepted answers with the suggested ones added after them, without repeats, up to Assessment's limit. */
+/* the accepted answers with the suggested ones added after them, without repeats, up to assessment's limit. */
 export function mergeAccepted(current: string, suggested: readonly string[]): string {
   const answers = optionLines(current);
   for (const answer of suggested.map((a) => a.trim()))
@@ -28,9 +28,7 @@ export function mergeAccepted(current: string, suggested: readonly string[]): st
   return answers.slice(0, MAX_ACCEPTED).join('\n');
 }
 
-/** "Draft marking guidance" for a short answer or written response the teacher wrote (ADR 0006): AI drafts accepted
- * answers or a rubric, and marking points, from the classroom's documents. Nothing changes until the teacher chooses
- * "Use this", and the question is saved only with the assessment. */
+/* "draft marking guidance" for a short answer or written response the teacher wrote (adr 0006): ai drafts accepted answers or a rubric, and marking points, from the classroom's documents. */
 @Component({
   selector: 'app-marking-guidance',
   standalone: true,
@@ -41,22 +39,22 @@ export class MarkingGuidanceComponent {
   private readonly api = inject(QuestionGenerationApi);
   private readonly usage = inject(AiUsage);
   @Input({ required: true }) question!: QuestionForm;
-  /** The question's position, for unique ids and labels. */
+  /* the question's position, for unique ids and labels. */
   @Input({ required: true }) index = 0;
   @Input({ required: true }) classroomId = '';
   @Input({ required: true }) documents!: Section<DocumentRecord[]>;
-  /** Marking points across the whole assessment, which has a limit of its own. */
+  /* marking points across the whole assessment, which has a limit of its own. */
   @Input() assessmentPassages = 0;
   @Input() disabled = false;
 
-  /** '' drafts from the classroom's teaching materials; otherwise from the one document chosen. */
+  /* '' drafts from the classroom's teaching materials; otherwise from the one document chosen. */
   readonly document = new FormControl('', { nonNullable: true });
   readonly result = new Section<Guidance>();
   readonly note = signal('');
-  /** Whether the teacher has used the draft on show. */
+  /* whether the teacher has used the draft on show. */
   readonly used = signal(false);
   readonly levelLines = levelLines;
-  /** The question as it was when the guidance on show was drafted. */
+  /* the question as it was when the guidance on show was drafted. */
   private drafted = { prompt: '', type: '' };
 
   get choices(): DocumentRecord[] {
@@ -96,14 +94,13 @@ export class MarkingGuidanceComponent {
       .then(() => this.usage.refresh());
   }
 
-  /** Whether the question's wording or type changed since the guidance on show was drafted. */
+  /* whether the question's wording or type changed since the guidance on show was drafted. */
   stale(): boolean {
     const c = this.question.controls;
     return c.prompt.value.trim() !== this.drafted.prompt || c.type.value !== this.drafted.type;
   }
 
-  /** Puts the draft into the question: accepted answers are added, a rubric and model answer replace the old ones,
-   * and the marking points are added to the question's when there is room. */
+  /* puts the draft into the question: accepted answers are added, a rubric and model answer replace the old ones, and the marking points are added to the question's when there is room. */
   use(): void {
     const g = this.result.value();
     const c = this.question.controls;
@@ -122,11 +119,11 @@ export class MarkingGuidanceComponent {
     }
     this.question.markAsDirty();
     this.used.set(true);
-    // The button goes away, so the keyboard continues from the note that replaces it.
+    // the button goes away, so the keyboard continues from the note that replaces it.
     setTimeout(() => document.getElementById(`question-${this.index}-guidance-used`)?.focus());
   }
 
-  /** Whether the question or the assessment has no room for another marking point. */
+  /* whether the question or the assessment has no room for another marking point. */
   schemeFull(): boolean {
     return (
       this.question.controls.marking_scheme.value.length >= MAX_EXCERPTS ||
@@ -134,7 +131,7 @@ export class MarkingGuidanceComponent {
     );
   }
 
-  /** Where one of the guidance's passages is from. */
+  /* where one of the guidance's passages is from. */
   source(excerpt: AgentExcerpt): string {
     return excerptLabel(fromAgent(excerpt), this.documents.value());
   }

@@ -1,8 +1,8 @@
-/** How the app writes dates, times and money: English (Singapore) formatting throughout. */
+/* how the app writes dates, times and money: english (singapore) formatting throughout. */
 
 const LOCALE = 'en-SG';
 
-/** Dollars as the meter shows them: cents, and never "$0.00" for spend that is real but under a cent. */
+/* dollars as the meter shows them: cents, and never "$0.00" for spend that is real but under a cent. */
 export function dollars(value: number): string {
   if (value > 0 && value < 0.005) return 'under $0.01';
   return new Intl.NumberFormat(LOCALE, {
@@ -12,7 +12,7 @@ export function dollars(value: number): string {
   }).format(value);
 }
 
-/** When the allowance comes back, in the viewer's local time: today's or tomorrow's date only when it matters. */
+/* when the allowance comes back, in the viewer's local time: today's or tomorrow's date only when it matters. */
 export function resetTime(iso: string, now = new Date()): string {
   const at = new Date(iso);
   const time = at.toLocaleTimeString(LOCALE, { hour: 'numeric', minute: '2-digit' });
@@ -21,17 +21,17 @@ export function resetTime(iso: string, now = new Date()): string {
     : `${time} on ${at.toLocaleDateString(LOCALE, { day: 'numeric', month: 'short' })}`;
 }
 
-/** A day, such as "13 Oct 2026". */
+/* a day, such as "13 oct 2026". */
 export function date(iso: string): string {
   return new Date(iso).toLocaleDateString(LOCALE, { dateStyle: 'medium' });
 }
 
-/** A day and time, such as "13 Oct 2026, 3:00 pm". */
+/* a day and time, such as "13 oct 2026, 3:00 pm". */
 export function dateTime(iso: string): string {
   return new Date(iso).toLocaleString(LOCALE, { dateStyle: 'medium', timeStyle: 'short' });
 }
 
-/** A time of day, such as "3:05 pm". */
+/* a time of day, such as "3:05 pm". */
 export function time(iso: string): string {
   return new Date(iso).toLocaleTimeString(LOCALE, { hour: 'numeric', minute: '2-digit' });
 }

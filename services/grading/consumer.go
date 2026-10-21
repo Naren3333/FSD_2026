@@ -12,8 +12,8 @@ import (
 	"github.com/jackc/pgx/v5"
 )
 
-// Grading reads assessment.submitted.v4, each question carrying its curriculum topic in topic_id, and publishes
-// grading.finalized.v3, its evidence carrying topic_id. Older versions are no longer read.
+// grading reads assessment.submitted.v4, each question carrying its curriculum topic in topic_id, and
+// publishes grading.finalized.v3, its evidence carrying topic_id.
 const (
 	topicSubmitted = "assessment.submitted.v4"
 	topicFinalized = "grading.finalized.v3"
@@ -47,14 +47,14 @@ func (v Submitted) valid() bool {
 		len(v.Questions) > 0 && len(v.Questions) <= 50 && len(v.Answers) == len(v.Questions)
 }
 
-// validScheme reports whether a question's marking-scheme passages are within Assessment's limits.
+// validscheme reports whether a question's marking-scheme passages are within assessment's limits.
 func validScheme(excerpts []Excerpt) bool {
 	return len(excerpts) <= maxExcerpts && !slices.ContainsFunc(excerpts, func(e Excerpt) bool {
 		return strings.TrimSpace(e.Text) == "" || utf8.RuneCountInString(e.Text) > maxExcerptText
 	})
 }
 
-// decodeSubmitted reads a submission event.
+// decodesubmitted reads a submission event.
 func decodeSubmitted(event platform.Event) (Submitted, bool) {
 	var v Submitted
 	if json.Unmarshal(event.Data, &v) != nil || event.Resource != v.Submission {
@@ -63,7 +63,8 @@ func decodeSubmitted(event platform.Event) (Submitted, bool) {
 	return v, v.valid()
 }
 
-// score evaluates each answer against its question; a question without exactly one answer is an InvalidEvent.
+// score evaluates each answer against its question; a question without exactly one answer is an
+// invalidevent.
 func (v Submitted) score() ([]Evidence, error) {
 	evidence := make([]Evidence, 0, len(v.Questions))
 	seen := map[string]bool{}
@@ -82,12 +83,12 @@ func (v Submitted) score() ([]Evidence, error) {
 	return evidence, nil
 }
 
-// marking reports whether the submission's unmarked questions get AI suggestions: the assessment asks for them and
-// names the teacher whose allowance pays (ADR 0003).
+// marking reports whether the submission's unmarked questions get ai suggestions: the assessment asks for
+// them and names the teacher whose allowance pays (adr 0003).
 func (v Submitted) marking() bool { return v.AIMarking && v.Teacher != "" }
 
-// consume scores a submitted assessment into a draft evaluation, queueing an AI suggestion for each question that
-// needs the teacher when the assessment asks for them. A malformed submission is an InvalidEvent.
+// consume scores a submitted assessment into a draft evaluation, queueing an ai suggestion for each
+// question that needs the teacher when the assessment asks for them.
 func consume(ctx context.Context, tx pgx.Tx, event platform.Event) error {
 	v, ok := decodeSubmitted(event)
 	if !ok {

@@ -11,8 +11,8 @@ import (
 	"time"
 )
 
-// racingStore is a memoryStore where the teacher's change lands between the handler's read of the assessment and the
-// student's (or the other editor's) write: meanwhile runs first.
+// racingstore is a memorystore where the teacher's change lands between the handler's read of the
+// assessment and the student's (or the other editor's) write: meanwhile runs first.
 type racingStore struct {
 	*memoryStore
 	meanwhile func()
@@ -50,7 +50,7 @@ func changeIt(m *memoryStore, v Assessment) {
 	m.assessments[v.ID] = v
 }
 
-// pastDue moves the due date an hour back, with the given late policy, as a teacher's details change would.
+// pastdue moves the due date an hour back, with the given late policy, as a teacher's details change would.
 func pastDue(policy string) func(*memoryStore, Assessment) {
 	return func(m *memoryStore, v Assessment) {
 		due := time.Now().Add(-time.Hour)
@@ -71,7 +71,8 @@ func TestAStudentRacingTheTeachersChangeIsToldWhatHappened(t *testing.T) {
 		{"submit while it is deleted", deleteIt, http.MethodPost, "/submissions", http.StatusNotFound, "NOT_FOUND"},
 		{"save while it is deleted", deleteIt, http.MethodPut, "/saved-answers", http.StatusNotFound, "NOT_FOUND"},
 		{"submit while a question changes", changeIt, http.MethodPost, "/submissions", http.StatusConflict, "ASSESSMENT_CHANGED"},
-		// The due date and late policy as stored when the submission commits decide, and the answer says what was stored.
+		// the due date and late policy as stored when the submission commits decide, and the answer says what was
+		// stored.
 		{"submit while late work becomes refused", pastDue(lateReject), http.MethodPost, "/submissions", http.StatusConflict, "CLOSED"},
 		{"submit while the due date passes", pastDue(lateAccept), http.MethodPost, "/submissions", http.StatusCreated, `"late":true`},
 	}
@@ -129,7 +130,8 @@ func TestDetailsChangesKeepToTheirRules(t *testing.T) {
 	if got := patch(t, s, v.ID, `{"due_at":"next week"}`, http.StatusUnprocessableEntity); got.DueAt == nil || !got.DueAt.Equal(due) {
 		t.Fatalf("a malformed due date changed it: %+v", got.DueAt)
 	}
-	// Once it is past due, the title still changes, and so does the late policy, but no new past due date is set.
+	// once it is past due, the title still changes, and so does the late policy, but no new past due date is
+	// set.
 	s.clock = func() time.Time { return due.Add(time.Hour) }
 	if got := patch(t, s, v.ID, `{"title":"Halves","late_policy":"reject"}`, http.StatusOK); got.Title != "Halves" || got.LatePolicy != lateReject || !got.DueAt.Equal(due) {
 		t.Fatalf("renamed after its due date: %+v", got)
@@ -151,7 +153,7 @@ func TestADraftsDetailsChangeToo(t *testing.T) {
 	s, _ := newServer(platform.RelationTeacher, topicValid)
 	v := post(t, s, draftQuiz)
 	past := time.Now().Add(-time.Hour)
-	// A draft's due date is checked when it is published, not now.
+	// a draft's due date is checked when it is published, not now.
 	if got := patch(t, s, v.ID, `{"title":"Renamed","due_at":`+stamp(past)+`}`, http.StatusOK); got.Title != "Renamed" || got.Status != statusDraft {
 		t.Fatalf("%+v", got)
 	}
@@ -190,7 +192,7 @@ func TestUnchangedQuestionsKeepTheirIDs(t *testing.T) {
 	}
 }
 
-// The edit as the web app sends it: the stored questions with their ids, which are ignored.
+// the edit as the web app sends it: the stored questions with their ids, which are ignored.
 func TestEditingWithTheQuestionsIDsSentKeepsThem(t *testing.T) {
 	s, v := scheduled(t, "")
 	s.access = platformtest.Access(platform.RelationTeacher)

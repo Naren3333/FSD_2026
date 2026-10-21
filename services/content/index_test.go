@@ -17,9 +17,8 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
-// These tests run the indexing worker and search against real PostgreSQL with pgvector, in a throwaway schema,
-// and a fake ai-core. They need CONTENT_TEST_DATABASE_URL (see docs/development/operations.md) and are skipped
-// without it.
+// these tests run the indexing worker and search against real postgresql with pgvector, in a throwaway
+// schema, and a fake ai-core.
 
 type memoryStore struct {
 	mu      sync.Mutex
@@ -119,7 +118,7 @@ func newFixture(t *testing.T) *fixture {
 		json.NewDecoder(r.Body).Decode(&body)
 		scores := make([]float64, len(body.Passages))
 		for i := range scores {
-			scores[i] = float64(i) // reverses the RRF order
+			scores[i] = float64(i) // reverses the rrf order
 		}
 		json.NewEncoder(w).Encode(map[string]any{"scores": scores})
 	}
@@ -149,7 +148,7 @@ func (f *fixture) reply(result any) func(http.ResponseWriter, *http.Request) {
 	}
 }
 
-// upload stores a PDF document waiting for the indexer, as the upload handler does.
+// upload stores a pdf document waiting for the indexer, as the upload handler does.
 func (f *fixture) upload(docType string) string {
 	id := uuid.NewString()
 	key := f.org + "/" + id + "/1"
@@ -259,13 +258,13 @@ func TestADuplicateRunCannotOverwriteOrEmitTwice(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	// The first run outlives its lease and a second worker takes the job over.
+	// the first run outlives its lease and a second worker takes the job over.
 	f.db.Exec(ctx, "UPDATE index_jobs SET next_attempt=now()")
 	second, err := f.x.claim(ctx)
 	if err != nil || second.document != id || second.attempts != 2 {
 		t.Fatalf("takeover: %+v %v", second, err)
 	}
-	// The first run returns while the second is still working, with a different result: it lost its lease, so
+	// the first run returns while the second is still working, with a different result: it lost its lease, so
 	// nothing changes and the job stays with the second run.
 	stale := indexedResult()
 	stale.Chunks = stale.Chunks[:1]
@@ -288,7 +287,7 @@ func TestADuplicateRunCannotOverwriteOrEmitTwice(t *testing.T) {
 	if got := f.value("SELECT chunk_count||' '||(SELECT count(*) FROM document_chunks)||' '||(SELECT count(*) FROM outbox WHERE topic='content.indexed.v1') FROM documents WHERE id=$1", id); got != "2 2 1" {
 		t.Fatalf("chunk_count, chunks, events: %s", got)
 	}
-	// A failure reported by the stale run is discarded too.
+	// a failure reported by the stale run is discarded too.
 	f.ai.ingest = f.reply(map[string]any{"outcome": "failed", "failure_reason": "CORRUPT"})
 	f.x.process(ctx, first)
 	if got := f.value("SELECT status FROM documents WHERE id=$1", id); got != "indexed" {
@@ -296,7 +295,7 @@ func TestADuplicateRunCannotOverwriteOrEmitTwice(t *testing.T) {
 	}
 }
 
-// purgeClassroom applies Identity's deletion of the fixture's classroom, as the consumer does.
+// purgeclassroom applies identity's deletion of the fixture's classroom, as the consumer does.
 func (f *fixture) purgeClassroom() {
 	ctx := context.Background()
 	data, _ := json.Marshal(platform.ClassroomDeleted{Classroom: f.room, Org: f.org})
@@ -321,7 +320,8 @@ func TestAPurgeDuringIndexingLeavesNoCropsAndRefusesLateUploads(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	// The classroom is deleted while the run is with ai-core; the run then stores its crops and loses its lease.
+	// the classroom is deleted while the run is with ai-core; the run then stores its crops and loses its
+	// lease.
 	reply := f.reply(indexedResult())
 	f.ai.ingest = func(w http.ResponseWriter, r *http.Request) {
 		f.purgeClassroom()
@@ -335,7 +335,7 @@ func TestAPurgeDuringIndexingLeavesNoCropsAndRefusesLateUploads(t *testing.T) {
 			t.Errorf("%s survived the purge", key)
 		}
 	}
-	// An upload that was already under way when the purge ran is refused.
+	// an upload that was already under way when the purge ran is refused.
 	late := newDocument{Document: Document{ID: uuid.NewString(), Classroom: f.room, Title: "Late", Type: mimeText, Status: statusExtracted, Revision: 1, SHA: strings.Repeat("b", 64), DocType: docTeachingMaterial, Chunks: []Chunk{}}, Org: f.org, Owner: "teacher", Key: "late"}
 	if _, err = f.s.store.insertDocument(ctx, late); !errors.Is(err, errClassroomPurged) {
 		t.Fatalf("upload into a purged classroom: %v", err)
@@ -384,7 +384,7 @@ func TestAnUnreadablePDFFailsWithItsReasonAndReindexRecovers(t *testing.T) {
 	}
 	f.ai.ingest = f.reply(map[string]any{"outcome": "failed", "failure_reason": "ENCRYPTED", "failure_detail": "password"})
 	f.runAll()
-	// The failed reindex keeps the earlier chunks searchable.
+	// the failed reindex keeps the earlier chunks searchable.
 	if got := f.value("SELECT status||' '||failure_reason||' '||failure_detail||' '||(SELECT count(*) FROM document_chunks) FROM documents WHERE id=$1", id); got != "failed ENCRYPTED password 2" {
 		t.Fatal(got)
 	}
@@ -400,7 +400,7 @@ func TestSearchFusesRerankRelatedAndAccess(t *testing.T) {
 	f := newFixture(t)
 	notes := f.upload("teaching_material")
 	f.runAll()
-	// The rubric's passages differ from the notes': search keeps one copy of identical text (see distinct).
+	// the rubric's passages differ from the notes': search keeps one copy of identical text (see distinct).
 	rubric := indexedResult()
 	for i := range rubric.Chunks {
 		rubric.Chunks[i].Content = "Rubric. " + rubric.Chunks[i].Content

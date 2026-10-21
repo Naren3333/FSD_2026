@@ -9,9 +9,7 @@ import (
 	"unicode/utf8"
 )
 
-// Document types. Teachers upload teaching material only. Rubrics and marking schemes uploaded before they were
-// retired (docs/decisions/0009-retire-marking-scheme-uploads.md) keep their type and stay with teachers: students
-// never see them.
+// document types.
 const (
 	docTeachingMaterial = "teaching_material"
 	docRubric           = "rubric"
@@ -20,8 +18,8 @@ const (
 
 var docTypes = map[string]bool{docTeachingMaterial: true, docRubric: true, docMarkingScheme: true}
 
-// Document statuses: a text file is extracted on upload; an indexable document is indexing until ai-core's result is indexed or
-// failed.
+// document statuses: a text file is extracted on upload; an indexable document is indexing until ai-core's
+// result is indexed or failed.
 const (
 	statusExtracted = "extracted"
 	statusIndexing  = "indexing"
@@ -29,7 +27,7 @@ const (
 	statusFailed    = "failed"
 )
 
-// Media types Content accepts and serves.
+// media types content accepts and serves.
 const (
 	mimePDF      = "application/pdf"
 	mimeText     = "text/plain"
@@ -38,7 +36,7 @@ const (
 	mimeDOCX     = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
 	mimePNG      = "image/png"
 
-	// pdfMagic starts every PDF; extract needs only this much of one.
+	// pdfmagic starts every pdf; extract needs only this much of one.
 	pdfMagic = "%PDF-"
 )
 
@@ -47,11 +45,11 @@ const (
 	maxText  = 5 << 20
 	maxTitle = 160 // characters
 
-	// uploadDeadline is how long one upload may take: a 50 MiB PDF at about 1.5 Mbit/s, matching the web app.
+	// uploaddeadline is how long one upload may take: a 50 mib pdf at about 1.5 mbit/s, matching the web app.
 	uploadDeadline = 5 * time.Minute
-	// removeDeadline is how long deleting a document's objects and row may take.
+	// removedeadline is how long deleting a document's objects and row may take.
 	removeDeadline = time.Minute
-	// downloadDeadline is how long sending an original or a figure may take, on the same reckoning.
+	// downloaddeadline is how long sending an original or a figure may take, on the same reckoning.
 	downloadDeadline = uploadDeadline
 )
 
@@ -65,7 +63,7 @@ type Document struct {
 	SHA       string  `json:"sha256"`
 	DocType   string  `json:"doc_type"`
 	Chunks    []Chunk `json:"chunks,omitempty"`
-	// Set for indexable documents once indexing ends: indexed (searchable) or failed with a reason.
+	// set for indexable documents once indexing ends: indexed (searchable) or failed with a reason.
 	PageCount      *int       `json:"page_count,omitempty"`
 	ChunkCount     *int       `json:"chunk_count,omitempty"`
 	EmbeddingModel *string    `json:"embedding_model,omitempty"`
@@ -73,13 +71,13 @@ type Document struct {
 	FailureReason  *string    `json:"failure_reason,omitempty"`
 }
 
-// newDocument is an upload about to be stored: the document plus who owns it and where its original is.
+// newdocument is an upload about to be stored: the document plus who owns it and where its original is.
 type newDocument struct {
 	Document
 	Org, Owner, Key string
 }
 
-// storedDocument is a document with the object key of its original.
+// storeddocument is a document with the object key of its original.
 type storedDocument struct {
 	Document
 	Key string
@@ -94,8 +92,7 @@ type Chunk struct {
 
 var errTooLarge = fmt.Errorf("text documents must be no larger than %d MiB", maxText>>20)
 
-// extract chunks a text document. A PDF is only checked here, by its first bytes (data need hold no more than
-// pdfMagic): it is indexed asynchronously.
+// extract chunks a text document.
 func extract(data []byte, kind string) ([]Chunk, string, error) {
 	if kind == mimePDF {
 		if !strings.HasPrefix(string(data), pdfMagic) {

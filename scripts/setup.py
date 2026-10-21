@@ -1,4 +1,4 @@
-"""Generate local-only secrets and Keycloak realm. Never overwrites an existing setup."""
+"""generate local-only secrets and keycloak realm."""
 
 import json
 import secrets
@@ -6,18 +6,15 @@ from pathlib import Path
 from typing import Any
 
 ROOT = Path(__file__).resolve().parents[1]
-# One database and role per service that owns data. chatbot is question-chatbot-agent's (ADR 0002); aicore is
-# ai-core's usage ledger (ADR 0003).
+# one database and role per service that owns data. chatbot is question-chatbot-agent's (adr 0002); aicore
+# is ai-core's usage ledger (adr 0003).
 SERVICES = ["identity", "curriculum", "content", "assessment", "grading", "analytics", "chatbot", "aicore"]
-# Service accounts that call the private AI services (client-credentials grant, `ai-client` role).
-# grading-marker asks for AI marking suggestions (ADR 0004); question-generation-agent drafts questions and marking
-# guidance (ADR 0006).
+# private ai callers use service accounts with the required client role.
 AI_CLIENTS = ["content-indexer", "question-chatbot-agent", "grading-marker", "question-generation-agent"]
-# Identity's service account for removing the sign-in account of a user who deleted theirs (ADR 0011). Its only role
-# is realm-management's manage-users, so it can manage the realm's users and nothing else.
+# identity's service account for removing the sign-in account of a user who deleted theirs (adr 0011).
 ACCOUNTS_CLIENT = "identity-accounts"
 ACCOUNTS_ROLE = ("realm-management", "manage-users")
-# Local people: username, realm role, and the .env key holding their password.
+# local people: username, realm role, and the .env key holding their password.
 PEOPLE = [
     ("teacher", "teacher", "TEACHER_PASSWORD"),
     ("student", "student", "STUDENT_PASSWORD"),
@@ -25,7 +22,7 @@ PEOPLE = [
 ]
 ORG = "local-school"
 WEB_ORIGIN = "http://localhost:4200"
-# The disposable test stack's web app (scripts/stack_tests.py). Only the test stack's own realm import allows it.
+# the disposable test stack's web app (scripts/stack_tests.py).
 TEST_WEB_ORIGIN = "http://localhost:14200"
 
 
@@ -34,7 +31,7 @@ def client_secret_key(client: str) -> str:
 
 
 def password_key(service: str) -> str:
-    """The .env key holding a service's database password."""
+    """the .env key holding a service's database password."""
     return f"{service.upper()}_DB_PASSWORD"
 
 
@@ -56,7 +53,7 @@ def generate_secrets() -> dict[str, str]:
 
 
 def postgres_init(values: dict[str, str]) -> str:
-    """Each service gets its own login role and database; no one else may connect to it."""
+    """each service gets its own login role and database; no one else may connect to it."""
     sql = []
     for name in SERVICES:
         password = values[password_key(name)]
@@ -65,7 +62,7 @@ def postgres_init(values: dict[str, str]) -> str:
             f"CREATE DATABASE {name} OWNER {name};",
             f"REVOKE ALL ON DATABASE {name} FROM PUBLIC;",
         ]
-    # pgvector is not a trusted extension, so the superuser creates it for Content (its embeddings index).
+    # pgvector is not a trusted extension, so the superuser creates it for content (its embeddings index).
     sql += ["\\connect content", "CREATE EXTENSION IF NOT EXISTS vector;"]
     return "\n".join(sql)
 
@@ -99,7 +96,7 @@ AUDIENCE = {
     "protocolMapper": "oidc-audience-mapper",
     "config": {"included.custom.audience": "learning", "access.token.claim": "true"},
 }
-# People carry their organization as a user attribute.
+# people carry their organization as a user attribute.
 PERSON_MAPPERS = [
     AUDIENCE,
     {
@@ -115,8 +112,7 @@ PERSON_MAPPERS = [
         },
     },
 ]
-# A service account has no user attributes to map, so its organization is a fixed claim. One local
-# organization only: a multi-organization deployment needs a per-request delegated identity instead.
+# a service account has no user attributes to map, so its organization is a fixed claim.
 SERVICE_MAPPERS = [
     AUDIENCE,
     {
@@ -133,13 +129,13 @@ SERVICE_MAPPERS = [
 ]
 
 
-# Sign out may return to any of the client's sign-in redirect URIs ("+"); without it Keycloak can refuse Sign
-# out's post_logout_redirect_uri as invalid.
+# sign out may return to any of the client's sign-in redirect uris ("+"); without it keycloak can refuse
+# sign out's post_logout_redirect_uri as invalid.
 WEB_ATTRIBUTES = {"pkce.code.challenge.method": "S256", "post.logout.redirect.uris": "+"}
 
 
 def web_client(web_origin: str) -> dict[str, Any]:
-    """The browser app's public client, for the web app at `web_origin`."""
+    """the browser app's public client, for the web app at `web_origin`."""
     return {
         "clientId": "learning-web",
         "publicClient": True,
@@ -154,7 +150,7 @@ def web_client(web_origin: str) -> dict[str, Any]:
 
 def clients(values: dict[str, str], web_origin: str) -> list[dict[str, Any]]:
     web = web_client(web_origin)
-    # Password grant for the integration and browser tests only.
+    # password grant for the integration and browser tests only.
     e2e = {
         "clientId": "learning-e2e",
         "publicClient": True,
@@ -167,8 +163,7 @@ def clients(values: dict[str, str], web_origin: str) -> list[dict[str, Any]]:
 
 
 def accounts_client(secret: str) -> dict[str, Any]:
-    """Identity's confidential client-credentials client for Keycloak's admin API. Its tokens are for Keycloak only,
-    so it has none of the learning audience or organization mappers."""
+    """identity's confidential client-credentials client for keycloak's admin api."""
     return {
         "clientId": ACCOUNTS_CLIENT,
         "publicClient": False,
@@ -180,7 +175,7 @@ def accounts_client(secret: str) -> dict[str, Any]:
 
 
 def service_client(client: str, secret: str) -> dict[str, Any]:
-    """A confidential client-credentials client for a service account."""
+    """a confidential client-credentials client for a service account."""
     return {
         "clientId": client,
         "publicClient": False,
@@ -193,7 +188,7 @@ def service_client(client: str, secret: str) -> dict[str, Any]:
 
 
 def realm(values: dict[str, str], web_origin: str = WEB_ORIGIN) -> dict[str, Any]:
-    """The learning realm's import, for a stack whose web app is at `web_origin`."""
+    """the learning realm's import, for a stack whose web app is at `web_origin`."""
     users = [person(username, role, values[key]) for username, role, key in PEOPLE]
     users += [service_account(client) for client in AI_CLIENTS]
     owner, role = ACCOUNTS_ROLE
@@ -217,7 +212,7 @@ def realm(values: dict[str, str], web_origin: str = WEB_ORIGIN) -> dict[str, Any
 
 
 def env_file(values: dict[str, str]) -> str:
-    # Provider keys are the developer's own: left empty here, and ai-core answers 503 until they are set.
+    # provider keys are the developer's own: left empty here, and ai-core answers 503 until they are set.
     providers = "\n# AI provider keys, used only by ai-core (ADR 0002). Fill in by hand.\nOPENAI_API_KEY=\nVOYAGE_API_KEY=\n"
     lines = "\n".join(f"{k}={v}" for k, v in values.items())
     return "# Generated local development secrets. Never commit.\n" + lines + "\n" + providers

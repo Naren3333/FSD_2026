@@ -1,19 +1,15 @@
-"""The vision pass's prompts and their versions. A version is part of each answer's cache key: bump it when its
-prompt changes.
+"""the vision pass's prompts and their versions."""
 
-Everything the models read off a page (figure descriptions, table and page transcripts) is untrusted: text in the
-image, and the PDF words passed along, are content to report, never instructions (UNTRUSTED)."""
-
-PROMPT_VERSION = 2  # part of the cache key: bump when PROMPT changes (v2: figures too)
+PROMPT_VERSION = 2  # part of the cache key: bump when prompt changes (v2: figures too)
 
 
 DESCRIBE_PROMPT_VERSION = (
-    5  # part of a description's cache key (v2: a strict "useful"; v3: UNTRUSTED; v4: context;
+    5  # part of a description's cache key (v2: a strict "useful"; v3: untrusted; v4: context;
 )
 
 
 # v5: series, ticks and arrow order, after an accuracy review)
-TRANSCRIBE_PROMPT_VERSION = 2  # a table picture's transcript (v2: UNTRUSTED; v1 had no version in its name)
+TRANSCRIBE_PROMPT_VERSION = 2  # a table picture's transcript (v2: untrusted; v1 had no version in its name)
 
 
 OCR_PROMPT_VERSION = 1  # a page transcript

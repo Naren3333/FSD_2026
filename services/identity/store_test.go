@@ -12,8 +12,7 @@ import (
 	"github.com/google/uuid"
 )
 
-// These tests run the store against real PostgreSQL, in a throwaway schema with every migration applied. They need
-// IDENTITY_TEST_DATABASE_URL and are skipped without it.
+// these tests run the store against real postgresql, in a throwaway schema with every migration applied.
 
 func testStore(t *testing.T) pgStore {
 	t.Helper()
@@ -125,7 +124,8 @@ func TestListClassroomsStaysInTheCallersOrganization(t *testing.T) {
 	register(t, s, "org-a", "student-a", "student", "s")
 	mine := classroom(t, s, "org-a", "teacher-a")
 	other := classroom(t, s, "org-b", "teacher-b")
-	// An enrollment row in another organization's classroom (which enrollment never makes) is still not listed.
+	// an enrollment row in another organization's classroom (which enrollment never makes) is still not
+	// listed.
 	for _, id := range []string{mine, other} {
 		if err := s.insertEnrollment(ctx, id, "student-a"); err != nil {
 			t.Fatal(err)
@@ -137,7 +137,7 @@ func TestListClassroomsStaysInTheCallersOrganization(t *testing.T) {
 	if got, err := s.listClassrooms(ctx, "org-a", "student-a", false); err != nil || len(got) != 1 || got[0].ID != mine {
 		t.Errorf("student's classrooms = %v, %v", got, err)
 	}
-	// Owning a classroom gives nothing to a caller listing as a student.
+	// owning a classroom gives nothing to a caller listing as a student.
 	if got, err := s.listClassrooms(ctx, "org-a", "teacher-a", false); err != nil || len(got) != 0 {
 		t.Errorf("non-teacher owner's classrooms = %v, %v", got, err)
 	}
@@ -182,7 +182,8 @@ func TestADeletedClassroomIsGoneAndAnnounced(t *testing.T) {
 	}
 }
 
-// The named roster comes in pages that together hold every student, in the order of the ids other services filter by.
+// the named roster comes in pages that together hold every student, in the order of the ids other services
+// filter by.
 func TestTheRosterOfIDsHasEveryStudent(t *testing.T) {
 	ctx, s := context.Background(), testStore(t)
 	register(t, s, "org-a", "teacher-a", "teacher", "a")
@@ -239,7 +240,7 @@ func TestRostersAndRemoval(t *testing.T) {
 	if removed, err := s.removeEnrollment(ctx, id, "org-a", "student-a"); err != nil || removed {
 		t.Fatalf("remove twice = %v, %v", removed, err)
 	}
-	// Announced once, for the classroom, naming the student.
+	// announced once, for the classroom, naming the student.
 	var events int
 	var student, org string
 	if err = s.db.QueryRow(ctx, "SELECT count(*) OVER (), body->'data'->>'student_id', body->'data'->>'org_id' FROM outbox WHERE topic=$1 AND partition_key=$2", platform.TopicEnrollmentRemoved, id).Scan(&events, &student, &org); err != nil || events != 1 || student != "student-a" || org != "org-a" {
@@ -294,7 +295,7 @@ func TestADeletedAccountIsClearedAnnouncedAndNeverReturns(t *testing.T) {
 		t.Fatalf("event %+v %v", v, err)
 	}
 
-	// Once the teacher's classroom is gone, the teacher can go too, and cannot create another.
+	// once the teacher's classroom is gone, the teacher can go too, and cannot create another.
 	if err := s.deleteClassroom(ctx, id, "org-a"); err != nil {
 		t.Fatal(err)
 	}
@@ -306,7 +307,7 @@ func TestADeletedAccountIsClearedAnnouncedAndNeverReturns(t *testing.T) {
 	}
 }
 
-// fakeKeycloak records the sign-in accounts removed, failing for those in fail.
+// fakekeycloak records the sign-in accounts removed, failing for those in fail.
 type fakeKeycloak struct {
 	removed []string
 	fail    map[string]bool
@@ -331,7 +332,7 @@ func TestDeletedAccountsLoseTheirSignInOnce(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	// The oldest one failing does not hold back the next; it is put off and retried once it is due.
+	// the oldest one failing does not hold back the next; it is put off and retried once it is due.
 	keycloak := &fakeKeycloak{fail: map[string]bool{first: true}}
 	remover := signInCleanup{s.db, keycloak}
 	if n, err := remover.removePending(ctx); err == nil || n != 1 {
@@ -357,7 +358,7 @@ func TestDeletedAccountsLoseTheirSignInOnce(t *testing.T) {
 	}
 }
 
-// dueNow makes the users' put-off sign-in removals due, as if their wait had passed.
+// duenow makes the users' put-off sign-in removals due, as if their wait had passed.
 func dueNow(t *testing.T, s pgStore, ids ...string) {
 	t.Helper()
 	if _, err := s.db.Exec(context.Background(), "UPDATE users SET signin_next_attempt=now()-interval '1 second' WHERE id=ANY($1)", ids); err != nil {
@@ -365,8 +366,7 @@ func dueNow(t *testing.T, s pgStore, ids ...string) {
 	}
 }
 
-// Accounts Keycloak keeps refusing to remove never fill every batch: a full batch of them failing does not stop
-// the one deleted after them from losing its sign-in, and each failure waits longer before it is tried again.
+// back off repeatedly failing removals without starving newly deleted accounts.
 func TestFailingSignInRemovalsDoNotHoldBackTheRest(t *testing.T) {
 	ctx, s := context.Background(), testStore(t)
 	keycloak := &fakeKeycloak{fail: map[string]bool{}}
@@ -392,7 +392,7 @@ func TestFailingSignInRemovalsDoNotHoldBackTheRest(t *testing.T) {
 	if n, err := remover.removePending(ctx); err != nil || n != 1 || !slices.Equal(keycloak.removed, []string{last}) {
 		t.Fatalf("second round removed %d (%v), %v", n, keycloak.removed, err)
 	}
-	// Due again, the failing ones are tried again and put off for longer.
+	// due again, the failing ones are tried again and put off for longer.
 	dueNow(t, s, failing...)
 	if n, err := remover.removePending(ctx); err == nil || n != 0 {
 		t.Fatalf("retry round removed %d, %v", n, err)

@@ -12,9 +12,8 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
-// DB is a pool on a throwaway schema of the PostgreSQL database named by the environment variable env, with every
-// migration in fsys's migrations directory and the outbox and inbox tables applied. The schema is dropped when the
-// test ends. Without env the test is skipped: scripts/db_tests.py runs these tests against the Compose PostgreSQL.
+// db is a pool on a throwaway schema of the postgresql database named by the environment variable env, with
+// every migration in fsys's migrations directory and the outbox and inbox tables applied.
 func DB(t testing.TB, env string, fsys fs.FS) *pgxpool.Pool {
 	t.Helper()
 	url := os.Getenv(env)

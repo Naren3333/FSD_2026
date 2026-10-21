@@ -1,4 +1,4 @@
-"""Offline prompt token counting with the same committed tokenizer used by ai-core."""
+"""offline prompt token counting with the same committed tokenizer used by ai-core."""
 
 import os
 from functools import cache

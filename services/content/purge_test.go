@@ -15,13 +15,13 @@ import (
 	"github.com/google/uuid"
 )
 
-// failingFolders fails every removal.
+// failingfolders fails every removal.
 type failingFolders struct{}
 
 func (failingFolders) removeAll(context.Context, string) error { return errors.New("storage down") }
 
-// purgeWith applies Identity's deletion of the classroom in one transaction, as the consumer does, committing only
-// when the purge succeeds.
+// purgewith applies identity's deletion of the classroom in one transaction, as the consumer does,
+// committing only when the purge succeeds.
 func (f *fixture) purgeWith(classroom string) error {
 	ctx := context.Background()
 	data, _ := json.Marshal(platform.ClassroomDeleted{Classroom: classroom, Org: f.org})
@@ -36,7 +36,7 @@ func (f *fixture) purgeWith(classroom string) error {
 	return tx.Commit(ctx)
 }
 
-// objectsOf counts the stored objects of the document.
+// objectsof counts the stored objects of the document.
 func (f *fixture) objectsOf(document string) int {
 	n := 0
 	for key := range f.store.objects {
@@ -80,13 +80,13 @@ func TestAPurgeLeavesOtherClassroomsAlone(t *testing.T) {
 	if got := f.value("SELECT string_agg(classroom_id::text,',') FROM purged_classrooms"); got != deletedRoom {
 		t.Fatalf("purged: %s", got)
 	}
-	// A repeated event changes nothing.
+	// a repeated event changes nothing.
 	if err := f.purgeWith(deletedRoom); err != nil || f.objectsOf(other) != 2 {
 		t.Fatalf("repeat: %v", err)
 	}
 }
 
-// Cleanup failures do not restore access; the job is durable and can be retried.
+// cleanup failures do not restore access; the job is durable and can be retried.
 func TestAPurgeQueuesCleanupAndRetriesStorageFailure(t *testing.T) {
 	f := newFixture(t)
 	id := f.upload("teaching_material")
@@ -146,12 +146,12 @@ func TestDeletingADocumentRemovesItsChunksJobObjectsAndEmitsOnce(t *testing.T) {
 		t.Fatalf("%s deleted events", got)
 	}
 	contentDeletedMatchesItsContract(t, f.value("SELECT body::text FROM outbox WHERE topic='content.deleted.v1'"), deleted)
-	// Deleting it again finds nothing and emits nothing.
+	// deleting it again finds nothing and emits nothing.
 	err := f.s.store.deleteDocument(ctx, f.org, deleted)
 	if !errors.Is(err, platform.ErrNotFound) {
 		t.Fatalf("second delete: %v", err)
 	}
-	// Another organization's id is not found either.
+	// another organization's id is not found either.
 	if err = f.s.store.deleteDocument(ctx, "org-2", kept); !errors.Is(err, platform.ErrNotFound) {
 		t.Fatalf("other organization: %v", err)
 	}
@@ -161,7 +161,7 @@ func TestADeleteRollbackCannotRemoveObjectsOrQueueCleanup(t *testing.T) {
 	f := newFixture(t)
 	id := f.upload("teaching_material")
 	f.runAll()
-	// A failure in the deletion transaction must leave both data and objects intact.
+	// a failure in the deletion transaction must leave both data and objects intact.
 	f.exec("ALTER TABLE object_cleanup_jobs ADD CONSTRAINT reject_cleanup CHECK(false)")
 	if err := f.s.store.deleteDocument(t.Context(), f.org, id); err == nil {
 		t.Fatal("expected rollback")
@@ -179,8 +179,8 @@ func TestADeleteDuringIndexingLeavesNoCrops(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	// The teacher deletes the document while the run is with ai-core; the run then stores its crops and loses its
-	// lease.
+	// the teacher deletes the document while the run is with ai-core; the run then stores its crops and loses
+	// its lease.
 	reply := f.reply(indexedResult())
 	f.ai.ingest = func(w http.ResponseWriter, r *http.Request) {
 		if err := f.s.store.deleteDocument(ctx, f.org, id); err != nil {
@@ -199,8 +199,9 @@ func TestADeleteDuringIndexingLeavesNoCrops(t *testing.T) {
 	}
 }
 
-// contentDeletedMatchesItsContract checks the event body has exactly the fields contracts/events/content.deleted.v1
-// requires, at the top level and in its data, and names the deleted document.
+// contentdeletedmatchesitscontract checks the event body has exactly the fields
+// contracts/events/content.deleted.v1 requires, at the top level and in its data, and names the deleted
+// document.
 func contentDeletedMatchesItsContract(t *testing.T, body, document string) {
 	t.Helper()
 	raw, err := os.ReadFile("../../contracts/events/content.deleted.v1.schema.json")

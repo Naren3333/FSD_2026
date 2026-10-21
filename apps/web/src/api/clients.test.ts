@@ -7,7 +7,7 @@ import { AssessmentApi, ContentApi, CurriculumApi } from './clients';
 
 beforeAll(() => TestBed.initTestEnvironment(BrowserTestingModule, platformBrowserTesting()));
 
-/** What each client call asked the gateway for. */
+/* what each client call asked the gateway for. */
 let calls: { service: Service; path: string; options?: RequestOptions }[];
 
 beforeEach(() => {

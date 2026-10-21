@@ -14,7 +14,7 @@ var operational = struct {
 	values map[string]float64
 }{values: map[string]float64{}}
 
-// CountMetric uses fixed names supplied by code, never user/resource/query labels.
+// countmetric uses fixed names supplied by code, never user/resource/query labels.
 func CountMetric(name string, delta float64) {
 	operational.Lock()
 	operational.values[name] += delta

@@ -13,7 +13,7 @@ import (
 	"testing"
 )
 
-// searchRecorder is a store and an ai-core that record what a search asked for and find nothing.
+// searchrecorder is a store and an ai-core that record what a search asked for and find nothing.
 type searchRecorder struct {
 	store
 	mu      sync.Mutex
@@ -62,7 +62,7 @@ func searchAs(t *testing.T, relation, docTypes string, roles ...string) (*search
 }
 
 func TestAStudentsSearchNeverWidensPastTeachingMaterial(t *testing.T) {
-	// Asking only for rubrics finds nothing, without a lookup or a paid embedding.
+	// asking only for rubrics finds nothing, without a lookup or a paid embedding.
 	for _, roles := range [][]string{{"student"}, {"teacher"}} { // a teacher elsewhere, enrolled here
 		rec, w := searchAs(t, platform.RelationStudent, `["rubric","marking_scheme"]`, roles...)
 		if w.Code != http.StatusOK || !strings.Contains(w.Body.String(), `"results":[]`) || len(rec.filters) != 0 || rec.embeds != 0 {
@@ -138,7 +138,7 @@ func (documentStore) findIndexed(ctx context.Context, org, id, image string) (Do
 	return d, err
 }
 
-// figureFiles serves any object and records the keys opened.
+// figurefiles serves any object and records the keys opened.
 type figureFiles struct {
 	documentFiles
 	opened []string

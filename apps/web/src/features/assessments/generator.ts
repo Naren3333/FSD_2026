@@ -26,7 +26,7 @@ import { Section } from '../../shared/section';
 import { SectionStateComponent } from '../../shared/section-state';
 import { MAX_PROMPT, clipText, draftQuestion, excerptLabel, fromAgent, marksText } from './editor';
 
-/** The agent's limits (ADR 0006). */
+/* the agent's limits (adr 0006). */
 export const MAX_SOURCE_DOCUMENTS = 10;
 export const MAX_COUNT = 10;
 export const MAX_FOCUS = 300;
@@ -38,12 +38,12 @@ export const GENERATABLE: { value: GeneratableType; label: string }[] = [
   { value: 'free_response', label: 'Written response' },
 ];
 
-/** What questions are generated from: the classroom's indexed teaching materials. */
+/* what questions are generated from: the classroom's indexed teaching materials. */
 export function sourceDocuments(documents: readonly DocumentRecord[]): DocumentRecord[] {
   return documents.filter((d) => d.doc_type === 'teaching_material' && d.status === 'indexed');
 }
 
-/** Why the agent's checks refused drafts, in the teacher's words. */
+/* why the agent's checks refused drafts, in the teacher's words. */
 const DROPPED: Record<string, string> = {
   EVIDENCE_NOT_FOUND: 'its supporting quote was not in your materials',
   UNKNOWN_SOURCE: 'it cited a passage it was not given',
@@ -55,7 +55,7 @@ const DROPPED: Record<string, string> = {
   DUPLICATE: 'it repeated another question',
 };
 
-/** "2 drafts were left out: 1 because …; 1 because …", or '' when none were. */
+/* "2 drafts were left out: 1 because …; 1 because …", or '' when none were. */
 export function droppedSummary(dropped: Record<string, number>): string {
   const reasons = Object.entries(dropped).filter(([, n]) => n > 0);
   const total = reasons.reduce((sum, [, n]) => sum + n, 0);
@@ -64,9 +64,7 @@ export function droppedSummary(dropped: Record<string, number>): string {
   return `${total} ${total === 1 ? 'draft was' : 'drafts were'} left out: ${parts.join('; ')}.`;
 }
 
-/** Generates draft questions from the classroom's teaching materials for the teacher to review (ADR 0006). Nothing
- * is saved here: a kept draft goes into the editor like any question the teacher wrote, and is saved with the
- * assessment. */
+/* generates draft questions from the classroom's teaching materials for the teacher to review (adr 0006). */
 @Component({
   selector: 'app-question-generator',
   standalone: true,
@@ -78,14 +76,14 @@ export class QuestionGeneratorComponent implements OnChanges {
   private readonly usage = inject(AiUsage);
   readonly topics = inject(CurriculumNames).topics;
   @Input({ required: true }) classroomId = '';
-  /** The classroom's documents, loaded once by the editor. */
+  /* the classroom's documents, loaded once by the editor. */
   @Input({ required: true }) documents!: Section<DocumentRecord[]>;
-  /** The editor's question prompts, so the agent leaves out near-duplicates. */
+  /* the editor's question prompts, so the agent leaves out near-duplicates. */
   @Input() existingPrompts: string[] = [];
-  /** Whether the editor has room for another question. */
+  /* whether the editor has room for another question. */
   @Input() room = true;
   @Input() disabled = false;
-  /** A draft the teacher keeps, to add to the editor. */
+  /* a draft the teacher keeps, to add to the editor. */
   @Output() readonly keep = new EventEmitter<Omit<Question, 'id'>>();
 
   readonly types = GENERATABLE;
@@ -99,9 +97,9 @@ export class QuestionGeneratorComponent implements OnChanges {
   readonly count = new FormControl(5, { nonNullable: true });
   readonly focus = new FormControl('', { nonNullable: true });
   readonly result = new Section<GenerateResult>();
-  /** Why generating could not start, such as no document chosen. */
+  /* why generating could not start, such as no document chosen. */
   readonly note = signal('');
-  /** The drafts kept or discarded, by position, so only the rest are shown. */
+  /* the drafts kept or discarded, by position, so only the rest are shown. */
   private readonly decided = signal<ReadonlySet<number>>(new Set());
   readonly drafts = computed(() =>
     (this.result.value()?.questions ?? [])
@@ -110,7 +108,7 @@ export class QuestionGeneratorComponent implements OnChanges {
   );
   readonly dropped = computed(() => droppedSummary(this.result.value()?.dropped ?? {}));
 
-  /** Another classroom's drafts and documents never carry over. */
+  /* another classroom's drafts and documents never carry over. */
   ngOnChanges(changes: SimpleChanges): void {
     if (!changes['classroomId'] || changes['classroomId'].firstChange) return;
     this.result.clear();
@@ -154,11 +152,11 @@ export class QuestionGeneratorComponent implements OnChanges {
             .map((p) => clipText(p, MAX_PROMPT)),
         }),
       )
-      // Generating spends the teacher's daily allowance, whether or not it found anything.
+      // generation can spend allowance even when it returns no questions.
       .then(() => this.usage.refresh());
   }
 
-  /** Why the request cannot be sent, or '' when it can. */
+  /* why the request cannot be sent, or '' when it can. */
   private problem(documentIds: string[], count: number): string {
     if (!documentIds.length) return 'Choose at least one teaching material.';
     if (documentIds.length > MAX_SOURCE_DOCUMENTS)
@@ -182,8 +180,7 @@ export class QuestionGeneratorComponent implements OnChanges {
     this.decide(position);
   }
 
-  /** Hides the draft and moves focus to the next one (its Add button, or Discard when the assessment is full), or
-   * back to Generate, so the keyboard is never lost. */
+  /* hides the draft and moves focus to the next one (its add button, or discard when the assessment is full), or back to generate, so the keyboard is never lost. */
   private decide(position: number): void {
     this.decided.update((done) => new Set([...done, position]));
     const next = this.drafts().find((d) => d.position > position) ?? this.drafts()[0];
@@ -197,7 +194,7 @@ export class QuestionGeneratorComponent implements OnChanges {
     return GENERATABLE.find((t) => t.value === type)?.label ?? type;
   }
 
-  /** Where a passage is from: its document and page. */
+  /* where a passage is from: its document and page. */
   source(excerpt: AgentExcerpt): string {
     return excerptLabel(fromAgent(excerpt), this.documents.value());
   }

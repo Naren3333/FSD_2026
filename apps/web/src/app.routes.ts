@@ -2,11 +2,11 @@ import { Type, inject } from '@angular/core';
 import { CanActivateFn, CanMatchFn, ResolveFn, Router, Routes } from '@angular/router';
 import { Session } from './core/session';
 
-/** A workspace section: its route, its navigation label, and the component loaded the first time it opens. */
+/* a workspace section: its route, its navigation label, and the component loaded the first time it opens. */
 export interface WorkspaceSection {
   path: string;
   label: string;
-  /** The label students see, when it differs. */
+  /* the label students see, when it differs. */
   studentLabel?: string;
   teacherOnly?: boolean;
   studentOnly?: boolean;
@@ -78,22 +78,22 @@ export const SECTIONS: WorkspaceSection[] = [
   },
 ];
 
-/** The section label for the signed-in user's role. */
+/* the section label for the signed-in user's role. */
 export function sectionLabel(section: WorkspaceSection, session: Session): string {
   return session.isStudent() && section.studentLabel ? section.studentLabel : section.label;
 }
 
-/** Where each role starts: teachers on their class dashboard, students on their Home. */
+/* where each role starts: teachers on their class dashboard, students on their home. */
 function landing(session: Session): string {
   return session.isStudent() ? '/home' : '/dashboard';
 }
 
-/** Signed in, but the profile (and so the role) did not load: nothing opens until the shell's Try again works. */
+/* signed in, but the profile (and so the role) did not load: nothing opens until the shell's try again works. */
 function profileMissing(session: Session): boolean {
   return session.signedIn && !session.profile();
 }
 
-/** Sections for one role send the other role to its own landing page. Signed out, the shell shows sign-in. */
+/* sections for one role send the other role to its own landing page. */
 function onlyFor(role: 'teacher' | 'student'): CanMatchFn {
   return async () => {
     const session = inject(Session);

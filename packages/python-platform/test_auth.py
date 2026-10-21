@@ -20,7 +20,7 @@ from learning_transport import auth
 
 def test_real_jwt_validation(monkeypatch: Any) -> None:
     key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
-    # Only remote key discovery is replaced; the actual JWT verifier is exercised.
+    # only remote key discovery is replaced; the actual jwt verifier is exercised.
     monkeypatch.setattr(
         auth,
         "keyset",
@@ -65,7 +65,7 @@ def jwks(*keys: tuple[str, Any]) -> dict[str, Any]:
 
 
 def token_for(kid: str) -> str:
-    """A token whose header names kid; key lookup reads only the header."""
+    """a token whose header names kid; key lookup reads only the header."""
     return jwt.encode({"sub": "s"}, "secret", algorithm="HS256", headers={"kid": kid})
 
 
@@ -175,7 +175,7 @@ def test_roles_are_read_defensively(claims: dict[str, Any], roles: set[str]) -> 
 
 def test_tokens_not_signed_with_the_realms_rsa_key_are_refused(monkeypatch: Any) -> None:
     key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
-    # The real key set, served locally.
+    # the real key set, served locally.
     keys = auth.KeySet("https://identity.example.test/certs", fetch=lambda: jwks(("realm", key.public_key())))
     monkeypatch.setattr(auth, "keyset", lambda: keys)
     monkeypatch.setenv("OIDC_ISSUER", "https://identity.example.test")
@@ -197,7 +197,7 @@ def test_tokens_not_signed_with_the_realms_rsa_key_are_refused(monkeypatch: Any)
         return base64.urlsafe_b64encode(json.dumps(value).encode()).rstrip(b"=")
 
     def token(alg: str, signing_key: bytes) -> str:
-        """A token with header `alg`, signed with HMAC-SHA256 under signing_key when one is given."""
+        """a token with header `alg`, signed with hmac-sha256 under signing_key when one is given."""
         body = segment({"alg": alg, "kid": "realm", "typ": "JWT"}) + b"." + segment(claims)
         mac = hmac.new(signing_key, body, hashlib.sha256).digest() if signing_key else b""
         return (body + b"." + base64.urlsafe_b64encode(mac).rstrip(b"=")).decode()

@@ -17,8 +17,8 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
-// App wires one service together: its database, routes, token verification, readiness checks and the background
-// workers it runs. Services build their handlers on the narrower pieces (the pool, ClassroomAccess), not on App.
+// app wires one service together: its database, routes, token verification, readiness checks and the
+// background workers it runs.
 type App struct {
 	Name         string
 	DB           *pgxpool.Pool
@@ -30,11 +30,11 @@ type App struct {
 	slow         map[string]time.Duration
 }
 
-// requestTimeout bounds every request except the routes given a longer deadline with Slow.
+// requesttimeout bounds every request except the routes given a longer deadline with slow.
 const requestTimeout = 15 * time.Second
 
-// New opens DATABASE_URL with the service's migrations (see OpenDB), sets up token verification from the OIDC_*
-// settings and registers the health routes.
+// new opens database_url with the service's migrations (see opendb), sets up token verification from the
+// oidc_* settings and registers the health routes.
 func New(name string, migrations fs.FS, bootstrap string) (*App, error) {
 	slog.SetDefault(slog.New(slog.NewJSONHandler(os.Stdout, nil)).With("service", name))
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
@@ -69,16 +69,14 @@ func (a *App) ready(w http.ResponseWriter, r *http.Request) {
 	JSON(w, http.StatusOK, map[string]string{"status": "ready"})
 }
 
-// Identity returns ClassroomAccess backed by the Identity service at IDENTITY_URL.
+// identity returns classroomaccess backed by the identity service at identity_url.
 func (a *App) Identity() *Identity { return NewIdentity(Required("IDENTITY_URL"), a.Client) }
 
-// Slow gives one route, "METHOD /path" matched exactly, a longer deadline than requestTimeout: both the request
-// context and the connection's read and write deadlines, so a large upload over a slow link isn't cut off by the
-// server's ReadTimeout.
+// extend request and connection deadlines for one exact route.
 func (a *App) Slow(pattern string, deadline time.Duration) { a.slow[pattern] = deadline }
 
-// Handler wraps the routes with request logging, correlation ids and a deadline; every route except /health/
-// also needs a verified bearer token.
+// handler wraps the routes with request logging, correlation ids and a deadline; every route except
+// /health/ also needs a verified bearer token.
 func (a *App) Handler() http.Handler {
 	authenticated := a.auth.Wrap(a.Mux)
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -108,7 +106,7 @@ func (a *App) Handler() http.Handler {
 		timeout := requestTimeout
 		if deadline, ok := a.slow[r.Method+" "+r.URL.Path]; ok {
 			timeout = deadline
-			// Not every ResponseWriter supports deadlines (test recorders don't); then only the context is extended.
+			// not every responsewriter supports deadlines (test recorders don't); then only the context is extended.
 			controller := http.NewResponseController(w)
 			_ = controller.SetReadDeadline(start.Add(deadline))
 			_ = controller.SetWriteDeadline(start.Add(deadline))
@@ -124,8 +122,7 @@ func (a *App) Handler() http.Handler {
 	})
 }
 
-// Run serves HTTP and runs the workers until SIGINT or SIGTERM, then shuts down gracefully: the server stops
-// taking requests, the workers' context is cancelled, and the pool closes once they have returned.
+// serve requests and workers, then drain them before closing the pool.
 func (a *App) Run(workers ...func(context.Context)) error {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer a.DB.Close()
@@ -161,7 +158,8 @@ func (w *responseRecorder) WriteHeader(status int) {
 	w.ResponseWriter.WriteHeader(status)
 }
 
-// Unwrap lets http.NewResponseController reach the connection, so a handler can extend its own write deadline.
+// unwrap lets http.newresponsecontroller reach the connection, so a handler can extend its own write
+// deadline.
 func (w *responseRecorder) Unwrap() http.ResponseWriter { return w.ResponseWriter }
 
 func (w *responseRecorder) Write(data []byte) (int, error) {
@@ -171,9 +169,8 @@ func (w *responseRecorder) Write(data []byte) (int, error) {
 	return w.ResponseWriter.Write(data)
 }
 
-// Serve builds the App, lets wire register the service's routes and return its background workers, and runs it
-// until shutdown. Any failure is logged and exits the process with status 1. Started with HealthcheckFlag, the
-// binary only checks the running service's readiness and exits (Healthcheck).
+// serve builds the app, lets wire register the service's routes and return its background workers, and runs
+// it until shutdown.
 func Serve(name string, migrations fs.FS, bootstrap string, wire func(a *App) ([]func(context.Context), error)) {
 	Healthcheck()
 	a, err := New(name, migrations, bootstrap)

@@ -1,5 +1,4 @@
-"""The question chatbot (ADR 0002 stage 4): students and teachers chat about a classroom's materials. Ported from
-fsd_test's assistant. Reached through Kong at /api/chatbot with the user's own token."""
+"""the question chatbot (adr 0002 stage 4): students and teachers chat about a classroom's materials."""
 
 import asyncio
 import threading
@@ -44,7 +43,7 @@ async def lifespan(app: Any) -> AsyncIterator[None]:
     require_env(*OIDC_SETTINGS, "KAFKA_BROKERS")
     settings = config.load()
     store = await PostgresStore.open(settings.database_url)
-    # Deleted classrooms' threads are purged by a consumer thread, with its own small synchronous pool.
+    # deleted classrooms' threads are purged by a consumer thread, with its own small synchronous pool.
     purge_pool = open_pool(settings.database_url, MIGRATIONS)
     stop, connected = threading.Event(), threading.Event()
     consumer = threading.Thread(
@@ -67,7 +66,7 @@ async def lifespan(app: Any) -> AsyncIterator[None]:
 app = application("question-chatbot-agent", lifespan=lifespan)
 
 
-# Students and teachers chat; service accounts may not.
+# students and teachers chat; service accounts may not.
 PERSON = requires(TEACHER, STUDENT)
 
 
@@ -77,7 +76,7 @@ def store_of(request: Request) -> Store:
 
 
 async def owned_thread(store: Store, claims: Claims, thread_id: UUID) -> dict[str, Any]:
-    """The thread if the caller owns it; 404 otherwise, so ids don't leak."""
+    """the thread if the caller owns it; 404 otherwise, so ids don't leak."""
     thread = await store.thread(claims.org, claims.subject, str(thread_id))
     if thread is None:
         raise failure(404, "NOT_FOUND", "Thread not found.")
@@ -85,15 +84,13 @@ async def owned_thread(store: Store, claims: Claims, thread_id: UUID) -> dict[st
 
 
 async def require_access(request: Request, classroom_id: str) -> str:
-    """The caller's relation to the classroom (teacher or student), or 403 unless Identity says the caller may use
-    the classroom now. Enrollment can end, so this is asked on every read and turn, not only when a thread is
-    created. The relation, not the token's role, decides the prompt and the allowance."""
+    """the caller's relation to the classroom (teacher or student), or 403 unless identity says the caller may use the classroom now."""
     services: Services = request.app.state.services
     return await require_relation(services.identity, request, classroom_id)
 
 
 async def accessible_thread(request: Request, claims: Claims, thread_id: UUID) -> tuple[dict[str, Any], str]:
-    """The caller's thread, if they still have access to its classroom, and their relation to that classroom."""
+    """the caller's thread, if they still have access to its classroom, and their relation to that classroom."""
     thread = await owned_thread(store_of(request), claims, thread_id)
     relation = await require_access(request, str(thread["classroom_id"]))
     return thread, relation
@@ -114,7 +111,7 @@ async def create_thread(body: NewThread, request: Request, claims: Claims = Depe
     thread = await store_of(request).create_thread(
         claims.org, claims.subject, relation, str(body.classroom_id)
     )
-    if thread is None:  # the classroom was deleted (and purged) after Identity allowed it
+    if thread is None:  # the classroom was deleted (and purged) after identity allowed it
         raise failure(403, "FORBIDDEN", "You do not have access to this classroom.")
     return thread
 
@@ -129,8 +126,8 @@ async def list_threads(
         claims.org, claims.subject, None if classroom_id is None else str(classroom_id)
     )
     if classroom_id is None:
-        # Enrollment can end, so even the unfiltered list shows only threads (and their titles) in classrooms
-        # Identity says the caller may still use.
+        # enrollment can end, so even the unfiltered list shows only threads (and their titles) in
+        # classrooms identity says the caller may still use.
         rooms = sorted({str(r["classroom_id"]) for r in rows})
         allowed = await asyncio.gather(*(may_use(request, room) for room in rooms))
         kept = {room for room, ok in zip(rooms, allowed, strict=True) if ok}
@@ -139,7 +136,7 @@ async def list_threads(
 
 
 async def may_use(request: Request, classroom_id: str) -> bool:
-    """Whether the caller may use the classroom now; Identity being unavailable is still a 503."""
+    """whether the caller may use the classroom now; identity being unavailable is still a 503."""
     try:
         await require_access(request, classroom_id)
     except HTTPException as error:
@@ -156,7 +153,7 @@ async def list_messages(
     limit: int = Query(default=MAX_MESSAGES, ge=1, le=MAX_MESSAGES),
     claims: Claims = Depends(PERSON),
 ) -> Any:
-    """The thread's latest `limit` messages, oldest first."""
+    """the thread's latest `limit` messages, oldest first."""
     await accessible_thread(request, claims, thread_id)
     return {"messages": await store_of(request).messages(str(thread_id), limit)}
 
@@ -171,10 +168,10 @@ async def post_message(
 ) -> SSEResponse:
     store = store_of(request)
     thread, relation = await accessible_thread(request, claims, thread_id)
-    # The relation now decides the prompt, so a thread from before the caller's relation changed follows it.
+    # the relation now decides the prompt, so a thread from before the caller's relation changed follows it.
     thread = {**thread, "role": relation}
-    # One answer at a time per user: each holds several of their ai-core slots (AI_USER_CONCURRENCY) while it
-    # searches, so questions from several tabs at once would fail as busy midway instead.
+    # one answer at a time per user: each holds several of their ai-core slots (ai_user_concurrency) while
+    # it searches, so questions from several tabs at once would fail as busy midway instead.
     if not await store.claim_turn(str(thread_id)):
         raise failure(
             409,
@@ -199,7 +196,7 @@ async def post_message(
 
 @app.get("/v1/usage", response_model=Usage, responses=ERRORS)
 async def usage(request: Request, claims: Claims = Depends(PERSON)) -> Any:
-    """The caller's AI spend today against their daily allowance, from ai-core's ledger."""
+    """the caller's ai spend today against their daily allowance, from ai-core's ledger."""
     services: Services = request.app.state.services
     try:
         return await services.usage(billed(claims), request.state.correlation_id)

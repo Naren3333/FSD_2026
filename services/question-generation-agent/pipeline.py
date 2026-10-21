@@ -1,6 +1,4 @@
-"""Question generation and marking guidance (ADR 0006): a fixed pipeline, not an agent. Search the teacher's chosen
-documents with the teacher's own token, make one structured ai-core call billed to the teacher, check the reply.
-The model gets no tools, and nothing it writes is saved: the teacher reviews it in the editor."""
+"""question generation and marking guidance (adr 0006): a fixed pipeline, not an agent."""
 
 import logging
 from datetime import datetime
@@ -17,7 +15,7 @@ from prompts import Passage
 
 log = logging.getLogger("question-generation-agent.pipeline")
 
-MAX_QUERY = 1000  # Content's longest search query
+MAX_QUERY = 1000  # content's longest search query
 GENERATION_PASSAGES = 12
 GUIDANCE_PASSAGES = 6
 GENERATION_TOKENS = 6000
@@ -25,7 +23,7 @@ GUIDANCE_TOKENS = 2000
 NOT_TEACHER = ("FORBIDDEN", "Only the classroom's teacher can generate questions or marking guidance.")
 
 
-# Errors whose code alone says what the teacher should hear.
+# errors whose code alone says what the teacher should hear.
 BY_CODE = {
     "AI_BUSY": (429, "You have too many AI requests running at once. Try again in a moment."),
     "AI_PROVIDER_NOT_CONFIGURED": (503, "AI is not set up on this server."),
@@ -35,7 +33,7 @@ BY_CODE = {
 
 
 def refused(e: UpstreamError) -> HTTPException:
-    """A failed upstream call as an error the editor can act on, with a safe message."""
+    """a failed upstream call as an error the editor can act on, with a safe message."""
     if e.code == "AI_SPEND_LIMIT":
         when = _local_time(e.resets_at)
         message = "You've used today's AI allowance." + (f" It resets at {when}." if when else "")
@@ -54,8 +52,7 @@ def refused(e: UpstreamError) -> HTTPException:
 
 
 def _local_time(iso: str | None) -> str:
-    """ai-core's reset time in its own zone (SPEND_TIMEZONE), with the zone's offset, e.g. "00:00 on 19 Oct
-    (UTC+08:00)": the teacher's browser may be elsewhere."""
+    """ai-core's reset time in its own zone (spend_timezone), with the zone's offset, e.g. \"00:00 on 19 oct (utc+08:00)\": the teacher's browser may be elsewhere."""
     try:
         at = datetime.fromisoformat(iso) if iso else None
     except ValueError:
@@ -67,8 +64,7 @@ def _local_time(iso: str | None) -> str:
 
 
 def passages_of(results: list[dict[str, Any]], floor: float) -> list[Passage]:
-    """The reranked search results as numbered passages; none when the best is below the relevance floor, since
-    then the documents say too little about the request."""
+    """the reranked search results as numbered passages; none when the best is below the relevance floor, since then the documents say too little about the request."""
     if not results or float(results[0].get("score", 0)) < floor:
         return []
     return [
@@ -173,8 +169,8 @@ class Pipeline:
             self.authorization, classroom, query, documents, top_k, self.correlation
         )
         if fallback and results:
-            # Without the reranker the results are in RRF order and the floor can't be applied, so the drafts would
-            # rest on passages nobody scored. Refuse before the paid call, as the chatbot does; the teacher can retry.
+            # without the reranker the results are in rrf order and the floor can't be applied, so the
+            # drafts would rest on passages nobody scored.
             raise UpstreamError("content", 503, "RERANK_UNAVAILABLE")
         passages = passages_of(results, self.floor)
         if not passages:

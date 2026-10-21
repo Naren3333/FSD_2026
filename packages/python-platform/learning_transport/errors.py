@@ -1,4 +1,4 @@
-"""Contracts and error envelopes shared by every service: errors are {"error": {"code", "message"}}."""
+"""contracts and error envelopes shared by every service: errors are {\"error\": {\"code\", \"message\"}}."""
 
 import httpx
 from fastapi import HTTPException
@@ -7,7 +7,7 @@ from pydantic import BaseModel, ConfigDict
 
 
 class Contract(BaseModel):
-    """A request or response body that rejects fields it does not declare."""
+    """a request or response body that rejects fields it does not declare."""
 
     model_config = ConfigDict(extra="forbid")
 
@@ -23,12 +23,12 @@ class ErrorResponse(Contract):
 
 
 def failure(status: int, code: str, message: str) -> HTTPException:
-    """An HTTP error the application's handler renders as the standard envelope."""
+    """an http error the application's handler renders as the standard envelope."""
     return HTTPException(status, {"code": code, "message": message})
 
 
 def unavailable(capability: str) -> JSONResponse:
-    """501 for an AI capability whose implementation has not been authorized yet."""
+    """501 for an ai capability whose implementation has not been authorized yet."""
     return JSONResponse(
         status_code=501,
         content={
@@ -42,8 +42,7 @@ def unavailable(capability: str) -> JSONResponse:
 
 
 class UpstreamError(Exception):
-    """Another service answered with an error or could not be reached (status 0). `code` is its error code, if
-    it sent one; `resets_at` comes with AI_SPEND_LIMIT: the user's daily AI allowance is used up until then."""
+    """carry upstream error details, including allowance reset times; zero status means unreachable."""
 
     def __init__(self, service: str, status: int, code: str = "", resets_at: str | None = None) -> None:
         super().__init__(f"{service} {status} {code}".strip())
@@ -51,8 +50,7 @@ class UpstreamError(Exception):
 
 
 def upstream_error(service: str, resp: httpx.Response) -> UpstreamError:
-    """A refused call as an UpstreamError: the service's error code and, for AI_SPEND_LIMIT, when the allowance
-    resets. A body that is not the standard envelope leaves both empty."""
+    """a refused call as an upstreamerror: the service's error code and, for ai_spend_limit, when the allowance resets."""
     try:
         error = resp.json()["error"]
         code, resets_at = str(error.get("code") or ""), error.get("resets_at")

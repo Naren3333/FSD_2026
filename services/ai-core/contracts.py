@@ -6,7 +6,7 @@ from pydantic import Field, model_validator
 
 from spend import Billed
 
-MAX_SCHEMA_CHARS = 20000  # a response_schema, as JSON: the callers' schemas are a few hundred characters
+MAX_SCHEMA_CHARS = 20000  # a response_schema, as json: the callers' schemas are a few hundred characters
 
 
 class Message(Contract):
@@ -15,8 +15,7 @@ class Message(Contract):
 
 
 class RequestContract(Contract):
-    """`embed` takes `input`. `generate` takes `input` (one user message) or `messages`; with `response_schema`
-    the reply is JSON in that strict schema, and with `stream` it arrives as server-sent events."""
+    """`embed` takes `input`. `generate` takes `input` (one user message) or `messages`; with `response_schema` the reply is json in that strict schema, and with `stream` it arrives as server-sent events."""
 
     operation: Literal["generate", "embed"]
     input: str | None = Field(default=None, min_length=1, max_length=20000)
@@ -26,7 +25,7 @@ class RequestContract(Contract):
     schema_name: str | None = Field(default=None, pattern=r"^[A-Za-z0-9_.-]{1,64}$")
     stream: bool = False
     model_profile: Literal["default"] = "default"
-    billed_to: Billed  # whose daily AI allowance pays for the call (ADR 0003)
+    billed_to: Billed  # whose daily ai allowance pays for the call (adr 0003)
 
     @model_validator(mode="after")
     def one_input(self) -> Self:
@@ -56,8 +55,7 @@ class ResponseContract(Contract):
 
 
 class Passage(Contract):
-    """A search hit as Content stores it. ai-core builds the text the reranker scores from these parts
-    (ingest.passage_text, the same rule that built the embedded text), so the rule lives in one place."""
+    """a search hit as content stores it. ai-core builds the text the reranker scores from these parts (ingest.passage_text, the same rule that built the embedded text), so the rule lives in one place."""
 
     title: str = Field(min_length=1, max_length=200)
     section_path: str | None = Field(default=None, max_length=20000)
@@ -102,8 +100,7 @@ class IngestFigure(Contract):
 
 
 class IngestResponse(Contract):
-    """`failed` is the document's own problem (ENCRYPTED, CORRUPT, NO_TEXT_LAYER, TOO_LARGE) and retrying will not
-    help. Provider outages are errors instead, for the caller to retry."""
+    """`failed` is the document's own problem (encrypted, corrupt, no_text_layer, too_large) and retrying will not help."""
 
     outcome: Literal["indexed", "failed"]
     failure_reason: Literal["NO_TEXT_LAYER", "ENCRYPTED", "CORRUPT", "TOO_LARGE"] | None = None

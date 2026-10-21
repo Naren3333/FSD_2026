@@ -14,7 +14,7 @@ import (
 
 const room = "6f1c5d2e-8a4b-4c3d-9e2f-1a2b3c4d5e6f"
 
-// memoryStore is an in-memory store: one organization's users, classrooms and enrollments.
+// memorystore is an in-memory store: one organization's users, classrooms and enrollments.
 type memoryStore struct {
 	roles      map[string]string   // user -> role
 	usernames  map[string]string   // user -> username
@@ -159,15 +159,16 @@ func call(t *testing.T, store store, method, path, body, subject string, roles .
 	return platformtest.Serve(server{store: store}.routes, method, path, body, subject, roles...)
 }
 
-// step is one request of a scenario, by subject with the space-separated roles, and the answer it expects: its
-// status and, when want is set, a part of the body.
+// step is one request of a scenario, by subject with the space-separated roles, and the answer it expects:
+// its status and, when want is set, a part of the body.
 type step struct {
 	name, method, path, body, subject, roles string
 	status                                   int
 	want                                     string
 }
 
-// run sends the steps in order to the same store and stops at the first answer that is not the one expected.
+// run sends the steps in order to the same store and stops at the first answer that is not the one
+// expected.
 func run(t *testing.T, store store, steps ...step) {
 	t.Helper()
 	for _, s := range steps {
@@ -227,7 +228,7 @@ func TestCreateValidatesTheName(t *testing.T) {
 		step{"blank name", http.MethodPost, "/v1/classrooms", named("  "), "teacher-1", "teacher", http.StatusUnprocessableEntity, ""},
 		step{"student created a classroom", http.MethodPost, "/v1/classrooms", named("Year 5"), "student-1", "student", http.StatusForbidden, ""},
 		step{"create", http.MethodPost, "/v1/classrooms", named(" Year 5 "), "teacher-1", "teacher", http.StatusCreated, `"name":"Year 5"`},
-		// The limit counts characters, not bytes.
+		// the limit counts characters, not bytes.
 		step{"the most characters", http.MethodPost, "/v1/classrooms", named(strings.Repeat("é", maxName)), "teacher-1", "teacher", http.StatusCreated, ""},
 		step{"one character more", http.MethodPost, "/v1/classrooms", named(strings.Repeat("é", maxName+1)), "teacher-1", "teacher", http.StatusUnprocessableEntity, ""},
 	)
@@ -271,7 +272,7 @@ func TestRegisterRecordsTheNamesFromTheToken(t *testing.T) {
 	c := platformtest.Claims("s9", "student")
 	c.Username, c.Name = " lin ", "  "
 	w := platformtest.ServeRequest(server{store: store}.routes, platformtest.Request(c, http.MethodPost, "/v1/me", ""))
-	// Without a full name, the username stands in for it.
+	// without a full name, the username stands in for it.
 	if w.Code != http.StatusOK || store.registered[0] != "s9:student:lin:lin" || !strings.Contains(w.Body.String(), `"username":"lin"`) {
 		t.Fatalf("%d %v", w.Code, store.registered)
 	}
@@ -329,7 +330,7 @@ func TestOnlyTheOwnerDeletesAClassroom(t *testing.T) {
 		step{"a student deleted the classroom", http.MethodDelete, path, "", "student-1", "student", http.StatusForbidden, ""},
 		step{"another teacher deleted the classroom", http.MethodDelete, path, "", "teacher-2", "teacher", http.StatusForbidden, ""},
 		step{"delete", http.MethodDelete, path, "", "teacher-1", "teacher", http.StatusOK, ""},
-		// Once deleted, nobody has access, including its teacher and its students.
+		// once deleted, nobody has access, including its teacher and its students.
 		step{"its teacher still has access", http.MethodGet, path + "/access", "", "teacher-1", "teacher", http.StatusForbidden, ""},
 		step{"its student still has access", http.MethodGet, path + "/access", "", "student-1", "student", http.StatusForbidden, ""},
 	)

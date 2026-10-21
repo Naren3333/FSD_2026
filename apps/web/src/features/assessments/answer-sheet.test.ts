@@ -41,7 +41,7 @@ const submitted: AssessmentSummary = {
   points: 1,
 };
 
-/** A student's answer sheet, with its template, for an assessment they have submitted. */
+/* a student's answer sheet, with its template, for an assessment they have submitted. */
 function render() {
   TestBed.resetTestingModule();
   TestBed.configureTestingModule({

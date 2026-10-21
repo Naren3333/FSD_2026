@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { LOCAL_CONFIG, loadConfig } from './config';
 
-/** A fetch that answers every request with one response, or fails like an unreachable server. */
+/* a fetch that answers every request with one response, or fails like an unreachable server. */
 function answering(response: Response | Error): typeof fetch {
   return () => (response instanceof Error ? Promise.reject(response) : Promise.resolve(response));
 }

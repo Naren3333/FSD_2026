@@ -16,7 +16,7 @@ import (
 	"github.com/google/uuid"
 )
 
-// submittedSchema is the published contract of the submission event.
+// submittedschema is the published contract of the submission event.
 func submittedSchema(t *testing.T) map[string]any {
 	t.Helper()
 	return eventSchema(t, topicSubmitted)
@@ -35,7 +35,7 @@ func eventSchema(t *testing.T, topic string) map[string]any {
 	return schema
 }
 
-// conform reports where value breaks schema, for the JSON Schema keywords the event contracts use.
+// conform reports where value breaks schema, for the json schema keywords the event contracts use.
 func conform(at string, schema map[string]any, value any) []string {
 	var problems []string
 	fail := func(format string, args ...any) { problems = append(problems, at+": "+fmt.Sprintf(format, args...)) }
@@ -131,7 +131,7 @@ func jsonType(value any, kind string) bool {
 	return false
 }
 
-// asJSON is value as decoded JSON, as a consumer reads it.
+// asjson is value as decoded json, as a consumer reads it.
 func asJSON(t *testing.T, value any) any {
 	t.Helper()
 	data, err := json.Marshal(value)
@@ -167,7 +167,7 @@ func TestTheSubmittedEventMatchesItsContract(t *testing.T) {
 			t.Errorf("%v has no marking scheme", q["type"])
 		}
 	}
-	// Where a generated question came from stays with the teacher (ADR 0006).
+	// where a generated question came from stays with the teacher (adr 0006).
 	if body, _ := json.Marshal(event); strings.Contains(string(body), "sources") || strings.Contains(string(body), "generated") {
 		t.Errorf("the event carries provenance: %s", body)
 	}
@@ -176,7 +176,7 @@ func TestTheSubmittedEventMatchesItsContract(t *testing.T) {
 	}
 }
 
-// The checker itself must notice what the contract forbids, or the test above proves nothing.
+// the checker itself must notice what the contract forbids, or the test above proves nothing.
 func TestTheContractCheckFindsProblems(t *testing.T) {
 	schema := submittedSchema(t)["properties"].(map[string]any)["data"].(map[string]any)
 	v := fixture()

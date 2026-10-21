@@ -115,7 +115,7 @@ describe('assessment conversion', () => {
     q.patchValue({ prompt: 'Gas?', topic_id: 's1', type: 'short_answer', accepted: 'oxygen' });
     q.controls.marking_scheme.setValue([passage]);
     expect(toAssessment(form, 'c1', 'draft').questions[0].marking_scheme).toEqual([passage]);
-    // A numerical question keeps no marking points, even ones added while it was a short answer.
+    // a numerical question keeps no marking points, even ones added while it was a short answer.
     q.patchValue({ type: 'numerical', answer: '1' });
     expect(q.controls.marking_scheme.enabled).toBe(false);
     expect(toAssessment(form, 'c1', 'draft').questions[0]).not.toHaveProperty('marking_scheme');

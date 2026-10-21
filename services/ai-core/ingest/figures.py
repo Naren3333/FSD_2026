@@ -1,14 +1,4 @@
-"""Figures. Blocking: runs while parsing.
-
-The vision pass (ingest.vision) finds each page's figures and describes the informative ones from their
-crop, with the PDF words inside them as grounding. Here they become `Figure`s: each is indexed as a chunk of its
-own (kind "figure", source "vision"), and its crop is stored under a content-hash name so a reindex never
-overwrites an image the live chunks still point at.
-
-The words inside a figure (diagram labels) leave the prose, where they made stray headings and noise; they stay
-searchable in the figure's embedded text. A figure covering most of the page (a whole slide drawn as a picture)
-keeps its words in the prose too: there, the "figure" is the page.
-"""
+"""attach native labels and crops to informative figure descriptions."""
 
 import hashlib
 from dataclasses import dataclass, field
@@ -29,13 +19,13 @@ class Figure:
     description: str
     caption: str | None = None
     values: tuple[str, ...] = ()  # key values read off a chart, each marked approximate
-    words: str = ""  # the PDF's own words inside it (labels), verbatim
+    words: str = ""  # the pdf's own words inside it (labels), verbatim
     png: bytes = field(default=b"", repr=False)
     strip: bool = True  # its words leave the prose
 
     @property
     def image(self) -> str:
-        """The crop's file name: its content hash, so the same crop always has the same name."""
+        """the crop's file name: its content hash, so the same crop always has the same name."""
         return image_name(self.png)
 
 
@@ -44,7 +34,7 @@ def image_name(png: bytes) -> str:
 
 
 def page_figures(page: pymupdf.Page, seen: list[SeenFigure], tables: list[Table]) -> list[Figure]:
-    """The page's described figures, top to bottom; one that is a table found on the page is dropped."""
+    """the page's described figures, top to bottom; one that is a table found on the page is dropped."""
     page_area = area(tuple(page.rect))
     out = [
         Figure(

@@ -1,4 +1,4 @@
-"""A request's shared reservation, grown before each paid provider attempt and settled by billing."""
+"""a request's shared reservation, grown before each paid provider attempt and settled by billing."""
 
 import asyncio
 import json
@@ -29,7 +29,7 @@ class Budget:
         await self.ledger.reserve(self.id, self.billed, 0.0, get_settings().user_concurrency)
 
     async def close(self) -> None:
-        # A failed ledger write leaves the reservation held, conservatively, until reconciliation/day reset.
+        # a failed ledger write leaves the reservation held, conservatively, until reconciliation/day reset.
         if not self.failed_accounting and not self.uncertain:
             await self.ledger.release(self.id)
 
@@ -40,7 +40,7 @@ async def guarded[T](
     active = current.get()
     reserved = 0.0
     if active is not None:
-        # UTF-8 bytes bound ordinary text tokens conservatively; images get a separate explicit allowance.
+        # utf-8 bytes bound ordinary text tokens conservatively; images get a separate explicit allowance.
         tokens = len(json.dumps(content, ensure_ascii=False).encode()) + 64 + image_tokens
         reserved = spend.cost(model, tokens, output)
         try:
@@ -71,6 +71,6 @@ async def guarded[T](
             try:
                 await active.ledger.adjust(active.id, reserved - actual)
             except Exception:
-                # Keep the conservative amount; final billing still records the known usage.
+                # keep the conservative amount; final billing still records the known usage.
                 logging.getLogger("ai-core.budget").warning("reservation_adjust_failed")
     return result

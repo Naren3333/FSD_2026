@@ -1,6 +1,4 @@
-"""Scanned pages and untrusted model text (Step 5). The vision pass runs on the
-mock OpenAI transport; the parser and chunker are given its results directly; the ingest test runs on the Neon
-test branch with the vision pass stubbed."""
+"""scanned pages and untrusted model text (step 5)."""
 
 import asyncio
 import json
@@ -64,8 +62,7 @@ def prompt_of(request: dict) -> str:
 
 
 class Models:
-    """Replies by prompt: the OCR prompt gets `ocr`, the page prompt `page`, anything else `other`. `prompts` holds
-    the prompts sent, by kind."""
+    """replies by prompt: the ocr prompt gets `ocr`, the page prompt `page`, anything else `other`. `prompts` holds the prompts sent, by kind."""
 
     def __init__(
         self,
@@ -188,14 +185,14 @@ def test_transcript_blocks_are_checked(raw: dict, expected: SeenText | None) -> 
     assert SeenText.from_json(raw) == expected
 
 
-# ---- hidden OCR layers
+# ---- hidden ocr layers
 
 BULLETS = ["The team picks the backlog items", "Developers forecast the work"]
 
 
 def test_a_hidden_ocr_layer_is_not_a_text_layer(tmp_path: Path, openai_fake: FakeOpenAI) -> None:
     path = write(tmp_path, make_scanned_pdf("Sprint Planning", BULLETS, hidden=True))
-    assert len(pymupdf.open(path)[0].get_text()) > pages.MIN_PAGE_CHARS  # PyMuPDF does read it
+    assert len(pymupdf.open(path)[0].get_text()) > pages.MIN_PAGE_CHARS  # pymupdf does read it
     models = Models(openai_fake)
     [page] = see(path, tmp_path / "cache")
     # a scan is transcribed whole
@@ -205,7 +202,7 @@ def test_a_hidden_ocr_layer_is_not_a_text_layer(tmp_path: Path, openai_fake: Fak
 def test_a_picture_of_text_under_typed_text_is_left_to_the_figure_pass(
     tmp_path: Path, openai_fake: FakeOpenAI
 ) -> None:
-    # Such pictures are no longer transcribed in place, so only the page call runs
+    # such pictures are no longer transcribed in place, so only the page call runs
     models = Models(openai_fake)
     [page] = see(
         write(tmp_path, make_scanned_pdf("Sprint Planning", BULLETS, header=True)), tmp_path / "cache"
@@ -237,7 +234,7 @@ def test_image_strips_are_one_picture(tmp_path: Path) -> None:
     assert box == pytest.approx(SCAN_BOX, abs=1)
 
 
-# ---- untrusted text (Step 5)
+# ---- untrusted text (step 5)
 
 
 def test_every_prompt_that_writes_indexed_text_treats_the_document_as_data() -> None:
@@ -257,7 +254,8 @@ def test_new_prompt_versions_have_their_own_cache_names(tmp_path: Path) -> None:
         vision_calls.cache_file(tmp_path, "m", SHA, kind).name
         for kind in ("page", "t0", f"t0-v{prompts.TRANSCRIBE_PROMPT_VERSION}", "ocr-v1")
     }
-    # the page prompt is unchanged, so page answers and the descriptions keyed by their figure indexes stay cached
+    # the page prompt is unchanged, so page answers and the descriptions keyed by their figure indexes stay
+    # cached
     assert len(names) == 4 and prompts.PROMPT_VERSION == 2
 
 
@@ -318,7 +316,7 @@ def test_a_figure_on_a_transcribed_page_is_kept(tmp_path: Path) -> None:
     assert kept.description == "A flow of three steps." and [c.kind for c in chunks] == ["text", "figure"]
 
 
-# ---- POST /v1/ingest
+# ---- post /v1/ingest
 
 
 def test_a_scan_is_indexed_from_its_transcript(

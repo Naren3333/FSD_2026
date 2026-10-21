@@ -10,10 +10,9 @@ import (
 )
 
 const (
-	// vectorCacheSize is how many query vectors are kept.
+	// vectorcachesize is how many query vectors are kept.
 	vectorCacheSize = 256
-	// vectorCacheTTL is how long a query vector is used before it is embedded again. It bounds how long search keeps
-	// using an embedding model that ai-core has since replaced.
+	// vectorcachettl is how long a query vector is used before it is embedded again.
 	vectorCacheTTL = 10 * time.Minute
 )
 
@@ -22,14 +21,11 @@ type cachedVector struct {
 	model  string
 }
 
-// vectorCache keeps the most recently used query vectors, so a repeated question costs no embedding call. When it
-// is full the least recently used one makes room. Vectors are kept for one embedding model, the one ai-core used
-// last: a vector from another model makes the cache start again, so a query is never compared using a model that
-// the indexed chunks no longer use. A nil cache keeps nothing.
+// vectorcache keeps the most recently used query vectors, so a repeated question costs no embedding call.
 type vectorCache struct {
 	mu      sync.Mutex
 	model   string     // the embedding model of every vector kept
-	order   *list.List // of *vectorEntry, most recently used first
+	order   *list.List // of *vectorentry, most recently used first
 	entries map[string]*list.Element
 	now     func() time.Time
 	flights map[string]*vectorFlight
@@ -41,8 +37,7 @@ type vectorFlight struct {
 	err   error
 }
 
-// load shares an in-flight embedding, never passages or authorization decisions. The initiating caller pays;
-// a cancelled waiter stops waiting without cancelling work another authorized caller is using.
+// load shares an in-flight embedding, never passages or authorization decisions.
 func (c *vectorCache) load(ctx context.Context, query string, fetch func(context.Context) (cachedVector, error)) (cachedVector, error) {
 	if c == nil {
 		return fetch(ctx)

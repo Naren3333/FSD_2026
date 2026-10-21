@@ -136,7 +136,7 @@ func TestMarkingEdges(t *testing.T) {
 			t.Errorf("%s: a refused mark changed the evidence: %+v", name, evidence[1])
 		}
 	}
-	// An evaluation stored before Grading kept its questions still takes points.
+	// an evaluation stored before grading kept its questions still takes points.
 	evidence, _ := markable()
 	if err := applyMarks(evidence, nil, map[string]Mark{"q2": {Awarded: points(4), Feedback: text(strings.Repeat("é", maxFeedback))}}); err != nil || evidence[1].Awarded != 4 || evidence[1].MarkedBy != markedTeacher {
 		t.Fatalf("legacy evaluation: %+v %v", evidence[1], err)

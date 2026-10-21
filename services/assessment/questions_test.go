@@ -159,7 +159,7 @@ func TestGeneratedQuestionsKeepTheirSources(t *testing.T) {
 	if err := v.Validate(); err != nil {
 		t.Fatal(err)
 	}
-	// Sources are not marking-scheme passages: they never count towards the assessment's twenty.
+	// sources are not marking-scheme passages: they never count towards the assessment's twenty.
 	for range maxAssessmentExcerpts {
 		v.Questions = append(v.Questions, v.Questions[0])
 	}

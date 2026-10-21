@@ -1,12 +1,12 @@
 import type { Citation } from '../../api/models';
 
-/** One run of answer text: plain, bold, italic, code, or (ref > 0) the number of a cited source. */
+/* one run of answer text: plain, bold, italic, code, or (ref > 0) the number of a cited source. */
 export interface Inline {
   kind: 'text' | 'strong' | 'em' | 'code' | 'ref';
   text: string;
   ref: number;
 }
-/** A block of an answer. Lists hold one inline run per item; the others hold a single run in items[0]. */
+/* a block of an answer. */
 export interface Block {
   kind: 'p' | 'h' | 'ul' | 'ol' | 'pre';
   items: Inline[][];
@@ -18,10 +18,7 @@ const BULLET = /^\s*[-*•]\s+(.*)$/,
   NUMBERED = /^\s*\d+[.)]\s+(.*)$/,
   HEADING = /^\s*#{1,6}\s+(.*)$/;
 
-/** The model's Markdown as plain data for the template; nothing is ever inserted as HTML. Only the subset the
- * answer prompt produces is understood: paragraphs, headings, bullet and numbered lists, code blocks, bold,
- * italic and inline code. A citation tag becomes the number of its source in `citations`; a tag without one
- * (the answer stopped before the citations arrived) is dropped, and so is a tag still arriving. */
+/* the model's markdown as plain data for the template; nothing is ever inserted as html. */
 export function markdown(text: string, citations: Citation[]): Block[] {
   const numbers = new Map(citations.map((c, i) => [c.chunk_id, i + 1]));
   const inline = (s: string) => inlines(s, numbers);
@@ -60,7 +57,7 @@ export function markdown(text: string, citations: Citation[]): Block[] {
       else blocks.push({ kind, items: [item] });
     } else {
       const last = blocks[blocks.length - 1];
-      // A wrapped line directly under a list item continues it.
+      // a wrapped line directly under a list item continues it.
       if (
         !paragraph.length &&
         (last?.kind === 'ul' || last?.kind === 'ol') &&
@@ -97,7 +94,7 @@ function inlines(s: string, numbers: Map<string, number>): Inline[] {
   return out;
 }
 
-/** A citation's page or page range, as the source list shows it. */
+/* a citation's page or page range, as the source list shows it. */
 export function pages(
   c: Pick<Citation, 'page_start' | 'page_end'> & Partial<Pick<Citation, 'source' | 'section_path'>>,
 ): string {

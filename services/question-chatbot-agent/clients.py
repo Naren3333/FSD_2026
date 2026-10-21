@@ -1,6 +1,4 @@
-"""Calls to the other services. Identity and Content get the user's own token, so their access rules decide what
-the chat may see; ai-core gets this agent's service-account token (role ai-client), never the user's. The transport
-is learning_transport.agents."""
+"""share authenticated retrieval and inference clients."""
 
 from collections.abc import AsyncIterator
 from dataclasses import dataclass
@@ -14,22 +12,21 @@ from contracts import Usage
 
 SEARCH_TOP_K = 8
 SEARCH_TIMEOUT = 15.0
-# Above ai-core's worst cases, retries included (openai_client): 30 s for the 300-token query rewrite; and for the
-# stream, which is read with a per-read timeout, 45 s to open plus 30 s for a chunk.
+# above ai-core's worst cases, retries included (openai_client): 30 s for the 300-token query rewrite; and
+# for the stream, which is read with a per-read timeout, 45 s to open plus 30 s for a chunk.
 GENERATE_TIMEOUT = 40.0
 STREAM_TIMEOUT = httpx.Timeout(90, connect=5)
 USAGE_TIMEOUT = 5.0
 
 
 def billed(claims: Claims, relation: str | None = None) -> dict[str, str]:
-    """Whose daily AI allowance pays for a call: the signed-in user, at the allowance of their relation to the
-    turn's classroom (teacher or student), or of their token's role when no classroom is involved."""
+    """whose daily ai allowance pays for a call: the signed-in user, at the allowance of their relation to the turn's classroom (teacher or student), or of their token's role when no classroom is involved."""
     return billed_to(claims, relation or claims.person_role or STUDENT)
 
 
 @dataclass(frozen=True)
 class Done:
-    """The end of a streamed reply."""
+    """the end of a streamed reply."""
 
     model: str | None
     usage_tokens: int | None
@@ -43,8 +40,7 @@ class Services(AgentClients):
     async def search(
         self, authorization: str, classroom_id: str, query: str, correlation: str
     ) -> tuple[list[dict[str, Any]], bool]:
-        """The top results, reranked, and whether the rerank fell back (then `score` is an RRF score, not
-        comparable to the relevance floor)."""
+        """the top results, reranked, and whether the rerank fell back (then `score` is an rrf score, not comparable to the relevance floor)."""
         body = {"classroom_id": classroom_id, "query": query, "top_k": SEARCH_TOP_K, "rerank": True}
         return await self.search_content(authorization, body, correlation, SEARCH_TIMEOUT)
 
@@ -53,8 +49,7 @@ class Services(AgentClients):
     async def stream(
         self, messages: list[dict[str, str]], max_tokens: int, correlation: str, payer: dict[str, str]
     ) -> AsyncIterator[str | Done]:
-        """The reply's text as it arrives, then Done, billed to `payer` (billed()). A failure before the first word
-        or mid-stream raises."""
+        """the reply's text as it arrives, then done, billed to `payer` (billed())."""
         body = {
             "operation": "generate",
             "messages": messages,
@@ -87,11 +82,10 @@ class Services(AgentClients):
         raise UpstreamError("ai-core", 502, "STREAM_ENDED_EARLY")
 
     async def usage(self, payer: dict[str, str], correlation: str) -> Usage:
-        """The user's AI spend today, their daily limit and when it resets, from ai-core's ledger. A reply without
-        them is a 502 UpstreamError."""
+        """the user's ai spend today, their daily limit and when it resets, from ai-core's ledger."""
         resp = await self.ai_core("GET", "/v1/usage", correlation, USAGE_TIMEOUT, params=payer)
         try:
             data = resp.json()
             return Usage.model_validate({k: data[k] for k in ("spent_usd", "limit_usd", "resets_at")})
-        except (ValueError, KeyError, TypeError):  # ValidationError is a ValueError
+        except (ValueError, KeyError, TypeError):  # validationerror is a valueerror
             raise UpstreamError("ai-core", 502) from None

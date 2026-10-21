@@ -1,4 +1,4 @@
-// Command content is the Content service: classroom documents in object storage, their indexing through
+// command content is the content service: classroom documents in object storage, their indexing through
 // ai-core, and hybrid search over the indexed chunks.
 package main
 
@@ -30,9 +30,9 @@ func main() {
 		}
 		a.Slow("POST /v1/documents", uploadDeadline)
 		server{store: pgStore{a.DB}, access: a.Identity(), files: files, ai: ai, vectors: newVectorCache()}.routes(a.Mux)
-		// Two indexing workers: ai-core ingests two PDFs at once.
+		// two indexing workers: ai-core ingests two pdfs at once.
 		x := indexer{a.DB, files, ai, 2 * time.Second}
-		// A purge deletes every document of the classroom with its chunks and vectors, and their objects in the
+		// a purge deletes every document of the classroom with its chunks and vectors, and their objects in the
 		// bucket: far more than the default 10 seconds for a large classroom.
 		classrooms := platform.Consumer{DB: a.DB, Group: "content-classrooms-v1", Timeout: purgeTimeout}
 		purge := purger{}.purge

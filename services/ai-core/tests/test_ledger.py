@@ -1,9 +1,4 @@
-"""PostgresLedger against a real PostgreSQL: the day a user's spend is summed over starts at local midnight in
-SPEND_TIMEZONE, and resets_at is the next local midnight, across DST changes too (ADR 0003). Needs
-AICORE_TEST_DATABASE_URL, a scratch database; each test migrates and then drops its own schema. Skipped without it.
-
-The clock is pinned without touching spend.py: the test schema comes before pg_catalog on the search_path and
-holds its own now(), which reads a one-row `clock` table (the real now() when it is empty)."""
+"""verify allowance resets at local midnight, including daylight-saving changes."""
 
 import asyncio
 import os
@@ -30,7 +25,7 @@ CREATE FUNCTION now() RETURNS timestamptz LANGUAGE sql STABLE
 
 
 class Pinned:
-    """A ledger in its own schema, with a clock the test sets."""
+    """a ledger in its own schema, with a clock the test sets."""
 
     def __init__(self, ledger: spend.PostgresLedger) -> None:
         self.ledger = ledger
@@ -140,7 +135,7 @@ async def test_usage_and_reservation_settle_in_one_transaction(pinned: Pinned) -
 
 async def test_the_day_starts_at_local_midnight(pinned: Pinned) -> None:
     user = str(uuid4())
-    await pinned.at(datetime(2026, 10, 17, 7, 30, tzinfo=SGT))  # still the 16th in UTC
+    await pinned.at(datetime(2026, 10, 17, 7, 30, tzinfo=SGT))  # still the 16th in utc
     await pinned.spent(user, "org-a", 1.0, datetime(2026, 10, 16, 23, 59, tzinfo=SGT))  # yesterday
     await pinned.spent(user, "org-a", 0.25, datetime(2026, 10, 17, 0, 1, tzinfo=SGT))
     usage = await pinned.ledger.today(billed(user))
@@ -150,7 +145,7 @@ async def test_the_day_starts_at_local_midnight(pinned: Pinned) -> None:
 
 
 async def test_recorded_charges_count_today_however_small(pinned: Pinned) -> None:
-    """Rows keep 10 decimal places, so three sub-cent-fraction embeddings still add up."""
+    """rows keep 10 decimal places, so three sub-cent-fraction embeddings still add up."""
     user = str(uuid4())
     charge = spend.Charge("embed", "text-embedding-3-small", 20, 0, 0.0000004)
     for _ in range(3):
@@ -171,9 +166,9 @@ async def test_the_same_user_id_in_another_organization_is_someone_else(pinned: 
 @pytest.mark.parametrize(
     ("noon", "midnight", "resets_at"),
     [
-        # Clocks go back at 02:00 BST on 25 October 2026: a 25-hour day.
+        # clocks go back at 02:00 bst on 25 october 2026: a 25-hour day.
         ("2026-10-25T12:00:00+00:00", "2026-10-24T23:00:00+00:00", "2026-10-26T00:00:00+00:00"),
-        # Clocks go forward at 01:00 GMT on 29 March 2026: a 23-hour day.
+        # clocks go forward at 01:00 gmt on 29 march 2026: a 23-hour day.
         ("2026-03-29T12:00:00+01:00", "2026-03-29T00:00:00+00:00", "2026-03-29T23:00:00+00:00"),
     ],
     ids=["autumn", "spring"],

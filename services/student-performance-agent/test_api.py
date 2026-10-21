@@ -18,7 +18,7 @@ PAYLOAD = {
 
 def test_placeholder_contract():
     client = TestClient(app)
-    # Explicit test double for verified OIDC claims, never wired in the application.
+    # explicit test double for verified oidc claims, never wired in the application.
     with as_caller(app, token_claims("ai-client", sub="test-service")):
         result = client.post(PATH, json=PAYLOAD)
         assert result.status_code == 501

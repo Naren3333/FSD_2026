@@ -1,6 +1,4 @@
-# The golden set's test corpus, copied from fsd_test's data/test_pdfs/manifest.yaml. The PDFs are not in this
-# repository (the decks are course material): scripts/eval reads them from EVAL_PDF_DIR, default ../fsd_test/data/test_pdfs.
-# Iter 7 test corpus. Decks 01-12 are real course slides; gen-* files are generated stand-ins.
+# the golden set's test corpus, copied from fsd_test's data/test_pdfs/manifest.yaml.
 01-Software Processes.pdf: {title: "Software Processes", doc_type: teaching_material, class_ids: [C1], topic_ids: [process]}
 02-User Stories, Estimation, Planning.pdf: {title: "User Stories, Estimation and Planning", doc_type: teaching_material, class_ids: [C1], topic_ids: [planning]}
 03-Collaboration Methods.pdf: {title: "Collaboration Methods", doc_type: teaching_material, class_ids: [C1], topic_ids: [git]}
@@ -13,16 +11,16 @@
 12-Automation and Deployment.pdf: {title: "Automation and Deployment", doc_type: teaching_material, class_ids: [C2], topic_ids: [deployment]}
 gen-C1 Git Workflow Handout.pdf: {title: "Git Workflow Handout", doc_type: teaching_material, class_ids: [C1], topic_ids: [git]}
 gen-Scanned Sprint Planning.pdf: {title: "Scanned Sprint Planning", doc_type: teaching_material, class_ids: [C1], topic_ids: [planning]}
-# Prose PDFs (your pure_pdfs/ folder)
+# prose pdfs (your pure_pdfs/ folder)
 pure_pdfs/2410.15944v1.pdf: {title: "Developing RAG-based LLM Systems from PDFs", doc_type: teaching_material, class_ids: [C1], topic_ids: [rag]}
 pure_pdfs/NIST.AI.100-1.pdf: {title: "NIST AI Risk Management Framework", doc_type: teaching_material, class_ids: [C1], topic_ids: [ai-governance]}
 pure_pdfs/1706.03762v7.pdf: {title: "Attention Is All You Need", doc_type: teaching_material, class_ids: [C1], topic_ids: [ml]}
 pure_pdfs/2103.00020v1.pdf: {title: "Learning Transferable Visual Models From Natural Language Supervision", doc_type: teaching_material, class_ids: [C1], topic_ids: [ml]}
-# Iteration 12 distractors (knowledge/eval/make_distractors.py): overlap existing topics, no new facts
+# iteration 12 distractors (knowledge/eval/make_distractors.py): overlap existing topics, no new facts
 gen-Collaboration Methods v2.pdf: {title: "Collaboration Methods (Revised)", doc_type: teaching_material, class_ids: [C1], topic_ids: [git]}
 gen-C1 Git Cheat Sheet.pdf: {title: "Git Command Cheat Sheet", doc_type: teaching_material, class_ids: [C1], topic_ids: [git]}
 gen-C1 Testing Revision Notes.pdf: {title: "Software Testing Revision Notes", doc_type: teaching_material, class_ids: [C1], topic_ids: [testing]}
 gen-C2 Agile Estimation Notes.pdf: {title: "Agile Estimation Notes", doc_type: teaching_material, class_ids: [C2], topic_ids: [planning]}
-# Iteration 13 injection test (knowledge/eval/make_distractors.py): instructions inside a figure picture
+# iteration 13 injection test (knowledge/eval/make_distractors.py): instructions inside a figure picture
 gen-Injection in Figure.pdf: {title: "Deployment Pipeline Handout", doc_type: teaching_material, class_ids: [C1], topic_ids: [deployment]}
 gen-Captioned Photo.pdf: {title: "Pair Programming History Handout", doc_type: teaching_material, class_ids: [C1], topic_ids: [review]}

@@ -1,21 +1,22 @@
-# Shared golangci-lint settings for the Go modules (packages/platform and the five Go services).
+# shared golangci-lint settings for the go modules (packages/platform and the five go services).
 version: "2"
 linters:
   enable:
-    - bodyclose      # HTTP response bodies are closed
-    - errorlint      # errors are compared with errors.Is / errors.As, so wrapped errors still match
+    - bodyclose      # http response bodies are closed
+    - errorlint      # errors are compared with errors.is / errors.as, so wrapped errors still match
     - gocritic       # common style and correctness checks
     - gocyclo        # function complexity
     - misspell
     - nilerr         # a nil return after an error check
-    - noctx          # outgoing HTTP requests carry a context
+    - noctx          # outgoing http requests carry a context
     - prealloc
-    - revive         # Go style: naming, exported docs, error strings
+    - revive         # go style: naming, exported docs, error strings
     - unparam        # parameters and results that never vary
     - usestdlibvars  # net/http status and method constants instead of literals
   settings:
     errcheck:
-      # Deferred cleanup whose error has nowhere to go: a rollback after commit, closing a body already read.
+      # deferred cleanup whose error has nowhere to go: a rollback after commit, closing a body already
+      # read.
       exclude-functions:
         - (github.com/jackc/pgx/v5.Tx).Rollback
         - (github.com/jackc/pgx/v5.BatchResults).Close
@@ -29,7 +30,11 @@ linters:
       min-complexity: 15
   exclusions:
     rules:
-      # Test fixtures write canned responses and set up state; a failure there fails the assertion that follows.
+      # lowercase comments intentionally differ from exported identifier casing.
+      - linters: [revive]
+        text: 'comment on exported .* should be of the form|package comment should be of the form'
+      # test fixtures write canned responses and set up state; a failure there fails the assertion that
+      # follows.
       - path: _test\.go
         linters: [errcheck, gocyclo, noctx, prealloc, unparam]
       - path: _test\.go

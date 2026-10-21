@@ -1,16 +1,4 @@
-"""Load the golden set's test corpus into the local stack and wait until Content has indexed it.
-
-    python scripts/eval/load_corpus.py [--reindex]
-
-- Creates two classrooms as `teacher` ("Golden eval C1" and "Golden eval C2") and enrolls `student` in C1 and a
-  second local test student, eval-student2, in C2. eval-student2 is created in the local Keycloak realm the first
-  time, with a generated password kept in .local/eval-corpus.json (gitignored).
-- Uploads each PDF in corpus.yaml from EVAL_PDF_DIR into its class's classroom, as its doc_type.
-- Safe to re-run: documents already in the classroom are kept, failed ones are queued again. --reindex queues
-  every document again, after a change to ingest.
-
-Indexing calls ai-core, so it costs OpenAI embeddings, plus vision calls for pages ai-core hasn't cached.
-"""
+"""load the eval corpus idempotently; explicit reindexing queues every document again."""
 
 import argparse
 import secrets
@@ -22,8 +10,7 @@ from local_stack import admin_client, check, ensure_person
 
 
 def ensure_student2(state: dict) -> None:
-    """Create eval-student2 (realm role student, org local-school) in the local realm if it doesn't exist. Its
-    password is generated once and kept in the eval's state; an existing account without one gets a new one."""
+    """create eval-student2 (realm role student, org local-school) in the local realm if it doesn't exist."""
     known = "student2_password" in state
     if not known:
         state["student2_password"] = secrets.token_hex(20)

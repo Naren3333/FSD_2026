@@ -1,4 +1,4 @@
--- Expand provenance formats without changing or deleting existing documents/chunks.
+-- expand provenance formats without changing or deleting existing documents/chunks.
 ALTER TABLE document_chunks DROP CONSTRAINT document_chunks_source_check;
 ALTER TABLE document_chunks ADD CONSTRAINT document_chunks_source_check
     CHECK (source IN ('pdf','vision','markdown','pptx','docx'));

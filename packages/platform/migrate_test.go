@@ -38,7 +38,7 @@ func TestMigrationsRejectGapsDuplicatesAndBadNames(t *testing.T) {
 	}
 }
 
-// Two migrations that each fail when run twice: the second run must skip both.
+// two migrations that each fail when run twice: the second run must skip both.
 var twoMigrations = fstest.MapFS{
 	"migrations/001_init.sql": {Data: []byte("CREATE TABLE things(id int PRIMARY KEY)")},
 	"migrations/002_seed.sql": {Data: []byte("INSERT INTO things VALUES (1)")},

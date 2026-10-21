@@ -11,8 +11,7 @@ const template = (path: string) => readFileSync(new URL(path, import.meta.url), 
 
 beforeAll(() => TestBed.initTestEnvironment(BrowserTestingModule, platformBrowserTesting()));
 
-// jsdom has no modal dialogs: these do what a browser's do for the parts the component relies on. A browser closes
-// the dialog on Escape only when its cancel event is not prevented.
+// jsdom has no modal dialogs: these do what a browser's do for the parts the component relies on.
 beforeAll(() => {
   HTMLDialogElement.prototype.showModal = function (this: HTMLDialogElement) {
     this.setAttribute('open', '');
@@ -42,7 +41,7 @@ function render() {
   const confirmed = vi.fn();
   fixture.componentInstance.closed.subscribe(closed);
   fixture.componentInstance.confirm.subscribe(confirmed);
-  /** Presses Escape as a browser does: a cancel event, then closing unless it was prevented. */
+  /* presses escape as a browser does: a cancel event, then closing unless it was prevented. */
   const escape = () => {
     const cancel = new Event('cancel', { cancelable: true });
     dialog.dispatchEvent(cancel);

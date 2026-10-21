@@ -1,5 +1,4 @@
-"""openai_client: embeddings, chat (plain, streamed, JSON schema) and the retry rules, against a mock OpenAI.
-Ported from fsd_test's shared tests."""
+"""openai_client: embeddings, chat (plain, streamed, json schema) and the retry rules, against a mock openai."""
 
 from collections.abc import Callable
 
@@ -11,7 +10,7 @@ from conftest import CACHED_USAGE, FakeOpenAI, chat_response, chat_stream, confi
 import openai_client
 from openai_client import StructuredOutputError, Usage
 
-# Async tests run on anyio's pytest plugin (installed with FastAPI), on asyncio (conftest.anyio_backend).
+# async tests run on anyio's pytest plugin (installed with fastapi), on asyncio (conftest.anyio_backend).
 pytestmark = pytest.mark.anyio
 
 RATE_LIMITED = {"error": {"message": "Rate limit reached", "type": "requests", "code": "rate_limit_exceeded"}}
@@ -246,7 +245,7 @@ async def test_schema_failures_raise_and_are_not_retried(
     with pytest.raises(StructuredOutputError, match=match) as error:
         await rewrite()
     assert len(openai_fake.requests) == 1 and openai_fake.sleeps == []
-    assert error.value.usage == Usage(120, 7)  # billed by OpenAI all the same: the caller charges it
+    assert error.value.usage == Usage(120, 7)  # billed by openai all the same: the caller charges it
 
 
 async def test_generate_500_is_retried(openai_fake: FakeOpenAI) -> None:
@@ -270,7 +269,7 @@ class Clock:
         monkeypatch.setattr(openai_client, "_sleep", sleep)
 
     def slow(self, seconds: float, status: int) -> Callable[[httpx2.Request], httpx2.Response]:
-        """A reply that fails with `status` after `seconds`."""
+        """a reply that fails with `status` after `seconds`."""
 
         def reply(request: httpx2.Request) -> httpx2.Response:
             self.now += seconds
@@ -282,7 +281,7 @@ class Clock:
 def test_the_generation_budget_grows_with_max_tokens() -> None:
     budget = openai_client.generation_budget
     assert budget(300) == openai_client.TIMEOUT  # never below the per-read timeout
-    assert budget(1500) == pytest.approx(45)  # Grading's marking call
+    assert budget(1500) == pytest.approx(45)  # grading's marking call
     assert budget(6000) == pytest.approx(120)  # question generation's longest reply
     assert budget(8000) == openai_client.GENERATE_CAP  # the most the contract allows
 
@@ -323,5 +322,5 @@ async def test_a_stream_is_not_reopened_once_a_whole_attempt_no_longer_fits(
     openai_fake.replies.append(clock.slow(20, 503))
     with pytest.raises(openai.InternalServerError):
         await collect()
-    # 20 s gone leaves 25 s of STREAM_OPEN_BUDGET: less than one more 30 s attempt.
+    # 20 s gone leaves 25 s of stream_open_budget: less than one more 30 s attempt.
     assert len(openai_fake.requests) == 1 and openai_fake.sleeps == []

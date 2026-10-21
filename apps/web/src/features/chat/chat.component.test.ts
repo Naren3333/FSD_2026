@@ -26,7 +26,7 @@ describe('chat placeholders', () => {
     const chat = {
       threads: vi.fn(() => Promise.resolve({ threads: [] as Thread[] })),
       createThread: vi.fn(() => Promise.resolve(thread)),
-      // Re-reading the saved conversation fails, so the local copies stay.
+      // re-reading the saved conversation fails, so the local copies stay.
       messages: vi.fn(() => Promise.reject(new Error('offline'))),
       ask: vi.fn((_t: string, content: string, _s: AbortSignal, onEvent: (e: StreamEvent) => void) => {
         onEvent({ event: 'token', data: { text: `About ${content}` } });
@@ -57,12 +57,12 @@ describe('chat placeholders', () => {
       'About fractions',
       'About decimals',
     ]);
-    // A message's parsed Markdown is kept until the message changes.
+    // a message's parsed markdown is kept until the message changes.
     expect(page.blocks(messages[1])).toBe(page.blocks(messages[1]));
   });
 });
 
-/** The chat page's logic (no template) whose answers stream as `ask` says, with a spy on the AI use meter. */
+/* the chat page's logic (no template) whose answers stream as `ask` says, with a spy on the ai use meter. */
 async function setup(ask: (onEvent: (e: StreamEvent) => void) => Promise<void>) {
   const usage = { refresh: vi.fn() };
   TestBed.resetTestingModule();

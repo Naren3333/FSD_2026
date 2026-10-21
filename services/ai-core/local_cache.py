@@ -1,4 +1,4 @@
-"""Bounded operational JSON cache. Deleting it changes latency/cost, never authorization or business state."""
+"""bounded operational json cache."""
 
 import asyncio
 import hashlib
@@ -53,7 +53,7 @@ def read(path: Path) -> Any:
 
 
 def write(path: Path, value: Any) -> None:
-    """Cache/storage failures never fail successful provider work. Writes are atomic; size and age are bounded."""
+    """cache/storage failures never fail successful provider work."""
     global _writes, _last_prune
     tmp = path.with_suffix(f".{uuid.uuid4().hex}.tmp")
     try:

@@ -1,7 +1,4 @@
-"""Reranking through Voyage AI's hosted rerank API. A CPU cross-encoder took 3-9s for 30 passages in fsd_test, so
-reranking is outsourced. Not retried: one attempt fits the 2s budget, and the caller (Content search) keeps its
-RRF order when this fails. Failures are raised, never turned into made-up scores.
-"""
+"""reranking through voyage ai's hosted rerank api."""
 
 import logging
 
@@ -19,11 +16,11 @@ _client: httpx2.AsyncClient | None = None
 
 
 class RerankNotConfiguredError(Exception):
-    """VOYAGE_API_KEY is unset."""
+    """voyage_api_key is unset."""
 
 
 class RerankError(Exception):
-    """Voyage timed out, answered with an error, or sent a body without a score for every document."""
+    """voyage timed out, answered with an error, or sent a body without a score for every document."""
 
 
 def get_client() -> httpx2.AsyncClient:
@@ -48,7 +45,7 @@ async def aclose() -> None:
 
 
 async def rerank(query: str, documents: list[str]) -> tuple[list[float], int | None]:
-    """The relevance score of each document, in the documents' order, and the tokens Voyage counted."""
+    """the relevance score of each document, in the documents' order, and the tokens voyage counted."""
     client, model = get_client(), get_settings().reranker_model
     try:
         resp = await budget.guarded(
@@ -69,12 +66,12 @@ async def rerank(query: str, documents: list[str]) -> tuple[list[float], int | N
         raise RerankError(f"HTTP {e.response.status_code}") from None
     except HTTPException:
         raise
-    except Exception as e:  # unreachable, or a body that isn't Voyage's shape
+    except Exception as e:  # unreachable, or a body that isn't voyage's shape
         raise RerankError(f"{type(e).__name__}") from None
     missing = scores.count(None)
     if missing:
         raise RerankError(f"{missing} of {len(documents)} documents have no score")
-    usage = body.get("usage")  # Voyage may send null: the caller then estimates the tokens
+    usage = body.get("usage")  # voyage may send null: the caller then estimates the tokens
     tokens = usage.get("total_tokens") if isinstance(usage, dict) else None
     log.info("rerank", extra={"model": model, "documents": len(documents), "tokens": tokens})
     return [s for s in scores if s is not None], tokens if isinstance(tokens, int) else None

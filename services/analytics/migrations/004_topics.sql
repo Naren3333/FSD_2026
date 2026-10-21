@@ -1,5 +1,4 @@
--- The curriculum has one level, the topic: evidence names its topic as topic_id. A rename keeps every stored row;
--- it runs only while the old column is still there, so the file is safe to run again.
+-- the curriculum has one level, the topic: evidence names its topic as topic_id.
 DO $$
 BEGIN
   IF EXISTS (SELECT 1 FROM information_schema.columns

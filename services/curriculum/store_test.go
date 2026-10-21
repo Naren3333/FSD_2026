@@ -11,8 +11,8 @@ import (
 	"github.com/google/uuid"
 )
 
-// These tests run the store, and the handlers over it, against real PostgreSQL in a throwaway schema with every
-// migration applied. They need CURRICULUM_TEST_DATABASE_URL and are skipped without it.
+// these tests run the store, and the handlers over it, against real postgresql in a throwaway schema with
+// every migration applied.
 
 func testStore(t *testing.T) pgStore {
 	t.Helper()
@@ -32,7 +32,7 @@ func topic(t *testing.T, s pgStore, org string) string {
 func TestTheCycleCheckFollowsTheWholeChain(t *testing.T) {
 	ctx, s := context.Background(), testStore(t)
 	a, b, c := topic(t, s, "org"), topic(t, s, "org"), topic(t, s, "org")
-	for _, edge := range [][2]string{{a, b}, {b, c}, {a, b}} { // A needs B, B needs C; repeating an edge is harmless
+	for _, edge := range [][2]string{{a, b}, {b, c}, {a, b}} { // a needs b, b needs c; repeating an edge is harmless
 		if got, err := s.insertPrerequisite(ctx, "org", edge[0], edge[1]); err != nil || got != prerequisiteAdded {
 			t.Fatalf("%v: %v %v", edge, got, err)
 		}
@@ -60,7 +60,7 @@ func TestPrerequisitesStayInTheOrganizationAndBetweenActiveTopics(t *testing.T) 
 			t.Errorf("%v: %v %v", edge, got, err)
 		}
 	}
-	// Through the handler, as the other organization's teacher would call it.
+	// through the handler, as the other organization's teacher would call it.
 	server := server{store: s}.routes
 	w := platformtest.Serve(server, http.MethodPost, "/v1/topics/"+mine+"/prerequisites", `{"prerequisite_id":"`+theirs+`"}`, "teacher-1", "teacher")
 	if w.Code != http.StatusUnprocessableEntity {
@@ -118,8 +118,8 @@ func TestOtherOrganizationsTopicsCannotBeReadRenamedArchivedOrRestored(t *testin
 	}
 }
 
-// A topic's prerequisites list only active topics of its organization; a link to an archived one is kept and comes
-// back with it, and either can be removed.
+// a topic's prerequisites list only active topics of its organization; a link to an archived one is kept
+// and comes back with it, and either can be removed.
 func TestPrerequisitesCanBeReadAndRemoved(t *testing.T) {
 	ctx, s := context.Background(), testStore(t)
 	a, b, c := topic(t, s, "org"), topic(t, s, "org"), topic(t, s, "org")

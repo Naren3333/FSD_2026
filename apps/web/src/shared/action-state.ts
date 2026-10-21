@@ -2,7 +2,7 @@ import { signal } from '@angular/core';
 import { FormGroup } from '@angular/forms';
 import { messageOf } from './errors';
 
-/** The busy flag, success message and error of one section's actions. */
+/* the busy flag, success message and error of one section's actions. */
 export class ActionState {
   readonly busy = signal(false);
   readonly error = signal('');
@@ -21,8 +21,7 @@ export class ActionState {
       this.busy.set(false);
     }
   }
-  /** Shows the form's errors and, when it is invalid, focuses its first invalid control: the one inside the element
-   * with id `formId`, never another form on the page. */
+  /* shows the form's errors and, when it is invalid, focuses its first invalid control: the one inside the element with id `formid`, never another form on the page. */
   validate(form: FormGroup, formId: string): boolean {
     form.markAllAsTouched();
     if (form.invalid) {

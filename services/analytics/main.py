@@ -1,4 +1,4 @@
-"""Learning Analytics: per-student topic accuracy from finalized grades only."""
+"""learning analytics: per-student topic accuracy from finalized grades only."""
 
 import asyncio
 import os
@@ -54,7 +54,8 @@ async def lifespan(app: Any) -> AsyncIterator[None]:
                 yield
             finally:
                 stop.set()
-                # Waited for in a worker thread: the event loop keeps serving requests still finishing meanwhile.
+                # waited for in a worker thread: the event loop keeps serving requests still finishing
+                # meanwhile.
                 await asyncio.to_thread(thread.join, CONSUMER_STOP_GRACE)
     finally:
         pool.close()
@@ -63,9 +64,7 @@ async def lifespan(app: Any) -> AsyncIterator[None]:
 app = application("analytics", lifespan=lifespan)
 
 
-# Ready when the database answers, as the chatbot is. The event consumer restarts itself with a backoff and logs each
-# stop (consumer_stopped_uncommitted, consumer_restarting); a broker outage delays new evidence but doesn't stop the
-# reads, so it doesn't take the service out of rotation.
+# ready when the database answers, as the chatbot is.
 @app.get("/health/ready")
 def ready(request: Request) -> dict[str, str]:
     try:
@@ -106,8 +105,7 @@ async def class_performance(
     limit: int = Query(default=20, ge=1, le=MAX_PAGE),
     claims: Claims = Depends(requires(TEACHER)),
 ) -> ClassPerformanceResponse:
-    """One page of the classroom's enrolled students with their topic evidence, for its own teacher only. The
-    roster comes from Identity with the teacher's token, so only currently enrolled students appear."""
+    """one page of the classroom's enrolled students with their topic evidence, for its own teacher only."""
     identity: IdentityClient = request.app.state.identity
     await require_relation(
         identity, request, str(classroom_id), allowed=(RELATION_TEACHER,), denied=TEACHER_ONLY
@@ -147,7 +145,8 @@ async def performance(
     teacher = claims.person_role == TEACHER
     if not teacher and student_id != claims.subject:
         raise failure(403, "FORBIDDEN", "Students can only view their own performance.")
-    # The relation must match the role: a teacher's token reads other students only as the classroom's teacher.
+    # the relation must match the role: a teacher's token reads other students only as the classroom's
+    # teacher.
     await require_relation(
         request.app.state.identity,
         request,

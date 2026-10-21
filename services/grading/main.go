@@ -1,6 +1,4 @@
-// Command grading is the Grading service: draft scores computed from submissions, with AI-suggested marks for the
-// questions that need the teacher when an assessment asks for them, which a classroom's teacher marks, finalizes
-// and releases to students.
+// compute draft grades and retain teacher approval before finalization and release.
 package main
 
 import (
@@ -18,7 +16,7 @@ func main() {
 	platform.Serve("grading", migrations, platform.EventMigration, func(a *platform.App) ([]func(context.Context), error) {
 		identity := a.Identity()
 		server{store: pgStore{a.DB}, access: identity, roster: identity}.routes(a.Mux)
-		// Ready only while all six consumers run: a stalled one would otherwise go unnoticed.
+		// ready only while all six consumers run: a stalled one would otherwise go unnoticed.
 		var submissionsRunning, classroomsRunning, assessmentsRunning, enrollmentsRunning, dueRunning, usersRunning atomic.Bool
 		a.Checks = append(a.Checks, func(ctx context.Context) error {
 			if !submissionsRunning.Load() || !classroomsRunning.Load() || !assessmentsRunning.Load() || !enrollmentsRunning.Load() || !dueRunning.Load() || !usersRunning.Load() {

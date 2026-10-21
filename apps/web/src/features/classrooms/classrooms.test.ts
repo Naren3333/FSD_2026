@@ -21,8 +21,7 @@ beforeAll(() => TestBed.initTestEnvironment(BrowserTestingModule, platformBrowse
 
 const ana: Student = { id: 's1', username: 'ana', display_name: 'Ana Lim' };
 
-/** A teacher's Classrooms page, with these classrooms (the first chosen), whose roster and school list load as
- * given. */
+/* a teacher's classrooms page, with these classrooms (the first chosen), whose roster and school list load as given. */
 function render(
   rooms: Classroom[],
   roster: Promise<Student[]>,
@@ -70,7 +69,7 @@ function render(
   const fixture = TestBed.createComponent(ClassroomsComponent);
   fixture.detectChanges();
   const root = fixture.nativeElement as HTMLElement;
-  /** The text of the panel with this heading id. */
+  /* the text of the panel with this heading id. */
   const panel = (id: string) => root.querySelector(`[aria-labelledby="${id}"]`)?.textContent ?? '';
   const settle = async () => {
     await new Promise((resolve) => setTimeout(resolve));

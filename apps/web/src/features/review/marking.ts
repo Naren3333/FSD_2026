@@ -1,19 +1,18 @@
 import { FormControl, FormGroup, Validators } from '@angular/forms';
 import type { Evidence, Mark, Question, Suggestion } from '../../api/models';
 
-/** The marking form for one evaluation and what it sends to Grading. Kept apart from the page so it can be tested
- * alone. */
+/* the marking form for one evaluation and what it sends to grading. */
 
 export type QuestionMarks = FormGroup<{
-  /** Points for a question without a rubric. */
+  /* points for a question without a rubric. */
   awarded: FormControl<number | null>;
-  /** The chosen level's points for each rubric criterion, by criterion id. */
+  /* the chosen level's points for each rubric criterion, by criterion id. */
   criteria: FormGroup<Record<string, FormControl<number | null>>>;
   feedback: FormControl<string>;
 }>;
 export type MarkingForm = FormGroup<Record<string, QuestionMarks>>;
 
-/** A form holding each question's current marks; a question still to mark must be given them. */
+/* a form holding each question's current marks; a question still to mark must be given them. */
 export function markingForm(evidence: readonly Evidence[], questions: readonly Question[]): MarkingForm {
   return new FormGroup(
     Object.fromEntries(
@@ -21,7 +20,7 @@ export function markingForm(evidence: readonly Evidence[], questions: readonly Q
         const rubric = questions.find((q) => q.id === e.question_id)?.rubric;
         const required = e.needs_marking ? [Validators.required] : [];
         const scores = new Map((e.criteria ?? []).map((c) => [c.criterion_id, c.points]));
-        // Assessment gives every criterion an id; one without could not be marked, so it gets no control.
+        // assessment gives every criterion an id; one without could not be marked, so it gets no control.
         const criteria = Object.fromEntries(
           (rubric?.criteria ?? []).flatMap((c) =>
             c.id ? [[c.id, new FormControl<number | null>(scores.get(c.id) ?? null, required)]] : [],
@@ -45,8 +44,7 @@ export function markingForm(evidence: readonly Evidence[], questions: readonly Q
   );
 }
 
-/** The marks to send: each question the teacher marked or gave feedback on. A rubric question counts once every
- * criterion has a level; points count when they differ from what the question has, or it still needed marking. */
+/* the marks to send: each question the teacher marked or gave feedback on. */
 export function marksOf(form: MarkingForm, evidence: readonly Evidence[]): Record<string, Mark> {
   const marks: Record<string, Mark> = {};
   for (const e of evidence) {
@@ -70,7 +68,7 @@ export function marksOf(form: MarkingForm, evidence: readonly Evidence[]): Recor
   return marks;
 }
 
-/** Puts a ready suggestion's levels (or points) and feedback into the question's form, for the teacher to check. */
+/* puts a ready suggestion's levels (or points) and feedback into the question's form, for the teacher to check. */
 export function applySuggestion(marks: QuestionMarks, suggestion: Suggestion): void {
   const criteria = suggestion.criteria ?? [];
   const rubric = Object.keys(marks.controls.criteria.controls).length > 0;
@@ -83,7 +81,7 @@ export function applySuggestion(marks: QuestionMarks, suggestion: Suggestion): v
   marks.markAsDirty();
 }
 
-/** Why a suggestion is not ready, in the teacher's words. */
+/* why a suggestion is not ready, in the teacher's words. */
 export function suggestionReason(suggestion: Suggestion): string {
   const reasons: Record<string, string> = {
     AI_SPEND_LIMIT: 'Waiting for your daily AI allowance to reset.',
@@ -111,7 +109,7 @@ export function suggestionReason(suggestion: Suggestion): string {
   return '';
 }
 
-/** Flags a suggestion carries, in words. */
+/* flags a suggestion carries, in words. */
 export function flagText(flag: string): string {
   const flags: Record<string, string> = {
     blank: 'The answer looks blank.',

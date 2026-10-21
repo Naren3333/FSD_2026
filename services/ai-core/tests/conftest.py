@@ -39,7 +39,7 @@ def anyio_backend() -> str:
 
 
 def configured(**overrides: Any) -> settings.Settings:
-    """Settings as from an empty environment, with test keys: never the developer's real ones."""
+    """settings as from an empty environment, with test keys: never the developer's real ones."""
     return replace(
         settings.Settings(**{**_EMPTY, "openai_api_key": "sk-test", "voyage_api_key": "pa-test"}), **overrides
     )
@@ -47,7 +47,7 @@ def configured(**overrides: Any) -> settings.Settings:
 
 @pytest.fixture(autouse=True)
 def test_settings(monkeypatch: pytest.MonkeyPatch) -> settings.Settings:
-    """Every module sees test settings: keys set, vision on, the cache in a fresh temp folder."""
+    """every module sees test settings: keys set, vision on, the cache in a fresh temp folder."""
     current = configured(cache_dir=Path(tempfile.mkdtemp(prefix="ai-core-cache-")))
     for module in (
         "settings",
@@ -70,8 +70,7 @@ BILLED_PARAMS = {"billed_user": "teacher-1", "billed_org": "test-org", "billed_r
 
 
 class MemoryLedger:
-    """Test double for the Postgres usage ledger: charges kept in a list, a fixed reset time, and `already`
-    pre-spent dollars per user. Never wired in the application."""
+    """test double for the postgres usage ledger: charges kept in a list, a fixed reset time, and `already` pre-spent dollars per user."""
 
     def __init__(self) -> None:
         self.charges: list[tuple[spend.Billed, spend.Charge]] = []
@@ -101,7 +100,7 @@ class MemoryLedger:
             from learning_transport import failure
 
             raise failure(429, "AI_BUSY", "Too many AI requests")
-        # Read the existing test ledger directly, so tests can independently observe preflight checks.
+        # read the existing test ledger directly, so tests can independently observe preflight checks.
         spent = self.already.get(billed.user_id, 0.0) + sum(
             c.cost_usd for b, c in self.charges if b.user_id == billed.user_id
         )
@@ -138,7 +137,7 @@ class MemoryLedger:
 
 @pytest.fixture(autouse=True)
 def ledger() -> Iterator[MemoryLedger]:
-    """A fresh in-memory ledger for every test; the lifespan keeps a ledger it finds instead of opening Postgres."""
+    """a fresh in-memory ledger for every test; the lifespan keeps a ledger it finds instead of opening postgres."""
     app.state.ledger = fake = MemoryLedger()
     yield fake
     del app.state.ledger
@@ -146,8 +145,7 @@ def ledger() -> Iterator[MemoryLedger]:
 
 @pytest.fixture
 def api() -> Iterator[TestClient]:
-    """The app as a service account holding ai-client. The override is a test double for verified OIDC claims,
-    never wired in the application."""
+    """the app as a service account holding ai-client."""
     with as_caller(app, SERVICE_CLAIMS), TestClient(app) as client:
         yield client
 
@@ -158,8 +156,7 @@ def make_pdf(
     password: str | None = None,
     paragraphs: list[list[str]] | None = None,
 ) -> bytes:
-    """A small text PDF built with PyMuPDF. Each page's text includes its number.
-    With `paragraphs`, page i holds paragraphs[i], one text block each, instead."""
+    """a small text pdf built with pymupdf."""
     doc = pymupdf.open()
     for i in range(len(paragraphs) if paragraphs is not None else pages):
         page = doc.new_page()
@@ -187,9 +184,7 @@ STYLES = {"h1": (18, "hebo"), "h2": (14, "hebo"), "h3": (10, "hebo"), "p": (10, 
 def make_structured_pdf(
     elements: list[tuple[str, str]], header: str | None = None, footer: str | None = None
 ) -> bytes:
-    """Headings and paragraphs flowed over as many pages as needed. `elements` are ("h1"|"h2"|"h3"|"p",
-    text) or ("page", "") to start a new page; "#" in `header`/`footer` becomes the page number. Each
-    element is its own text block."""
+    """headings and paragraphs flowed over as many pages as needed. `elements` are (\"h1\"|\"h2\"|\"h3\"|\"p\", text) or (\"page\", \"\") to start a new page; \"#\" in `header`/`footer` becomes the page number."""
     doc = pymupdf.open()
     page, y = None, 0.0
     for kind, content in elements:
@@ -225,8 +220,7 @@ def make_table_pdf(
     after: str | None = None,
     widths: list[float] | None = None,
 ) -> tuple[bytes, tuple[float, float, float, float]]:
-    """One page: an optional paragraph, an optional caption line, a table (cell grid lines when `ruled`,
-    otherwise whitespace only) and an optional paragraph after it. Returns the PDF and the table's box."""
+    """one page: an optional paragraph, an optional caption line, a table (cell grid lines when `ruled`, otherwise whitespace only) and an optional paragraph after it."""
     doc = pymupdf.open()
     page = doc.new_page()
     y = 60.0
@@ -269,9 +263,7 @@ def make_figure_pdf(
     after: str | None = None,
     full_page: bool = False,
 ) -> tuple[bytes, tuple[float, float, float, float]]:
-    """One page: an optional paragraph, a drawn diagram (three labelled boxes joined by lines), an optional
-    caption line under it and an optional paragraph after. With `full_page` the diagram fills the page.
-    Returns the PDF and the diagram's box."""
+    """one page: an optional paragraph, a drawn diagram (three labelled boxes joined by lines), an optional caption line under it and an optional paragraph after."""
     doc = pymupdf.open()
     page = doc.new_page()
     y = 60.0
@@ -303,7 +295,7 @@ def make_figure_pdf(
 def rasterized(
     draw: Callable[[pymupdf.Page], None], clip: tuple | None = None, dpi: int = 150
 ) -> pymupdf.Pixmap:
-    """Whatever `draw` puts on an A4 page (or the `clip` of it), as a picture: its text is in the pixels only."""
+    """whatever `draw` puts on an a4 page (or the `clip` of it), as a picture: its text is in the pixels only."""
     src = pymupdf.open()
     draw(src.new_page())
     pix = src[0].get_pixmap(dpi=dpi, clip=clip)
@@ -319,9 +311,7 @@ SCAN_BOX = (40.0, 120.0, 555.0, 700.0)  # where make_scanned_pdf(header=...) put
 def make_scanned_pdf(
     title: str, bullets: list[str], *, hidden: bool = False, header: bool = False, tiles: int = 1
 ) -> bytes:
-    """One page holding a picture of a slide (a title and bullets): a scan. With `hidden`, the scanner's
-    invisible OCR layer (render mode 3) is laid over it; with `header`, the picture sits in SCAN_BOX between a
-    typed header and footer (a picture of text on a page with a text layer); `tiles` cuts it into strips."""
+    """one page holding a picture of a slide (a title and bullets): a scan."""
 
     def slide(page: pymupdf.Page) -> None:
         page.insert_text((60, 120), title, fontsize=28)
@@ -353,7 +343,7 @@ def make_scanned_pdf(
 
 
 def make_mixed_pdf(kinds: str) -> bytes:
-    """One page per letter: 't' has a text paragraph, 'i' only an image (a scan without OCR)."""
+    """one page per letter: 't' has a text paragraph, 'i' only an image (a scan without ocr)."""
     doc = pymupdf.open()
     for i, kind in enumerate(kinds):
         page = doc.new_page()
@@ -372,8 +362,7 @@ def make_mixed_pdf(kinds: str) -> bytes:
 
 
 class FakeReranker:
-    """httpx2 transport handler standing in for Voyage's rerank API. With no `handler` it is down
-    (connection refused), so no test ever reaches the real, paid API. Records the request bodies."""
+    """httpx2 transport handler standing in for voyage's rerank api."""
 
     def __init__(self, handler: Callable[[httpx2.Request], httpx2.Response] | None = None) -> None:
         self.handler = handler
@@ -408,8 +397,7 @@ class FakeOpenAI:
 def embedding_response(
     vectors: list[list[float]], *, prompt_tokens: int = 8, order: list[int] | None = None
 ) -> dict:
-    """An embeddings response with base64 vectors, as OpenAI returns for the SDK's default request.
-    `order` lists the indexes in the order they appear in `data`."""
+    """an embeddings response with base64 vectors, as openai returns for the sdk's default request. `order` lists the indexes in the order they appear in `data`."""
 
     def b64(v: list[float]) -> str:
         return base64.b64encode(array.array("f", v).tobytes()).decode()
@@ -432,7 +420,7 @@ CACHED_USAGE = {**USAGE, "prompt_tokens_details": {"cached_tokens": 100}}
 def chat_response(
     content: str | None, *, finish_reason: str = "stop", refusal: str | None = None, usage: dict = USAGE
 ) -> dict:
-    """A non-streamed chat completion."""
+    """a non-streamed chat completion."""
     return {
         "id": "chatcmpl-test",
         "object": "chat.completion",
@@ -456,8 +444,7 @@ def chat_stream(
     fail_after: int | None = None,
     failure: type[httpx2.TransportError] = httpx2.ReadError,
 ) -> httpx2.Response:
-    """A streamed chat completion: one SSE chunk per delta, a final finish_reason chunk, the `choices: []`
-    usage chunk and [DONE]. `fail_after=n` breaks the connection after n deltas, with `failure`."""
+    """a streamed chat completion: one sse chunk per delta, a final finish_reason chunk, the `choices: []` usage chunk and [done]. `fail_after=n` breaks the connection after n deltas, with `failure`."""
 
     def event(choices: list[dict], **extra: Any) -> bytes:
         chunk = {
@@ -485,7 +472,7 @@ def chat_stream(
 
 @pytest.fixture
 def reranker_fake(monkeypatch: pytest.MonkeyPatch) -> FakeReranker:
-    """rerank's client sends to a FakeReranker (down until a test gives it a handler)."""
+    """rerank's client sends to a fakereranker (down until a test gives it a handler)."""
     fake = FakeReranker()
     client = httpx2.AsyncClient(base_url="https://voyage.test/v1", transport=httpx2.MockTransport(fake))
     monkeypatch.setattr(rerank, "_client", client)
@@ -494,7 +481,7 @@ def reranker_fake(monkeypatch: pytest.MonkeyPatch) -> FakeReranker:
 
 @pytest.fixture
 def openai_fake(monkeypatch: pytest.MonkeyPatch) -> FakeOpenAI:
-    """Points openai_client at a mock transport; retry sleeps are recorded, not slept."""
+    """points openai_client at a mock transport; retry sleeps are recorded, not slept."""
     fake = FakeOpenAI()
 
     async def fake_sleep(delay: float) -> None:
@@ -509,7 +496,7 @@ def openai_fake(monkeypatch: pytest.MonkeyPatch) -> FakeOpenAI:
 
 
 def fake_embeddings(request: httpx2.Request) -> httpx2.Response:
-    """Replies to any embeddings request with one 1536-float vector per input."""
+    """replies to any embeddings request with one 1536-float vector per input."""
     inputs = json.loads(request.content)["input"]
     return httpx2.Response(
         200, json=embedding_response([[0.01 * (i % 7 + 1)] * 1536 for i in range(len(inputs))])
@@ -517,7 +504,7 @@ def fake_embeddings(request: httpx2.Request) -> httpx2.Response:
 
 
 def page_key0(path: Path) -> str:
-    """The vision cache key of a PDF's first page (The cache is keyed by page content)."""
+    """the vision cache key of a pdf's first page (the cache is keyed by page content)."""
     from ingest.pages import page_key
 
     with pymupdf.open(path) as doc:
@@ -542,7 +529,7 @@ _EMPTY: dict[str, Any] = {
 }
 
 
-# ---- POST /v1/ingest helpers; the vision pass is off unless a test turns it on (`with_vision`)
+# ---- post /v1/ingest helpers; the vision pass is off unless a test turns it on (`with_vision`)
 
 SENTENCE = "Chloroplasts capture light energy and convert it into chemical energy for the plant. "
 

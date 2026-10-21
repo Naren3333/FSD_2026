@@ -10,7 +10,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
-// store is Identity's data: users, classrooms and enrollments.
+// store is identity's data: users, classrooms and enrollments.
 type store interface {
 	countClassrooms(ctx context.Context, org, subject string, teacher bool) (int, error)
 	registerUser(ctx context.Context, org, subject, role, username, name string) error
@@ -29,20 +29,17 @@ type store interface {
 	deleteAccount(ctx context.Context, org, subject string) error
 }
 
-// pgStore is the store in the service's own Postgres database.
+// pgstore is the store in the service's own postgres database.
 type pgStore struct{ db *pgxpool.Pool }
 
-// errRoleChanged is registerUser's answer when the account was registered with the other role. An account is a
-// teacher or a student for good: its role never changes.
+// errrolechanged is registeruser's answer when the account was registered with the other role.
 var errRoleChanged = errors.New("the account was registered with another role")
 
-// errAccountDeleted is registerUser's answer for an account its user deleted: it cannot be used again.
+// erraccountdeleted is registeruser's answer for an account its user deleted: it cannot be used again.
 var errAccountDeleted = errors.New("the account was deleted")
 
-// registerUser upserts the organization and the user's names in one transaction, recording the role on first
-// registration. It returns errRoleChanged when the account is already registered with another role in this
-// organization, and errAccountDeleted when its user deleted it; an account presenting another organization changes
-// nothing.
+// registeruser upserts the organization and the user's names in one transaction, recording the role on
+// first registration.
 func (p pgStore) registerUser(ctx context.Context, org, subject, role, username, name string) error {
 	tx, err := p.db.Begin(ctx)
 	if err != nil {
@@ -73,8 +70,7 @@ func (p pgStore) registerUser(ctx context.Context, org, subject, role, username,
 	return tx.Commit(ctx)
 }
 
-// findClassroomOwner returns the classroom's organization and teacher.
-// It returns platform.ErrNotFound when the classroom does not exist or was deleted.
+// findclassroomowner returns the classroom's organization and teacher.
 func (p pgStore) findClassroomOwner(ctx context.Context, classroom string) (org, teacher string, err error) {
 	err = p.db.QueryRow(ctx, "SELECT org_id,teacher_id FROM classrooms WHERE id=$1 AND deleted_at IS NULL", classroom).Scan(&org, &teacher)
 	return org, teacher, err
@@ -86,12 +82,11 @@ func (p pgStore) isEnrolled(ctx context.Context, classroom, student string) (boo
 	return enrolled, err
 }
 
-// errProfileRequired is insertClassroom's answer when the teacher (or their organization) has not registered yet,
-// or the account was deleted.
+// errprofilerequired is insertclassroom's answer when the teacher (or their organization) has not
+// registered yet, or the account was deleted.
 var errProfileRequired = errors.New("the teacher has not registered")
 
-// insertClassroom creates the classroom for a registered teacher. It holds the teacher's row shared, so a concurrent
-// account deletion (deleteAccount) either waits and then finds this classroom, or has already deleted the account.
+// insertclassroom creates the classroom for a registered teacher.
 func (p pgStore) insertClassroom(ctx context.Context, id, name, org, teacher string) error {
 	tx, err := p.db.Begin(ctx)
 	if err != nil {
@@ -136,12 +131,11 @@ func (p pgStore) studentExists(ctx context.Context, student, org string) (bool, 
 	return exists, err
 }
 
-// errStudentDeleted is insertEnrollment's answer when the student deleted their account meanwhile.
+// errstudentdeleted is insertenrollment's answer when the student deleted their account meanwhile.
 var errStudentDeleted = errors.New("the student's account was deleted")
 
-// insertEnrollment enrolls the student, or returns platform.ErrNotFound when the classroom was deleted meanwhile and
-// errStudentDeleted when the student's account was. It locks the classroom and student rows, so a concurrent delete
-// of either waits for the enrollment (and removes it) or has already marked the row deleted.
+// insertenrollment enrolls the student, or returns platform.errnotfound when the classroom was deleted
+// meanwhile and errstudentdeleted when the student's account was.
 func (p pgStore) insertEnrollment(ctx context.Context, classroom, student string) error {
 	tx, err := p.db.Begin(ctx)
 	if err != nil {
@@ -165,8 +159,7 @@ func (p pgStore) insertEnrollment(ctx context.Context, classroom, student string
 	return tx.Commit(ctx)
 }
 
-// studentsNamed returns the ids of the organization's students with this username, ignoring case. More than one
-// means the username is ambiguous.
+// studentsnamed returns the ids of the organization's students with this username, ignoring case.
 func (p pgStore) studentsNamed(ctx context.Context, org, username string) ([]string, error) {
 	rows, err := p.db.Query(ctx, "SELECT id FROM users WHERE org_id=$1 AND lower(username)=lower($2) AND role='student' AND deleted_at IS NULL LIMIT 2", org, username)
 	if err != nil {
@@ -175,9 +168,8 @@ func (p pgStore) studentsNamed(ctx context.Context, org, username string) ([]str
 	return pgx.CollectRows(rows, pgx.RowTo[string])
 }
 
-// removeEnrollment unenrolls the student and announces it (platform.TopicEnrollmentRemoved) in one transaction, and
-// reports whether the student was enrolled. Removing a student a concurrent request has just removed announces
-// nothing again.
+// removeenrollment unenrolls the student and announces it (platform.topicenrollmentremoved) in one
+// transaction, and reports whether the student was enrolled.
 func (p pgStore) removeEnrollment(ctx context.Context, classroom, org, student string) (bool, error) {
 	tx, err := p.db.Begin(ctx)
 	if err != nil {
@@ -194,10 +186,11 @@ func (p pgStore) removeEnrollment(ctx context.Context, classroom, org, student s
 	return true, tx.Commit(ctx)
 }
 
-// rosterOrder orders a classroom's enrolled students by name, those without one last, by id.
+// rosterorder orders a classroom's enrolled students by name, those without one last, by id.
 const rosterOrder = "ORDER BY lower(COALESCE(u.display_name,u.username)) NULLS LAST,u.id"
 
-// listStudents is one page of the classroom's roster with names, in rosterOrder, with how many are enrolled in all.
+// liststudents is one page of the classroom's roster with names, in rosterorder, with how many are enrolled
+// in all.
 func (p pgStore) listStudents(ctx context.Context, classroom string, offset, limit int) ([]Student, int, error) {
 	var total int
 	if err := p.db.QueryRow(ctx, "SELECT count(*) FROM enrollments e JOIN users u ON u.id=e.student_id WHERE e.classroom_id=$1", classroom).Scan(&total); err != nil {
@@ -211,9 +204,7 @@ func (p pgStore) listStudents(ctx context.Context, classroom string, offset, lim
 	return students, total, err
 }
 
-// listStudentIDs is every enrolled student's id, by id and without listStudents' cap: other services keep a removed
-// student's work out of the teacher's lists by it, so a student left off would vanish from them. They only test
-// membership, so it is read from the enrollments' primary key alone, with no names to sort by.
+// return the complete enrolled-student identifier set for authorization filters.
 func (p pgStore) listStudentIDs(ctx context.Context, classroom string) ([]string, error) {
 	rows, err := p.db.Query(ctx, "SELECT student_id FROM enrollments WHERE classroom_id=$1 ORDER BY student_id", classroom)
 	if err != nil {
@@ -222,9 +213,7 @@ func (p pgStore) listStudentIDs(ctx context.Context, classroom string) ([]string
 	return pgx.CollectRows(rows, pgx.RowTo[string])
 }
 
-// listOrgStudents is one page of the organization's students who have signed in since names were recorded, by
-// name, with how many match in all. search narrows them to names or usernames containing it, ignoring case.
-// Accounts with no name yet are left out: a teacher could not tell them apart.
+// page signed-in organization students with case-insensitive name and username filtering.
 func (p pgStore) listOrgStudents(ctx context.Context, org, search string, offset, limit int) ([]Student, int, error) {
 	const match = `FROM users WHERE org_id=$1 AND role='student' AND deleted_at IS NULL AND username IS NOT NULL AND ($2='' OR strpos(lower(COALESCE(display_name,'')||' '||username),lower($2))>0)`
 	var total int
@@ -245,10 +234,8 @@ func scanStudent(row pgx.CollectableRow) (Student, error) {
 	return v, err
 }
 
-// deleteClassroom marks the classroom deleted, unenrolls its students and announces it, in one transaction, so no
-// student stays tied to it and every other service purges its data for it. The students' accounts are untouched.
-// The classroom row is kept as the record that it was deleted. Deleting a classroom that a concurrent request has
-// just deleted changes nothing and announces nothing again.
+// deleteclassroom marks the classroom deleted, unenrolls its students and announces it, in one transaction,
+// so no student stays tied to it and every other service purges its data for it.
 func (p pgStore) deleteClassroom(ctx context.Context, classroom, org string) error {
 	tx, err := p.db.Begin(ctx)
 	if err != nil {
@@ -269,23 +256,19 @@ func (p pgStore) deleteClassroom(ctx context.Context, classroom, org string) err
 	return err
 }
 
-// errOwnsClassrooms is deleteAccount's answer for a teacher who still has classrooms: deleting those is a separate,
-// deliberate step (deleteClassroom), since it deletes every student's work in them.
+// errownsclassrooms is deleteaccount's answer for a teacher who still has classrooms: deleting those is a
+// separate, deliberate step (deleteclassroom), since it deletes every student's work in them.
 var errOwnsClassrooms = errors.New("the teacher still has classrooms")
 
-// deleteAccount deletes the caller's own account and announces it (platform.TopicUserDeleted) in one transaction:
-// the account's names are cleared, a student's enrollments go, and every other service purges the user's data.
-// The row stays, marked deleted, so the account can never register again, and the sign-in account is removed from
-// Keycloak afterwards (signInCleanup). It returns platform.ErrNotFound when the account is not registered here or is
-// already deleted, and errOwnsClassrooms for a teacher with classrooms.
+// clear the caller's profile and enrollments and announce deletion atomically.
 func (p pgStore) deleteAccount(ctx context.Context, org, subject string) error {
 	tx, err := p.db.Begin(ctx)
 	if err != nil {
 		return err
 	}
 	defer tx.Rollback(ctx)
-	// Locked first, so a classroom or enrollment being created for the account (which holds the row shared) commits
-	// before the classrooms are counted.
+	// locked first, so a classroom or enrollment being created for the account (which holds the row shared)
+	// commits before the classrooms are counted.
 	var role string
 	if err = tx.QueryRow(ctx, "SELECT role FROM users WHERE id=$1 AND org_id=$2 AND deleted_at IS NULL FOR UPDATE", subject, org).Scan(&role); err != nil {
 		return err

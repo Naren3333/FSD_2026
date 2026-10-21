@@ -190,8 +190,7 @@ def test_a_refused_token_request_is_an_upstream_error() -> None:
 
 
 def test_calls_queued_behind_a_failed_token_fetch_fail_at_once(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Keycloak hanging: the first call waits out the fetch, the ones queued behind it fail without asking again,
-    and after FAILURE_TTL the next call tries Keycloak again."""
+    """keycloak hanging: the first call waits out the fetch, the ones queued behind it fail without asking again, and after failure_ttl the next call tries keycloak again."""
     clock = [100.0]
     monkeypatch.setattr("learning_transport.tokens._now", lambda: clock[0])
     calls = 0
@@ -209,7 +208,7 @@ def test_calls_queued_behind_a_failed_token_fetch_fail_at_once(monkeypatch: pyte
         async with httpx.AsyncClient(transport=httpx.MockTransport(answer)) as http:
             token = ServiceToken(http, "http://kc/token", "id", "secret")
             failed = await asyncio.gather(*(token.get() for _ in range(5)), return_exceptions=True)
-            clock[0] += 6  # past FAILURE_TTL
+            clock[0] += 6  # past failure_ttl
             return failed, await token.get()
 
     failed, fresh = run(scenario())

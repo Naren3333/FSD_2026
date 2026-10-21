@@ -1,5 +1,4 @@
-"""The consumer's SQL against a real PostgreSQL. Needs ANALYTICS_TEST_DATABASE_URL, a scratch database; each test
-works in its own throwaway schema with the service's migrations, dropped afterwards. Skipped without it."""
+"""the consumer's sql against a real postgresql."""
 
 import os
 import threading
@@ -66,7 +65,7 @@ def deletion(classroom: str) -> ClassroomDeletedEvent:
 
 
 def assessment_deletion(event: Event) -> AssessmentDeletedEvent:
-    """The deletion of the assessment a finalized grade is for."""
+    """the deletion of the assessment a finalized grade is for."""
     assessment = str(event.data.assessment_id)
     return AssessmentDeletedEvent.model_validate(
         {
@@ -150,7 +149,7 @@ def test_a_deleted_assessments_evidence_goes_and_stays_gone(pool):
     purge_assessment(pool, assessment_deletion(deleted))  # a repeated deletion changes nothing
     assert evidence_of(pool, room) == 1
     assert count(pool, "SELECT count(*) FROM evaluations") == 1
-    # Another grade for the deleted assessment, published before the deletion but consumed after it.
+    # another grade for the deleted assessment, published before the deletion but consumed after it.
     late = grade(room)
     late.data.assessment_id = deleted.data.assessment_id
     process(pool, late)
@@ -169,7 +168,7 @@ def test_a_deleted_accounts_evidence_goes_and_stays_gone(pool):
     purge_user(pool, user_deletion(student))  # a repeated deletion changes nothing
     assert evidence_of(pool, room) == 1
     assert count(pool, "SELECT count(*) FROM evaluations") == 1
-    # Another of the student's grades, published before the deletion but consumed after it.
+    # another of the student's grades, published before the deletion but consumed after it.
     late = grade(room)
     late.data.student_id = student
     process(pool, late)
@@ -178,7 +177,7 @@ def test_a_deleted_accounts_evidence_goes_and_stays_gone(pool):
 
 
 def wait_for_lock(pool: ConnectionPool[Any], done: threading.Event) -> None:
-    """Waits until some session is waiting on an advisory lock, failing if the work finished without waiting."""
+    """waits until some session is waiting on an advisory lock, failing if the work finished without waiting."""
     deadline = time.monotonic() + 5
     while count(pool, "SELECT count(*) FROM pg_stat_activity WHERE wait_event='advisory'") == 0:
         assert not done.is_set(), "it did not wait for the classroom lock"
@@ -199,7 +198,7 @@ def in_thread(work: Callable[[], None]) -> tuple[threading.Thread, threading.Eve
 
 
 def test_a_grade_waits_for_a_purge_of_its_classroom_in_progress(pool):
-    """A purge holding the classroom's lock commits its tombstone first; the grade then sees it."""
+    """a purge holding the classroom's lock commits its tombstone first; the grade then sees it."""
     room = str(uuid4())
     event = grade(room)
     with pool.connection() as conn, conn.transaction():
@@ -212,7 +211,7 @@ def test_a_grade_waits_for_a_purge_of_its_classroom_in_progress(pool):
 
 
 def test_a_purge_waits_for_a_grade_of_its_classroom_in_progress(pool):
-    """A grade holding the classroom's lock commits its evidence first; the purge then removes it."""
+    """a grade holding the classroom's lock commits its evidence first; the purge then removes it."""
     room = str(uuid4())
     with pool.connection() as conn, conn.transaction():
         lock(conn, LOCK_CLASSROOM, room)

@@ -1,8 +1,4 @@
-"""identity.classroom.deleted.v1: when a classroom is deleted, its chat threads and their messages are removed.
-content.deleted.v1: when a teacher deletes a document, the passages past answers copied from it are blanked and
-marked removed (ADR 0009). identity.user.deleted.v1: when a user deletes their account, their threads and messages
-are removed (ADR 0011). Messages that don't match the contract are dead-lettered; learning_transport.kafka runs
-the consumer."""
+"""purge deleted classrooms and users; redact citations when their documents are deleted."""
 
 import threading
 from typing import Any, Literal
@@ -26,7 +22,8 @@ from store import LOCK_DOCUMENT
 
 DOCUMENT_DELETED = "content.deleted.v1"
 GROUP = "question-chatbot-agent-v1"
-# Blanks every citation of the document in one message's citations (%s: the document id), keeping their order.
+# blanks every citation of the document in one message's citations (%s: the document id), keeping their
+# order.
 REDACT = """(SELECT jsonb_agg(CASE WHEN c->>'document_id' = %s
     THEN c || '{"content": "", "image": null, "removed": true}'::jsonb ELSE c END ORDER BY n)
     FROM jsonb_array_elements(citations) WITH ORDINALITY AS e(c, n))"""
@@ -50,9 +47,7 @@ class DocumentDeletedEvent(Envelope):
 
 
 def purge(pool: ConnectionPool[Any], value: bytes | None) -> bool:
-    """Delete the classroom's threads (their messages go with them) and remember the classroom, so no thread is
-    created in it afterwards (store.create_thread takes the same lock). False when the message is not a valid
-    deletion. Deleting what is already gone changes nothing, so a repeated event is harmless."""
+    """delete the classroom's threads (their messages go with them) and remember the classroom, so no thread is created in it afterwards (store.create_thread takes the same lock)."""
     event = parse(ClassroomDeletedEvent, value)
     if event is None:
         return False
@@ -70,10 +65,7 @@ def purge(pool: ConnectionPool[Any], value: bytes | None) -> bool:
 
 
 def redact(pool: ConnectionPool[Any], value: bytes | None) -> bool:
-    """Blank the passages and figures that the classroom's past answers cite from the deleted document, marking each
-    citation removed, and remember the document, so an answer still being written when it was deleted is saved the
-    same way (store.save_answer). The answers' own words stay. False when the message is not a valid deletion.
-    Redacting what is already blank changes nothing, so a repeated event is harmless."""
+    """redact deleted-source citations and remember deletion for answers still being saved."""
     event = parse(DocumentDeletedEvent, value)
     if event is None:
         return False
@@ -95,9 +87,7 @@ def redact(pool: ConnectionPool[Any], value: bytes | None) -> bool:
 
 
 def purge_user(pool: ConnectionPool[Any], value: bytes | None) -> bool:
-    """Delete the threads (and so the messages) of a user who deleted their account and remember them, so no thread
-    is created for them afterwards (store.create_thread takes the same lock). False when the message is not a valid
-    deletion. Deleting what is already gone changes nothing, so a repeated event is harmless."""
+    """delete the threads (and so the messages) of a user who deleted their account and remember them, so no thread is created for them afterwards (store.create_thread takes the same lock)."""
     event = parse(UserDeletedEvent, value)
     if event is None:
         return False

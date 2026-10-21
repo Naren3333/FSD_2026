@@ -1,6 +1,4 @@
-"""The question-generation agent's HTTP contract (ADR 0006). Questions come back as drafts in Assessment's own question
-shape for the teacher to review in the editor; nothing is saved here, and Assessment validates every question again
-when the teacher saves it."""
+"""the question-generation agent's http contract (adr 0006)."""
 
 from collections.abc import Sequence
 from typing import Annotated, Literal, Self
@@ -9,7 +7,7 @@ from uuid import UUID
 from learning_transport import Contract
 from pydantic import Field, StringConstraints, model_validator
 
-# The limits Assessment applies (services/assessment/questions.go and domain.go).
+# the limits assessment applies (services/assessment/questions.go and domain.go).
 MAX_PROMPT = 2000
 MAX_ANSWER = 500  # also an option and an accepted answer
 MAX_ACCEPTED = 20
@@ -24,7 +22,7 @@ MAX_EXCERPT_TEXT = 2000
 MAX_SOURCES = 5
 DEFAULT_MAX_LENGTH = 5000
 
-# This agent's own limits.
+# this agent's own limits.
 MAX_COUNT = 10
 MAX_DOCUMENTS = 10
 MAX_FOCUS = 300
@@ -49,7 +47,7 @@ class GenerateRequest(Contract):
     difficulty: Difficulty
     count: int = Field(ge=1, le=MAX_COUNT)
     focus: Annotated[str, StringConstraints(strip_whitespace=True, max_length=MAX_FOCUS)] = ""
-    # The questions the editor already holds, so the agent can drop near-duplicates. Used once, never stored.
+    # the questions the editor already holds, so the agent can drop near-duplicates.
     existing_prompts: list[Annotated[str, StringConstraints(max_length=MAX_PROMPT)]] = Field(
         default=[], max_length=MAX_EXISTING
     )
@@ -62,7 +60,7 @@ class GenerateRequest(Contract):
 
 
 class Excerpt(Contract):
-    """A passage, as Assessment stores it: from a document (with its ids and page), or written with no ids."""
+    """a passage, as assessment stores it: from a document (with its ids and page), or written with no ids."""
 
     document_id: UUID | None = None
     chunk_id: UUID | None = None
@@ -86,7 +84,7 @@ class Rubric(Contract):
 
 
 class DraftQuestion(Contract):
-    """A question as Assessment takes it in a draft, with its sources and origin (ADR 0006)."""
+    """a question as assessment takes it in a draft, with its sources and origin (adr 0006)."""
 
     prompt: str
     type: Generatable
@@ -119,7 +117,7 @@ class GenerateResponse(Contract):
 
 
 class GuidanceRequest(Contract):
-    """Marking guidance for a question the teacher wrote, drafted from the documents they choose."""
+    """marking guidance for a question the teacher wrote, drafted from the documents they choose."""
 
     classroom_id: UUID
     document_ids: list[UUID] = Field(min_length=1, max_length=MAX_DOCUMENTS)
@@ -136,7 +134,7 @@ class GuidanceRequest(Contract):
 class Guidance(Contract):
     type: TeacherMarked
     accepted_answers: list[str]  # a short answer's suggested accepted answers; empty for a free response
-    rubric: Rubric | None  # a free response's rubric and model answer; None for a short answer
+    rubric: Rubric | None  # a free response's rubric and model answer; none for a short answer
     marking_points: Excerpt  # what earns each mark, as a marking-scheme passage with no document
     sources: list[Excerpt]
     evidence: str

@@ -1,5 +1,4 @@
-"""Fakes for the agent's tests: Identity, Curriculum, Content, ai-core and Keycloak's token endpoint behind one httpx
-MockTransport. The application's own Services client talks to them unchanged."""
+"""fakes for the agent's tests: identity, curriculum, content, ai-core and keycloak's token endpoint behind one httpx mocktransport."""
 
 import json
 from collections.abc import Iterator
@@ -53,7 +52,7 @@ def reply(body: dict[str, Any]) -> httpx.Response:
 
 
 class Fakes:
-    """What the other services answer. Every request is recorded."""
+    """what the other services answer."""
 
     def __init__(self) -> None:
         self.teachers = {("Bearer t1", ROOM)}
@@ -122,8 +121,7 @@ def api(fakes: Fakes) -> Iterator[TestClient]:
 
 
 def fake_actor(request: Request) -> dict[str, Any]:
-    """Verified claims for the user named in the test's Authorization header: t… is a teacher, a… a service account,
-    anyone else a student. Real JWT verification is tested in packages/python-platform."""
+    """verified claims for the user named in the test's authorization header: t… is a teacher, a… a service account, anyone else a student."""
     user = request.headers["authorization"].removeprefix("Bearer ")
     role = "teacher" if user.startswith("t") else "ai-client" if user.startswith("a") else "student"
     return token_claims(role, sub=user, org="org")

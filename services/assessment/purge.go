@@ -7,15 +7,13 @@ import (
 	"github.com/jackc/pgx/v5"
 )
 
-// purge removes a deleted classroom's assessments with their submissions and saved work, with any of its submission events not yet
-// published, and remembers the classroom so an assessment created meanwhile is refused. Deleting what is already gone
-// changes nothing, so a repeated event is harmless.
+// purge classroom work and pending events; remember deletion to reject racing writes.
 func purge(ctx context.Context, tx pgx.Tx, event platform.Event) error {
 	v, err := platform.DecodeClassroomDeleted(event)
 	if err != nil {
 		return err
 	}
-	// Waits for assessments being created in the classroom, and makes later ones see it purged.
+	// waits for assessments being created in the classroom, and makes later ones see it purged.
 	if err = platform.Lock(ctx, tx, platform.LockClassroom, v.Classroom); err != nil {
 		return err
 	}
@@ -31,10 +29,7 @@ func purge(ctx context.Context, tx pgx.Tx, event platform.Event) error {
 	return platform.DiscardPending(ctx, tx, v)
 }
 
-// purgeUser removes the submissions and saved work of a student who deleted their account, and their submission
-// events not yet published, and remembers them so a submission or save racing the deletion is refused. It holds
-// the student's lock against lockStudentWork. A teacher deletes their classrooms first, and those purges remove
-// their assessments, so a teacher's deletion leaves nothing here. A repeated event changes nothing.
+// purge a deleted student's work and pending events; reject racing writes.
 func purgeUser(ctx context.Context, tx pgx.Tx, event platform.Event) error {
 	v, err := platform.DecodeUserDeleted(event)
 	if err != nil {
@@ -51,6 +46,6 @@ func purgeUser(ctx context.Context, tx pgx.Tx, event platform.Event) error {
 	if err = platform.ExecAll(ctx, tx, statements, v.User, v.Org); err != nil {
 		return err
 	}
-	// Published or not, as for a deleted assessment: no copy of the student's answers stays in the outbox.
+	// published or not, as for a deleted assessment: no copy of the student's answers stays in the outbox.
 	return platform.DiscardPendingBy(ctx, tx, topicSubmittedAll, "student_id", v.User, v.Org)
 }

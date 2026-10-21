@@ -1,16 +1,4 @@
-"""Run the integration, database and browser tests against a disposable test stack, never the development one.
-
-The test stack is a second Compose project of docker-compose.yml, `learning-test`, with its own containers, network,
-volumes and ports (Kong 18000, Keycloak 18081, the web app 14200; local_stack.TEST_PORTS), so it runs beside a
-development stack without touching it. Its databases, Kafka topics, documents and Keycloak start empty but for the
-seeded local accounts, from the same .env. Each run creates it fresh, runs the suites in order and removes it with
-its volumes; --keep leaves it running to look at afterwards (the next run replaces it).
-
-    python scripts/stack_tests.py                     # integration, db and e2e
-    python scripts/stack_tests.py integration --live-ai
-    python scripts/stack_tests.py e2e --keep
-    python scripts/stack_tests.py scale               # the scale-out load test (scripts/scale_demo.py), only when named
-"""
+"""run the integration, database and browser tests against a disposable test stack, never the development one."""
 
 import argparse
 import json
@@ -23,7 +11,7 @@ from pathlib import Path
 from local_stack import ROOT, TEST_PORTS, TEST_PROJECT, env
 from setup import TEST_WEB_ORIGIN, postgres_init, realm
 
-# Each suite's command and working directory, in the order they run.
+# each suite's command and working directory, in the order they run.
 NPM = "npm.cmd" if os.name == "nt" else "npm"
 SUITES: dict[str, tuple[list[str], Path]] = {
     "integration": ([sys.executable, "scripts/integration.py"], ROOT),
@@ -31,17 +19,15 @@ SUITES: dict[str, tuple[list[str], Path]] = {
     "e2e": ([NPM, "run", "test:e2e"], ROOT / "apps/web"),
     "scale": ([sys.executable, "scripts/scale_demo.py"], ROOT),
 }
-# The suites a run without any named runs. The scale demo is a load test, not a check, so it runs only when named.
+# the suites a run without any named runs.
 DEFAULT_SUITES = ["integration", "db", "e2e"]
-# Compose files the scale demo adds: its replicas, CPU caps and the k6 load generator.
+# compose files the scale demo adds: its replicas, cpu caps and the k6 load generator.
 SCALE_FILE = "docker-compose.scale.yml"
 READY_TIMEOUT = 600  # seconds: a fresh stack imports the realm and runs every migration before it answers
-# The test stack's PostgreSQL init script and realm import, beside the development stack's in .local (relative to
-# the repository, as docker-compose.yml's LOCAL_CONFIG_DIR reads it).
+# the test stack's postgresql init script and realm import, beside the development stack's in .local
+# (relative to the repository, as docker-compose.yml's local_config_dir reads it).
 TEST_LOCAL_CONFIG_DIR = ".local/test-stack"
-# Every `docker compose` command here and in the test scripts acts on the project this names (Compose reads it before
-# the file's `name:`), publishes the test ports and mounts the test stack's first-start files; integration.py and the
-# browser tests refuse to run without it, and reach the stack on those ports.
+# isolate compose commands, ports and first-start files from the development stack.
 TEST_ENV = {
     **os.environ,
     "COMPOSE_PROJECT_NAME": TEST_PROJECT,
@@ -51,15 +37,12 @@ TEST_ENV = {
 
 
 def compose(*args: str, check: bool = True) -> subprocess.CompletedProcess[str]:
-    """Runs `docker compose` on the test stack, showing its output."""
+    """runs `docker compose` on the test stack, showing its output."""
     return subprocess.run(["docker", "compose", *args], cwd=ROOT, env=TEST_ENV, text=True, check=check)
 
 
 def refresh_local_files() -> None:
-    """Writes the test stack's PostgreSQL init script and realm import from .env, as scripts/setup.py writes the
-    development stack's, into TEST_LOCAL_CONFIG_DIR. The realm allows the test stack's web origin only, so the
-    development stack's import never lists it. The fresh test volumes get every current database and client even
-    when the development stack's files predate them (upgrade_local.py adds those to a running stack)."""
+    """writes the test stack's postgresql init script and realm import from .env, as scripts/setup.py writes the development stack's, into test_local_config_dir."""
     try:
         values = env()
         sql, import_ = postgres_init(values), realm(values, TEST_WEB_ORIGIN)
@@ -74,8 +57,7 @@ def refresh_local_files() -> None:
 
 
 def with_scale_file() -> None:
-    """Adds docker-compose.scale.yml to the Compose files every command of this run uses, after any COMPOSE_FILE
-    already names (Compose separates them with the platform's path separator)."""
+    """adds docker-compose.scale.yml to the compose files every command of this run uses, after any compose_file already names (compose separates them with the platform's path separator)."""
     files = TEST_ENV.get("COMPOSE_FILE") or "docker-compose.yml"
     TEST_ENV["COMPOSE_FILE"] = os.pathsep.join([files, SCALE_FILE])
 
@@ -115,7 +97,7 @@ def main() -> None:
         with_scale_file()
 
     refresh_local_files()
-    # Whatever an earlier --keep or interrupted run left, volumes included: every run starts from empty.
+    # whatever an earlier --keep or interrupted run left, volumes included: every run starts from empty.
     compose("down", "--volumes", "--remove-orphans")
     failed: list[str] = []
     try:

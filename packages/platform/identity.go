@@ -9,29 +9,26 @@ import (
 	"slices"
 )
 
-// Relations Identity reports between the caller and a classroom.
+// relations identity reports between the caller and a classroom.
 const (
 	RelationTeacher = "teacher"
 	RelationStudent = "student"
 )
 
-// ClassroomAccess answers how the caller may access a classroom. Relation writes the error response itself when it
-// denies access or cannot decide. The policy built on it (Access, TeacherOf) is in this package's functions, so the
-// real implementation and any test double share it.
+// classroomaccess answers how the caller may access a classroom.
 type ClassroomAccess interface {
-	// Relation reports how the caller may access the classroom (optionally on behalf of a student): as its
-	// teacher (RelationTeacher) or as an enrolled student (RelationStudent).
+	// relation reports how the caller may access the classroom (optionally on behalf of a student): as its
+	// teacher (relationteacher) or as an enrolled student (relationstudent).
 	Relation(w http.ResponseWriter, r *http.Request, classroom, student string) (string, bool)
 }
 
-// Access reports whether the caller may access the classroom at all, writing the refusal when not.
+// access reports whether the caller may access the classroom at all, writing the refusal when not.
 func Access(a ClassroomAccess, w http.ResponseWriter, r *http.Request, classroom, student string) bool {
 	_, ok := a.Relation(w, r, classroom, student)
 	return ok
 }
 
-// TeacherOf allows only the classroom's own teacher. The token's teacher role is not enough: a teacher may only
-// manage the classrooms Identity says they teach.
+// teacherof allows only the classroom's own teacher.
 func TeacherOf(a ClassroomAccess, w http.ResponseWriter, r *http.Request, classroom string) bool {
 	if !Teacher(w, r) {
 		return false
@@ -47,19 +44,19 @@ func TeacherOf(a ClassroomAccess, w http.ResponseWriter, r *http.Request, classr
 	return true
 }
 
-// Identity asks the Identity service, forwarding the caller's own token, so classroom policy stays with its owner.
+// identity asks the identity service, forwarding the caller's own token, so classroom policy stays with its
+// owner.
 type Identity struct {
 	base   string
 	client *http.Client
 }
 
-// NewIdentity returns a ClassroomAccess backed by the Identity service at base (IDENTITY_URL).
+// newidentity returns a classroomaccess backed by the identity service at base (identity_url).
 func NewIdentity(base string, client *http.Client) *Identity {
 	return &Identity{base: base, client: client}
 }
 
-// Relation asks Identity how the caller may access the classroom. Teacher-only data must be gated on
-// RelationTeacher, not on the token role. On denial or failure it has already written the error response.
+// relation asks identity how the caller may access the classroom.
 func (i *Identity) Relation(w http.ResponseWriter, r *http.Request, classroom, student string) (string, bool) {
 	if !ID(classroom) {
 		Invalid(w, "A valid classroom identifier is required.")
@@ -101,20 +98,17 @@ func (i *Identity) Relation(w http.ResponseWriter, r *http.Request, classroom, s
 	return answer.Relation, true
 }
 
-// maxRoster is the most of Identity's id-only roster read, in bytes: about 100,000 account ids.
+// maxroster is the most of identity's id-only roster read, in bytes: about 100,000 account ids.
 const maxRoster = 4 << 20
 
-// ClassroomRoster lists the students enrolled in a classroom, for its teacher. Roster writes the error response
-// itself when it is refused or cannot answer.
+// classroomroster lists the students enrolled in a classroom, for its teacher.
 type ClassroomRoster interface {
-	// Roster is the ids of every student enrolled in the classroom.
+	// roster is the ids of every student enrolled in the classroom.
 	Roster(w http.ResponseWriter, r *http.Request, classroom string) ([]string, bool)
 }
 
-// Roster asks Identity for the ids of the classroom's enrolled students with the caller's own token, so only the
-// classroom's teacher gets an answer. Work kept for students since removed (their submissions and grades) is left out
-// of a teacher's lists with it, so it asks for the id-only roster, which has every student: the named one stops at 500.
-// On denial or failure it has already written the error response.
+// roster asks identity for the ids of the classroom's enrolled students with the caller's own token, so
+// only the classroom's teacher gets an answer.
 func (i *Identity) Roster(w http.ResponseWriter, r *http.Request, classroom string) ([]string, bool) {
 	if !ID(classroom) {
 		Invalid(w, "A valid classroom identifier is required.")
@@ -145,8 +139,8 @@ func (i *Identity) Roster(w http.ResponseWriter, r *http.Request, classroom stri
 	var ids []string
 	body := &countingReader{r: io.LimitReader(res.Body, maxRoster)}
 	if err = json.NewDecoder(body).Decode(&ids); err != nil || ids == nil || slices.Contains(ids, "") {
-		// A roster larger than maxRoster is cut off and fails to decode; say so, since its answer is a 503 like any
-		// other unreadable roster.
+		// a roster larger than maxroster is cut off and fails to decode; say so, since its answer is a 503 like
+		// any other unreadable roster.
 		cause := "unreadable"
 		if body.n >= maxRoster {
 			cause = "over the size limit"
@@ -158,7 +152,7 @@ func (i *Identity) Roster(w http.ResponseWriter, r *http.Request, classroom stri
 	return ids, true
 }
 
-// countingReader counts the bytes read through it.
+// countingreader counts the bytes read through it.
 type countingReader struct {
 	r io.Reader
 	n int64

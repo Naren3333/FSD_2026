@@ -10,8 +10,8 @@ import {
 
 deleteTestDataAfterEach();
 
-// The agent and the classroom's documents are stubbed in the browser: real generation needs provider keys and
-// indexed PDFs. The editor, the curriculum and saving the draft are real.
+// the agent and the classroom's documents are stubbed in the browser: real generation needs provider keys
+// and indexed pdfs.
 const SLIDES = '00000000-0000-4000-8000-000000000001';
 const SCHEME = '00000000-0000-4000-8000-000000000002';
 const doc = (id: string, title: string, docType: string) => ({
@@ -105,12 +105,12 @@ test('a teacher generates questions and drafts marking guidance', async ({ page 
   await page.getByLabel('Assessment title').fill('Generated ' + suffix);
   await page.getByText('Generate questions from teaching materials').click();
   await page.getByRole('checkbox', { name: 'Testing slides' }).check();
-  // A marking scheme uploaded before they were retired is not a source for questions.
+  // a marking scheme uploaded before they were retired is not a source for questions.
   await expect(page.getByRole('checkbox', { name: 'Testing scheme' })).toHaveCount(0);
   await page.locator('#generate-topic').selectOption({ label: 'Testing topic ' + suffix });
   await page.getByRole('button', { name: 'Generate questions' }).click();
   await expect(page.getByText('Searching the class materials failed. Try again later.')).toBeVisible();
-  // Enter in the focus field generates instead of saving the assessment.
+  // enter in the focus field generates instead of saving the assessment.
   await page.getByLabel('Focus (optional)').fill('unit tests');
   await page.getByLabel('Focus (optional)').press('Enter');
   await expect(page.getByText(/2 of 3\s+questions drafted\.\s+1 draft was left out/)).toBeVisible();
@@ -126,8 +126,8 @@ test('a teacher generates questions and drafts marking guidance', async ({ page 
   await first.getByText('AI-generated from 1 passage of your materials').click();
   await expect(first.getByText('Testing slides, page 2')).toBeVisible();
 
-  // A hand-written short answer gets drafted guidance, from teaching materials only, then a marking point of the
-  // teacher's own.
+  // a hand-written short answer gets drafted guidance, from teaching materials only, then a marking point
+  // of the teacher's own.
   await page.getByRole('button', { name: 'Add question', exact: true }).click();
   const second = page.getByRole('group', { name: 'Question 2', exact: true });
   await second.getByLabel('Question', { exact: true }).fill('Name the test that checks one function.');

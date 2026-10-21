@@ -8,7 +8,7 @@ import (
 	"github.com/google/uuid"
 )
 
-// server answers Curriculum's HTTP routes from its store.
+// server answers curriculum's http routes from its store.
 type server struct{ store store }
 
 func (s server) routes(mux *http.ServeMux) {
@@ -146,7 +146,7 @@ func (s server) restore(w http.ResponseWriter, r *http.Request) {
 	platform.JSON(w, http.StatusOK, v)
 }
 
-// topicID reports whether the path's topic id is a UUID, answering 404 like a missing topic when it is not.
+// topicid reports whether the path's topic id is a uuid, answering 404 like a missing topic when it is not.
 func topicID(w http.ResponseWriter, r *http.Request) bool {
 	if !platform.ID(r.PathValue("id")) {
 		platform.NotFound(w, "Topic not found.")
@@ -186,8 +186,7 @@ func (s server) addPrerequisite(w http.ResponseWriter, r *http.Request) {
 	platform.JSON(w, http.StatusOK, map[string]string{"topic_id": id, "prerequisite_id": input.Prerequisite})
 }
 
-// prerequisites lists an active topic's active prerequisites, by name. A link to an archived topic is kept, and
-// listed again once that topic is restored.
+// prerequisites lists an active topic's active prerequisites, by name.
 func (s server) prerequisites(w http.ResponseWriter, r *http.Request) {
 	if !topicID(w, r) {
 		return
@@ -204,7 +203,7 @@ func (s server) prerequisites(w http.ResponseWriter, r *http.Request) {
 	platform.JSON(w, http.StatusOK, result)
 }
 
-// removePrerequisite deletes one prerequisite link, archived topics' included, for a teacher.
+// removeprerequisite deletes one prerequisite link, archived topics' included, for a teacher.
 func (s server) removePrerequisite(w http.ResponseWriter, r *http.Request) {
 	if !platform.Teacher(w, r) || !topicID(w, r) {
 		return

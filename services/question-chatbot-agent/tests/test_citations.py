@@ -8,7 +8,7 @@ TAGS = {f"S{n}": f"c{n}" for n in range(1, 13)}
 
 
 def run(deltas: list[str], tags: dict[str, str] = TAGS) -> tuple[str, CitationRewriter]:
-    """Feed the deltas one by one, as the stream does, and return everything relayed."""
+    """feed the deltas one by one, as the stream does, and return everything relayed."""
     r = CitationRewriter(tags)
     return "".join(r.feed(d) for d in deltas) + r.flush(), r
 

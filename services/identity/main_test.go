@@ -38,7 +38,7 @@ func TestDecideRelation(t *testing.T) {
 		{"student asking about someone else", claims("student-1", "student"), "org", "student-2", ""},
 		{"student not enrolled", claims("stranger", "student"), "org", "", ""},
 		{"other organization", claims("teacher-1", "teacher"), "elsewhere", "", ""},
-		// Teacher powers come from owning the classroom, student access from enrollment and the student role.
+		// teacher powers come from owning the classroom, student access from enrollment and the student role.
 		{"teacher listed as enrolled", claims("teacher-2", "teacher"), "org", "", ""},
 		{"student named as the owner", claims("teacher-1", "student"), "org", "", ""},
 	}

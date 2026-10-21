@@ -10,7 +10,7 @@ beforeAll(() => TestBed.initTestEnvironment(BrowserTestingModule, platformBrowse
 
 const room = (id: string): Classroom => ({ id, name: `Class ${id}`, teacher_id: 't1' });
 
-/** A promise and the functions that settle it, for holding a read open. */
+/* a promise and the functions that settle it, for holding a read open. */
 function deferred<T>() {
   let resolve!: (value: T) => void, reject!: (error: unknown) => void;
   const promise = new Promise<T>((yes, no) => ((resolve = yes), (reject = no)));

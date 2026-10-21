@@ -14,8 +14,8 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
-// These tests run the store and the marker against a real PostgreSQL (GRADING_TEST_DATABASE_URL); without it they
-// are skipped. scripts/db_tests.py runs them against the Compose stack.
+// these tests run the store and the marker against a real postgresql (grading_test_database_url); without
+// it they are skipped. scripts/db_tests.py runs them against the compose stack.
 
 const (
 	submissionA = "a1b2c3d4-0000-4000-8000-00000000000a"
@@ -28,7 +28,8 @@ func testDB(t *testing.T) *pgxpool.Pool {
 	return platformtest.DB(t, "GRADING_TEST_DATABASE_URL", migrations)
 }
 
-// submit consumes a v4 submission, the free response of submittedEvent with AI marking unless change says otherwise.
+// submit consumes a v4 submission, the free response of submittedevent with ai marking unless change says
+// otherwise.
 func submit(t *testing.T, db *pgxpool.Pool, id, student string, change map[string]any) {
 	t.Helper()
 	data := map[string]any{"submission_id": id, "student_id": student}
@@ -50,7 +51,7 @@ func submit(t *testing.T, db *pgxpool.Pool, id, student string, change map[strin
 	}
 }
 
-// autoMarked is a submission change: one numerical question worth 2, answered correctly, released by hand.
+// automarked is a submission change: one numerical question worth 2, answered correctly, released by hand.
 var autoMarked = map[string]any{
 	"questions":  []map[string]any{{"id": questionID, "prompt": "1+1?", "type": "numerical", "options": nil, "answer": "2", "tolerance": "0", "points": 2, "topic_id": topicID}},
 	"answers":    map[string]string{questionID: "2"},
@@ -164,7 +165,8 @@ func TestTheFinalizedEventAndStoredGradeNameTheTopic(t *testing.T) {
 	}
 }
 
-// TestTopicMigrationRenamesStoredSkillIDs stores grades as 003 left them, then checks 004 renames only the key.
+// testtopicmigrationrenamesstoredskillids stores grades as 003 left them, then checks 004 renames only the
+// key.
 func TestTopicMigrationRenamesStoredSkillIDs(t *testing.T) {
 	db := platformtest.DB(t, "GRADING_TEST_DATABASE_URL", nil)
 	ctx := t.Context()
@@ -235,7 +237,7 @@ func TestConcurrentFinalizesPublishOnce(t *testing.T) {
 	s := pgStore{db}
 	submit(t, db, submissionA, "student-a", map[string]any{"ai_marking": false, "release_policy": "on_finalize"})
 	marks := map[string]Mark{questionID: {Criteria: map[string]int{"c1": 3}}}
-	// Hold the row so both finalizes have started and wait on it before either can go on.
+	// hold the row so both finalizes have started and wait on it before either can go on.
 	blocker, err := db.Begin(t.Context())
 	if err != nil {
 		t.Fatal(err)
@@ -313,7 +315,7 @@ func TestFinalizeChecksItsRulesInTheStore(t *testing.T) {
 	}
 }
 
-// fakeSuggester answers every marking call the same way; during runs before it answers.
+// fakesuggester answers every marking call the same way; during runs before it answers.
 type fakeSuggester struct {
 	output string
 	err    error
@@ -331,7 +333,7 @@ func (f *fakeSuggester) generate(_ context.Context, _ []message, _ map[string]an
 	return f.output, "model-1", f.err
 }
 
-// markOnce leases the only marking job and works it.
+// markonce leases the only marking job and works it.
 func markOnce(t *testing.T, m marker) job {
 	t.Helper()
 	j, found, err := m.lease(t.Context())
@@ -476,7 +478,8 @@ func TestASpendLimitWaitsWithoutUsingAnAttempt(t *testing.T) {
 	}
 }
 
-// The real client against a fake ai-core: the teacher who set the assessment pays, and an empty reply fails.
+// the real client against a fake ai-core: the teacher who set the assessment pays, and an empty reply
+// fails.
 func TestTheAssessmentsTeacherPaysForMarking(t *testing.T) {
 	db := testDB(t)
 	submit(t, db, submissionA, "student-a", map[string]any{"teacher_id": "teacher-9"})
@@ -513,13 +516,12 @@ func purgeAssessmentNow(t *testing.T, db *pgxpool.Pool, event platform.Event) er
 	return tx.Commit(t.Context())
 }
 
-// A deleted assessment's grades go, finalized or not, with their audit, marking jobs and unpublished events; a
-// submission event that arrives later grades nothing, and a repeated deletion changes nothing.
+// assessment deletion removes grading data and prevents replay from recreating it.
 func TestADeletedAssessmentLeavesNoGrades(t *testing.T) {
 	db := testDB(t)
 	ctx, s := t.Context(), pgStore{db}
 	submit(t, db, submissionA, "student-a", map[string]any{"ai_marking": false, "release_policy": "on_finalize"})
-	submit(t, db, submissionB, "student-b", nil) // AI marking queues a job
+	submit(t, db, submissionB, "student-b", nil) // ai marking queues a job
 	other := "a1b2c3d4-0000-4000-8000-0000000000ff"
 	submit(t, db, other, "student-a", map[string]any{"assessment_id": other, "ai_marking": false})
 	if _, err := s.finalizeEvaluation(ctx, "org", submissionA, "teacher-1", "Checked", map[string]Mark{questionID: {Criteria: map[string]int{"c1": 3}}}); err != nil {
@@ -554,8 +556,8 @@ func TestADeletedAssessmentLeavesNoGrades(t *testing.T) {
 	}
 }
 
-// A deletion is only for the assessment, classroom and organization it names: one missing a field is dead-lettered,
-// and another organization's grade for an assessment with the same id is kept.
+// a deletion is only for the assessment, classroom and organization it names: one missing a field is
+// dead-lettered, and another organization's grade for an assessment with the same id is kept.
 func TestADeletionNeedsItsFieldsAndKeepsToItsOrganization(t *testing.T) {
 	db := testDB(t)
 	elsewhere := "a1b2c3d4-0000-4000-8000-0000000000fe"
@@ -584,7 +586,8 @@ func TestADeletionNeedsItsFieldsAndKeepsToItsOrganization(t *testing.T) {
 	}
 }
 
-// A marking job under way when its assessment is purged writes nothing: the job and its evaluation are gone.
+// a marking job under way when its assessment is purged writes nothing: the job and its evaluation are
+// gone.
 func TestAMarkingJobPurgedMidwayWritesNothing(t *testing.T) {
 	db := testDB(t)
 	submit(t, db, submissionB, "student-b", nil)
@@ -614,7 +617,8 @@ func apply(t *testing.T, db *pgxpool.Pool, handle platform.Handler, event platfo
 	return tx.Commit(t.Context())
 }
 
-// removal is identity.enrollment.removed.v1 for student-a in the test submissions' classroom, made at the given time.
+// removal is identity.enrollment.removed.v1 for student-a in the test submissions' classroom, made at the
+// given time.
 func removal(t *testing.T, at time.Time) platform.Event {
 	t.Helper()
 	data, err := json.Marshal(platform.EnrollmentRemoved{Classroom: submissionID, Org: "org", Student: "student-a"})
@@ -624,8 +628,8 @@ func removal(t *testing.T, at time.Time) platform.Event {
 	return platform.Event{Type: platform.TopicEnrollmentRemoved, Resource: submissionID, Timestamp: at, Data: data}
 }
 
-// A removed student's work stays, hidden from the teacher's lists, and the suggestion waiting for it stops without
-// an AI call. Work they submit after being enrolled again is marked as usual.
+// a removed student's work stays, hidden from the teacher's lists, and the suggestion waiting for it stops
+// without an ai call.
 func TestARemovedStudentsWorkIsKeptButNotMarked(t *testing.T) {
 	db := testDB(t)
 	ctx, s := t.Context(), pgStore{db}
@@ -637,7 +641,7 @@ func TestARemovedStudentsWorkIsKeptButNotMarked(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	// An older, replayed removal does not move the latest one back.
+	// an older, replayed removal does not move the latest one back.
 	if err := apply(t, db, removeStudent, removal(t, submitted.Add(-time.Hour))); err != nil {
 		t.Fatal(err)
 	}
@@ -669,7 +673,7 @@ func TestARemovedStudentsWorkIsKeptButNotMarked(t *testing.T) {
 	}
 }
 
-// dueChange is assessment.due_changed.v1 for the test submissions' assessment, made at the given time.
+// duechange is assessment.due_changed.v1 for the test submissions' assessment, made at the given time.
 func dueChange(t *testing.T, due *time.Time, at time.Time) platform.Event {
 	t.Helper()
 	data, err := json.Marshal(DueChanged{Assessment: submissionID, Classroom: submissionID, Org: "org", DueAt: due})
@@ -688,8 +692,7 @@ func late(t *testing.T, db *pgxpool.Pool, id string) bool {
 	return v
 }
 
-// A changed due date sets every evaluation's late flag against it, also for a submission whose event arrives after
-// the change; an older or repeated change, or one for a deleted assessment, changes nothing.
+// apply due-date changes to current and late-arriving evaluations; ignore stale events.
 func TestLateFlagsFollowTheDueDate(t *testing.T) {
 	db := testDB(t)
 	submitted := time.Date(2026, 10, 1, 9, 0, 0, 0, time.UTC)
@@ -710,7 +713,8 @@ func TestLateFlagsFollowTheDueDate(t *testing.T) {
 	if late(t, db, submissionA) {
 		t.Fatal("an older change was applied")
 	}
-	// Submitted before the extension, its event arriving after it: late against the old due date, not the new one.
+	// submitted before the extension, its event arriving after it: late against the old due date, not the new
+	// one.
 	submit(t, db, submissionB, "student-b", map[string]any{"submitted_at": submitted, "late": true})
 	if late(t, db, submissionB) {
 		t.Fatal("a submission graded after the change kept the old late flag")
@@ -738,14 +742,13 @@ func TestLateFlagsFollowTheDueDate(t *testing.T) {
 	}
 }
 
-// A student who deleted their account loses their grades, finalized or not, with their audit, marking jobs and
-// unpublished events; a submission event that arrives later grades nothing, and other students keep theirs.
+// account deletion removes only that student's grading data and blocks replay.
 func TestADeletedAccountLeavesNoGrades(t *testing.T) {
 	db := testDB(t)
 	ctx, s := t.Context(), pgStore{db}
 	gone := "b1b2c3d4-0000-4000-8000-0000000000aa"
 	submit(t, db, submissionA, gone, map[string]any{"ai_marking": false, "release_policy": "on_finalize"})
-	submit(t, db, submissionB, gone, map[string]any{"assessment_id": submissionB}) // AI marking queues a job
+	submit(t, db, submissionB, gone, map[string]any{"assessment_id": submissionB}) // ai marking queues a job
 	submit(t, db, submissionC, "student-c", map[string]any{"ai_marking": false})
 	if _, err := s.finalizeEvaluation(ctx, "org", submissionA, "teacher-1", "Checked", map[string]Mark{questionID: {Criteria: map[string]int{"c1": 3}}}); err != nil {
 		t.Fatal(err)
@@ -799,7 +802,7 @@ func TestAReleaseShowsOnlyEnrolledStudentsGrades(t *testing.T) {
 	if load(t, db, submissionB).released == nil || events(t, db, submissionB) != 1 {
 		t.Fatal("the enrolled student's grade was not released")
 	}
-	// Enrolled again, their kept grade is released at the next release.
+	// enrolled again, their kept grade is released at the next release.
 	if n, err := s.release(ctx, "org", submissionID, "teacher-1", everyone); err != nil || n != 1 || load(t, db, submissionA).released == nil {
 		t.Fatalf("release once enrolled again: %d %v", n, err)
 	}
@@ -812,7 +815,7 @@ func TestTheTeachersListComesInPagesThatNeverOverlap(t *testing.T) {
 	for i, id := range []string{submissionA, submissionB, submissionC} {
 		submit(t, db, id, everyone[i], map[string]any{"submitted_at": at})
 	}
-	// The same creation time for every one: the id orders them.
+	// the same creation time for every one: the id orders them.
 	if _, err := db.Exec(ctx, "UPDATE evaluations SET created_at=$1", at); err != nil {
 		t.Fatal(err)
 	}

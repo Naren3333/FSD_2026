@@ -1,5 +1,4 @@
-"""Bearer-token verification and the caller's identity. Identity comes only from a verified token, never from
-headers or request bodies."""
+"""bearer-token verification and the caller's identity."""
 
 import logging
 import os
@@ -24,12 +23,7 @@ log = logging.getLogger("learning_transport.auth")
 
 
 class KeySet:
-    """The identity provider's signing keys (its JWKS), cached for `lifespan` seconds. A token naming a key id the
-    cached set lacks refetches the set at most once per REFETCH_INTERVAL, so tokens with made-up key ids don't each
-    wait on the identity provider (and hammer it), while a key the provider really rotated in is still picked up
-    within the interval. A failed fetch keeps the keys already held and is retried no sooner than REFETCH_INTERVAL,
-    so an identity provider outage doesn't make every request wait on it. `fetch` replaces the HTTP request in
-    tests."""
+    """the identity provider's signing keys (its jwks), cached for `lifespan` seconds."""
 
     def __init__(
         self,
@@ -47,7 +41,7 @@ class KeySet:
         self._refetched = -REFETCH_INTERVAL
 
     def signing_key(self, token: str) -> jwt.PyJWK:
-        """The key that signed token, by the key id in its (unverified) header. PyJWTError when there is none."""
+        """the key that signed token, by the key id in its (unverified) header."""
         kid = jwt.get_unverified_header(token).get("kid")
         if not isinstance(kid, str):
             raise jwt.InvalidTokenError("The token names no signing key.")
@@ -76,7 +70,7 @@ class KeySet:
             keys = jwt.PyJWKSet.from_dict(data).keys
         except (httpx.HTTPError, ValueError, jwt.PyJWTError) as error:
             log.warning("key_set_fetch_failed", extra={"error": str(error)})
-            # Try again after REFETCH_INTERVAL, not on every request meanwhile.
+            # try again after refetch_interval, not on every request meanwhile.
             self._fetched = now - self._lifespan + REFETCH_INTERVAL
             return
         self._keys = {k.key_id: k for k in keys if k.key_id and k.public_key_use in ("sig", None)}
@@ -89,8 +83,7 @@ def keyset() -> KeySet:
 
 
 def actor(request: Request) -> dict[str, Any]:
-    """The verified claims of the request's bearer token: signature, issuer, audience and expiry are checked,
-    and `sub` and `org_id` must be present. 401 otherwise."""
+    """the verified claims of the request's bearer token: signature, issuer, audience and expiry are checked, and `sub` and `org_id` must be present. 401 otherwise."""
     auth = request.headers.get("authorization", "")
     if not auth.startswith("Bearer "):
         raise failure(401, "UNAUTHENTICATED", "Sign in to continue.")
@@ -115,7 +108,7 @@ def actor(request: Request) -> dict[str, Any]:
 
 @dataclass(frozen=True)
 class Claims:
-    """The caller, from verified token claims."""
+    """the caller, from verified token claims."""
 
     subject: str
     org: str
@@ -123,7 +116,7 @@ class Claims:
 
     @classmethod
     def from_token(cls, claims: Mapping[str, Any]) -> "Claims":
-        """Roles from `realm_access.roles`: a list of names, or one name; anything else holds no role."""
+        """roles from `realm_access.roles`: a list of names, or one name; anything else holds no role."""
         access = claims.get("realm_access")
         roles = access.get("roles") if isinstance(access, Mapping) else None
         if isinstance(roles, str):
@@ -136,8 +129,7 @@ class Claims:
 
     @property
     def person_role(self) -> str | None:
-        """The person's role, teacher or student (an account never holds both; see caller); None for a service
-        account."""
+        """the person's role, teacher or student (an account never holds both; see caller); none for a service account."""
         if self.has(TEACHER):
             return TEACHER
         if self.has(STUDENT):
@@ -146,8 +138,7 @@ class Claims:
 
 
 def caller(claims: dict[str, Any] = Depends(actor)) -> Claims:
-    """FastAPI dependency: the verified caller. An account is a teacher or a student, never both: a token holding
-    both roles is refused with 403."""
+    """fastapi dependency: the verified caller."""
     verified = Claims.from_token(claims)
     if verified.has(TEACHER) and verified.has(STUDENT):
         raise failure(403, "ROLE_CONFLICT", "An account must be either a teacher or a student, not both.")
@@ -155,7 +146,7 @@ def caller(claims: dict[str, Any] = Depends(actor)) -> Claims:
 
 
 def requires(*roles: str) -> Callable[..., Claims]:
-    """FastAPI dependency factory: the verified caller, who must hold at least one of `roles` (403 otherwise)."""
+    """fastapi dependency factory: the verified caller, who must hold at least one of `roles` (403 otherwise)."""
 
     def dependency(claims: Claims = Depends(caller)) -> Claims:
         if not any(claims.has(role) for role in roles):

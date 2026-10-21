@@ -31,6 +31,6 @@ func TestCheckReadyNeedsOK(t *testing.T) {
 }
 
 func TestHealthcheckReturnsWithoutTheFlag(t *testing.T) {
-	// The test binary's own arguments never include the flag, so this must return instead of exiting.
+	// the test binary's own arguments never include the flag, so this must return instead of exiting.
 	Healthcheck()
 }

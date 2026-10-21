@@ -10,7 +10,7 @@ import (
 	"github.com/google/uuid"
 )
 
-// server answers Identity's HTTP routes from its store.
+// server answers identity's http routes from its store.
 type server struct{ store store }
 
 func (s server) routes(mux *http.ServeMux) {
@@ -128,9 +128,7 @@ func (s server) list(w http.ResponseWriter, r *http.Request) {
 	platform.JSON(w, http.StatusOK, result)
 }
 
-// remove deletes a classroom for its teacher. Students lose access and it leaves every list; its enrollments go with
-// it, and identity.classroom.deleted.v1 has every other service purge the classroom's data (assessments,
-// submissions, grades, documents, chats, evidence) and refuse access to it from then on.
+// remove deletes a classroom for its teacher.
 func (s server) remove(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
 	if !s.owner(w, r, id, "delete it") {
@@ -193,8 +191,8 @@ func (s server) enroll(w http.ResponseWriter, r *http.Request) {
 	platform.JSON(w, http.StatusOK, map[string]string{"student_id": student, "classroom_id": id})
 }
 
-// findStudent resolves exactly one of an account id or a username to a student in the caller's organization.
-// problem explains a refusal.
+// findstudent resolves exactly one of an account id or a username to a student in the caller's
+// organization. problem explains a refusal.
 func (s server) findStudent(r *http.Request, id, username string) (student, problem string, err error) {
 	org := platform.Actor(r).Org
 	switch {
@@ -255,11 +253,10 @@ func (s server) roster(w http.ResponseWriter, r *http.Request) {
 	platform.JSON(w, http.StatusOK, map[string]any{"students": students, "total": total})
 }
 
-// maxRosterPage is the most students one page of a classroom's named roster holds.
+// maxrosterpage is the most students one page of a classroom's named roster holds.
 const maxRosterPage = 500
 
-// rosterIDs lists the ids of every student enrolled in the classroom, for its teacher. Assessment and Grading (through
-// platform.Identity.Roster) count and list only enrolled students' work by it, so it is not paged.
+// rosterids lists the ids of every student enrolled in the classroom, for its teacher.
 func (s server) rosterIDs(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
 	if !s.owner(w, r, id, "see the roster") {
@@ -273,12 +270,10 @@ func (s server) rosterIDs(w http.ResponseWriter, r *http.Request) {
 	platform.JSON(w, http.StatusOK, ids)
 }
 
-// maxPage is the most students one page of the school's list holds.
+// maxpage is the most students one page of the school's list holds.
 const maxPage = 50
 
-// students lists one page of the students in the teacher's organization who have signed in, so a teacher can find
-// and enroll them: ?search= narrows by name or username, ?offset= and ?limit= (default 10, at most 50) choose the
-// page, and total says how many match.
+// search and page signed-in students available for enrollment in the teacher's organization.
 func (s server) students(w http.ResponseWriter, r *http.Request) {
 	if !platform.Teacher(w, r) {
 		return
@@ -300,11 +295,11 @@ func (s server) students(w http.ResponseWriter, r *http.Request) {
 	platform.JSON(w, http.StatusOK, map[string]any{"students": students, "total": total})
 }
 
-// deleteAccount deletes the caller's own account (ADR 0011): it can never sign in or register again, and every
-// service deletes the user's data. A teacher deletes their classrooms first (409 OWNS_CLASSROOMS).
+// deleteaccount deletes the caller's own account (adr 0011): it can never sign in or register again, and
+// every service deletes the user's data.
 func (s server) deleteAccount(w http.ResponseWriter, r *http.Request) {
 	c := platform.Actor(r)
-	if !platform.ID(c.Subject) { // every Keycloak account id is a UUID, and the event's resource must be one
+	if !platform.ID(c.Subject) { // every keycloak account id is a uuid, and the event's resource must be one
 		platform.NotFound(w, "This account is not registered or was already deleted.")
 		return
 	}

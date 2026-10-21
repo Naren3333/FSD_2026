@@ -6,7 +6,7 @@ import (
 	"testing"
 )
 
-// Identity's events, which every service reads through platform, match their schemas.
+// identity's events, which every service reads through platform, match their schemas.
 func TestIdentityEventsMatchTheirSchemas(t *testing.T) {
 	for topic, value := range map[string]any{
 		platform.TopicClassroomDeleted:  platform.ClassroomDeleted{},
@@ -17,7 +17,7 @@ func TestIdentityEventsMatchTheirSchemas(t *testing.T) {
 	}
 }
 
-// A field on one side only, or optional on one side only, is reported; nested structs are compared too.
+// a field on one side only, or optional on one side only, is reported; nested structs are compared too.
 func TestMatchesSchemaReportsDrift(t *testing.T) {
 	doc := map[string]any{"components": map[string]any{"schemas": map[string]any{
 		"Inner": map[string]any{"properties": map[string]any{"b": map[string]any{}}, "required": []any{"b"}},

@@ -1,7 +1,6 @@
 import { ActivatedRouteSnapshot, DetachedRouteHandle, RouteReuseStrategy } from '@angular/router';
 
-/** Keeps a section alive after the user leaves it, so a half-written form or a loaded list is still there when
- * they come back. A section is created the first time it is opened. Routes opt in with `data: { keepAlive: true }`. */
+/* keeps a section alive after the user leaves it, so a half-written form or a loaded list is still there when they come back. */
 export class KeepAliveStrategy implements RouteReuseStrategy {
   private readonly kept = new Map<string, DetachedRouteHandle>();
 

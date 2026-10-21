@@ -10,14 +10,14 @@ import (
 	"github.com/google/uuid"
 )
 
-// server answers Assessment's HTTP routes: assessments, submissions and saved work in its store, classroom access
-// from Identity and topics from Curriculum.
+// server answers assessment's http routes: assessments, submissions and saved work in its store, classroom
+// access from identity and topics from curriculum.
 type server struct {
 	store  store
 	access platform.ClassroomAccess
 	roster platform.ClassroomRoster
 	topics topics
-	clock  func() time.Time // time.Now unless a test sets it
+	clock  func() time.Time // time.now unless a test sets it
 }
 
 func (s server) now() time.Time {
@@ -45,8 +45,7 @@ func (s server) routes(mux *http.ServeMux) {
 	mux.HandleFunc("PUT /v1/assessments/{id}/saved-answers", s.save)
 }
 
-// batch reads at most 50 snapshots with one SQL query and one access check per classroom. Each record has
-// exactly the projection GET would return. Nothing is sent until every requested resource is authorized.
+// batch reads at most 50 snapshots with one sql query and one access check per classroom.
 func (s server) batch(w http.ResponseWriter, r *http.Request) {
 	var input struct {
 		IDs []string `json:"ids"`
@@ -100,10 +99,7 @@ func (s server) batch(w http.ResponseWriter, r *http.Request) {
 	platform.JSON(w, http.StatusOK, result)
 }
 
-// prepare fills in and checks an assessment a teacher sent, then checks its topics with Curriculum. On failure the
-// response is written. Questions get new ids, except those unchanged from the published assessment it replaces
-// (before), on which students may have saved work. Publishing needs a due date in the future, and so does a new due
-// date on an assessment already published.
+// prepare fills in and checks an assessment a teacher sent, then checks its topics with curriculum.
 func (s server) prepare(w http.ResponseWriter, r *http.Request, v *Assessment, before *Assessment) bool {
 	v.normalize()
 	err := v.Validate()
@@ -141,7 +137,7 @@ func (s server) prepare(w http.ResponseWriter, r *http.Request, v *Assessment, b
 }
 
 func (s server) create(w http.ResponseWriter, r *http.Request) {
-	// The role check comes first so a student is refused before validation; TeacherOf decides below.
+	// the role check comes first so a student is refused before validation; teacherof decides below.
 	if !platform.Teacher(w, r) {
 		return
 	}
@@ -160,7 +156,7 @@ func (s server) create(w http.ResponseWriter, r *http.Request) {
 	v.CreatedBy = platform.Actor(r).Subject
 	if err := s.store.insertAssessment(r.Context(), platform.Actor(r).Org, v); err != nil {
 		if errors.Is(err, errClassroomPurged) {
-			// Identity deleted the classroom after the access check.
+			// identity deleted the classroom after the access check.
 			platform.NotFound(w, "Classroom not found.")
 			return
 		}
@@ -170,9 +166,8 @@ func (s server) create(w http.ResponseWriter, r *http.Request) {
 	platform.JSON(w, http.StatusCreated, v)
 }
 
-// update replaces an assessment until a student submits it, and publishes a draft when the new version says so;
-// without a status it keeps the one it has. A published assessment stays published, and once a student has submitted
-// it only its details change (PATCH).
+// update replaces an assessment until a student submits it, and publishes a draft when the new version says
+// so; without a status it keeps the one it has.
 func (s server) update(w http.ResponseWriter, r *http.Request) {
 	if !platform.Teacher(w, r) {
 		return
@@ -206,9 +201,7 @@ func (s server) update(w http.ResponseWriter, r *http.Request) {
 	platform.JSON(w, http.StatusOK, v)
 }
 
-// details changes an assessment's title, due date and late policy. Unlike a replacement it is allowed after students
-// have submitted: grading does not depend on them. A field left out keeps its value; a due_at of null removes the due
-// date.
+// details changes an assessment's title, due date and late policy.
 func (s server) details(w http.ResponseWriter, r *http.Request) {
 	if !platform.Teacher(w, r) {
 		return
@@ -274,9 +267,7 @@ func (s server) publish(w http.ResponseWriter, r *http.Request) {
 	platform.JSON(w, http.StatusOK, v)
 }
 
-// remove deletes an assessment. Once a student has submitted it, only when the teacher confirms with
-// ?with_submissions=true that its submissions and every grade for them go too (ADR 0008); without it the request is
-// refused, so a deletion never takes students' grades by accident.
+// remove deletes an assessment.
 func (s server) remove(w http.ResponseWriter, r *http.Request) {
 	if !platform.Teacher(w, r) {
 		return
@@ -297,8 +288,8 @@ func (s server) remove(w http.ResponseWriter, r *http.Request) {
 	platform.JSON(w, http.StatusOK, map[string]string{"id": v.ID})
 }
 
-// draftResult writes the response for a failed draft change: 409 once published (a race with another tab, say),
-// 404 when it is gone.
+// draftresult writes the response for a failed draft change: 409 once published (a race with another tab,
+// say), 404 when it is gone.
 func (s server) draftResult(w http.ResponseWriter, err error) bool {
 	if errors.Is(err, errNotDraft) {
 		notDraft(w)
@@ -307,8 +298,8 @@ func (s server) draftResult(w http.ResponseWriter, err error) bool {
 	return platform.Found(w, err, "Assessment not found.")
 }
 
-// changeResult writes the response for a failed replacement: 409 once a student has submitted it, once published
-// (when it would unpublish it) or when another change landed first, 404 when it is gone.
+// changeresult writes the response for a failed replacement: 409 once a student has submitted it, once
+// published (when it would unpublish it) or when another change landed first, 404 when it is gone.
 func (s server) changeResult(w http.ResponseWriter, err error) bool {
 	if errors.Is(err, errAssessmentChanged) {
 		platform.Error(w, http.StatusConflict, "ASSESSMENT_CHANGED", "This assessment changed while you were saving. Open it again and make your changes to it as it is now.")
@@ -325,7 +316,8 @@ func notDraft(w http.ResponseWriter) {
 	platform.Error(w, http.StatusConflict, "NOT_DRAFT", "A published assessment cannot be published again or go back to being a draft.")
 }
 
-// list is the classroom's assessments: all of them for its teacher; for a student, those published and open.
+// list is the classroom's assessments: all of them for its teacher; for a student, those published and
+// open.
 func (s server) list(w http.ResponseWriter, r *http.Request) {
 	id := r.URL.Query().Get("classroom_id")
 	relation, ok := s.access.Relation(w, r, id, "")
@@ -336,7 +328,8 @@ func (s server) list(w http.ResponseWriter, r *http.Request) {
 	teacher := relation == platform.RelationTeacher
 	var enrolled []string
 	if teacher {
-		// The teacher sees how many enrolled students submitted: work kept for students since removed isn't counted.
+		// the teacher sees how many enrolled students submitted: work kept for students since removed isn't
+		// counted.
 		if enrolled, ok = s.roster.Roster(w, r, id); !ok {
 			return
 		}
@@ -366,8 +359,8 @@ func (s server) list(w http.ResponseWriter, r *http.Request) {
 	platform.JSON(w, http.StatusOK, result)
 }
 
-// progress is, for the classroom's teacher only, each assessment with how many of its enrolled students have
-// submitted it.
+// progress is, for the classroom's teacher only, each assessment with how many of its enrolled students
+// have submitted it.
 func (s server) progress(w http.ResponseWriter, r *http.Request) {
 	id := r.URL.Query().Get("classroom_id")
 	if !platform.TeacherOf(s.access, w, r, id) {
@@ -402,8 +395,7 @@ func (s server) progress(w http.ResponseWriter, r *http.Request) {
 	platform.JSON(w, http.StatusOK, result)
 }
 
-// findAssessment looks up the assessment the path names in the caller's organization. On failure the response is
-// written: 404 for a malformed or unknown id.
+// findassessment looks up the assessment the path names in the caller's organization.
 func (s server) findAssessment(w http.ResponseWriter, r *http.Request) (Assessment, bool) {
 	id := r.PathValue("id")
 	if !platform.ID(id) {
@@ -423,7 +415,7 @@ func (s server) get(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	// Answer keys and rubrics go to the classroom's own teacher only, never on the strength of the token role.
+	// answer keys and rubrics go to the classroom's own teacher only, never on the strength of the token role.
 	switch {
 	case relation == platform.RelationTeacher:
 		platform.JSON(w, http.StatusOK, v)
@@ -434,8 +426,7 @@ func (s server) get(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-// forStudent finds the assessment for an enrolled student who may answer it: published and open. On failure the
-// response is written; a draft or one not open yet is not found.
+// forstudent finds the assessment for an enrolled student who may answer it: published and open.
 func (s server) forStudent(w http.ResponseWriter, r *http.Request) (Assessment, bool) {
 	c := platform.Actor(r)
 	if !c.Has("student") || c.Has("teacher") {
@@ -520,9 +511,8 @@ func alreadySubmitted(w http.ResponseWriter) {
 	platform.Error(w, http.StatusConflict, "ALREADY_SUBMITTED", "This assessment has already been submitted.")
 }
 
-// submission is the calling student's own submitted answers to the assessment, with when they submitted and whether
-// it was late, so they can read them again; 404 when they have not submitted. Only the student who submitted reads
-// it: a teacher has the class's work in Grading. It holds what the student wrote and nothing of the answer keys.
+// submission is the calling student's own submitted answers to the assessment, with when they submitted and
+// whether it was late, so they can read them again; 404 when they have not submitted.
 func (s server) submission(w http.ResponseWriter, r *http.Request) {
 	v, ok := s.forStudent(w, r)
 	if !ok {
@@ -545,7 +535,7 @@ func (s server) saved(w http.ResponseWriter, r *http.Request) {
 		platform.Fail(w, err)
 		return
 	}
-	// Work saved on questions the teacher has since changed or removed no longer answers anything.
+	// work saved on questions the teacher has since changed or removed no longer answers anything.
 	for id, answer := range result.Answers {
 		if !validateSaved(v, map[string]string{id: answer}) {
 			delete(result.Answers, id)
@@ -554,8 +544,7 @@ func (s server) saved(w http.ResponseWriter, r *http.Request) {
 	platform.JSON(w, http.StatusOK, result)
 }
 
-// save keeps the calling student's work in progress, so a long answer survives a closed tab. Saved work may be
-// incomplete; it is checked in full only when submitted.
+// save keeps the calling student's work in progress, so a long answer survives a closed tab.
 func (s server) save(w http.ResponseWriter, r *http.Request) {
 	v, ok := s.forStudent(w, r)
 	if !ok {

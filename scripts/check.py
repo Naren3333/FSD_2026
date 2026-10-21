@@ -1,12 +1,4 @@
-"""Run the local quality gates in parallel: formatting, lint, types, unit tests and builds, plus a check that the
-committed API contracts match the code.
-
-Each Go module, Python service and the web app is a lane of commands that run in order, side by side. By default
-the first failure stops the rest early (lanes not started are skipped, running ones stop after their current
-command); --keep-going runs everything and reports every failing lane. Use --serial on a slow machine, or
---jobs N to cap how many lanes run at once. Tests that skip themselves, such as the database-backed ones that
-scripts/db_tests.py runs against the stack, are listed at the end as not run.
-"""
+"""run the local quality gates in parallel: formatting, lint, types, unit tests and builds, plus a check that the committed api contracts match the code."""
 
 import argparse
 import os
@@ -41,7 +33,7 @@ env = dict(
     GOMODCACHE=str(ROOT / ".local/go-mod"),
     PYTHONPATH=str(ROOT / "packages/python-platform"),
     MYPYPATH=str(ROOT / "packages/python-platform"),
-    # Angular's first build otherwise waits for an answer to its analytics question.
+    # angular's first build otherwise waits for an answer to its analytics question.
     NG_CLI_ANALYTICS="false",
     CI="1",
 )
@@ -60,7 +52,7 @@ def go_lane(name: str) -> list[tuple[list[str], Path]]:
     return [
         (["gofmt", "-l", "."], cwd),
         (["go", "vet", "./..."], cwd),
-        # Without --allow-parallel-runners a second golangci-lint exits at once while another one runs.
+        # without --allow-parallel-runners a second golangci-lint exits at once while another one runs.
         (
             [
                 "golangci-lint",
@@ -87,32 +79,30 @@ def python_lane(cwd: Path, typed: bool) -> list[tuple[list[str], Path]]:
 
 def lanes() -> dict[str, list[tuple[list[str], Path]]]:
     npm = "npm.cmd" if os.name == "nt" else "npm"
-    # The slowest lanes come first so they start before the pool fills.
+    # the slowest lanes come first so they start before the pool fills.
     result = {"apps/web": [([npm, "run", script], ROOT / "apps/web") for script in WEB_SCRIPTS]}
     result.update({name: go_lane(name) for name in GO_MODULES})
     result["packages/python-platform"] = python_lane(ROOT / "packages/python-platform", typed=False)
     result.update({f"services/{n}": python_lane(ROOT / "services" / n, typed=True) for n in PYTHON_SERVICES})
-    # The repository's own scripts and the Kong config generator: formatting, lint, and the tests that need no
-    # stack (most scripts need the running stack, so they are not run here).
+    # the repository's own scripts and the kong config generator: formatting, lint, and the tests that need
+    # no stack (most scripts need the running stack, so they are not run here).
     config = str(ROOT / "ruff.toml")
     result["scripts"] = [
         (python("ruff", "format", "--check", "--config", config, "scripts", "infra"), ROOT),
         (python("ruff", "check", "--config", config, "scripts", "infra"), ROOT),
         (python("pytest", "-q", "-rs", "-p", "no:cacheprovider", "scripts/tests"), ROOT),
     ]
-    # The contracts in contracts/ are generated from the code; fail if any differs from what the code produces.
+    # the contracts in contracts/ are generated from the code; fail if any differs from what the code
+    # produces.
     result["contracts"] = [([sys.executable, "scripts/export_contracts.py", "--check"], ROOT)]
     return result
 
 
 def execute(command: list[str], cwd: Path, timeout: int) -> tuple[str, int]:
-    """Runs a command with no input and returns its output and exit code; a stuck command is stopped.
-
-    Output goes to a file rather than a pipe, so a child process left behind cannot keep the read open.
-    """
+    """runs a command with no input and returns its output and exit code; a stuck command is stopped."""
     with tempfile.TemporaryFile(mode="w+", encoding="utf-8", errors="replace") as out:
-        # Its own process group, so stopping it also stops the processes it started (npm -> node -> workers).
-        # No input: a command that asks a question fails instead of waiting for an answer.
+        # its own process group, so stopping it also stops the processes it started (npm -> node ->
+        # workers).
         process = subprocess.Popen(
             command,
             cwd=cwd,
@@ -139,12 +129,13 @@ def execute(command: list[str], cwd: Path, timeout: int) -> tuple[str, int]:
         return (out.read() + stuck).strip(), code
 
 
-# A skipped Go test (go test -v prints the reason just before the result line), or pytest's -rs summary line.
+# a skipped go test (go test -v prints the reason just before the result line), or pytest's -rs summary
+# line.
 SKIP = re.compile(r"^\s+\S+\.go:\d+: (.+)\n\s*--- SKIP: (\S+)|^SKIPPED \[\d+\] (.+)", re.MULTILINE)
 
 
 def run_lane(name: str, steps: list[tuple[list[str], Path]], timeout: int) -> bool:
-    """Runs a lane's commands in order and prints its output in one block; False if it failed or stopped."""
+    """runs a lane's commands in order and prints its output in one block; false if it failed or stopped."""
     log: list[str] = []
     started = time.monotonic()
     status = "PASS"
@@ -174,7 +165,7 @@ def run_lane(name: str, steps: list[tuple[list[str], Path]], timeout: int) -> bo
 
 
 def main() -> None:
-    # Piped Windows output otherwise uses cp1252 and can crash while printing a tool's Unicode diagnostics.
+    # piped windows output otherwise uses cp1252 and can crash while printing a tool's unicode diagnostics.
     sys.stdout.reconfigure(encoding="utf-8", errors="replace")
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--serial", action="store_true", help="run one lane at a time")

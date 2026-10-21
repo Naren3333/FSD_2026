@@ -1,4 +1,4 @@
-"""POST /v1/inference and /v1/rerank against mock providers, and who may call them."""
+"""post /v1/inference and /v1/rerank against mock providers, and who may call them."""
 
 import json
 from collections.abc import Callable
@@ -115,7 +115,7 @@ def test_a_stream_that_breaks_ends_with_an_error_event(
     resp = api.post("/v1/inference", json={**GENERATE, "stream": True})
     events = [block.split("\n")[0] for block in resp.text.strip().split("\n\n")]
     assert events == ["event: delta", "event: error"] and "AI_PROVIDER_FAILED" in resp.text
-    # The text relayed before the break is still paid for: charged once, by estimate (no usage chunk came).
+    # the text relayed before the break is still paid for: charged once, by estimate (no usage chunk came).
     [(_, charge)] = ledger.charges
     assert charge.operation == "stream" and charge.estimated
     assert charge.tokens_out == 1 and charge.tokens_in > 0 and charge.cost_usd > 0  # "one": about one token

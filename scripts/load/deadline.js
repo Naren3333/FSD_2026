@@ -1,10 +1,4 @@
-// A class at its deadline: every student submits the same assessment at once while the class keeps reading its
-// assessment list, own submission and own results. scripts/scale_demo.py writes /work/run.json (the gateway paths
-// and signed-in tokens, the first one per student) and runs this through the k6 service of docker-compose.scale.yml.
-//
-// It prints one JSON object, the numbers scale_demo.py reports, and logs each failed submission. Kong allows each
-// token 120 requests a minute, so scale_demo.py signs each student in enough times that reads spread over all the
-// tokens stay well below that.
+// submit assessments while students continue reading classroom data.
 import http from 'k6/http';
 import exec from 'k6/execution';
 import { SharedArray } from 'k6/data';
@@ -26,10 +20,10 @@ const serverErrors = new Counter('server_errors');
 export const options = {
   discardResponseBodies: true,
   scenarios: {
-    // Each student submits once, all starting together.
+    // each student submits once, all starting together.
     submit: { executor: 'per-vu-iterations', vus: RUN.students, iterations: 1, maxDuration: '2m', exec: 'submit' },
-    // Reads arrive at a steady rate whatever the response times, so a slower system shows as latency and dropped
-    // iterations rather than as fewer requests.
+    // reads arrive at a steady rate whatever the response times, so a slower system shows as latency and
+    // dropped iterations rather than as fewer requests.
     browse: {
       executor: 'constant-arrival-rate',
       rate: BROWSE_RATE,
@@ -54,8 +48,8 @@ function record(res, ok, time, okRate) {
 }
 
 export function submit() {
-  // One iteration per VU, so the scenario's iteration number names each student once (VU ids are shared with the
-  // browse scenario, so they would not).
+  // one iteration per vu, so the scenario's iteration number names each student once (vu ids are shared
+  // with the browse scenario, so they would not).
   const token = TOKENS[exec.scenario.iterationInTest];
   const params = { ...auth(token), responseType: 'text' };
   const res = http.post(`${BASE}${RUN.submit_path}`, JSON.stringify({ answers: RUN.answers }), params);

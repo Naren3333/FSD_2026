@@ -14,8 +14,7 @@ import { NoClassroomComponent } from '../../shared/no-classroom';
 import { Section } from '../../shared/section';
 import { SectionStateComponent } from '../../shared/section-state';
 
-/** A student's start page for the current classroom: what is still to do, what waits for the teacher, recent
- * finalized results and the topics to practise. Grades show only once the teacher has finalized them. */
+/* a student's start page for the current classroom: what is still to do, what waits for the teacher, recent finalized results and the topics to practise. */
 @Component({
   selector: 'app-home',
   standalone: true,
@@ -34,16 +33,16 @@ export class HomeComponent {
   readonly assessments = new Section<AssessmentSummary[]>();
   readonly results = new Section<OwnResult[]>();
   readonly performance = new Section<Performance>();
-  /** Recent results shown here; the rest are under My results. */
+  /* recent results shown here; the rest are under my results. */
   readonly recentCount = 3;
 
-  /** Assessments still to submit that still take submissions, soonest due first; those with no due date last. */
+  /* assessments still to submit that still take submissions, soonest due first; those with no due date last. */
   readonly toDo = computed(() =>
     (this.assessments.value() ?? [])
       .filter((a) => !a.submitted && dueState(a.due_at, a.late_policy) !== 'closed')
       .sort((a, b) => (a.due_at ?? '9999').localeCompare(b.due_at ?? '9999')),
   );
-  /** Submitted assessments with no finalized result yet. Needs both lists, so it waits for both. */
+  /* submitted assessments with no finalized result yet. */
   readonly waiting = computed(() => {
     const assessments = this.assessments.value();
     const results = this.results.value();
@@ -52,8 +51,7 @@ export class HomeComponent {
     return assessments.filter((a) => a.submitted && !graded.has(a.id)).length;
   });
   readonly recent = computed(() => this.results.value()?.slice(0, this.recentCount) ?? []);
-  /** What the to-do list says when it is empty: whether there was nothing, everything was submitted, or some closed
-   * before the student submitted them. */
+  /* what the to-do list says when it is empty: whether there was nothing, everything was submitted, or some closed before the student submitted them. */
   readonly nothingToDo = computed(() => {
     const assessments = this.assessments.value() ?? [];
     if (!assessments.length) return 'No assessments in this classroom yet.';
@@ -86,13 +84,13 @@ export class HomeComponent {
     void this.results.load(() => this.grading.mine(classroomId));
     void this.performance.load(async () => {
       const performance = await this.analytics.performance(studentId, classroomId);
-      // Without the curriculum, topics show their ids.
+      // without the curriculum, topics show their ids.
       await this.curriculum.need(performance.topics.map((s) => s.topic_id)).catch(() => undefined);
       return performance;
     });
   }
 
-  /** "Due 13 Oct 2026, 3:00 pm", or "Overdue since …" once past; '' without a due date. */
+  /* "due 13 oct 2026, 3:00 pm", or "overdue since …" once past; '' without a due date. */
   due(item: AssessmentSummary): string {
     if (!item.due_at) return '';
     return this.overdue(item) ? `Overdue since ${dateTime(item.due_at)}` : `Due ${dateTime(item.due_at)}`;

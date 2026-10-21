@@ -12,16 +12,14 @@ import (
 	"github.com/segmentio/kafka-go"
 )
 
-// Outbox delivery limits. A row is retried with backoff (doubling, at most five minutes apart) for about a day
-// before it needs an operator; every minute any backlog is logged as an error until it clears.
+// outbox delivery limits.
 const (
 	OutboxBatch       = 100
 	OutboxMaxAttempts = 300
 )
 
-// OutboxRetention is how long a published event stays in the outbox, the same as Kafka keeps the topics that carry
-// students' answers and grades (docker-compose.yml). Replays read Kafka, never the outbox, so an older published row
-// is only a further copy of the data: it is pruned, and deletions and purges scan a bounded table.
+// outboxretention is how long a published event stays in the outbox, the same as kafka keeps the topics
+// that carry students' answers and grades (docker-compose.yml).
 const OutboxRetention = 7 * 24 * time.Hour
 
 type outboxRow struct {
@@ -29,16 +27,15 @@ type outboxRow struct {
 	body           []byte
 }
 
-// Outbox publishes the events services Emit into their outbox table.
+// outbox publishes the events services emit into their outbox table.
 type Outbox struct{ DB *pgxpool.Pool }
 
-// messageWriter is the part of *kafka.Writer the outbox uses.
+// messagewriter is the part of *kafka.writer the outbox uses.
 type messageWriter interface {
 	WriteMessages(ctx context.Context, msgs ...kafka.Message) error
 }
 
-// Run publishes committed events until ctx ends. Every second it drains due rows in batches of OutboxBatch until
-// none are left, so a burst of submissions is delivered in seconds instead of one event per second.
+// run publishes committed events until ctx ends.
 func (o Outbox) Run(ctx context.Context) {
 	writer := Writer()
 	defer writer.Close()
@@ -69,9 +66,7 @@ func (o Outbox) Run(ctx context.Context) {
 	}
 }
 
-// publishBatch sends up to OutboxBatch due rows and records, per row, whether Kafka took it. It returns how many
-// rows were published; a failed delivery returns 0 so the rest waits for the next tick instead of hammering the
-// broker.
+// publishbatch sends up to outboxbatch due rows and records, per row, whether kafka took it.
 func (o Outbox) publishBatch(ctx context.Context, writer messageWriter) (int, error) {
 	batchCtx, cancel := context.WithTimeout(ctx, 20*time.Second)
 	defer cancel()
@@ -112,10 +107,7 @@ func (o Outbox) publishBatch(ctx context.Context, writer messageWriter) (int, er
 	return len(batch), nil
 }
 
-// dueRows locks up to OutboxBatch unpublished rows whose next attempt is due, oldest first. Only the oldest
-// unpublished event of each topic and key is due: a later one waits until it is published (or abandoned), so one
-// resource's events are never published out of order, whether the older one is backing off, failed in this same
-// batch, or is locked by another relay.
+// duerows locks up to outboxbatch unpublished rows whose next attempt is due, oldest first.
 func dueRows(ctx context.Context, tx pgx.Tx) ([]outboxRow, error) {
 	rows, err := tx.Query(ctx, `SELECT id,topic,partition_key,body FROM outbox o WHERE published_at IS NULL AND attempts<$1 AND next_attempt<=now()
 		AND NOT EXISTS(SELECT 1 FROM outbox p WHERE p.topic=o.topic AND p.partition_key=o.partition_key AND p.published_at IS NULL AND p.attempts<$1 AND (p.created_at,p.id)<(o.created_at,o.id))
@@ -143,7 +135,8 @@ func markPublished(ctx context.Context, tx pgx.Tx, ids []string) error {
 	return err
 }
 
-// scheduleRetries counts a failed attempt for each row and backs it off, logging the rows that ran out of attempts.
+// scheduleretries counts a failed attempt for each row and backs it off, logging the rows that ran out of
+// attempts.
 func scheduleRetries(ctx context.Context, tx pgx.Tx, ids []string) error {
 	if len(ids) == 0 {
 		return nil
@@ -161,8 +154,8 @@ func scheduleRetries(ctx context.Context, tx pgx.Tx, ids []string) error {
 	return nil
 }
 
-// deliveryFailures maps WriteMessages' error to the messages it concerns: kafka.WriteErrors names each message,
-// any other error fails them all.
+// deliveryfailures maps writemessages' error to the messages it concerns: kafka.writeerrors names each
+// message, any other error fails them all.
 func deliveryFailures(err error, n int) []bool {
 	failed := make([]bool, n)
 	if err == nil {
@@ -181,8 +174,8 @@ func deliveryFailures(err error, n int) []bool {
 	return failed
 }
 
-// reportOutbox logs, as an error, events waiting more than five minutes and events that ran out of attempts, so a
-// broker outage or a stuck event is visible instead of silent.
+// reportoutbox logs, as an error, events waiting more than five minutes and events that ran out of
+// attempts, so a broker outage or a stuck event is visible instead of silent.
 func (o Outbox) reportOutbox(ctx context.Context) {
 	reportCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
@@ -197,8 +190,8 @@ func (o Outbox) reportOutbox(ctx context.Context) {
 	}
 }
 
-// prune deletes published events older than OutboxRetention, a batch at a time so a large first prune never holds
-// a long lock. Unpublished rows are never touched, however old.
+// prune deletes published events older than outboxretention, a batch at a time so a large first prune never
+// holds a long lock.
 func (o Outbox) prune(ctx context.Context) {
 	pruneCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
@@ -207,16 +200,13 @@ func (o Outbox) prune(ctx context.Context) {
 	}
 }
 
-// pruneOutbox deletes up to 1000 rows published more than retention ago and reports how many it deleted.
+// pruneoutbox deletes up to 1000 rows published more than retention ago and reports how many it deleted.
 func pruneOutbox(ctx context.Context, db *pgxpool.Pool, retention time.Duration) (int64, error) {
 	tag, err := db.Exec(ctx, "DELETE FROM outbox WHERE id IN (SELECT id FROM outbox WHERE published_at<now()-make_interval(secs=>$1) LIMIT 1000)", retention.Seconds())
 	return tag.RowsAffected(), err
 }
 
-// DiscardPendingBy removes, inside tx, the outbox rows of the events of org whose topic matches topics (a LIKE
-// pattern, "%" for every topic) and whose data names value as key, published or not: those not yet published never
-// are, and nothing deleted for good stays behind in the outbox. Like the purge it is part of, it scans the matching
-// topics' rows, which deletions are rare enough to afford.
+// remove matching outbox events in the same transaction as the data purge.
 func DiscardPendingBy(ctx context.Context, tx pgx.Tx, topics, key, value, org string) error {
 	_, err := tx.Exec(ctx, "DELETE FROM outbox WHERE topic LIKE $1 AND body->'data'->>$2::text=$3::text AND body->'data'->>'org_id'=$4", topics, key, value, org)
 	return err

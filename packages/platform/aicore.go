@@ -11,15 +11,15 @@ import (
 	"time"
 )
 
-// AICore calls the private ai-core service as the calling service's own account (role ai-client). ai-core holds the
-// model provider keys and records what each call costs (docs/decisions/0002-ai-integration.md and 0003-ai-spend.md).
+// aicore calls the private ai-core service as the calling service's own account (role ai-client). ai-core
+// holds the model provider keys and records what each call costs.
 type AICore struct {
 	Base   string
 	Tokens *ServiceToken
 	Client *http.Client // no overall timeout: each call's context bounds it
 }
 
-// NewAICore reads AI_CORE_URL and the service account's AI_TOKEN_URL, AI_CLIENT_ID and AI_CLIENT_SECRET.
+// newaicore reads ai_core_url and the service account's ai_token_url, ai_client_id and ai_client_secret.
 func NewAICore() AICore {
 	return AICore{
 		Base:   strings.TrimRight(Required("AI_CORE_URL"), "/"),
@@ -28,19 +28,17 @@ func NewAICore() AICore {
 	}
 }
 
-// maxAIResponse bounds a successful ai-core answer. The largest is an ingest result: a long PDF's chunks with
-// their vectors and base64 figure crops.
+// maxairesponse bounds a successful ai-core answer.
 const maxAIResponse = 64 << 20
 
-// Billed is whose daily AI allowance pays for a call (ADR 0003).
+// billed is whose daily ai allowance pays for a call (adr 0003).
 type Billed struct {
 	UserID string `json:"user_id"`
 	OrgID  string `json:"org_id"`
 	Role   string `json:"role"`
 }
 
-// AIError is a non-200 answer from ai-core, or a failure to reach it (Status 0). Message and ResetsAt are set
-// for AI_SPEND_LIMIT: the user's daily AI allowance is used up until ResetsAt.
+// aierror is a non-200 answer from ai-core, or a failure to reach it (status 0).
 type AIError struct {
 	Status   int
 	Code     string
@@ -50,7 +48,8 @@ type AIError struct {
 
 func (e *AIError) Error() string { return fmt.Sprintf("ai-core %d %s", e.Status, e.Code) }
 
-// AISpendLimit reports whether err is ai-core refusing because the billed user's daily allowance is used up.
+// aispendlimit reports whether err is ai-core refusing because the billed user's daily allowance is used
+// up.
 func AISpendLimit(err error) (*AIError, bool) {
 	var e *AIError
 	if errors.As(err, &e) && e.Status == http.StatusTooManyRequests && e.Code == "AI_SPEND_LIMIT" {
@@ -59,15 +58,15 @@ func AISpendLimit(err error) (*AIError, bool) {
 	return nil, false
 }
 
-// AIBusy reports whether err is ai-core refusing because the billed user already has as many AI calls running as
-// it allows. Unlike AI_SPEND_LIMIT it clears as soon as one of them ends.
+// aibusy reports whether err is ai-core refusing because the billed user already has as many ai calls
+// running as it allows.
 func AIBusy(err error) bool {
 	var e *AIError
 	return errors.As(err, &e) && e.Status == http.StatusTooManyRequests && e.Code == "AI_BUSY"
 }
 
-// AITransient reports whether a later retry may succeed: ai-core or its provider being down, slow, rate limited or
-// not configured yet, or our token being refused. Anything else (a 4xx about the request) will fail again.
+// aitransient reports whether a later retry may succeed: ai-core or its provider being down, slow, rate
+// limited or not configured yet, or our token being refused.
 func AITransient(err error) bool {
 	var e *AIError
 	if !errors.As(err, &e) {
@@ -80,8 +79,7 @@ func AITransient(err error) bool {
 	return e.Status >= http.StatusInternalServerError
 }
 
-// Call POSTs to ai-core with the service token and decodes a 200 answer into out. A refused token is dropped from
-// the cache, so the next call (a retry of a transient 401) fetches a new one.
+// call posts to ai-core with the service token and decodes a 200 answer into out.
 func (a AICore) Call(ctx context.Context, path, contentType string, body io.Reader, size int64, out any) error {
 	token, err := a.Tokens.Get(ctx)
 	if err != nil {

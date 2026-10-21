@@ -27,11 +27,10 @@ import {
   type MarkingForm,
 } from './marking';
 
-/** One page of a classroom's evaluations with the names of their students and assessments, how many there are in
- * all, and, for one assessment, how many of its finalized grades its students cannot see yet. */
+/* load evaluations, display names, totals and unreleased grade counts. */
 interface Grades {
   grades: Evaluation[];
-  /** The page these are, counted from 0. */
+  /* the page these are, counted from 0. */
   page: number;
   total: number;
   unreleased: number;
@@ -39,11 +38,10 @@ interface Grades {
   assessments: Map<string, Assessment>;
 }
 
-/** How many grades one page shows; each carries the student's answers. */
+/* how many grades one page shows; each carries the student's answers. */
 const PAGE_SIZE = 20;
 
-/** How long an open grade first waits before re-reading AI suggestions still being prepared, and the longest wait.
- * The wait doubles after every re-read that finds a suggestion still pending. */
+/* how long an open grade first waits before re-reading ai suggestions still being prepared, and the longest wait. */
 const SUGGESTION_POLL = 5000;
 const SUGGESTION_POLL_MAX = 60000;
 
@@ -70,22 +68,22 @@ export class ReviewComponent {
   private readonly curriculum = inject(CurriculumNames);
   readonly classroomId = inject(ClassroomContext).classroomId;
   readonly state = new ActionState();
-  /** Releasing an assessment's results, in its confirmation dialog. */
+  /* releasing an assessment's results, in its confirmation dialog. */
   readonly releaseState = new ActionState();
   readonly grades = new Section<Grades>();
   readonly names = new EvidenceNames(
     () => this.grades.value()?.assessments,
     (id) => this.curriculum.topicName(id),
   );
-  /** The classroom's published assessments, to choose one to mark. */
+  /* the classroom's published assessments, to choose one to mark. */
   readonly published = new Section<AssessmentSummary[]>();
   readonly filter = new FormControl('', { nonNullable: true });
-  /** The assessment whose grades are shown; '' for the classroom's newest grades. */
+  /* the assessment whose grades are shown; '' for the classroom's newest grades. */
   readonly assessmentId = signal('');
-  /** The page of grades asked for, counted from 0. */
+  /* the page of grades asked for, counted from 0. */
   readonly page = signal(0);
   readonly pageSize = PAGE_SIZE;
-  /** The draft being marked. */
+  /* the draft being marked. */
   readonly selected = signal<Evaluation | null>(null);
   readonly finalizing = signal(false);
   readonly releasing = signal(false);
@@ -95,13 +93,12 @@ export class ReviewComponent {
   readonly form = new FormGroup({
     reason: new FormControl('', { nonNullable: true, validators: requiredText(1000) }),
   });
-  /** The chosen assessment's finalized grades its enrolled students cannot see yet, across every page: what a
-   * release releases. */
+  /* the chosen assessment's finalized grades its enrolled students cannot see yet, across every page: what a release releases. */
   readonly unreleased = computed(() => (this.assessmentId() ? (this.grades.value()?.unreleased ?? 0) : 0));
   readonly flagText = flagText;
   readonly suggestionReason = suggestionReason;
   private poll: ReturnType<typeof setTimeout> | undefined;
-  /** The classroom's students' names, read once per classroom (or Refresh) rather than for every page. */
+  /* the classroom's students' names, read once per classroom (or refresh) rather than for every page. */
   private names$: { classroomId: string; names: Promise<Map<string, string>> } | null = null;
 
   constructor() {
@@ -115,13 +112,13 @@ export class ReviewComponent {
     });
   }
 
-  /** Reads everything again, as on arrival, unless that would lose marks not saved yet. */
+  /* reads everything again, as on arrival, unless that would lose marks not saved yet. */
   refresh(): void {
     if (this.unsavedMarks()) return;
     this.load();
   }
 
-  /** Whether the grade being marked has changes not saved yet, which a new list would discard; it says so. */
+  /* whether the grade being marked has changes not saved yet, which a new list would discard; it says so. */
   private unsavedMarks(): boolean {
     if (!this.marks.dirty) return false;
     this.state.error.set('Save or close the grade you are marking first.');
@@ -142,7 +139,7 @@ export class ReviewComponent {
     );
   }
 
-  /** Shows the grades of the assessment the filter names, or the newest of all, from their first page. */
+  /* shows the grades of the assessment the filter names, or the newest of all, from their first page. */
   choose(): void {
     if (this.unsavedMarks()) {
       this.filter.setValue(this.assessmentId());
@@ -153,8 +150,7 @@ export class ReviewComponent {
     this.showPage();
   }
 
-  /** Shows the page the pager moved to. Marking a grade (which leaves the page) keeps the pager disabled while it
-   * has unsaved changes. */
+  /* shows the page the pager moved to. */
   showPage(): void {
     if (this.unsavedMarks()) {
       this.page.set(this.grades.value()?.page ?? 0);
@@ -166,9 +162,7 @@ export class ReviewComponent {
     if (classroomId) void this.grades.load((current) => this.read(classroomId, assessmentId, current));
   }
 
-  /** The page of evaluations asked for with the names of their students, assessments, questions and topics. A page
-   * past the end, after grades leave the list, falls back to the last one; `current` says whether the read is still
-   * the one on show, so only then does the page asked for change. */
+  /* the page of evaluations asked for with the names of their students, assessments, questions and topics. */
   private async read(classroomId: string, assessmentId: string, current: () => boolean): Promise<Grades> {
     let page = this.page();
     let result = await this.grading.evaluations(classroomId, assessmentId, page * PAGE_SIZE, PAGE_SIZE);
@@ -181,14 +175,14 @@ export class ReviewComponent {
       this.studentNames(classroomId),
       assessmentsOf(grades, (id) => this.assessmentApi.get(id)),
       assessmentId ? this.grading.counts(classroomId, assessmentId).then((c) => c.unreleased) : 0,
-      // Without the curriculum, topics show as ids.
+      // without the curriculum, topics show as ids.
       this.curriculum.need(grades.flatMap((g) => g.evidence.map((e) => e.topic_id))).catch(() => undefined),
     ]);
     if (current()) this.page.set(page);
     return { grades, page, total: result.total, unreleased, students, assessments };
   }
 
-  /** The classroom's students' names, read once for it; a failed read is tried again next time. */
+  /* the classroom's students' names, read once for it; a failed read is tried again next time. */
   private studentNames(classroomId: string): Promise<Map<string, string>> {
     if (this.names$?.classroomId !== classroomId) {
       const names = this.identity.roster(classroomId).then(studentNames);
@@ -200,8 +194,7 @@ export class ReviewComponent {
     return this.names$.names;
   }
 
-  /** Re-reads the page on show after a change that already succeeded. A failed re-read keeps what is on show and
-   * says so on the page, beside the change's own success. */
+  /* re-reads the page on show after a change that already succeeded. */
   private async reread(classroomId: string, assessmentId: string): Promise<void> {
     const same = () => this.classroomId() === classroomId && this.assessmentId() === assessmentId;
     try {
@@ -214,7 +207,7 @@ export class ReviewComponent {
     }
   }
 
-  /** The student's roster name, or '' for a student no longer enrolled or not yet named. */
+  /* the student's roster name, or '' for a student no longer enrolled or not yet named. */
   studentName(grade: Evaluation): string {
     return this.grades.value()?.students.get(grade.student_id) ?? '';
   }
@@ -230,7 +223,8 @@ export class ReviewComponent {
     return grade.submitted_at ? dateTime(grade.submitted_at) : '';
   }
 
-  // --- Marking ---------------------------------------------------------------------------------------------
+  // --- marking
+  // ---------------------------------------------------------------------------------------------
 
   review(grade: Evaluation): void {
     if (this.marks.dirty && this.selected()?.id !== grade.id) {
@@ -277,7 +271,7 @@ export class ReviewComponent {
     }, 'Marks saved. The grade is still a draft.');
   }
 
-  /** Puts a re-read grade in the list and, when it is the one being marked, in the marking form. */
+  /* puts a re-read grade in the list and, when it is the one being marked, in the marking form. */
   private replace(grade: Evaluation): void {
     const current = this.grades.value();
     if (current)
@@ -289,8 +283,7 @@ export class ReviewComponent {
     }
   }
 
-  /** While a suggestion is being prepared, re-reads the grade so it appears without a refresh, less often the longer
-   * it takes. */
+  /* while a suggestion is being prepared, re-reads the grade so it appears without a refresh, less often the longer it takes. */
   private watchSuggestions(delay = SUGGESTION_POLL): void {
     clearTimeout(this.poll);
     const grade = this.selected();
@@ -301,7 +294,7 @@ export class ReviewComponent {
         (fresh) => {
           const current = this.selected();
           if (current?.id !== grade.id || this.classroomId() !== classroomId) return;
-          // Only the suggestions change here, so the teacher's unsaved marks stay.
+          // only the suggestions change here, so the teacher's unsaved marks stay.
           const suggestions = new Map(fresh.evidence.map((e) => [e.question_id, e.suggestion]));
           this.selected.set({
             ...current,
@@ -341,7 +334,7 @@ export class ReviewComponent {
         await this.grading.finalize(grade.id, this.form.controls.reason.value, marks);
         this.close();
         this.stopMarking();
-        // The grade is final whether or not the list can be read again: say so either way.
+        // the grade is final whether or not the list can be read again: say so either way.
         await this.reread(classroomId, assessmentId);
       },
       grade.release_policy === 'manual'
@@ -350,7 +343,8 @@ export class ReviewComponent {
     );
   }
 
-  // --- Releasing -------------------------------------------------------------------------------------------
+  // --- releasing
+  // -------------------------------------------------------------------------------------------
 
   askRelease(): void {
     this.releasing.set(true);
@@ -369,7 +363,8 @@ export class ReviewComponent {
     void this.releaseState.run(async () => {
       const result = await this.grading.release(assessmentId);
       this.closeRelease();
-      // Released, so the page says so at once, after the dialog has closed; a failed re-read is reported beside it.
+      // released, so the page says so at once, after the dialog has closed; a failed re-read is reported
+      // beside it.
       this.state.error.set('');
       this.state.message.set(
         `${result.released} ${result.released === 1 ? 'result' : 'results'} released to students.`,

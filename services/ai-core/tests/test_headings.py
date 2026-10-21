@@ -1,4 +1,4 @@
-"""Heading detection and section paths. No PDF, no DB, no OpenAI."""
+"""heading detection and section paths."""
 
 from ingest.headings import outline
 from ingest.parse import Block, body_size
@@ -84,7 +84,7 @@ SLIDE_BODY = "Write tests even before writing the code"
 
 
 def deck(slides: int = 4) -> list[list[Block]]:
-    """A slide deck: a 44pt title page, then 32pt slide titles, 28pt bullets and 24pt sub-bullets."""
+    """a slide deck: a 44pt title page, then 32pt slide titles, 28pt bullets and 24pt sub-bullets."""
     title = [b("Collaborative Software Development", 44), b("Software Testing", 32), b(BODY, 24)]
     return [title] + [
         [b(f"Slide {n}", 32), b("▪Main point", 28), *[b("▪" + SLIDE_BODY, 24)] * 4]
@@ -129,7 +129,7 @@ def test_page_numbers_opening_or_closing_a_page_are_dropped() -> None:
 
 
 def report(extra: dict[int, list[Block]] | None = None, pages: int = 6) -> list[list[Block]]:
-    """A report: 25pt cover title on pages 1-2, 17pt chapters and 14pt sections on later pages."""
+    """a report: 25pt cover title on pages 1-2, 17pt chapters and 14pt sections on later pages."""
     doc = [[b("AI Risk Management", 25), b("Framework (AI RMF 1.0)", 25)] for _ in range(2)]
     doc += [
         [b(f"{n}. Chapter {n}", 17), b(BODY), b(f"{n}.1 Section", 14), b(BODY)] for n in range(1, pages - 1)
@@ -187,12 +187,11 @@ def test_a_contents_slide_without_entries_is_kept() -> None:
     assert "▪Why we test" in [p.text for p in outline(pages)]
 
 
-# ---- the PDF outline
+# ---- the pdf outline
 
 
 def methods_report() -> tuple[list[list[Block]], list[tuple[int, str, int]]]:
-    """Subsections and sub-subsections in the same size (NIST-style), a 20pt banner the outline doesn't list,
-    and an outline with three levels."""
+    """subsections and sub-subsections in the same size (nist-style), a 20pt banner the outline doesn't list, and an outline with three levels."""
     pages = [
         [
             b("1. Methods", 14),
@@ -261,7 +260,7 @@ def test_a_flat_outline_is_ignored() -> None:
 def test_an_outline_entry_on_the_wrong_page_is_still_found() -> None:
     pages, toc = methods_report()
     toc[0] = (1, "Methods", 1)
-    toc[4] = (1, "Results", 1)  # NIST's first entries all point at page 1
+    toc[4] = (1, "Results", 1)  # nist's first entries all point at page 1
     assert {p.text: p.level for p in outline(pages, toc=toc)}["2. Results"] == 0
 
 

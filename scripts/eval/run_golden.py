@@ -1,19 +1,4 @@
-"""Score Content's search on the golden queries, through Kong, as real local users. Ported from fsd_test's
-knowledge/eval/run_golden.py; the scoring is the same, so the two sets of numbers can be compared.
-
-    python scripts/eval/run_golden.py [--rerank] [--holdout] [--label NAME] [--compare EARLIER.json]
-
-Run scripts/eval/load_corpus.py first. Each query runs as its `as` user (golden.yaml): s1 searches classroom C1,
-s2 classroom C2, and t1 searches both and keeps the best-scoring results of the two, since FSD_2026 searches one
-classroom at a time. Query filters map onto Content's: `class_ids` picks the classrooms (a student asking about
-another class gets 403, which counts as no results), `titles` becomes `document_ids`, `doc_types` passes through.
-`topic_ids` has no Content equivalent, so those queries are skipped.
-
-Reports hit@1/3/5, MRR, recall@5/10, leaks (for a student: any rubric or marking scheme, or any document outside
-their classes) and, with --rerank, the refusal-floor table. Each query costs one embedding and, with --rerank, one
-Voyage rerank per classroom searched. Exits 1 on a leak or a `kind` regression. Runs are saved to
-.local/eval-runs/.
-"""
+"""score content's search on the golden queries, through kong, as real local users."""
 
 import argparse
 import json
@@ -33,7 +18,7 @@ MARGIN = 0.02
 def search(
     session: Session, classrooms: dict, q: dict, documents: dict, rerank: bool
 ) -> tuple[list[dict], bool]:
-    """Results for one query, best first, and whether any search fell back from the rerank."""
+    """results for one query, best first, and whether any search fell back from the rerank."""
     filters = q.get("filters") or {}
     rooms = filters.get("class_ids") or list(USERS[q["as"]][1])
     titles = filters.get("titles")
@@ -70,12 +55,12 @@ def matches(result: dict, want: dict) -> bool:
 
 
 def alternatives(part: dict | list[dict]) -> list[dict]:
-    """An `expect_all` part is one location, or a list of locations any of which answers that part."""
+    """an `expect_all` part is one location, or a list of locations any of which answers that part."""
     return part if isinstance(part, list) else [part]
 
 
 def recall(results: list[dict], parts: list) -> float:
-    """Share of `expect_all` parts answered by some result (one chunk may answer several parts)."""
+    """share of `expect_all` parts answered by some result (one chunk may answer several parts)."""
     return sum(any(matches(r, w) for r in results for w in alternatives(p)) for p in parts) / len(parts)
 
 
@@ -179,9 +164,7 @@ def paired_bootstrap(before: list[dict], after: list[dict], n: int = 2000, seed:
 
 
 def floor_table(rows: list[dict], step: float = 0.05) -> dict | None:
-    """Refuse when the top score is under a floor: how well does each floor separate answerable from unanswerable?
-    Positives: scored queries whose top result is correct. Negatives: unanswerable queries (no result counts as a
-    refusal at any floor). Scored queries with a wrong top result are listed apart: no floor makes them right."""
+    """refuse when the top score is under a floor: how well does each floor separate answerable from unanswerable?"""
     good = [r["top_score"] for r in rows if r["scored"] and r["rank"] == 1 and r["top_score"] is not None]
     bad = [r["top_score"] if r["top_score"] is not None else float("-inf") for r in rows if r["unanswerable"]]
     if not good or not bad:

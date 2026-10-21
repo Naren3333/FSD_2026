@@ -1,4 +1,4 @@
-/** Choose an explicit MIME type from the supported extension; browser MIME guesses vary by OS. */
+/* choose an explicit mime type from the supported extension; browser mime guesses vary by os. */
 export const DOCUMENT_MIMES: Record<string, string> = {
   pdf: 'application/pdf',
   txt: 'text/plain',
@@ -20,7 +20,7 @@ export function documentLimit(file: { name: string }): number {
     : 50 * 1024 * 1024;
 }
 
-/** Whether a chosen file is a PDF, by its name. */
+/* whether a chosen file is a pdf, by its name. */
 export function isPdf(file: { name: string }): boolean {
   return /\.pdf$/i.test(file.name);
 }

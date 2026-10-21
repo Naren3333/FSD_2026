@@ -163,7 +163,7 @@
                               cited point can be on any of these pages.
                             </p>
                           }
-                          <!-- One line: the passage keeps its own line breaks (pre-wrap), so no whitespace around it. -->
+                          <!-- one line: the passage keeps its own line breaks (pre-wrap), so no whitespace around it. -->
                           <!-- prettier-ignore -->
                           <div class="passage" tabindex="0" [attr.aria-label]="'Passage from ' + source.title + ', ' + pageText(source)">{{ source.content }}</div>
                           <button type="button" class="secondary open-page" (click)="openPage(source)">
@@ -254,7 +254,7 @@
         <code>{{ run.text }}</code>
       }
       @case ('ref') {
-        <!-- One line: whitespace inside the link would show around the citation number. -->
+        <!-- one line: whitespace inside the link would show around the citation number. -->
         <!-- prettier-ignore -->
         <a class="cite" [href]="'#' + sourceId(message, run.ref)" (click)="jump($event, message, run.ref)" [attr.aria-label]="'Source ' + run.ref">[{{ run.ref }}]</a>
       }

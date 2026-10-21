@@ -1,16 +1,4 @@
-"""One chat turn, ported from fsd_test's assistant: rewrite the question, search the class materials with the
-user's own token, and stream a cited answer from ai-core.
-
-A message about several topics is searched once whole and once per topic (the rewrite's sub_queries), and the
-searches take turns filling the prompt, so no topic crowds out another; one answer then sees every passage and can
-explain how they connect.
-
-Everything that can fail with a plain HTTP status (the user, the body, the thread's owner, the database) happens
-before the stream starts, and the user's message is saved then. After that, failures arrive as an `error` event,
-and the assistant message is saved whatever happens: `answered`, `no_results` (the fixed refusal), `error` with
-the partial text, or `interrupted` when the client goes away. Only a thread purged meanwhile (its classroom or its
-user deleted) keeps nothing more; the stream then ends with a NOT_FOUND `error` event.
-"""
+"""one chat turn, ported from fsd_test's assistant: rewrite the question, search the class materials with the user's own token, and stream a cited answer from ai-core."""
 
 import asyncio
 import html
@@ -51,19 +39,18 @@ CITATION_FIELDS = (
     "content",
     "image",
 )
-# The thread was deleted (its classroom or its user purged) while the answer was written: nothing more is saved.
+# the thread was deleted (its classroom or its user purged) while the answer was written: nothing more is
+# saved.
 THREAD_GONE = ("NOT_FOUND", "This conversation was deleted.")
 MAX_DOCUMENTS_CHARS = 55000  # ai-core takes messages of up to 60000 characters
 PASSAGE_OVERHEAD = 200  # characters each passage adds to the prompt besides its content: tag, title, pages
 MAX_SUB_QUERIES = 3
-MERGED_TOP_K = 12  # passages a split message is answered from (one search gives SEARCH_TOP_K)
+MERGED_TOP_K = 12  # passages a split message is answered from (one search gives search_top_k)
 PER_DOCUMENT = 5  # of those, at most this many from one document
 
 
 class SSEResponse(StreamingResponse):
-    """Closes the body generator as soon as streaming stops, disconnects included, so its cleanup runs then rather
-    than whenever the generator is garbage-collected. `finish` runs however the response ends: a client gone before
-    the body starts means the generator never runs, so its own cleanup can't."""
+    """close streaming generators promptly and run final cleanup even before streaming starts."""
 
     def __init__(self, content: AsyncIterator[str], finish: Callable[[], None]) -> None:
         super().__init__(
@@ -85,7 +72,7 @@ class SSEResponse(StreamingResponse):
 
 
 def error_of(e: UpstreamError) -> tuple[str, str]:
-    """The `error` event for a failed upstream call: a code the browser can act on and a safe message."""
+    """the `error` event for a failed upstream call: a code the browser can act on and a safe message."""
     if e.code == "AI_SPEND_LIMIT":
         return "AI_SPEND_LIMIT", "You've used today's AI allowance."
     if e.code == "AI_BUSY":
@@ -101,18 +88,18 @@ def error_of(e: UpstreamError) -> tuple[str, str]:
 
 @dataclass(frozen=True)
 class TurnRequest:
-    """What the user asked, in which thread, and on whose behalf."""
+    """what the user asked, in which thread, and on whose behalf."""
 
     thread: dict[str, Any]
-    authorization: str  # the user's own bearer token, for Content search
+    authorization: str  # the user's own bearer token, for content search
     correlation: str
     content: str
     history: list[dict[str, str]]
-    billed_to: dict[str, str]  # whose daily AI allowance pays for this turn's model calls
+    billed_to: dict[str, str]  # whose daily ai allowance pays for this turn's model calls
 
 
 class Turn:
-    """One answer: runs the pipeline, yields SSE frames and saves the assistant message."""
+    """one answer: runs the pipeline, yields sse frames and saves the assistant message."""
 
     def __init__(
         self,
@@ -131,7 +118,7 @@ class Turn:
         )
         self.content, self.history = request.content, request.history
         self.started = time.perf_counter()
-        # The ms each step took, for the chat_turn log: where a slow turn spent its time.
+        # the ms each step took, for the chat_turn log: where a slow turn spent its time.
         self.timings: dict[str, int] = {}
         self.parts: list[str] = []
         self.results: list[dict[str, Any]] = []
@@ -140,9 +127,9 @@ class Turn:
         self.model: str | None = None
         self.usage_tokens: int | None = None
         self.outcome = "answered"
-        self.rewritten_query: str | None = None  # None when the rewrite failed
+        self.rewritten_query: str | None = None  # none when the rewrite failed
         self.sub_queries: list[str] = []  # the topics of a message about several, each searched on its own
-        self.topic_of: dict[str, list[str]] = {}  # A duplicate passage can support several topic searches.
+        self.topic_of: dict[str, list[str]] = {}  # a duplicate passage can support several topic searches.
         self.is_on_topic: bool | None = None
         self.small_talk = False
         self.searched = False
@@ -150,7 +137,7 @@ class Turn:
         self.begun = False  # whether events() has started; finish() saves the turn when it never did
 
     def finish(self) -> None:
-        """Saves the turn as `interrupted` if its events never started: the client left before the stream began."""
+        """saves the turn as `interrupted` if its events never started: the client left before the stream began."""
         if not self.begun:
             self.begun = True
             log.info("chat_client_gone_before_answer", extra={"thread_id": str(self.thread["id"])})
@@ -164,8 +151,7 @@ class Turn:
             async for frame in self._answer():
                 yield frame
         except (asyncio.CancelledError, GeneratorExit):
-            # The client went away. Saved in a task of its own: this one is being cancelled, and any await here
-            # would be cancelled too.
+            # the client went away.
             log.info("chat_client_disconnected", extra={"thread_id": str(self.thread["id"])})
             self._save_detached("interrupted")
             raise
@@ -177,9 +163,9 @@ class Turn:
         except Exception:
             log.exception("chat_turn_failed", extra={"thread_id": str(self.thread["id"])})
             error = ("INTERNAL_ERROR", "The answer failed.")
-        # Saved before the last events, so a disconnect while they are sent can't lose the row, and shielded, so a
-        # disconnect during the save can't either: the save carries on and the lifespan waits for it.
-        # A save that fails, or finds the thread purged meanwhile, still ends the stream with an `error` event.
+        # saved before the last events, so a disconnect while they are sent can't lose the row, and
+        # shielded, so a disconnect during the save can't either: the save carries on and the lifespan waits
+        # for it.
         if error is None:
             saved = await self._saved(self.outcome)
             if isinstance(saved, str):
@@ -195,7 +181,7 @@ class Turn:
         yield sse_event("error", data)
 
     async def _saved(self, outcome: str) -> str | tuple[str, str]:
-        """The saved answer's id, or the `error` event's code and message when it could not be saved."""
+        """the saved answer's id, or the `error` event's code and message when it could not be saved."""
         try:
             message_id = await asyncio.shield(self._save_detached(outcome))
         except Exception:  # logged by _log_failure
@@ -203,8 +189,7 @@ class Turn:
         return THREAD_GONE if message_id is None else message_id
 
     async def _answer(self) -> AsyncIterator[str]:
-        """Small talk gets a short reply without documents; an off-topic message, no results, or a top score under
-        the floor gets the fixed refusal without a model call; anything else is answered from the results."""
+        """answer small talk directly; refuse unrelated or weak evidence without an answer call."""
         role = self.thread["role"]
         step = time.perf_counter()
         await self._rewrite()
@@ -251,11 +236,11 @@ class Turn:
         if out := self.rewriter.flush():
             self.parts.append(out)
             yield sse_event("token", {"text": out})
-        # Structural coverage only: a citation's presence does not establish semantic entailment.
+        # structural coverage only: a citation's presence does not establish semantic entailment.
         cited_topics = {t for cid in self.rewriter.cited for t in self.topic_of.get(cid, [])}
         missing = [t for t in self.sub_queries if t not in cited_topics] if not self.small_talk else []
         if missing:
-            # Rewrite output is untrusted. Labels must not introduce citation markers or markup.
+            # rewrite output is untrusted.
             labels = [re.sub(r"[\[\]<>`*_]", "", " ".join(t.split()))[:200] for t in missing]
             notice = "\n\nCitation coverage is incomplete for: " + "; ".join(labels) + "."
             self.parts.append(notice)
@@ -264,19 +249,17 @@ class Turn:
         self._took("answer_ms", step)
 
     def _took(self, name: str, since: float) -> float:
-        """Records the ms since `since` as `name` and returns now, the next step's start."""
+        """records the ms since `since` as `name` and returns now, the next step's start."""
         now = time.perf_counter()
         self.timings[name] = round((now - since) * 1000)
         return now
 
     async def _search(self) -> None:
-        """Searches the whole message and, when it spans topics, each topic, all at once, then merges what came
-        back. Each search holds one of the user's AI_USER_CONCURRENCY slots in ai-core while it embeds or reranks,
-        so a split turn holds up to 1 + MAX_SUB_QUERIES."""
+        """searches the whole message and, when it spans topics, each topic, all at once, then merges what came back."""
         queries = [self.rewritten_query or self.content, *self.sub_queries]
         classroom = str(self.thread["classroom_id"])
 
-        # Every search finishes before a failure is raised, so none is left running after the turn.
+        # every search finishes before a failure is raised, so none is left running after the turn.
         async def lookup(q: str) -> list[dict[str, Any]]:
             results, fallback = await self.services.search(self.authorization, classroom, q, self.correlation)
             if fallback and results:
@@ -329,7 +312,7 @@ class Turn:
             return
         merged = merge(searches, self.settings.relevance_floor, self.settings.topic_floor)
         self.results = [r for r, _ in merged]
-        # Attribute every qualifying topic leg, including passages taken first by the primary search.
+        # attribute every qualifying topic leg, including passages taken first by the primary search.
         retained = {str(r["chunk_id"]) for r in self.results}
         self.topic_of = {}
         for topic_label, passages in zip(self.sub_queries, searches[1:], strict=True):
@@ -341,7 +324,7 @@ class Turn:
                         labels.append(topic_label)
 
     def _fitting(self) -> list[dict[str, Any]]:
-        """The results, best first, that fit in one prompt message."""
+        """the results, best first, that fit in one prompt message."""
         kept: list[dict[str, Any]] = []
         size = 0
 
@@ -353,7 +336,7 @@ class Turn:
         def context_chars(result: dict[str, Any]) -> int:
             return len(result.get("content") or "") + len(section_markup(result)) + PASSAGE_OVERHEAD
 
-        # Count with the offline tokenizer and reserve space for markup, history and the current question.
+        # count with the offline tokenizer and reserve space for markup, history and the current question.
         budget = max(
             0,
             self.settings.context_tokens
@@ -361,7 +344,7 @@ class Turn:
             - token_bound(self.content)
             - 1000,
         )
-        # Give each requested topic a chance before spending the remaining budget on extra passages.
+        # give each requested topic a chance before spending the remaining budget on extra passages.
         priority: list[dict[str, Any]] = []
         represented: set[str] = set()
         for label in self.sub_queries:
@@ -392,12 +375,10 @@ class Turn:
         return self.results
 
     async def _rewrite(self) -> None:
-        """A standalone search query, the two flags and the topics (query_rewrite.v2). If the model fails or its
-        reply is unusable the turn goes on: the raw message is searched and only the floor can refuse. ai-core being
-        down or not configured fails the turn, as the answer would too."""
+        """a standalone search query, the two flags and the topics (query_rewrite.v2)."""
         if self.settings.adaptive_rewrite and not needs_rewrite(self.content, self.history):
             self.rewritten_query = self.content
-            self.is_on_topic = True  # Retrieval, never this heuristic, decides whether there is evidence.
+            self.is_on_topic = True  # retrieval, never this heuristic, decides whether there is evidence.
             return
         try:
             output = await self.services.generate(
@@ -427,8 +408,7 @@ class Turn:
         self.sub_queries = topics(out.get("sub_queries"), self.rewritten_query)
 
     def _citations(self) -> list[dict[str, Any]]:
-        """The cited chunks, in citation order. The rewriter only maps tags that were in the prompt, so each one is
-        among the retrieved results."""
+        """the cited chunks, in citation order."""
         if self.rewriter is None:
             return []
         by_id = {str(r["chunk_id"]): r for r in self.results}
@@ -473,7 +453,7 @@ class Turn:
         return message_id
 
     def _save_detached(self, outcome: str) -> asyncio.Task[str | None]:
-        """Save in a task of its own, which a cancelled request does not cancel."""
+        """save in a task of its own, which a cancelled request does not cancel."""
         task = asyncio.get_running_loop().create_task(self._save(outcome))
         self.pending.add(task)  # a strong reference until it finishes; the lifespan waits for these
         task.add_done_callback(self.pending.discard)
@@ -482,8 +462,7 @@ class Turn:
 
 
 def topics(value: Any, query: str) -> list[str]:
-    """The rewrite's sub_queries, cleaned: distinct, not the whole query, at most MAX_SUB_QUERIES. A single topic
-    is no split, so it gives none."""
+    """the rewrite's sub_queries, cleaned: distinct, not the whole query, at most max_sub_queries."""
     if not isinstance(value, list):
         return []
     seen = {query.casefold()}
@@ -500,11 +479,7 @@ def topics(value: Any, query: str) -> list[str]:
 def merge(
     searches: list[list[dict[str, Any]]], floor: float, topic_floor: float
 ) -> list[tuple[dict[str, Any], int]]:
-    """One list from several searches, each best first, as (result, the index of the search that found it): they
-    take turns giving their next passage, so each topic gets its share. The whole message's search (the first)
-    gives none if its best passage is under `floor`, a topic's search if under `topic_floor`: it found nothing on
-    its topic. A passage already taken, or from a document that already has PER_DOCUMENT, is skipped. At most
-    MERGED_TOP_K."""
+    """one list from several searches, each best first, as (result, the index of the search that found it): they take turns giving their next passage, so each topic gets its share."""
     queues = [
         (n, list(rs))
         for n, rs in enumerate(searches)
@@ -536,7 +511,7 @@ def _log_failure(task: asyncio.Task[Any]) -> None:
 
 
 def needs_rewrite(content: str, history: list[dict[str, str]]) -> bool:
-    # Skip only explicit, short, single-subject definitions on a first turn. Ambiguity keeps the model route.
+    # skip only explicit, short, single-subject definitions on a first turn.
     if history or not re.match(r"^(what (?:is|are)|define|explain)\s+", content.strip(), re.I):
         return True
     words = re.findall(r"[a-z0-9]+", content.lower())

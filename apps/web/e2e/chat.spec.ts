@@ -9,7 +9,7 @@ import {
 const CHUNK = '11111111-1111-4111-8111-111111111111',
   FIGURE = '22222222-2222-4222-8222-222222222222',
   DOC = '33333333-3333-4333-8333-333333333333';
-// A 1x1 PNG, served in place of a figure crop.
+// a 1x1 png, served in place of a figure crop.
 const PNG = Buffer.from(
   'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=',
   'base64',
@@ -56,7 +56,7 @@ test('teacher uploads materials and an enrolled student asks the real assistant'
   const slides = page.locator('.record').filter({ hasText: 'Slides ' + suffix });
   await expect(slides.locator('.badge').first()).toHaveText(/^Indexing( failed)?$/);
 
-  // Deleting a material asks first, with Cancel focused, and then removes it for everyone.
+  // deleting a material asks first, with cancel focused, and then removes it for everyone.
   await notes.getByRole('button', { name: 'Delete Notes ' + suffix }).click();
   const confirm = page.getByRole('dialog', { name: 'Delete this document?' });
   await expect(confirm.getByRole('button', { name: 'Cancel' })).toBeFocused();
@@ -68,7 +68,7 @@ test('teacher uploads materials and an enrolled student asks the real assistant'
   await expect(notes).toHaveCount(0);
   await expect(page.getByRole('heading', { name: 'Classroom library' })).toBeFocused();
 
-  // The student sees what is left, and asks with their own access.
+  // the student sees what is left, and asks with their own access.
   await student.getByRole('button', { name: 'Refresh classrooms' }).click();
   await student.getByLabel('Current classroom').selectOption({ label: 'Chat ' + suffix });
   await student.getByRole('link', { name: 'Teaching materials', exact: true }).click();
@@ -88,7 +88,8 @@ async function answerHonestly(page: Page) {
   await expect(page.getByLabel('Your question')).toBeFocused();
   await page.getByLabel('Your question').fill('What does photosynthesis produce?');
   await page.getByLabel('Your question').press('Control+Enter');
-  // With or without provider keys the turn must end honestly: an answer, "no matching material", or a stated failure.
+  // with or without provider keys the turn must end honestly: an answer, "no matching material", or a
+  // stated failure.
   const answer = page.locator('.turn.answer').last();
   await expect(answer.locator('.cursor')).toHaveCount(0, { timeout: 60000 });
   await expect(page.getByRole('button', { name: 'Send question', exact: true })).toBeEnabled();

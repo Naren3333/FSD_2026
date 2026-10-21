@@ -1,4 +1,4 @@
-"""The HTTP routes, with Identity and the database replaced by fakes; the real queries run in test_store.py."""
+"""the http routes, with identity and the database replaced by fakes; the real queries run in test_store.py."""
 
 from collections.abc import Iterator
 from typing import Any
@@ -17,8 +17,7 @@ AUTH = {"Authorization": "Bearer token"}
 
 
 class FakeIdentity:
-    """Answers every access check with one relation (None denies), and the roster with `students`; `down` makes
-    Identity unavailable."""
+    """answers every access check with one relation (none denies), and the roster with `students`; `down` makes identity unavailable."""
 
     def __init__(self, relation: str | None, students: list[str] | None = None, down: bool = False) -> None:
         self.relation_answer, self.students, self.down = relation, students, down
@@ -39,7 +38,7 @@ class FakeIdentity:
 
 
 class FakePool:
-    """A pool whose connection returns `rows` for any query and records the queries' parameters."""
+    """a pool whose connection returns `rows` for any query and records the queries' parameters."""
 
     def __init__(self, rows: list[dict[str, Any]] | None = None) -> None:
         self.rows = rows or []
@@ -64,7 +63,7 @@ class FakePool:
 
 @pytest.fixture
 def serve() -> Iterator[Any]:
-    """Sets the app's Identity and pool, and returns a client calling as the given roles and subject."""
+    """sets the app's identity and pool, and returns a client calling as the given roles and subject."""
     client = TestClient(app)
 
     def set_up(identity: FakeIdentity, pool: FakePool) -> TestClient:
@@ -113,7 +112,7 @@ def test_a_page_of_the_roster_reads_only_its_students(serve):
 @pytest.mark.parametrize(
     ("identity", "status"),
     [
-        (FakeIdentity("teacher", None), 403),  # Identity refused the roster
+        (FakeIdentity("teacher", None), 403),  # identity refused the roster
         (FakeIdentity("student", ["s1"]), 403),  # not this classroom's teacher
         (FakeIdentity(None, ["s1"]), 403),
         (FakeIdentity("teacher", ["s1"], down=True), 503),
@@ -173,8 +172,7 @@ def test_a_student_cannot_read_a_classmate(serve):
 
 
 def test_a_teacher_account_reported_as_a_student_cannot_read_a_classmate(serve):
-    """Identity never says this for a teacher's account; if it ever did, a teacher's token alone must not turn a
-    student's access into a teacher's."""
+    """identity never says this for a teacher's account; if it ever did, a teacher's token alone must not turn a student's access into a teacher's."""
     pool = FakePool([evidence("s2", True)])
     client = serve(FakeIdentity("student"), pool)
     with as_caller(app, token_claims("teacher", sub="t1", org="org")):

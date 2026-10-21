@@ -1,8 +1,4 @@
-"""What a PDF page shows, read with PyMuPDF: its visible words, pictures, a content key for caching, and renders.
-
-The page's key (`page_key`) hashes what the page shows, not its bytes: its size, words, pictures and drawings. A
-page without a text layer (a scan: under MIN_PAGE_CHARS of visible PDF text) is transcribed by the vision pass.
-Hidden text (a scanner's invisible OCR layer, or fully transparent text) doesn't count."""
+"""what a pdf page shows, read with pymupdf: its visible words, pictures, a content key for caching, and renders."""
 
 import hashlib
 from pathlib import Path
@@ -18,7 +14,7 @@ DPI = 110
 CROP_DPI = 150
 
 
-MIN_PAGE_CHARS = 50  # a page with less PDF text than this has no text layer: it is transcribed (OCR)
+MIN_PAGE_CHARS = 50  # a page with less pdf text than this has no text layer: it is transcribed (ocr)
 
 
 TILE_GAP = 2.0  # image tiles this close are one picture (scanners often write a page as strips)
@@ -28,10 +24,7 @@ TILE_OVERLAP = 0.1  # ...unless they lie on each other by more than this share o
 
 
 def page_key(page: pymupdf.Page) -> str:
-    """What the page shows, hashed: its size, words with their boxes, embedded pictures (by content digest) and
-    drawings. The same slide in a revised deck has the same key; a changed word, picture or shape gives a new one.
-    Not a hash of the rendered pixels, which would change with the renderer's version; and the raw PDF words, not
-    the cleaned-up ones, so a change to the cleaning never re-keys (and so re-samples) the cache."""
+    """what the page shows, hashed: its size, words with their boxes, embedded pictures (by content digest) and drawings."""
     h = hashlib.sha256()
     h.update(repr((_r(page.rect.width), _r(page.rect.height))).encode())
     for w in page.get_text("words", sort=True):
@@ -48,7 +41,7 @@ def _r(v: float) -> float:
 
 
 def visible_words(page: pymupdf.Page) -> list[Word]:
-    """The page's words, minus hidden text (alpha 0: a scanner's invisible OCR layer, or transparent text)."""
+    """the page's words, minus hidden text (alpha 0: a scanner's invisible ocr layer, or transparent text)."""
     words = [(*w[:4], unligature(w[4])) for w in page.get_text("words", sort=True)]
     spans = [
         s for b in page.get_text("dict")["blocks"] if b["type"] == 0 for ln in b["lines"] for s in ln["spans"]
@@ -63,8 +56,7 @@ def visible_words(page: pymupdf.Page) -> list[Word]:
 
 
 def pictures(page: pymupdf.Page) -> list[Box]:
-    """The page's images, tiles merged; top to bottom. Tiles touch (within TILE_GAP) without lying on each other:
-    a picture placed over a page-sized background stays its own picture."""
+    """the page's images, tiles merged; top to bottom."""
     boxes = [
         b for b in (tuple(pymupdf.Rect(i["bbox"]) & page.rect) for i in page.get_image_info()) if area(b) > 0
     ]
@@ -99,7 +91,7 @@ def _tiles(a: Box, b: Box) -> bool:
 
 
 def _render(path: Path, number: int, clip: Box | None = None, sharp: bool = False) -> bytes:
-    """The page (at DPI, or CROP_DPI when `sharp`: a transcript needs small print legible), or a crop of it."""
+    """the page (at dpi, or crop_dpi when `sharp`: a transcript needs small print legible), or a crop of it."""
     with pymupdf.open(path) as doc:
         page = doc[number]
         if clip is None:

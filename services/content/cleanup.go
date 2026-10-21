@@ -11,8 +11,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
-// Cleanup is recorded in the deletion transaction and runs only after commit. A crashed worker's lease
-// expires; removing an already absent prefix is harmless. Failed jobs are retained until cleanup succeeds.
+// cleanup is recorded in the deletion transaction and runs only after commit.
 type cleaner struct {
 	db    *pgxpool.Pool
 	files folders

@@ -12,7 +12,7 @@ import (
 	"github.com/jackc/pgx/v5"
 )
 
-// Migration is one numbered SQL file, NNN_name.sql, applied once and recorded in schema_migrations.
+// migration is one numbered sql file, nnn_name.sql, applied once and recorded in schema_migrations.
 type Migration struct {
 	Version int
 	Name    string
@@ -21,9 +21,7 @@ type Migration struct {
 
 var migrationName = regexp.MustCompile(`^(\d{3})_[a-z0-9_]+\.sql$`)
 
-// Migrations reads the numbered SQL files in fsys's migrations directory in version order. Versions must be
-// unique and start at 1 without gaps, so a missing or misnamed file fails startup instead of
-// silently skipping a schema change.
+// migrations reads the numbered sql files in fsys's migrations directory in version order.
 func Migrations(fsys fs.FS) ([]Migration, error) {
 	entries, err := fs.ReadDir(fsys, "migrations")
 	if err != nil {
@@ -57,10 +55,7 @@ func Migrations(fsys fs.FS) ([]Migration, error) {
 	return out, nil
 }
 
-// migrate applies bootstrap (idempotent statements run on every start, such as the outbox tables)
-// and then every numbered migration not yet recorded, each in the caller's transaction, which
-// holds the advisory lock. 001_init.sql files record version 1 themselves; recording it again is
-// a no-op.
+// apply bootstrap statements and pending numbered migrations under the transaction lock.
 func migrate(ctx context.Context, tx pgx.Tx, migrations []Migration, bootstrap string) error {
 	if _, err := tx.Exec(ctx, "CREATE TABLE IF NOT EXISTS schema_migrations(version integer PRIMARY KEY, applied_at timestamptz NOT NULL DEFAULT now())"); err != nil {
 		return err

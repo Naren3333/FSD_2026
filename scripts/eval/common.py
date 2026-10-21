@@ -1,5 +1,4 @@
-"""Shared by the golden eval scripts: local sign-in through Keycloak, the corpus manifest, and the eval's state in
-.local/ (classroom and document ids, the second student's generated password). Local development stack only."""
+"""share local sign-in, corpus metadata and private eval state."""
 
 import json
 import os
@@ -23,12 +22,12 @@ STATE = ROOT / ".local" / "eval-corpus.json"
 RUNS = ROOT / ".local" / "eval-runs"
 CLASSES = ("C1", "C2")
 STUDENT2 = "eval-student2"
-# The golden set's users: which account, and which of the eval classrooms it belongs to.
+# the golden set's users: which account, and which of the eval classrooms it belongs to.
 USERS = {"t1": ("teacher", CLASSES), "s1": ("student", ("C1",)), "s2": (STUDENT2, ("C2",))}
 
 
 def corpus() -> dict[str, dict]:
-    """File name → title, doc_type and class_ids (one class per document)."""
+    """file name → title, doc_type and class_ids (one class per document)."""
     return yaml.safe_load(CORPUS.read_text(encoding="utf-8"))
 
 
@@ -48,9 +47,7 @@ def password(user: str, state: dict) -> str:
 
 
 class Session:
-    """Gateway calls as a local test user (the learning-e2e client, as scripts/integration.py does). Access tokens
-    are short-lived, so a 401 signs in again, once per expiry. Kong allows each signed-in session (bearer token) 120 requests a
-    minute, which a long run of queries can reach, so a 429 waits and retries."""
+    """gateway calls as a local test user (the learning-e2e client, as scripts/integration.py does)."""
 
     def __init__(self, user: str, state: dict) -> None:
         self.user, self.secret = user, password(user, state)
@@ -61,9 +58,7 @@ class Session:
         self.http.headers["Authorization"] = "Bearer " + password_token(self.user, self.secret)
 
     def send(self, method: str, path: str, *, stream: bool = False, **kwargs) -> httpx.Response:
-        """The response, after signing in again on a 401 and waiting out 429s. With `stream`, the body is not read
-        yet: close the response when done with it. The token can expire during a long run of 429 waits, so a 401
-        signs in again at any attempt; a second 401 straight after signing in is the answer."""
+        """the response, after signing in again on a 401 and waiting out 429s."""
         signed_in = False
         for attempt in range(ATTEMPTS):
             res = self.http.send(self.http.build_request(method, path, **kwargs), stream=stream)
@@ -84,7 +79,7 @@ class Session:
 
     @contextmanager
     def stream(self, method: str, path: str, **kwargs) -> Iterator[httpx.Response]:
-        """Like request, with the response streamed inside the block."""
+        """like request, with the response streamed inside the block."""
         res = self.send(method, path, stream=True, **kwargs)
         try:
             yield res

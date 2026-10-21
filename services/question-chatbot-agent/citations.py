@@ -1,11 +1,4 @@
-"""Rewrites the model's source tags into the frontend's citation markers while the answer streams. Ported from
-fsd_test's assistant.
-
-The prompt labels documents S1…S8; models copy those reliably, where 36-char UUIDs get mangled. `[S3]` becomes
-`[doc:<chunk_id>]`, and a list `[S1, S3]` becomes `[doc:a][doc:b]`. A tag that wasn't in the prompt, or a range
-(`[S1-S3]`), is dropped and logged. Text after an unclosed `[` is held back until it closes, stops looking like
-a tag, or passes HOLD chars, so a tag split across deltas is never relayed half-rewritten.
-"""
+"""rewrites the model's source tags into the frontend's citation markers while the answer streams."""
 
 import logging
 import re
@@ -20,7 +13,7 @@ _TAG_CHARS = set("0123456789S ,;-–")
 
 class CitationRewriter:
     def __init__(self, tag_map: dict[str, str]) -> None:
-        """`tag_map`: "S1" → chunk id, for the documents that were in the prompt."""
+        """`tag_map`: \"s1\" → chunk id, for the documents that were in the prompt."""
         self.tag_map = tag_map
         self.cited: list[str] = []  # chunk ids in order of first citation
         self._held = ""
@@ -45,7 +38,7 @@ class CitationRewriter:
         return "".join(out)
 
     def flush(self) -> str:
-        """The held-back text at the end of the stream, as written."""
+        """the held-back text at the end of the stream, as written."""
         held, self._held = self._held, ""
         return held
 
@@ -64,4 +57,4 @@ class CitationRewriter:
         if _RANGE.fullmatch(tag):
             log.warning("citation_range_dropped", extra={"tag": tag})
             return ""
-        return tag  # e.g. "[S]": tag-like, but not a citation
+        return tag  # e.g. "[s]": tag-like, but not a citation

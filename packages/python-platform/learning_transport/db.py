@@ -1,6 +1,4 @@
-"""Postgres connection pools for services that own a database. Each opens with dict rows and a 10 s statement
-timeout, and applies the service's numbered migrations before it is used. Import this module only from a
-service that has psycopg installed."""
+"""postgres connection pools for services that own a database."""
 
 import os
 import re
@@ -28,8 +26,8 @@ def pool_limits() -> tuple[int, int]:
 
 
 MIGRATION_NAME = re.compile(r"^(\d{3})_[a-z0-9_]+\.sql$")
-# Lock scopes, as in the Go platform package (lock.go): a scope and its key hash to one transaction-scoped advisory
-# lock, derived exactly as the Go services derive it.
+# lock scopes, as in the go platform package (lock.go): a scope and its key hash to one transaction-scoped
+# advisory lock, derived exactly as the go services derive it.
 LOCK_MIGRATIONS = "migrations"  # no key: serializes replicas migrating at once
 LOCK_CLASSROOM = "classroom"  # a classroom's purge against new rows in it
 LOCK_USER = "user"  # a deleted account's purge against new rows for it
@@ -44,7 +42,7 @@ RECORD = "INSERT INTO schema_migrations(version) VALUES(%s) ON CONFLICT DO NOTHI
 
 @dataclass(frozen=True)
 class Migration:
-    """One numbered SQL file, NNN_name.sql, applied once and recorded in schema_migrations."""
+    """one numbered sql file, nnn_name.sql, applied once and recorded in schema_migrations."""
 
     version: int
     name: str
@@ -52,8 +50,7 @@ class Migration:
 
 
 def migrations(directory: Path) -> list[Migration]:
-    """The NNN_name.sql files in directory in version order. Versions must run 1..n without gaps or duplicates,
-    so a missing or misnamed file fails startup instead of silently skipping a schema change."""
+    """the nnn_name.sql files in directory in version order."""
     found = []
     for path in directory.glob("*.sql"):
         match = MIGRATION_NAME.match(path.name)
@@ -70,7 +67,7 @@ def migrations(directory: Path) -> list[Migration]:
 
 
 def lock(conn: Connection[Any], scope: str, key: object) -> None:
-    """Take the exclusive advisory lock on (scope, key) until conn's transaction ends."""
+    """take the exclusive advisory lock on (scope, key) until conn's transaction ends."""
     conn.execute(LOCK, (scope, str(key)))
 
 
@@ -118,7 +115,7 @@ def open_pool(url: str, directory: Path) -> ConnectionPool[Any]:
 
 
 class AsyncPooled:
-    """A service's own database behind an async pool, opened with the service's MIGRATIONS applied."""
+    """a service's own database behind an async pool, opened with the service's migrations applied."""
 
     MIGRATIONS: ClassVar[Path]
 

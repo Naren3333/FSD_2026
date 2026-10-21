@@ -1,7 +1,6 @@
 FROM golang:1.25.7-alpine AS build
 WORKDIR /src
-# Modules first, so a code change reuses the downloaded-modules layer. The replace in go.mod points at
-# packages/platform, which only needs its go.mod for the download.
+# modules first, so a code change reuses the downloaded-modules layer.
 COPY packages/platform/go.mod packages/platform/go.sum /src/packages/platform/
 COPY services/assessment/go.mod services/assessment/go.sum /src/services/assessment/
 WORKDIR /src/services/assessment

@@ -1,4 +1,4 @@
-"""Render reproducible Kong OSS configuration with Keycloak's local RSA public key."""
+"""render reproducible kong oss configuration with keycloak's local rsa public key."""
 
 import json
 import os
@@ -9,10 +9,9 @@ from typing import Any
 
 BUSINESS_SERVICES = ["identity", "curriculum", "content", "assessment", "grading", "analytics"]
 TIMEOUT_MS = 20_000
-# Content gives an upload 5 minutes (uploadDeadline in services/content/domain.go); Kong waits a little longer, so a
-# slow 50 MiB upload gets Content's answer instead of a gateway 504 while the document still commits.
+# let the upload service finish before the gateway times out.
 CONTENT_TIMEOUT_MS = 310_000
-# The token issuer and the web app's origin, on the ports the Compose stack publishes (docker-compose.yml).
+# the token issuer and the web app's origin, on the ports the compose stack publishes (docker-compose.yml).
 ISSUER = os.environ.get("KEYCLOAK_ISSUER", "http://localhost:8081/realms/learning")
 WEB_ORIGIN = os.environ.get("WEB_ORIGIN", "http://localhost:4200")
 
@@ -21,7 +20,7 @@ def business_service(name: str) -> dict[str, Any]:
     timeout = CONTENT_TIMEOUT_MS if name == "content" else TIMEOUT_MS
     route: dict[str, Any] = {"name": name, "paths": [f"/api/{name}"], "strip_path": True}
     if name == "content":
-        # PDFs may be up to 50 MiB (in megabytes, so 51 leaves room for the request around the file).
+        # pdfs may be up to 50 mib (in megabytes, so 51 leaves room for the request around the file).
         route["plugins"] = [{"name": "request-size-limiting", "config": {"allowed_payload_size": 51}}]
     return {
         "name": name,
@@ -33,9 +32,7 @@ def business_service(name: str) -> dict[str, Any]:
     }
 
 
-# The chatbot streams its answers (server-sent events), so Kong must not buffer them. Its read timeout is the
-# longest gap between two writes: before the first token the chatbot may wait for the query rewrite (40 s), the
-# search (15 s) and the answer's first words (90 s).
+# the chatbot streams its answers (server-sent events), so kong must not buffer them.
 CHATBOT = {
     "name": "question-chatbot-agent",
     "url": "http://question-chatbot-agent:8080/v1",
@@ -47,9 +44,7 @@ CHATBOT = {
     ],
 }
 
-# Question generation makes one model call of up to a few thousand tokens after a search, so it may take a couple of
-# minutes: the agent waits up to 135 s for ai-core (GENERATE_TIMEOUT) after its checks and search, and Kong a little
-# longer than all of that.
+# allow generation to finish its search, model call and accounting before the gateway times out.
 QUESTION_GENERATION = {
     "name": "question-generation-agent",
     "url": "http://question-generation-agent:8080/v1",
@@ -73,8 +68,8 @@ PLUGINS = [
         "name": "correlation-id",
         "config": {"header_name": "X-Correlation-ID", "generator": "uuid", "echo_downstream": True},
     },
-    # Every user signs in through the one "keycloak" consumer, so limiting by consumer would give the whole school
-    # one shared budget. Each signed-in session's bearer token gets its own 120 requests a minute instead.
+    # every user signs in through the one "keycloak" consumer, so limiting by consumer would give the whole
+    # school one shared budget.
     {
         "name": "rate-limiting",
         "config": {"minute": 120, "policy": "local", "limit_by": "header", "header_name": "authorization"},

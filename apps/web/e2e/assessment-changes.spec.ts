@@ -22,7 +22,7 @@ test('a teacher edits and deletes a published assessment until a student submits
   await expect(teacher.getByText('Topic added.', { exact: true })).toBeVisible();
   await teacher.getByRole('link', { name: 'Assessments', exact: true }).click();
 
-  // Two published assessments: one to edit, one to delete.
+  // two published assessments: one to edit, one to delete.
   for (const title of ['Quiz ' + suffix, 'Spare ' + suffix]) {
     await teacher.getByLabel('Assessment title').fill(title);
     const first = teacher.getByRole('group', { name: 'Question 1' });
@@ -33,7 +33,7 @@ test('a teacher edits and deletes a published assessment until a student submits
     await expect(teacher.getByText('Assessment published.', { exact: true })).toBeVisible();
   }
 
-  // Nobody has submitted yet: the whole assessment can change, and it stays published.
+  // nobody has submitted yet: the whole assessment can change, and it stays published.
   await teacher.getByRole('button', { name: 'Edit Quiz ' + suffix, exact: true }).click();
   await expect(teacher.getByRole('heading', { name: 'Edit assessment: Quiz ' + suffix })).toBeVisible();
   await expect(teacher.getByRole('button', { name: 'Publish assessment', exact: true })).toHaveCount(0);
@@ -52,7 +52,7 @@ test('a teacher edits and deletes a published assessment until a student submits
   await expect(teacher.getByText('Spare ' + suffix + ' deleted.', { exact: true })).toBeVisible();
   await expect(teacher.getByText('Spare ' + suffix, { exact: true })).toHaveCount(0);
 
-  // The student answers the changed question.
+  // the student answers the changed question.
   await student.getByRole('button', { name: 'Refresh classrooms' }).click();
   await student.getByLabel('Current classroom').selectOption({ label: room });
   await student.getByRole('link', { name: 'Assessments', exact: true }).click();
@@ -64,7 +64,7 @@ test('a teacher edits and deletes a published assessment until a student submits
     student.getByText('Answers submitted. Your teacher will review the grade.', { exact: true }),
   ).toBeVisible();
 
-  // Once submitted, only the title, due date and late policy change.
+  // once submitted, only the title, due date and late policy change.
   await teacher.getByRole('button', { name: 'Refresh assessments' }).click();
   await expect(teacher.getByText(/1 submitted/)).toBeVisible();
   await teacher.getByRole('button', { name: 'Edit details of Sums ' + suffix, exact: true }).click();
@@ -76,16 +76,16 @@ test('a teacher edits and deletes a published assessment until a student submits
   await expect(teacher.getByText('Sums marked ' + suffix + ' saved.', { exact: true })).toBeVisible();
   await expect(teacher.locator('strong').getByText('Sums marked ' + suffix, { exact: true })).toBeVisible();
 
-  // The teacher's preview closes from its own button, and focus goes back to the button that opened it.
+  // the teacher's preview closes from its own button, and focus goes back to the button that opened it.
   const preview = teacher.getByRole('button', { name: 'Preview assessment', exact: true });
   await preview.click();
   await expect(teacher.getByText(/Teacher preview\./)).toBeVisible();
-  // Not the list's toggle, which also reads Close preview while the preview is open.
+  // not the list's toggle, which also reads close preview while the preview is open.
   await teacher.locator('#answer-form').getByRole('button', { name: 'Close preview', exact: true }).click();
   await expect(teacher.getByText(/Teacher preview\./)).toHaveCount(0);
   await expect(preview).toBeFocused();
 
-  // Deleting it now takes the student's submission and grade too, which the dialog says first.
+  // deleting it now takes the student's submission and grade too, which the dialog says first.
   await teacher.getByRole('button', { name: 'Delete Sums marked ' + suffix, exact: true }).click();
   const dialog = teacher.getByRole('dialog');
   await expect(dialog.getByRole('heading', { name: 'Delete this assessment and its grades?' })).toBeVisible();

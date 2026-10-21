@@ -200,7 +200,7 @@
                           <legend>{{ criterion.title }}</legend>
                           @for (level of criterion.levels; track level.points) {
                             <label class="check">
-                              <!-- One name per criterion makes a real radio group: one Tab stop, arrow keys between levels. -->
+                              <!-- one name per criterion makes a real radio group: one tab stop, arrow keys between levels. -->
                               <input
                                 type="radio"
                                 [attr.name]="group"
@@ -277,7 +277,7 @@
       </p>
     }
   }
-  <!-- Not disabled while a page loads, so the button pressed keeps keyboard focus; only the newest page lands. -->
+  <!-- not disabled while a page loads, so the button pressed keeps keyboard focus; only the newest page lands. -->
   <app-pager
     label="Grade pages"
     noun="grades"

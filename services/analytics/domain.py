@@ -10,8 +10,7 @@ FINALIZED = "grading.finalized.v3"
 
 
 class Evidence(Contract):
-    """One question's finalized marks. A question is correct only with full marks; it is worth up to 100 points and
-    may earn part of them."""
+    """one question's finalized marks."""
 
     question_id: UUID
     topic_id: UUID
@@ -60,7 +59,7 @@ class AssessmentDeleted(Contract):
 
 
 class AssessmentDeletedEvent(Envelope):
-    """A published assessment its teacher deleted with its submissions (ADR 0008)."""
+    """a published assessment its teacher deleted with its submissions (adr 0008)."""
 
     event_type: Literal["assessment.deleted.v1"]
     data: AssessmentDeleted
@@ -73,8 +72,7 @@ class AssessmentDeletedEvent(Envelope):
 
 
 class TopicMetric(Contract):
-    """A topic's finalized evidence: questions attempted and answered with full marks, and the marks earned out of
-    the marks possible (which shows part marks)."""
+    """a topic's finalized evidence: questions attempted and answered with full marks, and the marks earned out of the marks possible (which shows part marks)."""
 
     topic_id: UUID
     attempted: int = Field(ge=1)
@@ -104,7 +102,7 @@ class StudentPerformance(Contract):
 
 
 class ClassPerformanceResponse(Contract):
-    """One page of a classroom's enrolled students, in Identity's roster order, each with their topic evidence."""
+    """one page of a classroom's enrolled students, in identity's roster order, each with their topic evidence."""
 
     classroom_id: UUID
     total: int = Field(ge=0)
@@ -122,7 +120,7 @@ class PerformanceResponse(Contract):
 
 
 def by_student(students: list[str], rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    """Each student's topic summary, in the given order; a student without evidence has no topics."""
+    """each student's topic summary, in the given order; a student without evidence has no topics."""
     evidence: dict[str, list[dict[str, Any]]] = defaultdict(list)
     for row in rows:
         evidence[row["student_id"]].append(row)
@@ -137,9 +135,7 @@ def by_student(students: list[str], rows: list[dict[str, Any]]) -> list[dict[str
 
 
 def summarize(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    """Each topic's counts from evidence rows (topic_id, correct, awarded, possible). The weakness indicator counts
-    questions answered with full marks, so part marks don't lift it; that is ADR 0004's definition of "correct", and
-    marks_awarded/marks_possible show the part marks beside it."""
+    """each topic's counts from evidence rows (topic_id, correct, awarded, possible)."""
     counts: dict[str, list[int]] = defaultdict(lambda: [0, 0, 0, 0])
     for row in rows:
         topic = counts[str(row["topic_id"])]

@@ -7,19 +7,19 @@ import (
 	"unicode/utf8"
 )
 
-// Evaluation statuses: a draft until the classroom's teacher finalizes it.
+// evaluation statuses: a draft until the classroom's teacher finalizes it.
 const (
 	statusDraft     = "draft"
 	statusFinalized = "finalized"
 )
 
-// When students see a finalized grade: at once, or when the teacher releases the assessment's results.
+// when students see a finalized grade: at once, or when the teacher releases the assessment's results.
 const (
 	releaseOnFinalize = "on_finalize"
 	releaseManual     = "manual"
 )
 
-// Who set a question's marks.
+// who set a question's marks.
 const (
 	markedAuto    = "auto"
 	markedTeacher = "teacher"
@@ -27,7 +27,7 @@ const (
 
 const maxFeedback = 2000
 
-// Marking-scheme passage limits, as Assessment checks them.
+// marking-scheme passage limits, as assessment checks them.
 const (
 	maxExcerpts    = 5
 	maxExcerptText = 2000
@@ -55,8 +55,8 @@ type Rubric struct {
 	ModelAnswer string      `json:"model_answer,omitempty"`
 }
 
-// Excerpt is a passage of the classroom's marking scheme the teacher attached to a question, for AI marking
-// suggestions only. Like the rubric it never reaches the student.
+// excerpt is a passage of the classroom's marking scheme the teacher attached to a question, for ai marking
+// suggestions only.
 type Excerpt struct {
 	Document string `json:"document_id,omitempty"`
 	Chunk    string `json:"chunk_id,omitempty"`
@@ -64,7 +64,8 @@ type Excerpt struct {
 	Text     string `json:"text"`
 }
 
-// Question is a question as Assessment published it, answer key, rubric and marking-scheme passages included.
+// question is a question as assessment published it, answer key, rubric and marking-scheme passages
+// included.
 type Question struct {
 	ID              string    `json:"id"`
 	Prompt          string    `json:"prompt"`
@@ -81,14 +82,13 @@ type Question struct {
 	Topic           string    `json:"topic_id"`
 }
 
-// CriterionScore is the level a rubric criterion was given.
+// criterionscore is the level a rubric criterion was given.
 type CriterionScore struct {
 	Criterion string `json:"criterion_id"`
 	Points    int    `json:"points"`
 }
 
-// Suggestion is an AI-suggested mark for a question that needs the teacher. It is never a grade: the teacher
-// accepts, edits or ignores it (docs/decisions/0004-assessment-lifecycle-and-ai-marking.md).
+// suggestion is an ai-suggested mark for a question that needs the teacher.
 type Suggestion struct {
 	Status     string               `json:"status"` // pending, ready or failed
 	Criteria   []SuggestedCriterion `json:"criteria,omitempty"`
@@ -97,13 +97,14 @@ type Suggestion struct {
 	Confidence string               `json:"confidence,omitempty"`
 	Flags      []string             `json:"flags,omitempty"`
 	Model      string               `json:"model,omitempty"`
-	// Reason says why a suggestion failed or is still waiting (for the teacher's daily AI allowance, say).
+	// reason says why a suggestion failed or is still waiting (for the teacher's daily ai allowance, say).
 	Reason string `json:"reason,omitempty"`
-	// SchemePassages is how many of the question's marking-scheme passages the model was given.
+	// schemepassages is how many of the question's marking-scheme passages the model was given.
 	SchemePassages int `json:"scheme_passages,omitempty"`
 }
 
-// SuggestedCriterion is the level suggested for one criterion, with the student's own words that justify it.
+// suggestedcriterion is the level suggested for one criterion, with the student's own words that justify
+// it.
 type SuggestedCriterion struct {
 	Criterion string   `json:"criterion_id"`
 	Points    int      `json:"points"`
@@ -111,15 +112,14 @@ type SuggestedCriterion struct {
 	Rationale string   `json:"rationale"`
 }
 
-// Suggestion statuses.
+// suggestion statuses.
 const (
 	suggestionPending = "pending"
 	suggestionReady   = "ready"
 	suggestionFailed  = "failed"
 )
 
-// Evidence is one question's marks in an evaluation. A question needs marking while it waits for the teacher: a
-// free response, or a short answer matching none of the accepted answers.
+// evidence is one question's marks in an evaluation.
 type Evidence struct {
 	Question     string           `json:"question_id"`
 	Topic        string           `json:"topic_id"`
@@ -133,7 +133,7 @@ type Evidence struct {
 	Suggestion   *Suggestion      `json:"suggestion,omitempty"`
 }
 
-// Evaluation is the teacher's view of one submission's grading, with the student's answers.
+// evaluation is the teacher's view of one submission's grading, with the student's answers.
 type Evaluation struct {
 	ID            string            `json:"id"`
 	Assessment    string            `json:"assessment_id"`
@@ -149,7 +149,7 @@ type Evaluation struct {
 	ReleasedAt    *time.Time        `json:"released_at"`
 }
 
-// OwnEvidence is a question's result as its student sees it: marks and feedback, never rubric details or AI
+// ownevidence is a question's result as its student sees it: marks and feedback, never rubric details or ai
 // suggestions.
 type OwnEvidence struct {
 	Question string `json:"question_id"`
@@ -160,7 +160,7 @@ type OwnEvidence struct {
 	Feedback string `json:"feedback,omitempty"`
 }
 
-// OwnResult is a student's own released result.
+// ownresult is a student's own released result.
 type OwnResult struct {
 	ID          string            `json:"id"`
 	Assessment  string            `json:"assessment_id"`
@@ -182,7 +182,7 @@ func (v Evaluation) own() OwnResult {
 	return OwnResult{v.ID, v.Assessment, v.Classroom, v.Student, v.Status, evidence, v.Answers, v.Late, v.FinalizedAt, v.ReleasedAt}
 }
 
-// FinalEvidence is a question's finalized marks as grading.finalized.v3 carries them to Analytics.
+// finalevidence is a question's finalized marks as grading.finalized.v3 carries them to analytics.
 type FinalEvidence struct {
 	Question string `json:"question_id"`
 	Topic    string `json:"topic_id"`
@@ -199,16 +199,15 @@ func final(evidence []Evidence) []FinalEvidence {
 	return out
 }
 
-// Mark is the teacher's marking of one question: a rubric level for every criterion of a free response, or the
-// points awarded for any other question, and optional feedback for the student. A mark with only feedback leaves
-// the score as it is.
+// mark is the teacher's marking of one question: a rubric level for every criterion of a free response, or
+// the points awarded for any other question, and optional feedback for the student.
 type Mark struct {
 	Criteria map[string]int `json:"criteria,omitempty"`
 	Awarded  *int           `json:"awarded,omitempty"`
 	Feedback *string        `json:"feedback,omitempty"`
 }
 
-// overridesAsMarks turns finalize's older overrides (points by question) into marks.
+// overridesasmarks turns finalize's older overrides (points by question) into marks.
 func overridesAsMarks(overrides map[string]int, marks map[string]Mark) map[string]Mark {
 	out := map[string]Mark{}
 	for id, m := range marks {
@@ -222,9 +221,7 @@ func overridesAsMarks(overrides map[string]int, marks map[string]Mark) map[strin
 	return out
 }
 
-// applyMarks updates evidence in place with the teacher's marks, checking each against its question. It returns
-// errUnknownQuestion if any mark matched no question, errScoreOutOfBounds or errInvalidCriteria for a score its
-// question cannot have, and errFeedbackTooLong.
+// applymarks updates evidence in place with the teacher's marks, checking each against its question.
 func applyMarks(evidence []Evidence, questions []Question, marks map[string]Mark) error {
 	applied := 0
 	for i := range evidence {
@@ -247,7 +244,7 @@ func applyMarks(evidence []Evidence, questions []Question, marks map[string]Mark
 	return nil
 }
 
-// applyMark marks one question. q is nil for an evaluation stored before Grading kept its questions; such a
+// applymark marks one question. q is nil for an evaluation stored before grading kept its questions; such a
 // question can only take points.
 func applyMark(e *Evidence, q *Question, m Mark) error {
 	if m.Feedback != nil {
@@ -286,8 +283,8 @@ func applyMark(e *Evidence, q *Question, m Mark) error {
 	return nil
 }
 
-// rubricScores checks that given names one of each criterion's levels, and nothing else, and returns the scores in
-// the rubric's order with their total.
+// rubricscores checks that given names one of each criterion's levels, and nothing else, and returns the
+// scores in the rubric's order with their total.
 func rubricScores(r Rubric, given map[string]int) ([]CriterionScore, int, error) {
 	if len(given) != len(r.Criteria) {
 		return nil, 0, errInvalidCriteria

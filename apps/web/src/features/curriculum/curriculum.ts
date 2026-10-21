@@ -31,14 +31,14 @@ import { requiredText } from '../../shared/validators';
 export class CurriculumComponent implements OnInit {
   readonly session = inject(Session);
   private readonly curriculum = inject(CurriculumApi);
-  /** Shares what this page reads and adds with every page that names topics. */
+  /* shares what this page reads and adds with every page that names topics. */
   private readonly names = inject(CurriculumNames);
-  /** The archived topics, read with the active ones. */
+  /* the archived topics, read with the active ones. */
   readonly archived = this.names.archived;
   readonly state = new ActionState();
-  /** Archiving a topic, in its confirmation dialog. */
+  /* archiving a topic, in its confirmation dialog. */
   readonly archiveState = new ActionState();
-  /** The topic waiting for its archiving to be confirmed. */
+  /* the topic waiting for its archiving to be confirmed. */
   readonly archiving = signal<Topic | null>(null);
   @ViewChild('archiveDialog') archiveDialog?: ConfirmDialogComponent;
   readonly topics = new Section<Topic[]>();
@@ -105,7 +105,7 @@ export class CurriculumComponent implements OnInit {
     void this.archiveState.run(async () => {
       await this.curriculum.archiveTopic(topic.id);
       this.closeArchive();
-      // The dialog has closed, so refreshing the list reports to the page, where a failure stays visible.
+      // the dialog has closed, so refreshing the list reports to the page, where a failure stays visible.
       void this.state.run(async () => {
         this.topics.set(await this.names.refresh());
       }, `${topic.name} archived.`);

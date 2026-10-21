@@ -1,7 +1,4 @@
-"""Offline PDF extraction/chunk comparison. Never calls a provider or claims retrieval quality.
-
-python services/ai-core/benchmark.py file.pdf [...] --output .local/pdf-efficiency.json
-"""
+"""offline pdf extraction/chunk comparison."""
 
 import argparse
 import json

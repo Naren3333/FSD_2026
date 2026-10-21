@@ -1,7 +1,5 @@
 name: learning-foundation
-# Each application's healthcheck asks its own /health/ready from inside its container. The Go images are distroless,
-# with no shell or curl, so their binary checks itself (`/app -healthcheck`, packages/platform/health.go); the Python
-# images use Python. Checks run every 3 s while starting, then every 30 s.
+# each application's healthcheck asks its own /health/ready from inside its container.
 x-go-healthcheck: &go-healthcheck
   test:
   - CMD
@@ -25,19 +23,19 @@ x-python-healthcheck: &python-healthcheck
   retries: 3
 services:
   postgres:
-    # Postgres 17 with pgvector, for Content's chunk embeddings (docs/decisions/0002-ai-integration.md)
+    # postgres 17 with pgvector, for content's chunk embeddings
     image: pgvector/pgvector:0.8.1-pg17
     restart: unless-stopped
     environment:
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Run scripts/setup.py or scripts/upgrade_local.py}
     volumes:
     - postgres-data:/var/lib/postgresql/data
-    # The test stack (scripts/stack_tests.py) reads its own first-start files from LOCAL_CONFIG_DIR.
+    # the test stack (scripts/stack_tests.py) reads its own first-start files from local_config_dir.
     - ${LOCAL_CONFIG_DIR:-./.local}/postgres-init.sql:/docker-entrypoint-initdb.d/01-services.sql:ro
     healthcheck:
       test:
       - CMD-SHELL
-      # Over TCP: the temporary server that runs the init scripts only listens on the socket
+      # over tcp: the temporary server that runs the init scripts only listens on the socket
       - pg_isready -h 127.0.0.1 -U postgres
       interval: 5s
       timeout: 3s
@@ -60,8 +58,8 @@ services:
     - ${LOCAL_CONFIG_DIR:-./.local}/learning-realm.json:/opt/keycloak/data/import/learning-realm.json:ro
     - keycloak-data:/opt/keycloak/data
     healthcheck:
-      # The image has no curl or wget: ask the management port's readiness check with bash's /dev/tcp and read
-      # the status code from the response's first line.
+      # the image has no curl or wget: ask the management port's readiness check with bash's /dev/tcp and
+      # read the status code from the response's first line.
       test:
       - CMD
       - bash
@@ -94,7 +92,7 @@ services:
     volumes:
     - kafka-data:/var/lib/kafka/data
     healthcheck:
-      # Each check starts a JVM, so once Kafka is up it is checked only every minute.
+      # each check starts a jvm, so once kafka is up it is checked only every minute.
       test:
       - CMD-SHELL
       - /opt/kafka/bin/kafka-topics.sh --bootstrap-server localhost:9092 --list
@@ -126,9 +124,7 @@ services:
       identity.enrollment.removed.v1.dlq assessment.due_changed.v1.dlq identity.user.deleted.v1.dlq;
       do /opt/kafka/bin/kafka-configs.sh --bootstrap-server kafka:9092 --alter --entity-type topics
       --entity-name $$topic --add-config retention.ms=604800000; done
-  # S3-compatible document storage. MinIO's images stopped being publicly downloadable, so this is
-  # SeaweedFS. The S3 identities are written from .env at start: an admin, and a content-service
-  # user that can only read, write and list the documents bucket. The S3 API is not published.
+  # s3-compatible document storage.
   seaweedfs:
     image: chrislusf/seaweedfs:4.48
     restart: unless-stopped
@@ -171,7 +167,7 @@ services:
       keycloak:
         condition: service_healthy
     environment:
-      # The issuer Kong accepts and the origin it allows, on the ports this stack publishes.
+      # the issuer kong accepts and the origin it allows, on the ports this stack publishes.
       KEYCLOAK_ISSUER: http://localhost:${KEYCLOAK_PORT:-8081}/realms/learning
       WEB_ORIGIN: http://localhost:${WEB_PORT:-4200}
     volumes:
@@ -183,8 +179,7 @@ services:
   kong:
     image: kong:3.9.1
     restart: unless-stopped
-    # Kong starts once the services it routes to are ready, so its first requests are not 502s. They are optional
-    # (`required: false`): one that never becomes healthy is reported, and Kong starts anyway.
+    # kong starts once the services it routes to are ready, so its first requests are not 502s.
     depends_on:
       gateway-config:
         condition: service_completed_successfully
@@ -218,8 +213,9 @@ services:
       KONG_ADMIN_LISTEN: 'off'
       KONG_PROXY_ACCESS_LOG: 'off'
       KONG_PROXY_ERROR_LOG: /dev/stderr
-      KONG_DNS_VALID_TTL: '5'  # re-resolve services every 5 s, so a recreated container is found without restarting Kong
-      KONG_DNS_STALE_TTL: '0'  # never route to a cached address after it expires; a restarted container's old IP may now belong to another service
+      KONG_DNS_VALID_TTL: '5'  # re-resolve services every 5 s, so a recreated container is found without restarting kong
+      KONG_DNS_STALE_TTL: '0'  # never route to a cached address after it expires; a restarted container's old ip may now belong to another
+# service
     ports:
     - 127.0.0.1:${KONG_PORT:-8000}:8000
     volumes:
@@ -244,7 +240,7 @@ services:
       DB_POOL_MAX: ${GO_DB_POOL_MAX:-10}
       DB_POOL_MIN: ${DB_POOL_MIN:-1}
       KAFKA_BROKERS: kafka:9092
-      # Removes a deleted account's sign-in from Keycloak (ADR 0011).
+      # removes a deleted account's sign-in from keycloak (adr 0011).
       KEYCLOAK_URL: http://keycloak:8080
       ACCOUNTS_CLIENT_SECRET: ${IDENTITY_ACCOUNTS_CLIENT_SECRET:?Run scripts/upgrade_local.py}
     depends_on:
@@ -297,7 +293,7 @@ services:
       S3_SECRET_KEY: ${S3_CONTENT_PASSWORD:?Run scripts/setup.py or scripts/upgrade_local.py}
       S3_BUCKET: documents
       S3_SECURE: 'false'
-      # The indexing worker and search call ai-core as the content-indexer service account (ADR 0002).
+      # the indexing worker and search call ai-core as the content-indexer service account (adr 0002).
       AI_CORE_URL: http://ai-core:8080
       AI_TOKEN_URL: http://keycloak:8080/realms/learning/protocol/openid-connect/token
       AI_CLIENT_ID: content-indexer
@@ -353,7 +349,7 @@ services:
       DB_POOL_MIN: ${DB_POOL_MIN:-1}
       IDENTITY_URL: http://identity:8080
       KAFKA_BROKERS: kafka:9092
-      # AI marking suggestions (ADR 0004), billed to the assessment's teacher through ai-core.
+      # ai marking suggestions (adr 0004), billed to the assessment's teacher through ai-core.
       AI_CORE_URL: http://ai-core:8080
       AI_TOKEN_URL: http://keycloak:8080/realms/learning/protocol/openid-connect/token
       AI_CLIENT_ID: grading-marker
@@ -382,7 +378,7 @@ services:
       DB_POOL_MIN: ${DB_POOL_MIN:-1}
       IDENTITY_URL: http://identity:8080
       KAFKA_BROKERS: kafka:9092
-      # A new group re-reads every retained event, for rebuilding into a new database (operations.md).
+      # a new group re-reads every retained event, for rebuilding into a new database (operations.md).
       KAFKA_GROUP: ${ANALYTICS_KAFKA_GROUP:-analytics-v1}
     depends_on:
       keycloak:
@@ -403,7 +399,7 @@ services:
       OIDC_ISSUER: http://localhost:${KEYCLOAK_PORT:-8081}/realms/learning
       OIDC_JWKS_URL: http://keycloak:8080/realms/learning/protocol/openid-connect/certs
       OIDC_AUDIENCE: learning
-      # Provider keys exist only in ai-core (ADR 0002). Unset: ai-core answers 503 AI_PROVIDER_NOT_CONFIGURED.
+      # provider keys exist only in ai-core (adr 0002).
       OPENAI_API_KEY: ${OPENAI_API_KEY:-}
       VOYAGE_API_KEY: ${VOYAGE_API_KEY:-}
       EMBEDDING_MODEL: text-embedding-3-small
@@ -417,7 +413,7 @@ services:
       CHUNK_TOKENS: ${CHUNK_TOKENS:-600}
       CHUNK_OVERLAP: ${CHUNK_OVERLAP:-90}
       SLIDE_CHUNKS: ${SLIDE_CHUNKS:-true}
-      # Per-user daily AI spend (ADR 0003). Run scripts/upgrade_local.py if .env predates this database.
+      # per-user daily ai spend (adr 0003).
       DATABASE_URL: postgresql://aicore:${AICORE_DB_PASSWORD:?Run scripts/setup.py or scripts/upgrade_local.py}@postgres:5432/aicore?sslmode=disable
       DB_POOL_MAX: ${PYTHON_DB_POOL_MAX:-8}
       DB_POOL_MIN: ${DB_POOL_MIN:-1}
@@ -443,8 +439,7 @@ services:
       OIDC_ISSUER: http://localhost:${KEYCLOAK_PORT:-8081}/realms/learning
       OIDC_JWKS_URL: http://keycloak:8080/realms/learning/protocol/openid-connect/certs
       OIDC_AUDIENCE: learning
-      # Stateless (ADR 0006). Identity, Curriculum and Content get the teacher's own token; ai-core gets this
-      # agent's service account. Run scripts/upgrade_local.py if .env predates this client.
+      # stateless (adr 0006).
       IDENTITY_URL: http://identity:8080
       CURRICULUM_URL: http://curriculum:8080
       CONTENT_URL: http://content:8080
@@ -482,7 +477,7 @@ services:
       OIDC_ISSUER: http://localhost:${KEYCLOAK_PORT:-8081}/realms/learning
       OIDC_JWKS_URL: http://keycloak:8080/realms/learning/protocol/openid-connect/certs
       OIDC_AUDIENCE: learning
-      # Threads and messages only (ADR 0002). Run scripts/upgrade_local.py if .env predates this database.
+      # threads and messages only (adr 0002).
       DATABASE_URL: postgresql://chatbot:${CHATBOT_DB_PASSWORD:?Run scripts/setup.py or scripts/upgrade_local.py}@postgres:5432/chatbot?sslmode=disable
       DB_POOL_MAX: ${PYTHON_DB_POOL_MAX:-8}
       DB_POOL_MIN: ${DB_POOL_MIN:-1}
@@ -490,13 +485,13 @@ services:
       ADAPTIVE_SEARCH: ${ADAPTIVE_SEARCH:-true}
       CHAT_CONTEXT_TOKENS: ${CHAT_CONTEXT_TOKENS:-8000}
       IDENTITY_URL: http://identity:8080
-      # Searches run with the user's own token; ai-core gets this agent's service account.
+      # searches run with the user's own token; ai-core gets this agent's service account.
       CONTENT_URL: http://content:8080
       AI_CORE_URL: http://ai-core:8080
       AI_TOKEN_URL: http://keycloak:8080/realms/learning/protocol/openid-connect/token
       AI_CLIENT_ID: question-chatbot-agent
       AI_CLIENT_SECRET: ${QUESTION_CHATBOT_AGENT_CLIENT_SECRET:?Run scripts/setup.py or scripts/upgrade_local.py}
-      # Purges a deleted classroom's threads (identity.classroom.deleted.v1).
+      # purges a deleted classroom's threads (identity.classroom.deleted.v1).
       KAFKA_BROKERS: kafka:9092
     depends_on:
       keycloak:
@@ -514,7 +509,7 @@ services:
       context: .
       dockerfile: apps/web/Dockerfile
     environment:
-      # Served to the app as /config.json and allowed by its Content-Security-Policy (apps/web/nginx.conf).
+      # served to the app as /config.json and allowed by its content-security-policy (apps/web/nginx.conf).
       GATEWAY_URL: http://localhost:${KONG_PORT:-8000}
       KEYCLOAK_URL: http://localhost:${KEYCLOAK_PORT:-8081}
     ports:

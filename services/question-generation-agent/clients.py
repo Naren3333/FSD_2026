@@ -1,6 +1,4 @@
-"""Calls to the other services. Identity, Curriculum and Content get the teacher's own token, so their access rules
-decide what the agent may see; ai-core gets this agent's service-account token (role ai-client), never the
-teacher's. The transport is learning_transport.agents."""
+"""share authenticated retrieval and inference clients."""
 
 from dataclasses import dataclass
 from typing import Any
@@ -13,13 +11,12 @@ from config import Settings
 
 TOPIC_TIMEOUT = 5.0
 SEARCH_TIMEOUT = 15.0
-# One structured reply of up to GENERATION_TOKENS (6000). ai-core gives it at most 120 s, retries included
-# (openai_client.generation_budget), so this waits that long plus room for ai-core's allowance check and charge.
+# allow enough time for bounded generation, allowance checks and usage accounting.
 GENERATE_TIMEOUT = 135.0
 
 
 def billed(claims: Claims) -> dict[str, str]:
-    """Whose daily AI allowance pays: the teacher who asked (ADR 0003)."""
+    """whose daily ai allowance pays: the teacher who asked (adr 0003)."""
     return billed_to(claims, "teacher")
 
 
@@ -30,13 +27,13 @@ class Topic:
 
 
 class Services(AgentClients):
-    settings: Settings  # with Curriculum's URL
+    settings: Settings  # with curriculum's url
     generate_timeout = GENERATE_TIMEOUT
 
     # ---- teacher-token calls
 
     async def topic(self, authorization: str, topic_id: str, correlation: str) -> Topic | None:
-        """The curriculum topic, or None when Curriculum has no such topic for the teacher."""
+        """the curriculum topic, or none when curriculum has no such topic for the teacher."""
         try:
             resp = await self.http.get(
                 f"{self.settings.curriculum_url}/v1/topics/{topic_id}",
@@ -61,9 +58,7 @@ class Services(AgentClients):
         self, authorization: str, classroom_id: str, query: str, document_ids: list[str], top_k: int,
         correlation: str,
     ) -> tuple[list[dict[str, Any]], bool]:  # fmt: skip
-        """The chosen documents' passages that best match the query, reranked, and whether the rerank fell back (then
-        `score` is an RRF score, not comparable to the relevance floor). Only teaching materials are searched: a
-        rubric or marking scheme uploaded before they were retired (ADR 0009) is never drafted from."""
+        """the chosen documents' passages that best match the query, reranked, and whether the rerank fell back (then `score` is an rrf score, not comparable to the relevance floor)."""
         body = {
             "classroom_id": classroom_id,
             "query": query,

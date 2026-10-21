@@ -18,7 +18,7 @@ const (
 	topicB = "8b3e7f40-ac6d-4e5f-9a4b-3c4d5e6f7081"
 )
 
-// memoryStore keeps topics by id and prerequisite edges; it answers a cycle when the reverse edge exists.
+// memorystore keeps topics by id and prerequisite edges; it answers a cycle when the reverse edge exists.
 type memoryStore struct {
 	topics   map[string]Topic
 	archived map[string]Topic
@@ -128,15 +128,16 @@ func call(t *testing.T, store store, method, path, body string, roles ...string)
 	return platformtest.Serve(server{store: store}.routes, method, path, body, "user", roles...)
 }
 
-// step is one request of a scenario and the answer it expects: its status and, when want is set, a part of the body.
-// A want that is a whole JSON object, as the handlers write them, can only match the whole body.
+// step is one request of a scenario and the answer it expects: its status and, when want is set, a part of
+// the body.
 type step struct {
 	name, method, path, body, role string
 	status                         int
 	want                           string
 }
 
-// run sends the steps in order to the same store and stops at the first answer that is not the one expected.
+// run sends the steps in order to the same store and stops at the first answer that is not the one
+// expected.
 func run(t *testing.T, store store, steps ...step) {
 	t.Helper()
 	for _, s := range steps {

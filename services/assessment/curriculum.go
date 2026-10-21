@@ -23,9 +23,7 @@ type topics interface {
 	check(r *http.Request, topic string) topicStatus
 }
 
-// checkAll checks every topic at once and reports the worst answer: unauthenticated if Curriculum refused the
-// caller's token for any of them, otherwise unavailable if it couldn't answer for any, otherwise invalid if any is not
-// a topic.
+// check all topic references; prioritize authentication failures, then outages, then invalid topics.
 func checkAll(r *http.Request, s topics, ids []string) topicStatus {
 	statuses := make([]topicStatus, len(ids))
 	var wg sync.WaitGroup
@@ -40,16 +38,14 @@ func checkAll(r *http.Request, s topics, ids []string) topicStatus {
 	return worst
 }
 
-// curriculum asks the Curriculum service, forwarding the caller's token.
+// curriculum asks the curriculum service, forwarding the caller's token.
 type curriculum struct {
 	base   string
 	client *http.Client
 }
 
-// check asks the curriculum service whether the topic exists in the caller's curriculum: a 200 with the topic is
-// valid. A topic Curriculum says is missing (any other 4xx) is invalid. A token it does not accept (401) is
-// unauthenticated, so the teacher signs in again; a refusal (403), Curriculum failing (5xx) or a body it cannot read
-// is unavailable. Neither an expired token nor an outage is ever reported to the teacher as an invalid topic.
+// check asks the curriculum service whether the topic exists in the caller's curriculum: a 200 with the
+// topic is valid.
 func (c curriculum) check(r *http.Request, topic string) topicStatus {
 	req, err := platform.Forward(r, http.MethodGet, c.base+"/v1/topics/"+topic)
 	if err != nil {
@@ -67,7 +63,7 @@ func (c curriculum) check(r *http.Request, topic string) topicStatus {
 	case res.StatusCode == http.StatusUnauthorized:
 		return topicUnauthenticated
 	case res.StatusCode == http.StatusForbidden:
-		// Assessment has already checked the caller teaches the classroom, so Curriculum refusing them is a
+		// assessment has already checked the caller teaches the classroom, so curriculum refusing them is a
 		// misconfiguration to fix, not a topic the teacher picked wrongly.
 		slog.Warn("curriculum_refused_topic_check", "topic", topic)
 		return topicUnavailable

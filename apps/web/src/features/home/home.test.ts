@@ -28,7 +28,7 @@ const assessment = (id: string, submitted: boolean): AssessmentSummary => ({
   question_count: 1,
   points: 1,
 });
-/** A result the student can see: Grading returns only finalized grades the teacher has released. */
+/* a result the student can see: grading returns only finalized grades the teacher has released. */
 const result = (assessmentId: string): Evaluation => ({
   id: `e-${assessmentId}`,
   assessment_id: assessmentId,
@@ -49,7 +49,7 @@ const noEvidence: Performance = {
   topics: [],
 };
 
-/** The student's Home for classroom c1, each part answering as given. */
+/* the student's home for classroom c1, each part answering as given. */
 function render(
   assessments: Promise<AssessmentSummary[]>,
   results: Promise<Evaluation[]>,
@@ -75,7 +75,7 @@ function render(
   const fixture = TestBed.createComponent(HomeComponent);
   fixture.detectChanges();
   const root = fixture.nativeElement as HTMLElement;
-  /** The text of the panel with this heading. */
+  /* the text of the panel with this heading. */
   const panel = (heading: string) =>
     [...root.querySelectorAll('section')]
       .find((s) => s.querySelector('h3')?.textContent === heading)
@@ -90,8 +90,8 @@ function render(
 
 describe('waiting for your teacher', () => {
   it('counts submitted assessments with no released result, so grades still in draft stay waiting', async () => {
-    // q2 is submitted and its grade is a draft (or finalized but not released): Grading does not return it to the
-    // student, so it is still waiting. q1 has a released result; q3 is not submitted.
+    // q2 is submitted and its grade is a draft (or finalized but not released): grading does not return it
+    // to the student, so it is still waiting. q1 has a released result; q3 is not submitted.
     const page = render(
       Promise.resolve([assessment('q1', true), assessment('q2', true), assessment('q3', false)]),
       Promise.resolve([result('q1')]),

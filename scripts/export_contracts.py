@@ -1,7 +1,4 @@
-"""Export versioned HTTP and Kafka schemas. Python HTTP schemas come from FastAPI.
-
-With --check nothing is written: it lists every contract that differs from the code and exits 1 if any does.
-"""
+"""export versioned http and kafka schemas."""
 
 import json
 import os
@@ -40,7 +37,8 @@ def save(path, data):
         stale.append(path)
 
 
-# Assessment and grading since ADR 0004: points, short answers, free responses with rubrics, drafts and dates.
+# assessment and grading since adr 0004: points, short answers, free responses with rubrics, drafts and
+# dates.
 NULLABLE_TIME = {"type": ["string", "null"], "format": "date-time"}
 QUESTION_TYPES = {"enum": ["multiple_choice", "numerical", "short_answer", "free_response"]}
 POINTS = {"type": "integer", "minimum": 1, "maximum": 100}
@@ -64,8 +62,7 @@ question_fields = {
     "topic_id": UUID,
 }
 QUESTION_REQUIRED = ["id", "prompt", "type", "options", "answer", "tolerance", "points", "topic_id"]
-# Since ADR 0005 a short answer or free response may carry passages of the classroom's marking scheme for AI
-# marking suggestions: picked from Content's search (with their document, chunk and page) or pasted by the teacher.
+# marking suggestions may use teacher-supplied or retrieved marking-scheme passages.
 excerpt = obj(
     {
         "document_id": UUID,
@@ -77,15 +74,15 @@ excerpt = obj(
 )
 question_fields = {**question_fields, "marking_scheme": array(excerpt, 1, 5)}
 submitted_question = obj(question_fields, QUESTION_REQUIRED)
-# Since ADR 0006 a question the teacher kept from AI question generation says so and names the passages it came
-# from. Teacher-only provenance in Assessment's HTTP API: neither students nor the submission event get it.
+# since adr 0006 a question the teacher kept from ai question generation says so and names the passages it
+# came from.
 question_fields = {
     **question_fields,
     "sources": array(excerpt, 1, 5),
     "origin": {"enum": ["generated"], "description": "Left out for a question the teacher wrote."},
 }
 teacher_question = obj(question_fields, QUESTION_REQUIRED)
-# A criterion's id is assigned by Assessment, so a teacher sends criteria without one.
+# a criterion's id is assigned by assessment, so a teacher sends criteria without one.
 input_rubric = obj(
     {
         "criteria": array(
@@ -95,8 +92,8 @@ input_rubric = obj(
     },
     ["criteria"],
 )
-# A question's id is optional and ignored: Assessment gives every saved question a new id, except that a question
-# left unchanged on a published assessment keeps the one it had.
+# a question's id is optional and ignored: assessment gives every saved question a new id, except that a
+# question left unchanged on a published assessment keeps the one it had.
 question_input = obj(
     {
         **question_fields,
@@ -235,7 +232,7 @@ suggestion = obj(
         "flags": array({"type": "string"}),
         "model": {"type": "string"},
         "reason": {"type": "string"},
-        # How many of the question's marking-scheme passages the model was given (ADR 0005).
+        # how many of the question's marking-scheme passages the model was given (adr 0005).
         "scheme_passages": {"type": "integer", "minimum": 1, "maximum": 5},
     },
     ["status", "awarded"],
@@ -455,7 +452,7 @@ ERRORS = {
 
 
 def errors(statuses):
-    """The error responses of a Go service's route: the standard envelope for each status."""
+    """the error responses of a go service's route: the standard envelope for each status."""
     return {
         str(s): {"description": ERRORS[s], "content": {"application/json": {"schema": error}}}
         for s in statuses
@@ -493,7 +490,7 @@ def operation(method, path, body, response, code=200, query=()):
             },
             **errors(
                 [401, 403, 404, 409]
-                + ([413] if body is not None else [])  # platform.Decode's 2 MiB limit
+                + ([413] if body is not None else [])  # platform.decode's 2 mib limit
                 + [422, 500, 503]
             ),
         },
@@ -503,8 +500,8 @@ def operation(method, path, body, response, code=200, query=()):
     return path, method.lower(), op
 
 
-# The organization's active topics, or with archived=true its archived ones (still named by older questions and
-# evidence), by name.
+# the organization's active topics, or with archived=true its archived ones (still named by older questions
+# and evidence), by name.
 topic_list = operation("GET", "/v1/topics", None, array(curriculum_topic, maximum=200))
 topic_list[2]["parameters"] = [
     {"name": "archived", "in": "query", "required": False, "schema": {"type": "boolean", "default": False}}
@@ -514,7 +511,7 @@ COUNT = {"type": "integer", "minimum": 0}
 
 
 def paged(op, most, fallback):
-    """The operation with the ?offset= and ?limit= of a list the server pages (platform.Page)."""
+    """the operation with the ?offset= and ?limit= of a list the server pages (platform.page)."""
     op[2]["parameters"] += [
         {
             "name": "offset",
@@ -532,7 +529,7 @@ def paged(op, most, fallback):
     return op
 
 
-# One page of the teacher's school's students, narrowed by an optional search.
+# one page of the teacher's school's students, narrowed by an optional search.
 school_student_page = obj({"students": array(student, maximum=50), "total": COUNT})
 roster_page = obj({"students": array(student, maximum=500), "total": COUNT})
 school_students = operation("GET", "/v1/students", None, school_student_page)
@@ -573,14 +570,14 @@ operations = {
             None,
             enrollment_record,
         ),
-        # One page of the roster by name, and how many are enrolled.
+        # one page of the roster by name, and how many are enrolled.
         paged(
             operation("GET", "/v1/classrooms/{id}/students", None, roster_page),
             500,
             50,
         ),
-        # Every enrolled student's id, in the same order and not paged, for the services that keep removed
-        # students' work out of the teacher's lists (platform.Identity.Roster).
+        # every enrolled student's id, in the same order and not paged, for the services that keep removed
+        # students' work out of the teacher's lists (platform.identity.roster).
         operation("GET", "/v1/classrooms/{id}/student-ids", None, {"type": "array", "items": TEXT}),
         school_students,
     ],
@@ -591,7 +588,8 @@ operations = {
         operation("PATCH", "/v1/topics/{id}", topic_input, curriculum_topic),
         operation("DELETE", "/v1/topics/{id}", None, None, 204),
         operation("POST", "/v1/topics/{id}/restore", None, curriculum_topic),
-        # The topic's active prerequisites, by name; links to archived topics are kept and listed again on restore.
+        # the topic's active prerequisites, by name; links to archived topics are kept and listed again on
+        # restore.
         operation("GET", "/v1/topics/{id}/prerequisites", None, array(curriculum_topic, maximum=200)),
         operation(
             "POST",
@@ -627,7 +625,8 @@ operations = {
             assessment_details,
             assessment,
         ),
-        # Once students have submitted, only with with_submissions=true: their submissions and grades go too (ADR 0008).
+        # once students have submitted, only with with_submissions=true: their submissions and grades go too
+        # (adr 0008).
         operation("DELETE", "/v1/assessments/{id}", None, obj({"id": UUID}), query=["with_submissions"]),
         operation("POST", "/v1/assessments/{id}/publish", None, assessment),
         operation(
@@ -637,7 +636,7 @@ operations = {
             submission_receipt,
             201,
         ),
-        # The calling student's own submitted answers; 404 before they submit. Never the answer keys.
+        # the calling student's own submitted answers; 404 before they submit.
         operation(
             "GET",
             "/v1/assessments/{id}/submission",
@@ -648,7 +647,8 @@ operations = {
         operation("PUT", "/v1/assessments/{id}/saved-answers", obj({"answers": ANSWERS}), saved_answers),
     ],
     "grading": [
-        # One page of the enrolled students' evaluations, newest first, or of one assessment's, oldest first.
+        # one page of the enrolled students' evaluations, newest first, or of one assessment's, oldest
+        # first.
         paged(
             operation(
                 "GET",
@@ -689,7 +689,7 @@ operations = {
         ),
     ],
 }
-# Additive page endpoints preserve existing bounded array clients.
+# additive page endpoints preserve existing bounded array clients.
 PAGE_SCHEMAS = {}
 for service, resource, item, query in [
     ("identity", "classrooms", classroom, []),
@@ -726,10 +726,7 @@ operations["assessment"].append(
     )
 )
 
-# The named schemas of the Go services' contracts, under components/schemas. The web's types are generated from them
-# (apps/web/src/api/generated), and each Go service's tests check its JSON structs against them (contract_test.go),
-# so these names are what both sides refer to. A schema used in a contract is written once there and referred to
-# by $ref; event schemas below stay self-contained.
+# the named schemas of the go services' contracts, under components/schemas.
 NAMES = {
     "ClassroomPage": PAGE_SCHEMAS["identity"],
     "TopicPage": PAGE_SCHEMAS["curriculum"],
@@ -787,7 +784,7 @@ assert len(NAMED) == len(NAMES), "a schema has two names"
 
 
 def referenced(node, used, top=None):
-    """The node with every named schema in it (but `top` itself) replaced by its $ref, adding each name to `used`."""
+    """the node with every named schema in it (but `top` itself) replaced by its $ref, adding each name to `used`."""
     if isinstance(node, dict):
         if node is not top and id(node) in NAMED:
             used.add(NAMED[id(node)])
@@ -799,7 +796,7 @@ def referenced(node, used, top=None):
 
 
 def components(used):
-    """The named schemas `used` names and every named schema they refer to, by name."""
+    """the named schemas `used` names and every named schema they refer to, by name."""
     schemas, pending = {}, set(used)
     while pending:
         name = pending.pop()
@@ -834,7 +831,7 @@ for name, routes in operations.items():
                 "name": "doc_type",
                 "in": "query",
                 "required": False,
-                # Rubrics and marking schemes are no longer uploaded (ADR 0009); documents keep their type.
+                # rubrics and marking schemes are no longer uploaded (adr 0009); documents keep their type.
                 "schema": {"const": "teaching_material", "default": "teaching_material"},
             }
         )
@@ -993,7 +990,7 @@ payloads = {
         }
     ),
 }
-# When an event is published, for topics whose timing matters to consumers.
+# when an event is published, for topics whose timing matters to consumers.
 FINALIZED_TIMING = (
     "Published when a finalized grade becomes visible to its student: at finalization "
     "with release_policy on_finalize, otherwise when the teacher releases the assessment's results. Consumers "
@@ -1050,7 +1047,7 @@ for name in [
         encoding="utf-8",
     )
     save(f"contracts/http/{name}.openapi.json", json.loads(data))
-# Leftover event schemas (a retired version) are stale too: nothing above writes them.
+# leftover event schemas (a retired version) are stale too: nothing above writes them.
 written = {f"contracts/events/{topic}.schema.json" for topic in payloads}
 stale += sorted(
     p.relative_to(ROOT).as_posix()
@@ -1068,8 +1065,8 @@ if stale:  # leftover event schemas, when writing
 print(
     f"{'Checked' if CHECK else 'Exported'} ten HTTP contracts and {len(payloads)} implemented event schemas."
 )
-# The web app's API types are generated from these contracts (apps/web/src/api/generated); its check.py lane checks
-# them with `npm run contracts:check`.
+# the web app's api types are generated from these contracts (apps/web/src/api/generated); its check.py lane
+# checks them with `npm run contracts:check`.
 if not CHECK:
     web = ROOT / "apps/web"
     if (web / "node_modules").exists():

@@ -9,8 +9,7 @@ import { Auth } from './core/auth';
 
 beforeAll(() => TestBed.initTestEnvironment(BrowserTestingModule, platformBrowserTesting()));
 
-/** Runs a route guard the way the router does, for a user with this role (or signed out). The real Session reads
- * the role, from a fake sign-in and a fake Identity. */
+/* runs a route guard the way the router does, for a user with this role (or signed out). */
 async function guard(
   path: string,
   role: 'teacher' | 'student' | null,
@@ -33,7 +32,7 @@ async function guard(
     ],
   });
   const route = routes.find((r) => r.path === path) as Route;
-  // A section open to both roles has no guard: the router opens it.
+  // a section open to both roles has no guard: the router opens it.
   if (!route.canActivate?.length && !route.canMatch?.length) return true;
   const result = await TestBed.runInInjectionContext(() =>
     route.canActivate

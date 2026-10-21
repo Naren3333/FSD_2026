@@ -44,7 +44,7 @@ export class ChatComponent {
   private readonly usage = inject(AiUsage);
   private readonly context = inject(ClassroomContext);
   readonly classroomId = this.context.classroomId;
-  /** Whether the user's classrooms have loaded; until then the thread list says why there is no classroom. */
+  /* whether the user's classrooms have loaded; until then the thread list says why there is no classroom. */
   readonly classroomsKnown = this.context.known;
   readonly state = new ActionState();
   readonly max = MAX_QUESTION;
@@ -58,9 +58,9 @@ export class ChatComponent {
   readonly figures = signal<Record<string, string>>({});
   readonly figureErrors = signal<Record<string, string>>({});
   streamingId = '';
-  /** Numbers each question's local placeholders, so they never share an id with an earlier question's. */
+  /* numbers each question's local placeholders, so they never share an id with an earlier question's. */
   private asked = 0;
-  /** Each message's parsed answer, kept while the message object is unchanged; a streamed token makes a new one. */
+  /* each message's parsed answer, kept while the message object is unchanged; a streamed token makes a new one. */
   private readonly parsed = new WeakMap<ChatMessage, Block[]>();
   private controller: AbortController | null = null;
   readonly form = new FormGroup({
@@ -75,7 +75,7 @@ export class ChatComponent {
       this.loadThreads();
     });
   }
-  /** Whether either list is loading; sending waits for both. */
+  /* whether either list is loading; sending waits for both. */
   loading(): boolean {
     return this.threads.loading() || this.messages.loading();
   }
@@ -115,10 +115,11 @@ export class ChatComponent {
     if (!this.state.validate(this.form, 'chat-form')) return;
     const question = this.form.controls.question.value.trim(),
       classroom = this.classroomId();
-    // The question moves into the conversation at once; it comes back only if it was never asked.
+    // the question moves into the conversation at once; it comes back only if it was never asked.
     this.form.reset();
     this.tried.set(false);
-    // A restored question is unsaved work again, so the shell keeps the classroom until it is sent or cleared.
+    // a restored question is unsaved work again, so the shell keeps the classroom until it is sent or
+    // cleared.
     const restore = () => {
       if (this.form.controls.question.value) return;
       this.form.controls.question.setValue(question);
@@ -198,7 +199,7 @@ export class ChatComponent {
         this.streaming.set(false);
         this.streamingId = '';
         this.controller = null;
-        // However the turn ended, it may have spent AI allowance.
+        // however the turn ended, it may have spent ai allowance.
         this.usage.refresh();
       }
       const done = this.messages.value()?.find((m) => m.id === answer.id);
@@ -218,7 +219,7 @@ export class ChatComponent {
   stop(): void {
     this.controller?.abort();
   }
-  /** Replaces the local copy with what the chatbot saved, and moves the conversation to the top. */
+  /* replaces the local copy with what the chatbot saved, and moves the conversation to the top. */
   private async sync(thread: Thread): Promise<void> {
     try {
       const [{ messages }, { threads }] = await Promise.all([
@@ -230,7 +231,7 @@ export class ChatComponent {
       this.threads.set(threads);
       this.active.set(threads.find((t) => t.id === thread.id) || thread);
     } catch {
-      /* keep the streamed copy; Refresh conversations retries */
+      /* retain streamed text until the conversation can be refreshed. */
     }
   }
 
@@ -272,7 +273,7 @@ export class ChatComponent {
         })),
       );
   }
-  /** The original PDF in a new tab at the source's first page; the tab opens on the click so it isn't blocked. */
+  /* open the original file; create the tab synchronously to avoid popup blocking. */
   openPage(source: Citation): void {
     const tab = window.open('', '_blank');
     this.content

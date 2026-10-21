@@ -73,7 +73,7 @@
     "/v1/usage": {
       "get": {
         "summary": "Usage Today",
-        "description": "A user's spend today, their daily limit and when it resets, for a service showing it to that user.",
+        "description": "a user's spend today, their daily limit and when it resets, for a service showing it to that user.",
         "operationId": "usage_today_v1_usage_get",
         "parameters": [
           {
@@ -425,7 +425,7 @@
     "/v1/ingest": {
       "post": {
         "summary": "Ingest Pdf",
-        "description": "One supported document (the raw body) \u2192 chunks with embeddings and the figure crops they point at. Stateless: the caller\nstores the result. A document problem is a `failed` outcome; a provider outage is an error to retry. The\nmodel calls are charged to `billed_user` (the teacher who uploaded the document), whatever the outcome.",
+        "description": "one supported document (the raw body) \u2192 chunks with embeddings and the figure crops they point at.",
         "operationId": "ingest_pdf_v1_ingest_post",
         "parameters": [
           {
@@ -632,7 +632,7 @@
           "role"
         ],
         "title": "Billed",
-        "description": "The user a call is made for. Callers are trusted service accounts (role ai-client) that took this from the\nuser's verified token: it decides whose allowance pays, never what the call may read."
+        "description": "the user a call is made for."
       },
       "ErrorBody": {
         "properties": {
@@ -911,7 +911,7 @@
           "outcome"
         ],
         "title": "IngestResponse",
-        "description": "`failed` is the document's own problem (ENCRYPTED, CORRUPT, NO_TEXT_LAYER, TOO_LARGE) and retrying will not\nhelp. Provider outages are errors instead, for the caller to retry."
+        "description": "`failed` is the document's own problem (encrypted, corrupt, no_text_layer, too_large) and retrying will not help."
       },
       "Message": {
         "properties": {
@@ -985,7 +985,7 @@
           "content"
         ],
         "title": "Passage",
-        "description": "A search hit as Content stores it. ai-core builds the text the reranker scores from these parts\n(ingest.passage_text, the same rule that built the embedded text), so the rule lives in one place."
+        "description": "a search hit as content stores it. ai-core builds the text the reranker scores from these parts (ingest.passage_text, the same rule that built the embedded text), so the rule lives in one place."
       },
       "RequestContract": {
         "properties": {
@@ -1079,7 +1079,7 @@
           "billed_to"
         ],
         "title": "RequestContract",
-        "description": "`embed` takes `input`. `generate` takes `input` (one user message) or `messages`; with `response_schema`\nthe reply is JSON in that strict schema, and with `stream` it arrives as server-sent events."
+        "description": "`embed` takes `input`. `generate` takes `input` (one user message) or `messages`; with `response_schema` the reply is json in that strict schema, and with `stream` it arrives as server-sent events."
       },
       "RerankRequest": {
         "properties": {

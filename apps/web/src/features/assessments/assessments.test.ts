@@ -49,8 +49,7 @@ const summary: AssessmentSummary = {
   points: 1,
 };
 
-/** The assessments page's logic (no template) for a user with `role`, against a fake Assessment API, with the answer
- * sheet (no template either) that opens its assessments. */
+/* the assessments page's logic (no template) for a user with `role`, against a fake assessment api, with the answer sheet (no template either) that opens its assessments. */
 function setup(
   role: 'student' | 'teacher',
   open: Assessment = assessment(),
@@ -146,7 +145,7 @@ describe('a student answering an assessment', () => {
     expect(sheet.submitted()).toBe(true);
     expect(sheet.answers.disabled).toBe(true);
     expect(unsaved.any()).toBe(false);
-    // Nothing can be typed now; even a programmatic change starts no save.
+    // nothing can be typed now; even a programmatic change starts no save.
     sheet.answers.controls[QUESTION].setValue('0.6');
     await vi.advanceTimersByTimeAsync(5000);
     expect(api.save).toHaveBeenCalledTimes(1);
@@ -500,7 +499,7 @@ describe('a teacher changing a published assessment', () => {
     await settle();
     expect(api.details).toHaveBeenCalledWith('a1', { title: 'Halves', due_at: null, late_policy: 'reject' });
     expect(api.update).not.toHaveBeenCalled();
-    // Stopping leaves the editor whole again for the next assessment.
+    // stopping leaves the editor whole again for the next assessment.
     expect(page.questions.enabled).toBe(true);
     expect(page.detailsOnly()).toBe(false);
   });
@@ -595,7 +594,7 @@ describe('a teacher changing a published assessment', () => {
     await settle();
     page.edit({ ...summary, submissions: 0 });
     await settle();
-    // The list cannot tell: the only submitter is no longer enrolled.
+    // the list cannot tell: the only submitter is no longer enrolled.
     api.update.mockRejectedValueOnce(new ApiError('Students have submitted.', 409, 'HAS_SUBMISSIONS'));
     page.save(false);
     await settle();
@@ -680,7 +679,7 @@ describe('a teacher editing one assessment after another', () => {
       true,
       true,
     ]);
-    // Only the controls its question type uses are on.
+    // only the controls its question type uses are on.
     expect(page.questions.at(0).controls.accepted.enabled).toBe(true);
     expect(page.questions.at(0).controls.answer.enabled).toBe(false);
   });
@@ -705,7 +704,7 @@ describe('a teacher editing a question whose topic is archived', () => {
     page.save(false);
     await settle();
     expect(api.update).not.toHaveBeenCalled();
-    // A question added after it does not take the archived topic.
+    // a question added after it does not take the archived topic.
     page.addQuestion();
     expect(page.questions.at(1).controls.topic_id.value).toBe('');
     page.removeQuestion(1);

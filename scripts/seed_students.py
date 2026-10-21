@@ -1,12 +1,4 @@
-"""Add thirty test students to the local stack so a teacher can enroll them.
-
-    python scripts/seed_students.py
-
-Creates each student in the local Keycloak realm (role student, organization local-school) and signs them in
-once, which registers them with Identity; until then a teacher cannot enroll them by username. All thirty share
-one generated password, kept in .local/seed-students.json (gitignored) and printed at the end. Safe to re-run:
-existing students are kept and given the saved password. Local development stack only; requires .env and httpx.
-"""
+"""create and register thirty local test students for enrollment."""
 
 import json
 import secrets
@@ -51,7 +43,7 @@ STUDENTS = [
 
 
 def register(username: str, password: str) -> None:
-    """Signs the student in once, which registers them with Identity."""
+    """signs the student in once, which registers them with identity."""
     token = password_token(username, password)
     profile = check(
         httpx.post(f"{BASE}/identity/me", json={}, headers={"Authorization": "Bearer " + token}, timeout=15)
@@ -67,7 +59,7 @@ def main() -> None:
     STATE.write_text(json.dumps(state, indent=2) + "\n", encoding="utf-8")
     for first, last in STUDENTS:
         username = f"{first}.{last}".lower()
-        # Keycloak's admin tokens last a minute, so each student gets a fresh one.
+        # keycloak's admin tokens last a minute, so each student gets a fresh one.
         with admin_client() as admin:
             ensure_person(admin, username, first, last, password)
         register(username, password)

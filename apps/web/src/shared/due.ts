@@ -1,6 +1,6 @@
 import type { LatePolicy } from '../api/models';
 
-/** Where a student stands with an assessment's due date. */
+/* where a student stands with an assessment's due date. */
 export type DueState = 'none' | 'upcoming' | 'late' | 'closed';
 
 export function dueState(

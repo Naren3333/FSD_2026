@@ -7,7 +7,7 @@ import { ActionState } from '../../shared/action-state';
 import { ConfirmDialogComponent } from '../../shared/confirm-dialog';
 import { StatusComponent } from '../../shared/status';
 
-/** The signed-in user's own account: who they are, and deleting the account for good (ADR 0011). */
+/* the signed-in user's own account: who they are, and deleting the account for good (adr 0011). */
 @Component({
   selector: 'app-profile',
   standalone: true,
@@ -21,14 +21,14 @@ export class ProfileComponent {
   private readonly unsaved = inject(UnsavedChanges);
   readonly profile = this.session.profile;
   readonly state = new ActionState();
-  /** A teacher's own classrooms: deleting those comes first, since each one deletes its students' work. */
+  /* a teacher's own classrooms: deleting those comes first, since each one deletes its students' work. */
   readonly classroomCount = computed(() => (this.session.isTeacher() ? this.context.classrooms().length : 0));
-  /** Whether a teacher's classrooms are still unknown (loading, or failed to load), so they may still have some. */
+  /* whether a teacher's classrooms are still unknown (loading, or failed to load), so they may still have some. */
   readonly classroomsUnknown = computed(
     () =>
       this.session.isTeacher() && (!this.context.known() || this.context.loading() || !!this.context.error()),
   );
-  /** Whether a teacher must wait, or delete their classrooms, before deleting their account. */
+  /* whether a teacher must wait, or delete their classrooms, before deleting their account. */
   readonly blocked = computed(() => this.classroomsUnknown() || this.classroomCount() > 0);
   @ViewChild('deleteDialog') deleteDialog?: ConfirmDialogComponent;
 
@@ -40,7 +40,7 @@ export class ProfileComponent {
     this.deleteDialog?.show();
   }
 
-  /** Reads the teacher's classrooms again after they failed to load. */
+  /* reads the teacher's classrooms again after they failed to load. */
   retryClassrooms(): void {
     this.context.refresh().catch(() => undefined);
   }
@@ -49,7 +49,7 @@ export class ProfileComponent {
     this.deleteDialog?.close();
   }
 
-  /** Deletes the account, then signs out: the account cannot sign in again. */
+  /* deletes the account, then signs out: the account cannot sign in again. */
   deleteAccount(): void {
     void this.state.run(async () => {
       await this.identity.deleteAccount();

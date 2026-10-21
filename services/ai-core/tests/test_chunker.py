@@ -1,4 +1,4 @@
-"""The structure-aware chunker. No DB, no OpenAI."""
+"""the structure-aware chunker."""
 
 from itertools import pairwise
 
@@ -17,12 +17,12 @@ def book(pages: int = 3, per_page: int = 25) -> list[list[str]]:
 
 
 def plain(pages: list[list[str]]) -> list[Para]:
-    """Body paragraphs with no headings, as from a PDF without any."""
+    """body paragraphs with no headings, as from a pdf without any."""
     return [Para(text, page_no, ()) for page_no, texts in enumerate(pages, start=1) for text in texts]
 
 
 class Doc:
-    """Builds an outline the way headings.outline would: a path stack per heading level."""
+    """builds an outline the way headings.outline would: a path stack per heading level."""
 
     def __init__(self) -> None:
         self.paras: list[Para] = []
@@ -132,7 +132,7 @@ def test_a_chunk_spanning_subsections_gets_their_common_prefix() -> None:
 
 
 def test_carried_overlap_does_not_widen_the_path() -> None:
-    # ~83-token paragraphs: seven fill chunk 0 so that "Calvin cycle" + its first paragraph don't fit.
+    # ~83-token paragraphs: seven fill chunk 0 so that "calvin cycle" + its first paragraph don't fit.
     doc = (
         Doc()
         .h(0, "Chapter 3")
@@ -144,7 +144,7 @@ def test_carried_overlap_does_not_widen_the_path() -> None:
     first, second = chunk_paras(doc.paras)
     assert first.section_path == "Chapter 3 > Light reactions"
     carried, heading = second.content.split(SEPARATOR)[:2]
-    # The chunk opens with the end of a "Light reactions" paragraph but is labelled by its own content.
+    # the chunk opens with the end of a "light reactions" paragraph but is labelled by its own content.
     assert first.content.endswith(carried) and heading == "Calvin cycle"
     assert second.section_path == "Chapter 3 > Calvin cycle"
 
@@ -163,7 +163,7 @@ def test_no_chunk_ends_with_a_heading() -> None:
 
 
 def test_a_title_page_joins_the_first_section() -> None:
-    # A slide deck: the course title (demoted to body text) sits before the first slide title.
+    # a slide deck: the course title (demoted to body text) sits before the first slide title.
     doc = Doc().p("Collaborative Software Development")
     doc.paras += Doc().h(0, "Software Testing").p("Software testers succeed where others fail.").paras
     doc.paras += Doc().h(0, "Test-Driven Development", page=2).p(paragraph(1), page=2).paras
@@ -185,7 +185,7 @@ def test_embed_text_uses_only_the_deepest_heading() -> None:
 
 
 def test_outline_sections_split_at_the_second_level() -> None:
-    """An outline's top level is often a few parts; its sections bound chunks too."""
+    """an outline's top level is often a few parts; its sections bound chunks too."""
     from ingest.chunker import _sections
 
     paras = [
@@ -204,7 +204,7 @@ def test_outline_sections_split_at_the_second_level() -> None:
 
 
 def test_captions_give_labels_and_text_gives_citations() -> None:
-    """What search uses to hand back the figure a paragraph mentions."""
+    """what search uses to hand back the figure a paragraph mentions."""
     from ingest.chunker import cited, label_of
 
     assert label_of("Fig. 7. The data efficiency") == "figure 7" and label_of("Table 2: Results") == "table 2"
@@ -240,7 +240,7 @@ def test_a_short_chunk_alone_on_its_page_is_kept() -> None:
 def test_a_header_wider_than_a_chunk_keeps_every_row() -> None:
     from ingest.tables import Table
 
-    # the header alone is over MAX_TOKENS; one row is very long, and gets cut into windows
+    # the header alone is over max_tokens; one row is very long, and gets cut into windows
     header = tuple(f"Assessment criterion {i} with a long descriptive heading" for i in range(80))
     rows = (*((f"row {r}", *("x",) * 79) for r in range(5)), ("long " * 400, *("y",) * 79))
     table = Table((0, 0, 100, 100), header, rows)

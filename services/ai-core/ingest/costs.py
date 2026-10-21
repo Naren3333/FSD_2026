@@ -1,18 +1,4 @@
-"""What an ingest cost: model calls by kind, cache hits, failures, tokens, retries
-and wall time, plus the time each stage took. One record per ingest, logged; `write` also appends it to a JSON
-lines file when given one (eval scripts).
-
-The record lives in a ContextVar set by `ingest()`; the tasks `asyncio.gather` starts copy the context, so they
-all add to the same object. Outside an ingest (tests, eval scripts) there is no record and every hook is a no-op.
-
-Kinds: page, pictures, region, ocr, describe, transcribe (a picture of a table) and layout (ingest.rescue).
-`vision.cached` counts a hit, or a miss whose model call then succeeds or fails; while that call runs, the kind
-is set in `_kind`, so `vision.ask` can attribute its usage without being told.
-
-A vision failure never fails the ingest (the page just loses its tables or figures), so `failed` is the only
-place such a loss shows up. `retries` counts attempts beyond the first, by the shared client (429, 5xx,
-connection errors) and by `ask`'s own rate-limit loop alike.
-"""
+"""what an ingest cost: model calls by kind, cache hits, failures, tokens, retries and wall time, plus the time each stage took."""
 
 import json
 import logging
@@ -38,7 +24,7 @@ class Calls:
     failed: int = 0  # gave up: the page, figure or table goes without
     retries: int = 0
     prompt_tokens: int = 0
-    cached_tokens: int = 0  # of prompt_tokens, served from OpenAI's prompt cache
+    cached_tokens: int = 0  # of prompt_tokens, served from openai's prompt cache
     completion_tokens: int = 0
     seconds: float = 0.0  # summed over calls, so concurrent calls add up to more than the wall time
 
@@ -74,7 +60,7 @@ _kind: ContextVar[str | None] = ContextVar("ingest_cost_kind", default=None)
 
 @contextmanager
 def recording(document_id: str) -> Iterator[IngestCost]:
-    """The ingest's record, current inside the block (and in the tasks it starts)."""
+    """the ingest's record, current inside the block (and in the tasks it starts)."""
     record = IngestCost(document_id)
     token = _record.set(record)
     try:
@@ -101,7 +87,7 @@ def failed(kind: str | None = None, n: int = 1) -> None:
 
 @contextmanager
 def calling(kind: str) -> Iterator[None]:
-    """The kind the model calls made inside are attributed to."""
+    """the kind the model calls made inside are attributed to."""
     token = _kind.set(kind)
     try:
         yield
@@ -110,7 +96,7 @@ def calling(kind: str) -> Iterator[None]:
 
 
 def answered(model: str, usage: Any, seconds: float, retries: int, kind: str | None = None) -> None:
-    """One successful model call. `usage` is the response's usage object (or None)."""
+    """one successful model call. `usage` is the response's usage object (or none)."""
     if (r := _record.get()) is None or not (kind := kind or _kind.get()):
         return
     c = r.of(kind)
@@ -125,7 +111,7 @@ def answered(model: str, usage: Any, seconds: float, retries: int, kind: str | N
 
 
 def retried(n: int = 1, kind: str | None = None) -> None:
-    """Retries of a call that then failed (a successful one reports its retries through `answered`)."""
+    """retries of a call that then failed (a successful one reports its retries through `answered`)."""
     if (r := _record.get()) is not None and (kind := kind or _kind.get()):
         r.of(kind).retries += n
 
@@ -141,7 +127,7 @@ def stage(name: str) -> Iterator[None]:
 
 
 def write(record: IngestCost, path: Path | None) -> None:
-    """Log the record, and append it to `path` (JSON lines) when one is set. Never raises."""
+    """log the record, and append it to `path` (json lines) when one is set."""
     fields = record.to_json()
     log.info("ingest_cost", extra=fields)
     line = json.dumps(fields, separators=(",", ":"))

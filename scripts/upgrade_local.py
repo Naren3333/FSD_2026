@@ -1,15 +1,4 @@
-"""Bring a local setup made by an older scripts/setup.py up to date, without touching existing data or secrets.
-
-Adds missing secrets to .env (it never changes an existing line), creates missing service databases and roles in
-the running Compose PostgreSQL (for example `chatbot`, added in ADR 0002 stage 4, and `aicore`, ai-core's usage
-ledger from ADR 0003), and creates missing AI service-account clients in the running Keycloak (for example
-`grading-marker`, ADR 0004) and Identity's `identity-accounts` client (ADR 0011). Existing clients, users and
-databases are left as they are, but every service account still gets its role, so a run that stopped half-way is
-finished by the next, and the existing `learning-web` client gets its sign-out redirect setting and loses the test
-stack's web origin, which older realm imports listed. Safe to run again.
-It also rewrites the generated realm import from .env, for the next fresh Keycloak volume. Other realm changes to
-a running Keycloak still need a fresh volume (see operations.md).
-"""
+"""bring a local setup made by an older scripts/setup.py up to date, without touching existing data or secrets."""
 
 import json
 from collections.abc import Callable
@@ -36,14 +25,12 @@ from setup import (
 if TYPE_CHECKING:
     import httpx
 
-# Values only read when a volume is first created: added to an .env that lacks them, they do not change a running
-# PostgreSQL superuser, Keycloak admin or local person, whose existing passwords stay in effect.
+# new environment defaults affect fresh volumes only; existing account passwords stay in effect.
 FIRST_START_ONLY = {"POSTGRES_PASSWORD", "KEYCLOAK_ADMIN_PASSWORD", *(key for _, _, key in PEOPLE)}
 
 
 def add_missing_secrets(env_path: Path) -> dict[str, str]:
-    """Appends every value scripts/setup.py generates that .env lacks (a database password per service, a client
-    secret per AI client, and so on) and returns every value in .env. Existing lines are never changed."""
+    """appends every value scripts/setup.py generates that .env lacks (a database password per service, a client secret per ai client, and so on) and returns every value in .env."""
     text = env_path.read_text(encoding="utf-8")
     env = read_env(env_path)
     added = {key: value for key, value in generate_secrets().items() if not env.get(key)}
@@ -73,9 +60,7 @@ def add_missing_databases(env: dict[str, str]) -> None:
 
 
 def add_missing_clients(env: dict[str, str]) -> None:
-    """Creates each AI client Keycloak lacks, with .env's secret, and gives its service account the ai-client
-    role. The role is assigned to existing clients too (Keycloak ignores a mapping it already has), so a run that
-    stopped after creating a client is finished by the next one."""
+    """creates each ai client keycloak lacks, with .env's secret, and gives its service account the ai-client role."""
     with admin_client() as admin:
         for client in AI_CLIENTS:
             created = ensure_client(
@@ -90,9 +75,7 @@ def add_missing_clients(env: dict[str, str]) -> None:
 
 
 def add_missing_accounts_client(env: dict[str, str]) -> None:
-    """Creates Identity's identity-accounts client if Keycloak lacks it, with .env's secret, and gives its service
-    account realm-management's manage-users role. The role is assigned to an existing client too, so a run that
-    stopped after creating the client is finished by the next one; without it Identity cannot remove sign-ins."""
+    """creates identity's identity-accounts client if keycloak lacks it, with .env's secret, and gives its service account realm-management's manage-users role."""
     with admin_client() as admin:
         created = ensure_client(
             admin, ACCOUNTS_CLIENT, lambda: accounts_client(env[client_secret_key(ACCOUNTS_CLIENT)])
@@ -108,9 +91,7 @@ def add_missing_accounts_client(env: dict[str, str]) -> None:
 
 
 def update_web_client() -> None:
-    """Gives the existing learning-web client the attributes setup.py now sets (such as where Sign out may
-    return to) and, in the development stack, drops the test stack's web origin that older realm imports added; the
-    test stack has its own realm. Changes nothing when the client already matches."""
+    """update browser-client attributes while keeping test origins out of the development realm."""
     with admin_client() as admin:
         found = check(admin.get("/clients", params={"clientId": "learning-web"})).json()
         if not found:
@@ -123,8 +104,7 @@ def update_web_client() -> None:
 
 
 def updated_web_client(client: dict[str, Any], *, development: bool) -> dict[str, Any]:
-    """The learning-web client with setup.py's attributes and, for the development stack, without the test stack's
-    web origin. Other settings are kept as they are."""
+    """the learning-web client with setup.py's attributes and, for the development stack, without the test stack's web origin."""
     updated = {**client, "attributes": {**(client.get("attributes") or {}), **WEB_ATTRIBUTES}}
     if development:
         test_uri = f"{TEST_WEB_ORIGIN}/*"
@@ -136,7 +116,7 @@ def updated_web_client(client: dict[str, Any], *, development: bool) -> dict[str
 
 
 def ensure_client(admin: "httpx.Client", client: str, representation: Callable[[], dict[str, Any]]) -> bool:
-    """Creates the client unless Keycloak has it; True when it was created."""
+    """creates the client unless keycloak has it; true when it was created."""
     if check(admin.get("/clients", params={"clientId": client})).json():
         return False
     check(admin.post("/clients", json=representation()))
@@ -144,7 +124,7 @@ def ensure_client(admin: "httpx.Client", client: str, representation: Callable[[
 
 
 def refresh_realm_import(env: dict[str, str]) -> None:
-    """Rewrites the generated realm import from .env, so a fresh Keycloak volume gets the current clients too."""
+    """rewrites the generated realm import from .env, so a fresh keycloak volume gets the current clients too."""
     path = ROOT / ".local" / "learning-realm.json"
     path.parent.mkdir(exist_ok=True)
     path.write_text(json.dumps(realm(env), indent=2), encoding="utf-8")
@@ -156,7 +136,8 @@ def main() -> None:
         raise SystemExit("No .env: run scripts/setup.py for a new setup.")
     env = add_missing_secrets(env_path)
     refresh_realm_import(env)
-    # Compose refuses to start while .env lacks a secret, so the secrets come first and the stack may be down.
+    # compose refuses to start while .env lacks a secret, so the secrets come first and the stack may be
+    # down.
     if psql("SELECT 1", check=False).returncode != 0:
         raise SystemExit(
             "Secrets are in .env, but the stack is not running. Start it with `docker compose up -d --build`, "

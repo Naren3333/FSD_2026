@@ -5,8 +5,7 @@ import (
 	"testing"
 )
 
-// The structs Grading writes match the named schemas of its contract, so the web's generated types (and
-// integration.py's response checks) describe what it really sends; and the events it reads and writes match theirs.
+// verify response and event types against their generated contracts.
 func TestResponsesMatchTheContract(t *testing.T) {
 	for name, value := range map[string]any{
 		"Evaluation":    Evaluation{},

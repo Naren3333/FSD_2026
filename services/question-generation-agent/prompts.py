@@ -1,5 +1,4 @@
-"""What the model is asked, and the strict JSON schemas its replies must follow. The passages and the teacher's
-focus go in as one JSON document, so text in a document stays a quoted value however it is written."""
+"""what the model is asked, and the strict json schemas its replies must follow."""
 
 import json
 from dataclasses import dataclass
@@ -8,14 +7,13 @@ from typing import Any
 from contracts import Generatable, GenerateRequest, TeacherMarked
 
 MAX_MESSAGE = 60000  # ai-core's longest message, in characters
-# What the passages may take of the task message: the rest holds the request's own fields (a question of up to 2,000
-# characters for guidance) and, for generation, as many of the editor's existing questions as fit.
+# reserve prompt space for the request and existing questions before adding passages.
 PASSAGES_BUDGET = 50000
 
 
 @dataclass(frozen=True)
 class Passage:
-    """A search result the model may use, numbered from 1 as the model cites it."""
+    """a search result the model may use, numbered from 1 as the model cites it."""
 
     number: int
     chunk_id: str
@@ -58,7 +56,7 @@ INT: dict[str, Any] = {"type": "integer"}
 
 
 def _strict(properties: dict[str, Any]) -> dict[str, Any]:
-    """An object whose every property is required and nothing else allowed, as strict structured output needs."""
+    """an object whose every property is required and nothing else allowed, as strict structured output needs."""
     return {
         "type": "object",
         "properties": properties,
@@ -116,14 +114,12 @@ def _passages(passages: list[Passage]) -> list[dict[str, Any]]:
 
 
 def _size(value: Any) -> int:
-    """Characters `value` takes in the task document."""
+    """characters `value` takes in the task document."""
     return len(json.dumps(value, ensure_ascii=False))
 
 
 def fitting(passages: list[Passage]) -> list[Passage]:
-    """The passages, best first, that fit in PASSAGES_BUDGET characters of the task document; always the best one
-    (Content's passages are at most 20,000 characters). Cut before the call, so the checks see only the passages
-    the model was shown."""
+    """the passages, best first, that fit in passages_budget characters of the task document; always the best one (content's passages are at most 20,000 characters)."""
     kept: list[Passage] = []
     size = 0
     for p in passages:
@@ -135,7 +131,7 @@ def fitting(passages: list[Passage]) -> list[Passage]:
 
 
 def _recent(prompts: list[str], room: int) -> list[str]:
-    """The newest of the editor's prompts (the last ones) that fit in `room` characters, in the editor's order."""
+    """the newest of the editor's prompts (the last ones) that fit in `room` characters, in the editor's order."""
     kept: list[str] = []
     for prompt in reversed(prompts):
         room -= _size(prompt) + 2  # and the ", " between items
@@ -148,8 +144,7 @@ def _recent(prompts: list[str], room: int) -> list[str]:
 def generation_messages(
     topic: str, request: GenerateRequest, passages: list[Passage]
 ) -> list[dict[str, str]]:
-    """The system and task messages. existing_questions get what room the rest of the task leaves in one ai-core
-    message, newest first: the older ones beyond it are left out rather than the call refused."""
+    """the system and task messages. existing_questions get what room the rest of the task leaves in one ai-core message, newest first: the older ones beyond it are left out rather than the call refused."""
     task: dict[str, Any] = {
         "topic": topic,
         "focus": request.focus,

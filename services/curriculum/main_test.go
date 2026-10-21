@@ -11,7 +11,7 @@ func TestValidation(t *testing.T) {
 			t.Fatalf("accepted %q", name)
 		}
 	}
-	// The limit counts characters, not bytes, after trimming.
+	// the limit counts characters, not bytes, after trimming.
 	if !validName(" Fraction addition ") || !validName(strings.Repeat("é", maxName)) {
 		t.Fatal("rejected a valid name")
 	}

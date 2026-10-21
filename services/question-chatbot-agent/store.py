@@ -1,5 +1,4 @@
-"""The chatbot's own database: threads and messages (ADR 0002). It holds conversations only, never business
-records; what a turn may read comes from Content, with the user's token."""
+"""the chatbot's own database: threads and messages (adr 0002)."""
 
 import json
 from pathlib import Path
@@ -10,18 +9,19 @@ from psycopg import AsyncConnection
 from psycopg.types.json import Jsonb
 
 MIGRATIONS = Path(__file__).parent / "migrations"
-# A deleted document's redaction (purge.redact) against an answer citing it being saved.
+# a deleted document's redaction (purge.redact) against an answer citing it being saved.
 LOCK_DOCUMENT = "document"
 TITLE_CHARS = 80
 THREAD_COLUMNS = "id, classroom_id, role, title, created_at, last_message_at"
 MESSAGE_COLUMNS = "id, role, content, outcome, citations, created_at"
-# An answer still marked in progress after this was lost (its process died before saving it), so a new one may start.
+# an answer still marked in progress after this was lost (its process died before saving it), so a new one
+# may start.
 TURN_STALE = "3 minutes"
 
 
 class Store(Protocol):
     async def create_thread(self, org: str, user: str, role: str, classroom_id: str) -> dict[str, Any] | None:
-        """The new thread, or None when the classroom was deleted and purged."""
+        """the new thread, or none when the classroom was deleted and purged."""
         ...
 
     async def list_threads(self, org: str, user: str, classroom_id: str | None) -> list[dict[str, Any]]: ...
@@ -29,24 +29,21 @@ class Store(Protocol):
     async def thread(self, org: str, user: str, thread_id: str) -> dict[str, Any] | None: ...
 
     async def messages(self, thread_id: str, limit: int) -> list[dict[str, Any]]:
-        """The thread's latest `limit` messages, oldest first."""
+        """the thread's latest `limit` messages, oldest first."""
         ...
 
     async def claim_turn(self, thread_id: str) -> bool:
-        """Marks an answer in progress for the thread's user, until save_answer saves it. False when another of
-        their answers, in any thread, is still in progress; True too when the thread is gone, which start_turn
-        then reports."""
+        """marks an answer in progress for the thread's user, until save_answer saves it."""
         ...
 
     async def start_turn(
         self, thread_id: str, content: str, history_turns: int
     ) -> list[dict[str, str]] | None:
-        """The last `history_turns` messages (oldest first), then saves the user's message and, for the first,
-        the thread's title. None, saving nothing, when the thread is gone (purged since it was read)."""
+        """the last `history_turns` messages (oldest first), then saves the user's message and, for the first, the thread's title."""
         ...
 
     async def save_answer(self, thread_id: str, answer: dict[str, Any]) -> str | None:
-        """The saved answer's id; None, saving nothing, when the thread is gone. Ends the thread's claim_turn."""
+        """the saved answer's id; none, saving nothing, when the thread is gone."""
         ...
 
 
@@ -55,8 +52,8 @@ class PostgresStore(AsyncPooled):
 
     async def create_thread(self, org: str, user: str, role: str, classroom_id: str) -> dict[str, Any] | None:
         async with self.pool.connection() as conn, conn.transaction():
-            # The classroom's purge and a deleted account's take the same locks, so a thread is never created in a
-            # classroom, or for a user, whose purge is committing.
+            # the classroom's purge and a deleted account's take the same locks, so a thread is never
+            # created in a classroom, or for a user, whose purge is committing.
             await lock_async(conn, LOCK_CLASSROOM, classroom_id)
             await lock_async(conn, LOCK_USER, user)
             cur = await conn.execute(
@@ -99,7 +96,8 @@ class PostgresStore(AsyncPooled):
         async with self.pool.connection() as conn, conn.transaction():
             if not await _hold_thread(conn, thread_id):
                 return True
-            # A concurrent claim for the same user waits on the primary key, then sees this one and is refused.
+            # a concurrent claim for the same user waits on the primary key, then sees this one and is
+            # refused.
             cur = await conn.execute(
                 "INSERT INTO active_turns (user_id, thread_id) SELECT user_id, id FROM threads WHERE id=%s"
                 " ON CONFLICT (user_id) DO UPDATE SET thread_id=excluded.thread_id, started_at=now()"
@@ -135,8 +133,7 @@ class PostgresStore(AsyncPooled):
             if not await _hold_thread(conn, thread_id):
                 return None
             if citations:
-                # A document deleted while the answer was written is cited as removed (purge.redact). The locks,
-                # taken in order, make a redaction either see this answer or come after this check.
+                # a document deleted while the answer was written is cited as removed (purge.redact).
                 documents = sorted({str(c["document_id"]) for c in citations})
                 for document in documents:
                     await lock_async(conn, LOCK_DOCUMENT, document)
@@ -172,15 +169,14 @@ class PostgresStore(AsyncPooled):
             )
             row = await cur.fetchone()
             await conn.execute("UPDATE threads SET last_message_at=now() WHERE id=%s", (thread_id,))
-            # In the answer's own transaction, so the user's next question is accepted once this one is saved.
+            # in the answer's own transaction, so the user's next question is accepted once this one is
+            # saved.
             await conn.execute("DELETE FROM active_turns WHERE thread_id=%s", (thread_id,))
             assert row is not None
             return str(row["id"])
 
 
 async def _hold_thread(conn: AsyncConnection[Any], thread_id: str) -> bool:
-    """Whether the thread still exists, holding it until the transaction ends. A purge deleting it (purge.py) either
-    commits first, and then this sees it gone, or waits for this transaction: a message is never inserted for a
-    thread being deleted, which would break the foreign key."""
+    """whether the thread still exists, holding it until the transaction ends."""
     cur = await conn.execute("SELECT 1 FROM threads WHERE id=%s FOR KEY SHARE", (thread_id,))
     return await cur.fetchone() is not None

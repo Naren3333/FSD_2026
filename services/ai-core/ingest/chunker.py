@@ -1,27 +1,4 @@
-"""The structure-aware chunker: paragraphs packed to at most MAX_TOKENS
-with a little overlap, never across a top-level section.
-
-A chunk's section_path is the common prefix of the paths of the body paragraphs new to it (the overlap
-carried from the previous chunk and the headings themselves don't count). Headings stay in the content but never end a chunk.
-
-A table is a chunk of its own (kind "table"): its caption, then the table as Markdown. One over MAX_TOKENS
-is split by rows, the header repeated in every piece. What gets embedded (`embed_body`) is the caption
-and one sentence per row with each cell labelled by its column ("Criterion: Analysis; Band 4: ..."), so a
-question about one row matches it. Text never packs across a table, and no overlap is carried over one.
-
-Text transcribed from a scanned page (OCR) is packed like any other; a chunk touching such a page is
-source "vision".
-
-A described figure is a chunk of its own too (kind "figure", source "vision"), after the text around it; unlike
-a table it doesn't split that text (a diagram mid-slide would cut the slide's bullets in two): its caption, a "[diagram,
-described by AI]" line and the description, plus any key values. Its embedded text adds the PDF's own words
-inside the figure (the diagram labels taken out of the prose), so keyword search still finds them. The chunk
-points at the stored crop by name (`image`).
-
-Tables and figures with a numbered caption carry its label ("figure 7", "table 2"), and text chunks the labels
-they mention (`cites`), so search can hand back the figure a paragraph is talking about.
-Blocking (tiktoken): run it in a thread.
-"""
+"""the structure-aware chunker: paragraphs packed to at most max_tokens with a little overlap, never across a top-level section."""
 
 import os
 import re
@@ -36,7 +13,7 @@ from ingest.headings import Para
 from ingest.tables import markdown_lines
 
 MAX_TOKENS = 600
-OVERLAP_TOKENS = 90  # ~15% of MAX_TOKENS: whole trailing paragraphs, or the end of the last one
+OVERLAP_TOKENS = 90  # ~15% of max_tokens: whole trailing paragraphs, or the end of the last one
 SEPARATOR = "\n\n"
 PATH_SEPARATOR = " > "
 WINDOW_SLACK = 10  # re-encoding a decoded window can come out a token or two longer
@@ -44,7 +21,7 @@ SENTENCE_END = re.compile(r"(?<=[.!?])\s+(?=[A-Z0-9\"“(])")
 CONTINUED = "(cont.)"
 DESCRIBED = "described by AI"
 MAX_LABEL_TOKENS = 300  # a figure's own words, as embedded
-MIN_ROW_TOKENS = 100  # room for rows in a table chunk, even when the caption and header alone fill MAX_TOKENS
+MIN_ROW_TOKENS = 100  # room for rows in a table chunk, even when the caption and header alone fill max_tokens
 TRANSCRIBED = "(transcribed from an image)"
 STUB_WORDS = 5  # a text chunk shorter than this is dropped when another chunk covers its page
 LABEL = re.compile(r"\b(fig(?:ure)?s?\.?|tables?|exhibits?)\s*(\d+[a-z]?)\b", re.IGNORECASE)
@@ -59,7 +36,7 @@ class Chunk:
     token_count: int
     section_path: str | None = None
     kind: str = "text"  # "text" | "table" | "figure"
-    source: str = "pdf"  # "pdf": the PDF's own text; "vision": written by the vision model
+    source: str = "pdf"  # "pdf": the pdf's own text; "vision": written by the vision model
     embed_body: str | None = None  # embedded instead of content when set (row sentences; a figure's labels)
     image: str | None = None  # a figure's crop file name
     label: str | None = None  # a table's or figure's numbered caption label: "figure 7", "table 2"
@@ -67,13 +44,13 @@ class Chunk:
 
 
 def label_of(caption: str | None) -> str | None:
-    """The label a caption opens with ("Fig. 7. ..." → "figure 7"), or None."""
+    """the label a caption opens with (\"fig. 7. ...\" → \"figure 7\"), or none."""
     m = LABEL.match(caption.strip()) if caption else None
     return _label(m) if m else None
 
 
 def cited(text: str) -> tuple[str, ...]:
-    """The labels a text mentions, each once, in order."""
+    """the labels a text mentions, each once, in order."""
     return tuple(dict.fromkeys(_label(m) for m in LABEL.finditer(text)))
 
 
@@ -92,8 +69,8 @@ class _Unit:
     heading: bool = False
 
 
-# cl100k_base's BPE file is committed beside the service (OpenAI's published file, checked by tiktoken against
-# its own sha256), so ingest and the tests never download it.
+# cl100k_base's bpe file is committed beside the service (openai's published file, checked by tiktoken
+# against its own sha256), so ingest and the tests never download it.
 TIKTOKEN_DIR = Path(__file__).resolve().parents[1] / "tiktoken"
 
 
@@ -130,7 +107,7 @@ def chunk_paras(
 
 
 def _chunk_paras(paras: list[Para], vision_pages: frozenset[int]) -> list[Chunk]:
-    """`vision_pages`: pages whose text the vision model transcribed (OCR); a text chunk on one is source "vision"."""
+    """`vision_pages`: pages whose text the vision model transcribed (ocr); a text chunk on one is source \"vision\"."""
     enc = encoding()
     chunks: list[Chunk] = []
     for section in _sections(paras):
@@ -156,8 +133,7 @@ def _chunk_paras(paras: list[Para], vision_pages: frozenset[int]) -> list[Chunk]
 
 
 def _without_stubs(chunks: list[Chunk]) -> list[Chunk]:
-    """Drop text chunks of a few words, such as a slide title whose body became a table or figure chunk, or a
-    "Continued on next page" line, when another chunk covers the same page: alone they only take search slots."""
+    """drop tiny text stubs only when another chunk covers the same page."""
 
     def stub(c: Chunk) -> bool:
         return c.kind == "text" and len(c.content.split()) < STUB_WORDS
@@ -200,13 +176,13 @@ def _text_chunks(enc: tiktoken.Encoding, paras: list[Para]) -> list[Chunk]:
 
 
 def _table_chunks(enc: tiktoken.Encoding, para: Para) -> list[Chunk]:
-    """The table as Markdown under its caption, split by rows (header repeated) to fit MAX_TOKENS."""
+    """the table as markdown under its caption, split by rows (header repeated) to fit max_tokens."""
     table = para.table
     assert table is not None
     caption = " ".join(x for x in (table.caption, TRANSCRIBED if table.source == "vision" else None) if x)
     lines = markdown_lines(table)
     head, row_lines = lines[:2], lines[2:]
-    # A very wide header leaves no room under MAX_TOKENS: its chunks then run over it rather than lose rows.
+    # a very wide header leaves no room under max_tokens: its chunks then run over it rather than lose rows.
     budget = max(
         MIN_ROW_TOKENS,
         _limits.get()[0]
@@ -255,7 +231,7 @@ def _table_chunks(enc: tiktoken.Encoding, para: Para) -> list[Chunk]:
 
 
 def _figure_chunks(enc: tiktoken.Encoding, para: Para) -> list[Chunk]:
-    """The figure's caption, an "[<type>, described by AI]" line, the description and its key values."""
+    """the figure's caption, an \"[<type>, described by ai]\" line, the description and its key values."""
     figure = para.figure
     assert figure is not None
     head = SEPARATOR.join(x for x in (figure.caption, f"[{figure.type or 'figure'}, {DESCRIBED}]") if x)
@@ -289,7 +265,7 @@ def _clip(enc: tiktoken.Encoding, text: str, budget: int) -> str:
 
 
 def _row_sentence(header: tuple[str, ...] | None, row: tuple[str, ...]) -> str:
-    """One row as text for embedding, each cell labelled by its column."""
+    """one row as text for embedding, each cell labelled by its column."""
     if header and any(header):
         return "; ".join(f"{h}: {v}" if h else v for h, v in zip_longest(header, row, fillvalue="") if v)
     return " | ".join(c for c in row if c)
@@ -300,10 +276,7 @@ def _tokens(enc: tiktoken.Encoding, text: str) -> int:
 
 
 def _sections(paras: list[Para]) -> list[list[Para]]:
-    """Split before every top-level heading (the smallest level the document has), except the first:
-    text before it (a title page) joins the first section instead of becoming a tiny chunk of its own.
-    When the headings come from the PDF outline, before second-level ones too: an outline's top level is often
-    a few parts ("Part 1", "Part 2"), and splitting only there would pack unrelated sections together."""
+    """split before every top-level heading (the smallest level the document has), except the first: text before it (a title page) joins the first section instead of becoming a tiny chunk of its own."""
     levels = [p.level for p in paras if p.level is not None]
     top = min(levels, default=None)
     split = None if top is None else top + (1 if any(p.toc for p in paras) else 0)
@@ -320,7 +293,7 @@ def _sections(paras: list[Para]) -> list[list[Para]]:
 
 
 def _pack(enc: tiktoken.Encoding, units: list[_Unit]) -> list[tuple[list[_Unit], int]]:
-    """Greedy packing; each group comes with how many of its leading units are carried overlap."""
+    """greedy packing; each group comes with how many of its leading units are carried overlap."""
     groups: list[tuple[list[_Unit], int]] = []
     current: list[_Unit] = []
     carried = 0
@@ -347,8 +320,7 @@ def _pack(enc: tiktoken.Encoding, units: list[_Unit]) -> list[tuple[list[_Unit],
 
 
 def _units(enc: tiktoken.Encoding, para: Para) -> list[_Unit]:
-    """One unit per paragraph. One over MAX_TOKENS is split into sentence runs that fit, and a single
-    sentence over it into token windows."""
+    """one unit per paragraph."""
     tokens = len(enc.encode(para.text, disallowed_special=()))
     if tokens < _limits.get()[0]:
         return [_Unit(para.page, para.text, tokens + 1, para.path, para.level is not None)]
@@ -389,8 +361,7 @@ def _common_prefix(paths: list[tuple[str, ...]]) -> tuple[str, ...]:
 
 
 def _tail(enc: tiktoken.Encoding, units: list[_Unit]) -> list[_Unit]:
-    """The trailing units that fit in OVERLAP_TOKENS. If the last one alone is bigger (common: a
-    paragraph is often ~100 tokens), its last _limits.get()[1] instead, from a sentence or word start."""
+    """the trailing units that fit in overlap_tokens."""
     if _limits.get()[1] == 0:
         return []
     tail: list[_Unit] = []

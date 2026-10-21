@@ -32,7 +32,7 @@ const doc = (change: Partial<DocumentRecord>): DocumentRecord => ({
   ...change,
 });
 
-/** The materials page for a user with `role` in classroom `classroomId`, whose documents load as given. */
+/* the materials page for a user with `role` in classroom `classroomid`, whose documents load as given. */
 function render(
   documents: Promise<DocumentRecord[]>,
   role: 'teacher' | 'student' = 'teacher',

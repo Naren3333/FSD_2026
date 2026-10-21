@@ -15,12 +15,12 @@ var errAlreadyFinalized = errors.New("evaluation already finalized")
 
 // store is a classroom's draft and finalized evaluations, with their audit trail.
 type store interface {
-	// listEvaluations is one page of the classroom's evaluations of the given students, or of one assessment's when
-	// assessment is set, with how many there are in all.
+	// listevaluations is one page of the classroom's evaluations of the given students, or of one assessment's
+	// when assessment is set, with how many there are in all.
 	listEvaluations(ctx context.Context, org, classroom, assessment string, students []string, offset, limit int) ([]Evaluation, int, error)
 	listReleased(ctx context.Context, org, classroom, student string) ([]Evaluation, error)
-	// countEvaluations counts the classroom's evaluations of the given students, or one assessment's when assessment
-	// is set.
+	// countevaluations counts the classroom's evaluations of the given students, or one assessment's when
+	// assessment is set.
 	countEvaluations(ctx context.Context, org, classroom, assessment string, students []string) (Counts, error)
 	findEvaluation(ctx context.Context, org, id string) (Evaluation, error)
 	findClassroom(ctx context.Context, org, id string) (string, error)
@@ -31,11 +31,11 @@ type store interface {
 	release(ctx context.Context, org, assessment, actor string, students []string) (int, error)
 }
 
-// pgStore is the store in the service's own Postgres database.
+// pgstore is the store in the service's own postgres database.
 type pgStore struct{ db *pgxpool.Pool }
 
-// Counts is how many of a classroom's evaluations are drafts waiting for its teacher, how many are finalized, and
-// how many finalized ones its students cannot see until the teacher releases them.
+// counts is how many of a classroom's evaluations are drafts waiting for its teacher, how many are
+// finalized, and how many finalized ones its students cannot see until the teacher releases them.
 type Counts struct {
 	Drafts     int `json:"drafts"`
 	Finalized  int `json:"finalized"`
@@ -48,7 +48,7 @@ func (p pgStore) countEvaluations(ctx context.Context, org, classroom, assessmen
 	return c, err
 }
 
-// optional is an assessment id for a query, or NULL (every assessment) for none.
+// optional is an assessment id for a query, or null (every assessment) for none.
 func optional(assessment string) *string {
 	if assessment == "" {
 		return nil
@@ -56,8 +56,7 @@ func optional(assessment string) *string {
 	return &assessment
 }
 
-// insertEvaluation runs inside the event consumer's transaction. A repeated submission changes nothing, and nor
-// does one for a classroom already purged. queued are the questions that get an AI suggestion.
+// insertevaluation runs inside the event consumer's transaction.
 func insertEvaluation(ctx context.Context, tx pgx.Tx, v Submitted, evidence []Evidence, queued []string) error {
 	data, err := json.Marshal(evidence)
 	if err != nil {
@@ -75,15 +74,15 @@ func insertEvaluation(ctx context.Context, tx pgx.Tx, v Submitted, evidence []Ev
 	if v.marking() {
 		teacher = &v.Teacher
 	}
-	// Shared with other submissions to the assessment, exclusive against its purge (purgeAssessment), and likewise
-	// with the student's other work against the purge of their deleted account (purgeUser).
+	// shared with other submissions to the assessment, exclusive against its purge (purgeassessment), and
+	// likewise with the student's other work against the purge of their deleted account (purgeuser).
 	if err = platform.LockShared(ctx, tx, platform.LockAssessment, v.Assessment); err != nil {
 		return err
 	}
 	if err = platform.LockShared(ctx, tx, platform.LockUser, v.Student); err != nil {
 		return err
 	}
-	// A due date changed since the student submitted (changeDue) decides whether the work is late.
+	// a due date changed since the student submitted (changedue) decides whether the work is late.
 	result, err := tx.Exec(ctx, `INSERT INTO evaluations(id,assessment_id,classroom_id,org_id,student_id,evidence,questions,answers,late,submitted_at,release_policy,teacher_id)
 		SELECT $1::uuid,$2::uuid,$3::uuid,$4::text,$5::text,$6::jsonb,$7::jsonb,$8::jsonb,
 			CASE WHEN d.assessment_id IS NULL OR $10::timestamptz IS NULL THEN $9::boolean ELSE coalesce($10::timestamptz>d.due_at,false) END,
@@ -104,11 +103,10 @@ func insertEvaluation(ctx context.Context, tx pgx.Tx, v Submitted, evidence []Ev
 	return nil
 }
 
-// evaluationColumns are the columns scanEvaluation reads first.
+// evaluationcolumns are the columns scanevaluation reads first.
 const evaluationColumns = "id,assessment_id,classroom_id,student_id,status,evidence,coalesce(answers,'{}'::jsonb),late,submitted_at,release_policy,finalized_at,released_at"
 
-// scanEvaluation reads evaluationColumns, then any extra columns into more, and decodes the evidence. It also
-// returns the evidence as stored.
+// scanevaluation reads evaluationcolumns, then any extra columns into more, and decodes the evidence.
 func scanEvaluation(row pgx.Row, more ...any) (Evaluation, []byte, error) {
 	var v Evaluation
 	var data, answers []byte
@@ -133,8 +131,8 @@ func (p pgStore) collect(rows pgx.Rows, err error) ([]Evaluation, error) {
 	})
 }
 
-// listEvaluations is one page of the classroom's evaluations of the given students, newest first, or of one
-// assessment's, oldest first, with how many there are in all. The id breaks ties, so pages never overlap.
+// listevaluations is one page of the classroom's evaluations of the given students, newest first, or of one
+// assessment's, oldest first, with how many there are in all.
 func (p pgStore) listEvaluations(ctx context.Context, org, classroom, assessment string, students []string, offset, limit int) ([]Evaluation, int, error) {
 	const match = " FROM evaluations WHERE classroom_id=$1 AND org_id=$2 AND student_id=ANY($3::text[]) AND ($4::uuid IS NULL OR assessment_id=$4::uuid)"
 	order := " ORDER BY created_at DESC,id DESC"
@@ -149,14 +147,13 @@ func (p pgStore) listEvaluations(ctx context.Context, org, classroom, assessment
 	return list, total, err
 }
 
-// findEvaluation is one evaluation with its students' answers; platform.ErrNotFound when there is none.
+// findevaluation is one evaluation with its students' answers; platform.errnotfound when there is none.
 func (p pgStore) findEvaluation(ctx context.Context, org, id string) (Evaluation, error) {
 	v, _, err := scanEvaluation(p.db.QueryRow(ctx, "SELECT "+evaluationColumns+" FROM evaluations WHERE id=$1 AND org_id=$2", id, org))
 	return v, err
 }
 
-// listReleased is one student's released results in a classroom, newest first. Drafts and unreleased grades never
-// leave Grading for students: a grade is the student's only once a teacher has finalized and released it.
+// listreleased is one student's released results in a classroom, newest first.
 func (p pgStore) listReleased(ctx context.Context, org, classroom, student string) ([]Evaluation, error) {
 	return p.collect(p.db.Query(ctx, "SELECT "+evaluationColumns+" FROM evaluations WHERE classroom_id=$1 AND org_id=$2 AND student_id=$3 AND status='finalized' AND released_at IS NOT NULL ORDER BY released_at DESC LIMIT 100", classroom, org, student))
 }
@@ -167,15 +164,15 @@ func (p pgStore) findClassroom(ctx context.Context, org, id string) (string, err
 	return classroom, err
 }
 
-// assessmentClassroom is the classroom of an assessment that has evaluations; platform.ErrNotFound when none.
+// assessmentclassroom is the classroom of an assessment that has evaluations; platform.errnotfound when
+// none.
 func (p pgStore) assessmentClassroom(ctx context.Context, org, assessment string) (string, error) {
 	var classroom string
 	err := p.db.QueryRow(ctx, "SELECT classroom_id FROM evaluations WHERE assessment_id=$1 AND org_id=$2 LIMIT 1", assessment, org).Scan(&classroom)
 	return classroom, err
 }
 
-// lockDraft locks a draft evaluation with its questions for a change. It returns errAlreadyFinalized for a
-// finalized one, and the evidence as stored.
+// lockdraft locks a draft evaluation with its questions for a change.
 func lockDraft(ctx context.Context, tx pgx.Tx, org, id string) (Evaluation, []Question, []byte, error) {
 	var data []byte
 	v, before, err := scanEvaluation(tx.QueryRow(ctx, "SELECT "+evaluationColumns+",coalesce(questions,'[]'::jsonb) FROM evaluations WHERE id=$1 AND org_id=$2 FOR UPDATE", id, org), &data)
@@ -189,7 +186,7 @@ func lockDraft(ctx context.Context, tx pgx.Tx, org, id string) (Evaluation, []Qu
 	return v, questions, before, json.Unmarshal(data, &questions)
 }
 
-// saveMarks records the teacher's marks on a draft without finalizing it, with an audit entry.
+// savemarks records the teacher's marks on a draft without finalizing it, with an audit entry.
 func (p pgStore) saveMarks(ctx context.Context, org, id, actor string, marks map[string]Mark) (Evaluation, error) {
 	tx, err := p.db.Begin(ctx)
 	if err != nil {
@@ -217,11 +214,7 @@ func (p pgStore) saveMarks(ctx context.Context, org, id, actor string, marks map
 	return v, err
 }
 
-// finalizeEvaluation locks the evaluation row, applies the marks and records the audit entry in one transaction,
-// releasing the grade to the student at once when its assessment says so; only then does it emit the finalized
-// event, since Analytics shows its marks to the student (a manual release emits it in release). It returns
-// errAlreadyFinalized, errUnmarked or a marking error for the business failures; any other error is an
-// infrastructure failure.
+// finalize grades and audit atomically; emit results only when released to the student.
 func (p pgStore) finalizeEvaluation(ctx context.Context, org, id, actor, reason string, marks map[string]Mark) (Evaluation, error) {
 	tx, err := p.db.Begin(ctx)
 	if err != nil {
@@ -263,17 +256,13 @@ func (p pgStore) finalizeEvaluation(ctx context.Context, org, id, actor, reason 
 	return v, err
 }
 
-// emitFinalized publishes grading.finalized.v3 through the outbox when a grade becomes visible to its student:
-// Analytics shows the student their own marks from it, so it must never go out before the release.
+// publish released grades through the outbox so analytics cannot reveal drafts.
 func emitFinalized(ctx context.Context, tx pgx.Tx, org string, v Evaluation) error {
 	return platform.Emit(ctx, tx, topicFinalized, v.ID, map[string]any{"evaluation_id": v.ID, "assessment_id": v.Assessment, "classroom_id": v.Classroom, "org_id": org, "student_id": v.Student, "evidence": final(v.Evidence)})
 }
 
 // release shows the assessment's finalized, unreleased grades to their students, with an audit entry and a
-// grading.finalized.v3 event each, and returns how many it released. Only the given students' grades are released,
-// the classroom's enrolled ones: a removed student's stay unreleased and kept, and a later release after they are
-// enrolled again releases them. Drafts stay drafts: finalizing one later releases it only if its assessment releases
-// on finalization, or at the next release.
+// grading.finalized.v3 event each, and returns how many it released.
 func (p pgStore) release(ctx context.Context, org, assessment, actor string, students []string) (int, error) {
 	tx, err := p.db.Begin(ctx)
 	if err != nil {

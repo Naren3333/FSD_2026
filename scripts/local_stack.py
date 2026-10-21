@@ -1,8 +1,4 @@
-"""Helpers the local-stack scripts share: the generated .env, sign-in through the local Keycloak, its admin API, and
-PostgreSQL inside the Compose container. Local development stack only; the Keycloak calls need httpx.
-
-Scripts in scripts/ import this directly (`python scripts/<name>.py` puts scripts/ on the path); scripts/eval/common.py
-adds scripts/ to the path first."""
+"""helpers the local-stack scripts share: the generated .env, sign-in through the local keycloak, its admin api, and postgresql inside the compose container."""
 
 import json
 import os
@@ -21,9 +17,7 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 def read_env(path: Path = ROOT / ".env") -> dict[str, str]:
-    """The KEY=value lines of a .env file, read as Compose reads them: blank lines and comments skipped, an
-    `export ` prefix dropped, whitespace around the name and value stripped, and one pair of matching quotes around
-    the value removed. Lines without `=` are skipped."""
+    """read environment assignments using compose-compatible whitespace, export and quoting rules."""
     values: dict[str, str] = {}
     for raw in path.read_text(encoding="utf-8").splitlines():
         line = raw.strip()
@@ -39,8 +33,7 @@ def read_env(path: Path = ROOT / ".env") -> dict[str, str]:
 
 
 def published_port(name: str, default: str) -> str:
-    """A published port as docker-compose.yml resolves it: the environment, then .env, then the development
-    default."""
+    """a published port as docker-compose.yml resolves it: the environment, then .env, then the development default."""
     if os.environ.get(name):
         return os.environ[name]
     try:
@@ -49,10 +42,8 @@ def published_port(name: str, default: str) -> str:
         return default
 
 
-# The published ports, as docker-compose.yml reads them: the development stack's unless the environment or .env
-# names others (scripts/stack_tests.py sets TEST_PORTS for the test stack). Compose publishes them on 127.0.0.1
-# only; naming it, not localhost, saves Windows a failed try on ::1 per connection. Tokens still carry the
-# localhost issuer, which Keycloak takes from KC_HOSTNAME, not from the address asked.
+# the published ports, as docker-compose.yml reads them: the development stack's unless the environment or
+# .env names others (scripts/stack_tests.py sets test_ports for the test stack).
 KONG_PORT = published_port("KONG_PORT", "8000")
 KEYCLOAK_PORT = published_port("KEYCLOAK_PORT", "8081")
 BASE = f"http://127.0.0.1:{KONG_PORT}/api"
@@ -60,9 +51,7 @@ KEYCLOAK = f"http://127.0.0.1:{KEYCLOAK_PORT}"
 TOKEN_URL = f"{KEYCLOAK}/realms/learning/protocol/openid-connect/token"
 ADMIN_TOKEN_URL = f"{KEYCLOAK}/realms/master/protocol/openid-connect/token"
 PSQL_TIMEOUT = 90  # seconds
-# Compose projects of docker-compose.yml. The development stack is the file's own name; the test stack is a second
-# project with its own containers, network, volumes and published ports, made fresh for each run by
-# scripts/stack_tests.py, so it runs beside the development stack.
+# compose projects of docker-compose.yml.
 DEV_PROJECT = "learning-foundation"
 TEST_PROJECT = "learning-test"
 TEST_PORTS = {"KONG_PORT": "18000", "KEYCLOAK_PORT": "18081", "WEB_PORT": "14200"}
@@ -70,19 +59,17 @@ TEST_PORTS = {"KONG_PORT": "18000", "KEYCLOAK_PORT": "18081", "WEB_PORT": "14200
 
 @cache
 def env() -> dict[str, str]:
-    """The repository's .env, made by scripts/setup.py, read once."""
+    """the repository's .env, made by scripts/setup.py, read once."""
     return read_env()
 
 
 def project() -> str:
-    """The Compose project that `docker compose` acts on here: COMPOSE_PROJECT_NAME, which Compose itself reads
-    first, or else the development stack."""
+    """the compose project that `docker compose` acts on here: compose_project_name, which compose itself reads first, or else the development stack."""
     return os.environ.get("COMPOSE_PROJECT_NAME") or DEV_PROJECT
 
 
 def require_test_stack(*, dev: bool) -> None:
-    """Stops a script that creates and deletes data unless it is aimed at the running test stack, or `dev` (the
-    script's --dev flag) says to use the development stack's data anyway."""
+    """stops a script that creates and deletes data unless it is aimed at the running test stack, or `dev` (the script's --dev flag) says to use the development stack's data anyway."""
     if dev:
         return
     if project() != TEST_PROJECT:
@@ -90,8 +77,8 @@ def require_test_stack(*, dev: bool) -> None:
             "This creates and deletes data, so it runs against the disposable test stack: "
             "python scripts/stack_tests.py. Pass --dev to run it against the development stack instead."
         )
-    # The HTTP calls go to these ports, read when this module loads: the test project name alone would send psql to
-    # the test stack but requests to the development stack's Kong and Keycloak.
+    # the http calls go to these ports, read when this module loads: the test project name alone would send
+    # psql to the test stack but requests to the development stack's kong and keycloak.
     published = {"KONG_PORT": KONG_PORT, "KEYCLOAK_PORT": KEYCLOAK_PORT}
     wrong = [f"{name}={port}" for name, port in published.items() if port != TEST_PORTS[name]]
     if wrong:
@@ -116,7 +103,7 @@ def require_test_stack(*, dev: bool) -> None:
 
 
 def check(response: "httpx.Response") -> "httpx.Response":
-    """The response, or exit with what went wrong."""
+    """the response, or exit with what went wrong."""
     if response.is_error:
         request = response.request
         raise SystemExit(
@@ -126,7 +113,7 @@ def check(response: "httpx.Response") -> "httpx.Response":
 
 
 def password_token(username: str, password: str) -> str:
-    """A local person's access token, from the learning-e2e client's password grant (tests and evals only)."""
+    """a local person's access token, from the learning-e2e client's password grant (tests and evals only)."""
     import httpx  # noqa: PLC0415 - only the scripts that sign in need httpx
 
     data = {"client_id": "learning-e2e", "grant_type": "password", "username": username, "password": password}
@@ -137,8 +124,7 @@ def password_token(username: str, password: str) -> str:
 
 
 def admin_client() -> "httpx.Client":
-    """The learning realm's admin API as the local Keycloak admin. Admin tokens last a minute: open a new client for
-    each batch of work."""
+    """the learning realm's admin api as the local keycloak admin."""
     import httpx  # noqa: PLC0415 - only the scripts that use the admin API need httpx
 
     data = {
@@ -163,9 +149,7 @@ def ensure_person(  # noqa: PLR0913 - one local person's whole Keycloak record
     role: str = "student",
     reset_password: bool = True,
 ) -> str:
-    """Creates the person with `password`, or (with reset_password) gives an existing one that password, then the
-    realm role and the local organization. Returns their Keycloak id. org_id is an unmanaged attribute, which the
-    admin API only keeps while the realm lets admins edit those (allow_admin_attributes)."""
+    """creates the person with `password`, or (with reset_password) gives an existing one that password, then the realm role and the local organization."""
     found = check(admin.get("/users", params={"username": username, "exact": "true"})).json()
     credential = {"type": "password", "value": password, "temporary": False}
     if found:
@@ -196,9 +180,7 @@ def ensure_person(  # noqa: PLR0913 - one local person's whole Keycloak record
 
 
 def allow_admin_attributes(admin: "httpx.Client") -> None:
-    """Lets the realm's admins (not its users) edit unmanaged attributes such as org_id, unless it already allows
-    that, and leaves it so. It is only ever turned on: switching it back after each person raced with scripts
-    creating people at the same time, whose org_id was then dropped."""
+    """lets the realm's admins (not its users) edit unmanaged attributes such as org_id, unless it already allows that, and leaves it so."""
     profile = check(admin.get("/users/profile")).json()
     if profile.get("unmanagedAttributePolicy") not in {"ADMIN_EDIT", "ENABLED"}:
         check(admin.put("/users/profile", json={**profile, "unmanagedAttributePolicy": "ADMIN_EDIT"}))
@@ -207,8 +189,7 @@ def allow_admin_attributes(admin: "httpx.Client") -> None:
 def psql(
     sql: str, *, database: str = "postgres", user: str = "postgres", check: bool = True
 ) -> subprocess.CompletedProcess[str]:
-    """Runs one statement in the Compose PostgreSQL as `user` (the superuser unless a service's own role is named):
-    unaligned, tuples only, tab-separated columns."""
+    """runs one statement in the compose postgresql as `user` (the superuser unless a service's own role is named): unaligned, tuples only, tab-separated columns."""
     command = ["docker", "compose", "exec", "-T", "postgres", "psql", "-U", user, "-d", database]
     command += ["-v", "ON_ERROR_STOP=1", "-At", "-F", "\t", "-c", sql]
     return subprocess.run(
@@ -223,14 +204,12 @@ def psql(
 
 
 def psql_value(sql: str, *, database: str = "postgres", user: str = "postgres") -> str:
-    """The single value a statement returns."""
+    """the single value a statement returns."""
     return psql(sql, database=database, user=user).stdout.strip()
 
 
 def delete_topics(where: str) -> str:
-    """Deletes the topics a condition on Curriculum's `topics` picks, with their prerequisite links, straight from
-    Curriculum's database. Test data only: an assessment or grade that named a deleted topic shows its id instead.
-    Returns how many were deleted. apps/web/e2e/helpers.ts deleteTestTopic runs the same statement."""
+    """deletes the topics a condition on curriculum's `topics` picks, with their prerequisite links, straight from curriculum's database."""
     ids = f"(SELECT id FROM topics WHERE {where})"
     return psql_value(
         f"WITH p AS (DELETE FROM prerequisites WHERE topic_id IN {ids} OR prerequisite_id IN {ids}), "
@@ -241,17 +220,14 @@ def delete_topics(where: str) -> str:
 
 
 def psql_json(sql: str, *, database: str = "postgres", user: str = "postgres") -> list[dict[str, Any]]:
-    """The rows a SELECT returns, each a dict by column name. PostgreSQL encodes them as one JSON array, so text
-    holding tabs, line breaks or anything else comes back intact."""
+    """the rows a select returns, each a dict by column name."""
     out = psql_value(f"SELECT coalesce(json_agg(r), '[]') FROM ({sql}) r", database=database, user=user)
     rows: list[dict[str, Any]] = json.loads(out)
     return rows
 
 
 def sse_events(lines: Iterable[str]) -> Iterator[tuple[str, dict[str, Any]]]:
-    """(event name, JSON data) for each frame of a server-sent event stream, such as httpx's `iter_lines()`. The
-    synchronous twin of learning_transport.read_events, which the scripts don't import (they run without the
-    services' packages on the path)."""
+    """(event name, json data) for each frame of a server-sent event stream, such as httpx's `iter_lines()`."""
     event = ""
     for line in lines:
         if line.startswith("event:"):

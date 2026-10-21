@@ -2,6 +2,16 @@
 
 This is the current state of the system. Why each rule exists is in `docs/decisions/` (ADRs 0001–0013), how to run and recover it is in `docs/development/operations.md`, and service boundaries and data ownership are in `docs/architecture/system.md`. Dated history lives in git and in the ADRs.
 
+## Comment cleanup — 2026-10-21
+
+Source comments and Python docstrings were shortened and lowercased across services, shared packages, scripts, frontend and infrastructure. Redundant generated type descriptions are omitted by the browser type generator, which retains a short regeneration notice. Case-sensitive tool/compiler directives are preserved. The Go lint configuration excludes only doc-comment identifier/package casing diagnostics to accommodate the owner's lowercase style; other checks remain enabled. Exported HTTP descriptions were regenerated from the shorter docstrings; contract fields and validation are unchanged. Executable-token/AST and configuration comparisons verified that application logic, prompts, SQL and template content were preserved. Full test/infrastructure/paid evaluation runs remain deferred; no runtime deployment or provider calls occurred.
+
+## Offline PDF structure proof of concept — 2026-10-21
+
+After the research report, the owner authorized trying the first implementation phase. `services/ai-core/pdf_structure_probe.py` is a standalone local CLI, **not connected to the app**. It imports only stdlib/PyMuPDF, never ingest/provider/settings modules. It exports native text lines/font spans, measured unrotated boxes, candidate section hierarchy/furniture, image regions and ruled-table alternate views to new review folders. It neither performs OCR nor interprets diagrams nor embeds chunks. Structure and reading order are explicitly unverified; no acceptance/accuracy metric is fabricated.
+
+`scripts/eval/structure_cases.json` proposes 50 physical pages across ten existing PDFs for manual annotation. It is not gold ground truth or a locked holdout. Six new fixture tests cover hierarchy/provenance, blank pages, deterministic output, annotation preservation, corrupt/encrypted input, tables and furniture. Ruff and mypy passed for the CLI; fixture tests and full checks/integration/E2E remain deferred at the owner's request. No sample extraction was executed by this implementation turn; page selection was checked against existing PDF page counts only. No dependencies, containers, migrations, application APIs, databases, budget settings or paid model calls changed. Commands and limitations are in the research report's implementation checkpoint.
+
 ## Native format implementation — 2026-10-21
 
 ADR 0013 adds local structure readers for Markdown, PPTX and DOCX, using the existing Content indexing queue and ai-core chunking, embedding caches and spend checks. Headings/sections, native tables and PPTX speaker notes are preserved. Native heading paths feed embedding and reranking; chat citations show slides or sections rather than fictitious Word/Markdown page numbers. The upload picker accepts the formats and states that PPTX notes are included. Office images/charts/SmartArt are not interpreted. Plain `.txt` remains extraction-only. PDF extraction/vision improvement work remains deferred.

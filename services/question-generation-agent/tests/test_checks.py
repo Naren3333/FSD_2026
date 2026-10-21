@@ -1,5 +1,4 @@
-"""The deterministic checks: what makes a generated question or drafted guidance acceptable, and every reason one is
-dropped."""
+"""the deterministic checks: what makes a generated question or drafted guidance acceptable, and every reason one is dropped."""
 
 import json
 from typing import Any
@@ -100,7 +99,7 @@ def test_each_type_becomes_a_draft_in_assessments_shape():
         sa.marking_scheme[0].text.startswith("Award the marks") and sa.marking_scheme[0].document_id is None
     )
     assert fr.rubric is not None and fr.points == 4 and fr.max_length == 5000
-    # Levels come back sorted, as Assessment stores them.
+    # levels come back sorted, as assessment stores them.
     assert [lv.points for lv in fr.rubric.criteria[0].levels] == [0, 1, 2]
     assert fr.sources[0].chunk_id == UUID(CHUNK_2) and fr.sources[0].page == 5
     assert all(g.question.topic_id == UUID(TOPIC) and g.question.origin == "generated" for g in kept)
@@ -117,7 +116,7 @@ def test_each_type_becomes_a_draft_in_assessments_shape():
         (choice(source_passages=[True]), "UNKNOWN_SOURCE"),
         (choice(evidence="A unit test checks everything at once."), "EVIDENCE_NOT_FOUND"),
         (choice(evidence="unit test"), "EVIDENCE_NOT_FOUND"),
-        # Quoted, but from a passage the question does not cite.
+        # quoted, but from a passage the question does not cite.
         (choice(evidence="off-by-one mistakes happen at the edges"), "EVIDENCE_NOT_FOUND"),
         (choice(answer="Nothing"), "INVALID_KEY"),
         (choice(options=["Same", "Same"], answer="Same"), "INVALID_KEY"),
@@ -162,7 +161,7 @@ def test_each_type_becomes_a_draft_in_assessments_shape():
             ),
             "INVALID_RUBRIC",
         ),
-        # Each criterion is in range, but together they are worth more than Assessment allows.
+        # each criterion is in range, but together they are worth more than assessment allows.
         (
             written(
                 criteria=[
@@ -229,7 +228,7 @@ def test_at_most_five_sources_each_cut_to_assessments_limit():
 
 
 def test_evidence_late_in_a_long_passage_is_stored_with_it():
-    """The excerpt kept is the window around the evidence, so what the teacher sees holds the quote."""
+    """the excerpt kept is the window around the evidence, so what the teacher sees holds the quote."""
     text = "Filler words. " * 300 + "\n" + UNIT_TESTS + " Trailing text." * 100
     kept, dropped = checks.questions(
         json.dumps({"questions": [choice()]}), request(), [Passage(1, CHUNK_1, DOC, "Slides", 1, text)]

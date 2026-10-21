@@ -1,13 +1,8 @@
-# Golden retrieval queries, ported from fsd_test's knowledge/eval/golden.yaml (its RAG_PLAN.md has the history).
-# Run with scripts/eval/run_golden.py after scripts/eval/load_corpus.py. Corpus: corpus.yaml (CSD lecture decks + gen-* stand-ins).
-# Users: t1 = teacher (C1 and C2), s1 = student (C1 only), s2 = eval-student2 (C2 only).
-# C1: decks 01-06, 10, 11, the Git handout. C2: 09 Basic Security, 12 Automation. The rubric and marking scheme left
-# the corpus when their uploads were retired (ADR 0009); the leak checks that name them stay as a guard.
-# `page` is the slide the answer is on; several entries mean any of them counts.
-# Since Iteration 12 the `tables` / `figures` queries are `kind`-checked: only a table / figure chunk counts.
+# golden retrieval queries, ported from fsd_test's knowledge/eval/golden.yaml (its rag_plan.md has the
+# history).
 
-# Unless tagged `group: prose`, queries are about the slide decks (group "default" = slides).
-# --- s1: paraphrases (semantic) -------------------------------------------------------------
+# unless tagged `group: prose`, queries are about the slide decks (group "default" = slides). --- s1:
+# paraphrases (semantic) -------------------------------------------------------------
 - id: waterfall-weakness
   as: s1
   query: what goes wrong when a team follows a fixed plan rigidly
@@ -112,7 +107,7 @@
   query: what does a pull request need before it can be merged
   expect: [{title: Git Workflow Handout}, {title: Collaboration Methods, page: 33}, {title: Collaboration Methods (Revised), page: 31}]
 
-# --- t1: C2 material -------------------------------------------------------------------------
+# --- t1: c2 material -------------------------------------------------------------------------
 - id: sql-injection-t1
   as: t1
   query: how do prepared statements stop SQL injection
@@ -126,7 +121,7 @@
   query: virtual machines versus containers startup time and isolation
   expect: [{title: Automation and Deployment, page: 7}]
 
-# --- s2: C2 student sees C2 ------------------------------------------------------------------
+# --- s2: c2 student sees c2 ------------------------------------------------------------------
 - id: password-salt-s2
   as: s2
   query: why add a salt before hashing passwords
@@ -151,7 +146,7 @@
   query: continuous delivery versus continuous deployment to production
   expect_none_from: [Automation and Deployment]
 
-# --- prose PDFs (data/test_pdfs/pure_pdfs): reports, a standard and a paper ------------------
+# --- prose pdfs (data/test_pdfs/pure_pdfs): reports, a standard and a paper ------------------
 - id: nist-core-functions
   group: prose
   as: s1
@@ -182,7 +177,7 @@
   as: s1
   query: when should I fine-tune a model instead of using retrieval augmented generation
   expect: [{title: Developing RAG-based LLM Systems from PDFs, page: 4}, {title: Developing RAG-based LLM Systems from PDFs, page: 5}]
-# ---- Iteration 10: questions answered by a table (row or cell level) ----
+# ---- iteration 10: questions answered by a table (row or cell level) ----
 - id: table-idempotent-methods
   group: tables
   as: s1
@@ -236,7 +231,7 @@
   as: s1
   query: zero-shot CLIP accuracy on MNIST and SVHN compared with linear probes
   expect: [{title: Learning Transferable Visual Models From Natural Language Supervision, page: 46, kind: table}]
-# ---- Iteration 11: questions answered by a figure (diagram or chart content) ----
+# ---- iteration 11: questions answered by a figure (diagram or chart content) ----
 - id: figure-scrum-share-pie
   group: figures
   as: s1
@@ -288,10 +283,7 @@
   query: which AI RMF function is drawn at the center of Map, Measure and Manage
   expect: [{title: NIST AI Risk Management Framework, page: 25, kind: figure}]
 
-# ==== Iteration 12 (RAG_PLAN.md) ====
-# origin: blind = knowledge/eval/blind_queries.yaml, written from titles only before reading content.
-# split: holdout = never looked at while tuning (run_golden.py --holdout); chosen at random per style.
-# Group as before; style = clean / vague / typo / multi / followup.
+# retain the original blind-query and holdout labels for regression comparison.
 - id: blind-agile-vs-waterfall
   as: s1
   style: vague
@@ -1215,7 +1207,7 @@
   expect:
   - {title: Agile Estimation Notes}
   expect_none_from: ['User Stories, Estimation and Planning']
-# Iteration 13, Step 1: the scanned copy of deck 06 asked on its own (OCR text, source vision)
+# iteration 13, step 1: the scanned copy of deck 06 asked on its own (ocr text, source vision)
 - id: scanned-ready-velocity
   group: scanned
   as: s1
@@ -1265,13 +1257,14 @@
   query: plans are of litle importance but planing is essential
   expect: [{title: Scanned Sprint Planning, page: 1}]
   filters: {titles: [Scanned Sprint Planning]}
-# Iteration 13, Step 5: a figure whose picture carries an injected instruction still indexes as a description
+# iteration 13, step 5: a figure whose picture carries an injected instruction still indexes as a
+# description
 - id: injection-pipeline-figure
   group: injection
   as: s1
   query: diagram of the stages from commit to deploy in the CI pipeline
   expect: [{title: Deployment Pipeline Handout, kind: figure}]
-# Iteration 14, Step 1: the CLIP text layer writes "ﬁ"/"ﬂ" as ligatures; each query leans on such words
+# iteration 14, step 1: the clip text layer writes "ﬁ"/"ﬂ" as ligatures; each query leans on such words
 - id: ligature-clip-contrastive-efficiency
   group: prose
   split: tune
@@ -1292,7 +1285,8 @@
   query: on how many of the 27 datasets does a linear classifier on CLIP features beat the Noisy Student EfficientNet
   expect: [{title: Learning Transferable Visual Models From Natural Language Supervision, page: 12},
            {title: Learning Transferable Visual Models From Natural Language Supervision, page: 13}]
-# Iteration 14, Step 6: a photo with a numbered caption is described and indexed (uncaptioned clip art is not)
+# iteration 14, step 6: a photo with a numbered caption is described and indexed (uncaptioned clip art is
+# not)
 - id: figure-eniac-first-programmers
   group: figures
   split: tune
@@ -1300,11 +1294,8 @@
   query: photo of the first programmers working in pairs on the ENIAC
   expect: [{title: Pair Programming History Handout, kind: figure}]
 
-# ==== Teacher and refusal batch (2026-10-13) ====
-# Added after a review found only 5 teacher queries and a 20-query floor sample. All holdout, labelled from the
-# PDF text before any run. t1 sees C1 and C2, so each `expect` lists every
-# visible document that answers, distractors included. Unanswerable entries were checked by searching every
-# document the asking user can see for their key terms.
+# ==== teacher and refusal batch (2026-10-13) ==== added after a review found only 5 teacher queries and a
+# 20-query floor sample.
 - id: t1-teach-planning-poker
   group: teacher
   split: holdout
@@ -1378,7 +1369,7 @@
   style: clean
   query: what is a minimum viable product and how does it shape the release plan
   expect: [{title: "User Stories, Estimation and Planning", page: 30}]
-# Unanswerable: nothing the asking user can see answers these.
+# unanswerable: nothing the asking user can see answers these.
 - id: unans-t1-late-penalty
   split: holdout
   as: t1
@@ -1470,10 +1461,8 @@
   query: what are the different pair programming styles
   unanswerable: true
 
-# ==== Simulated student batch (2026-10-13) ====
-# Written as a student would ask, often from a misconception ("isn't X just Y?"). Not real student
-# questions: origin `simulated` keeps them apart, and real ones should still be added. All holdout, labelled from the
-# PDF text before any run; each `expect` lists every document the asking student can see that answers.
+# ==== simulated student batch (2026-10-13) ==== written as a student would ask, often from a misconception
+# ("isn't x just y?").
 - id: stu-refactor-vs-rewrite
   origin: simulated
   split: holdout
@@ -1655,10 +1644,8 @@
   query: the security scan in our pipeline flags lots of issues that aren't real, is that normal
   expect: [{title: Automation and Deployment, page: 20}]
 
-# ==== Off-wording batch (2026-10-13) ====
-# Simulated like the batch above, but phrased away from the slides' own words: slang, shorthand, half-remembered
-# terms and symptoms instead of names. Still not real student questions. Holdout, labelled from the PDF text before
-# any run; unanswerable ones were checked against every document the asking user can see.
+# ==== off-wording batch (2026-10-13) ==== simulated like the batch above, but phrased away from the slides'
+# own words: slang, shorthand, half-remembered terms and symptoms instead of names.
 - id: off-clean-up-messy-code
   origin: simulated
   split: holdout
@@ -1790,7 +1777,7 @@
   style: typo
   query: hypervisr what does it do
   expect: [{title: Automation and Deployment, page: 5}, {title: Automation and Deployment, page: 7}]
-# Unanswerable: close to the course, but nothing the asking user can see covers them.
+# unanswerable: close to the course, but nothing the asking user can see covers them.
 - id: off-unans-detached-head
   origin: simulated
   split: holdout

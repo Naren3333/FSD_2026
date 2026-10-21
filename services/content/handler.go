@@ -20,8 +20,8 @@ import (
 	"github.com/google/uuid"
 )
 
-// server answers Content's HTTP routes: documents and chunks in its store, originals and figure crops in object
-// storage, classroom access from Identity, and query embeddings and reranking from ai-core.
+// server answers content's http routes: documents and chunks in its store, originals and figure crops in
+// object storage, classroom access from identity, and query embeddings and reranking from ai-core.
 type server struct {
 	store   store
 	access  platform.ClassroomAccess
@@ -42,14 +42,13 @@ func (s server) routes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /v1/search", s.search)
 }
 
-// visible reports whether a caller with this classroom relation may see a document of this type: students see
-// teaching material only. The relation comes from Identity, not the token role, so an account that is a teacher
-// elsewhere but enrolled here sees what students see.
+// visible reports whether a caller with this classroom relation may see a document of this type: students
+// see teaching material only.
 func visible(relation, docType string) bool {
 	return docType == docTeachingMaterial || relation == platform.RelationTeacher
 }
 
-// tooLarge is the upload limit, in words.
+// toolarge is the upload limit, in words.
 var tooLarge = fmt.Sprintf("PDF, PPTX and DOCX files must be no larger than %d MiB; text and Markdown %d MiB.", maxPDF>>20, maxText>>20)
 
 func (s server) upload(w http.ResponseWriter, r *http.Request) {
@@ -105,13 +104,13 @@ func (s server) upload(w http.ResponseWriter, r *http.Request) {
 	}
 	commitAttempted, err := s.store.insertDocument(r.Context(), d)
 	if errors.Is(err, errClassroomPurged) {
-		// Identity deleted the classroom while the file was uploading.
+		// identity deleted the classroom while the file was uploading.
 		s.files.removeOrphan(id, d.Key)
 		platform.NotFound(w, "Classroom not found.")
 		return
 	}
 	if err != nil {
-		// An uncertain commit may have stored the row, so the original stays; otherwise it is an orphan.
+		// an uncertain commit may have stored the row, so the original stays; otherwise it is an orphan.
 		if !commitAttempted {
 			s.files.removeOrphan(id, d.Key)
 		}
@@ -121,8 +120,8 @@ func (s server) upload(w http.ResponseWriter, r *http.Request) {
 	platform.JSON(w, http.StatusCreated, d.Document)
 }
 
-// spool copies an upload to a temporary file, hashing it on the way, so a 50 MiB PDF is never held in memory. The
-// file is rewound for reading; the caller must discard it.
+// spool copies an upload to a temporary file, hashing it on the way, so a 50 mib pdf is never held in
+// memory.
 func spool(body io.Reader) (*os.File, int64, string, error) {
 	file, err := os.CreateTemp("", "upload-*")
 	if err != nil {
@@ -145,8 +144,8 @@ func discard(file *os.File) {
 	_ = os.Remove(file.Name())
 }
 
-// extractFile reads as much of a spooled upload as extract needs (a PDF's first bytes, or a whole text document
-// up to one byte past its limit) and rewinds it for storage.
+// extractfile reads as much of a spooled upload as extract needs (a pdf's first bytes, or a whole text
+// document up to one byte past its limit) and rewinds it for storage.
 func extractFile(file *os.File, kind string) ([]Chunk, string, error) {
 	limit := int64(maxText + 1)
 	if kind == mimePDF || kind == mimePPTX || kind == mimeDOCX {
@@ -162,8 +161,8 @@ func extractFile(file *os.File, kind string) ([]Chunk, string, error) {
 	return extract(data, kind)
 }
 
-// uploadFields reads an upload's title and document type from the query string (the body is the file itself).
-// problem is set when either is invalid. The type is optional and only teaching_material is accepted.
+// uploadfields reads an upload's title and document type from the query string (the body is the file
+// itself). problem is set when either is invalid.
 func uploadFields(r *http.Request) (title, docType, problem string) {
 	title = strings.TrimSpace(r.URL.Query().Get("title"))
 	if title == "" || utf8.RuneCountInString(title) > maxTitle {
@@ -210,8 +209,7 @@ func (s server) list(w http.ResponseWriter, r *http.Request) {
 	platform.JSON(w, http.StatusOK, result)
 }
 
-// visibleDocument looks a document up and checks the caller may see it in its classroom. A document the caller may
-// not see answers 404 like a missing one, so its existence doesn't leak. On failure the response is written.
+// visibledocument looks a document up and checks the caller may see it in its classroom.
 func (s server) visibleDocument(w http.ResponseWriter, r *http.Request, what string, find func(org string) (Document, error)) (Document, bool) {
 	v, ok := lookupDocument(w, r, what, find)
 	if !ok {
@@ -228,8 +226,7 @@ func (s server) visibleDocument(w http.ResponseWriter, r *http.Request, what str
 	return v, true
 }
 
-// lookupDocument finds the document the path names in the caller's organization, before any access check. On
-// failure the response is written: 404 for a malformed or unknown id.
+// lookupdocument finds the document the path names in the caller's organization, before any access check.
 func lookupDocument(w http.ResponseWriter, r *http.Request, what string, find func(org string) (Document, error)) (Document, bool) {
 	notFound := what + " not found."
 	if !platform.ID(r.PathValue("id")) {
@@ -286,9 +283,9 @@ func (s server) figure(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-// reindex queues a PDF for indexing again: after a failure, or a PDF uploaded before indexing existed.
+// reindex queues a pdf for indexing again: after a failure, or a pdf uploaded before indexing existed.
 func (s server) reindex(w http.ResponseWriter, r *http.Request) {
-	// The role check comes first so a student is refused before any lookup; TeacherOf decides below.
+	// the role check comes first so a student is refused before any lookup; teacherof decides below.
 	if !platform.Teacher(w, r) {
 		return
 	}
@@ -324,11 +321,10 @@ func (s server) reindex(w http.ResponseWriter, r *http.Request) {
 	platform.JSON(w, http.StatusAccepted, v)
 }
 
-// remove deletes a document for good: its row with its chunks, vectors and indexing job, its original and figure
-// crops in object storage, and emits content.deleted.v1. An indexing run still under way loses its job and stores
-// nothing. Questions that cite the document keep the passages they copied.
+// remove deletes a document for good: its row with its chunks, vectors and indexing job, its original and
+// figure crops in object storage, and emits content.deleted.v1.
 func (s server) remove(w http.ResponseWriter, r *http.Request) {
-	// The role check comes first so a student is refused before any lookup; TeacherOf decides below.
+	// the role check comes first so a student is refused before any lookup; teacherof decides below.
 	if !platform.Teacher(w, r) {
 		return
 	}
@@ -343,7 +339,7 @@ func (s server) remove(w http.ResponseWriter, r *http.Request) {
 	if !platform.TeacherOf(s.access, w, r, v.Classroom) {
 		return
 	}
-	// Commit the logical deletion and cleanup job even if the caller disconnects.
+	// commit the logical deletion and cleanup job even if the caller disconnects.
 	ctx, cancel := context.WithTimeout(context.WithoutCancel(r.Context()), removeDeadline)
 	defer cancel()
 	err := s.store.deleteDocument(ctx, org, v.ID)
@@ -353,13 +349,12 @@ func (s server) remove(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
-// send streams a stored object to the caller. A 50 MiB original on a slow link takes longer than the request
-// deadline and the server's write timeout, so the stream gets its own: downloadDeadline for both reading the object
-// and writing the response. A client that goes away still ends it, by failing the write.
+// send streams a stored object to the caller.
 func (s server) send(w http.ResponseWriter, r *http.Request, key, kind, disposition string) {
 	ctx, cancel := context.WithTimeout(context.WithoutCancel(r.Context()), downloadDeadline)
 	defer cancel()
-	// Not every ResponseWriter supports deadlines (test recorders don't); the server's write timeout then applies.
+	// not every responsewriter supports deadlines (test recorders don't); the server's write timeout then
+	// applies.
 	_ = http.NewResponseController(w).SetWriteDeadline(time.Now().Add(downloadDeadline))
 	object, size, err := s.files.open(ctx, key)
 	if err != nil {

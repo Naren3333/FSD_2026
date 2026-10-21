@@ -1,6 +1,4 @@
-"""Compose's kafka-init creates every Kafka topic up front (the broker does not create them on first use), so a topic
-a service emits or consumes but Compose leaves out shows up only as a consumer that never becomes ready. Static
-checks over the repository; nothing needs Docker or the running stack."""
+"""verify that compose provisions every topic the services use."""
 
 import re
 from pathlib import Path
@@ -9,8 +7,8 @@ import yaml
 
 ROOT = Path(__file__).resolve().parents[2]
 TOPIC = re.compile(r"[\"']([a-z]+(?:\.[a-z_]+)+\.v[0-9]+)[\"']")
-# These Content events have no consumer yet, so they have no dead-letter topic. (content.deleted.v1 has one since
-# ADR 0010: the chatbot redacts the deleted document's citations.)
+# these content events have no consumer yet, so they have no dead-letter topic. (content.deleted.v1 has one
+# since adr 0010: the chatbot redacts the deleted document's citations.)
 EMIT_ONLY = {"content.uploaded.v1", "content.indexed.v1"}
 
 
@@ -23,7 +21,7 @@ def created_topics() -> set[str]:
 
 
 def sources() -> list[Path]:
-    """The services' and shared packages' Go and Python source, tests left out."""
+    """the services' and shared packages' go and python source, tests left out."""
     found = []
     for root in [ROOT / "services", ROOT / "packages"]:
         for path in root.rglob("*"):
@@ -34,7 +32,7 @@ def sources() -> list[Path]:
 
 
 def named_topics() -> dict[str, set[str]]:
-    """Each topic the source names, with the files naming it."""
+    """each topic the source names, with the files naming it."""
     topics: dict[str, set[str]] = {}
     for path in sources():
         for topic in TOPIC.findall(path.read_text(encoding="utf-8")):
@@ -49,7 +47,7 @@ def test_compose_creates_every_topic_the_services_name():
 
 
 def test_compose_creates_no_topic_the_services_no_longer_name():
-    """Retired event versions leave Compose too, with their dead-letter topics."""
+    """retired event versions leave compose too, with their dead-letter topics."""
     named = named_topics()
     unused = {t for t in created_topics() if t.removesuffix(".dlq") not in named}
     assert unused == set()
@@ -62,7 +60,7 @@ def test_every_consumed_topic_has_its_dead_letter_topic():
 
 
 def test_emit_only_topics_are_only_named_by_content():
-    """A service that starts consuming one of Content's events needs its dead-letter topic: move it out of EMIT_ONLY."""
+    """a service that starts consuming one of content's events needs its dead-letter topic: move it out of emit_only."""
     named = named_topics()
     elsewhere = {
         t: files
