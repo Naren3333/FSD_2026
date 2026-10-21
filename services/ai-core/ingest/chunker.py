@@ -191,7 +191,7 @@ def _text_chunks(enc: tiktoken.Encoding, paras: list[Para]) -> list[Chunk]:
                 content,
                 group[0].page,
                 group[-1].page,
-                len(enc.encode(content)),
+                len(enc.encode(content, disallowed_special=())),
                 path,
                 cites=cited(content),
             )
@@ -216,7 +216,7 @@ def _table_chunks(enc: tiktoken.Encoding, para: Para) -> list[Chunk]:
     )
     rows: list[tuple[tuple[str, ...], str]] = []
     for row, line in zip(table.rows, row_lines, strict=False):
-        ids = enc.encode(line)
+        ids = enc.encode(line, disallowed_special=())
         if len(ids) <= budget:
             rows.append((row, line))
         else:  # rare: one row longer than a chunk, cut into token windows
@@ -284,7 +284,7 @@ def _figure_chunks(enc: tiktoken.Encoding, para: Para) -> list[Chunk]:
 
 
 def _clip(enc: tiktoken.Encoding, text: str, budget: int) -> str:
-    ids = enc.encode(text)
+    ids = enc.encode(text, disallowed_special=())
     return text if len(ids) <= budget else enc.decode(ids[:budget]).rstrip() + " …"
 
 
@@ -296,7 +296,7 @@ def _row_sentence(header: tuple[str, ...] | None, row: tuple[str, ...]) -> str:
 
 
 def _tokens(enc: tiktoken.Encoding, text: str) -> int:
-    return len(enc.encode(text))
+    return len(enc.encode(text, disallowed_special=()))
 
 
 def _sections(paras: list[Para]) -> list[list[Para]]:
@@ -349,27 +349,29 @@ def _pack(enc: tiktoken.Encoding, units: list[_Unit]) -> list[tuple[list[_Unit],
 def _units(enc: tiktoken.Encoding, para: Para) -> list[_Unit]:
     """One unit per paragraph. One over MAX_TOKENS is split into sentence runs that fit, and a single
     sentence over it into token windows."""
-    tokens = len(enc.encode(para.text))
+    tokens = len(enc.encode(para.text, disallowed_special=()))
     if tokens < _limits.get()[0]:
         return [_Unit(para.page, para.text, tokens + 1, para.path, para.level is not None)]
     size = _limits.get()[0] - WINDOW_SLACK
     pieces: list[str] = []
     run: list[str] = []
     for sentence in SENTENCE_END.split(para.text):
-        if len(enc.encode(" ".join([*run, sentence]))) <= size:
+        if len(enc.encode(" ".join([*run, sentence]), disallowed_special=())) <= size:
             run.append(sentence)
             continue
         if run:
             pieces.append(" ".join(run))
         run = [sentence]
-        if len(enc.encode(sentence)) > size:
-            ids = enc.encode(sentence)
+        if len(enc.encode(sentence, disallowed_special=())) > size:
+            ids = enc.encode(sentence, disallowed_special=())
             pieces += [enc.decode(ids[i : i + size]).strip() for i in range(0, len(ids), size)]
             run = []
     if run:
         pieces.append(" ".join(run))
     pieces = [p.strip() for p in pieces]
-    return [_Unit(para.page, p, len(enc.encode(p)) + 1, para.path) for p in pieces if p]
+    return [
+        _Unit(para.page, p, len(enc.encode(p, disallowed_special=())) + 1, para.path) for p in pieces if p
+    ]
 
 
 def _cost(units: list[_Unit]) -> int:
@@ -399,8 +401,12 @@ def _tail(enc: tiktoken.Encoding, units: list[_Unit]) -> list[_Unit]:
     if tail or not units:
         return tail
     last = units[-1]
-    piece = enc.decode(enc.encode(last.text)[-(_limits.get()[1] - 1) :])
+    piece = enc.decode(enc.encode(last.text, disallowed_special=())[-(_limits.get()[1] - 1) :])
     sentence = piece.find(". ")
     piece = piece[sentence + 2 :] if 0 <= sentence < len(piece) // 2 else piece.partition(" ")[2]
     piece = piece.strip()
-    return [_Unit(last.page, piece, len(enc.encode(piece)) + 1, last.path)] if piece else []
+    return (
+        [_Unit(last.page, piece, len(enc.encode(piece, disallowed_special=())) + 1, last.path)]
+        if piece
+        else []
+    )

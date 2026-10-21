@@ -1,6 +1,14 @@
 # Engineering handover
 
-This is the current state of the system. Why each rule exists is in `docs/decisions/` (ADRs 0001–0012), how to run and recover it is in `docs/development/operations.md`, and service boundaries and data ownership are in `docs/architecture/system.md`. Dated history lives in git and in the ADRs.
+This is the current state of the system. Why each rule exists is in `docs/decisions/` (ADRs 0001–0013), how to run and recover it is in `docs/development/operations.md`, and service boundaries and data ownership are in `docs/architecture/system.md`. Dated history lives in git and in the ADRs.
+
+## Native format implementation — 2026-10-21
+
+ADR 0013 adds local structure readers for Markdown, PPTX and DOCX, using the existing Content indexing queue and ai-core chunking, embedding caches and spend checks. Headings/sections, native tables and PPTX speaker notes are preserved. Native heading paths feed embedding and reranking; chat citations show slides or sections rather than fictitious Word/Markdown page numbers. The upload picker accepts the formats and states that PPTX notes are included. Office images/charts/SmartArt are not interpreted. Plain `.txt` remains extraction-only. PDF extraction/vision improvement work remains deferred.
+
+Content migration 006 expands the allowed provenance values without deleting data. It has **not** been applied to the running stack in this turn. Backend/web containers were not rebuilt or restarted. The owner deferred test execution: new parser/API/cache/security fixtures, Content database/transport fixtures and web source/selection/status fixtures are added but not claimed passing. Full `scripts/check.py`, database/integration, browser E2E and golden/paid evaluations are deferred. No paid model calls were made for this implementation.
+
+Static verification completed: Ruff formatting/lint for changed Python services/scripts; mypy for ai-core, chatbot and question generation; Content Go build and golangci-lint (including test-source type checking, no tests executed); Angular typecheck, ESLint and build; HTTP/event contract export/check and generated web types. Native section markup is included in chat context budgets. The premium UI static audit still reports the same 64 findings in the previously documented categories (55 Angular action-detection and nine textarea-style findings); `.local/native-ui-audit.json` records them, and a clean audit or browser verification is not claimed. Deployment and deferred test commands are in the native-materials section of `operations.md`.
 
 ## Delivered architecture
 

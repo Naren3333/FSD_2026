@@ -425,7 +425,7 @@
     "/v1/ingest": {
       "post": {
         "summary": "Ingest Pdf",
-        "description": "One PDF (the raw body) \u2192 chunks with embeddings and the figure crops they point at. Stateless: the caller\nstores the result. A document problem is a `failed` outcome; a provider outage is an error to retry. The\nmodel calls are charged to `billed_user` (the teacher who uploaded the document), whatever the outcome.",
+        "description": "One supported document (the raw body) \u2192 chunks with embeddings and the figure crops they point at. Stateless: the caller\nstores the result. A document problem is a `failed` outcome; a provider outage is an error to retry. The\nmodel calls are charged to `billed_user` (the teacher who uploaded the document), whatever the outcome.",
         "operationId": "ingest_pdf_v1_ingest_post",
         "parameters": [
           {
@@ -575,6 +575,24 @@
                 "type": "string",
                 "format": "binary"
               }
+            },
+            "text/markdown": {
+              "schema": {
+                "type": "string",
+                "format": "binary"
+              }
+            },
+            "application/vnd.openxmlformats-officedocument.presentationml.presentation": {
+              "schema": {
+                "type": "string",
+                "format": "binary"
+              }
+            },
+            "application/vnd.openxmlformats-officedocument.wordprocessingml.document": {
+              "schema": {
+                "type": "string",
+                "format": "binary"
+              }
             }
           }
         }
@@ -688,12 +706,14 @@
           "page_start": {
             "type": "integer",
             "minimum": 1.0,
-            "title": "Page Start"
+            "title": "Page Start",
+            "description": "PDF page, PPTX slide, or internal section anchor for Markdown/DOCX; not a rendered page for native text."
           },
           "page_end": {
             "type": "integer",
             "minimum": 1.0,
-            "title": "Page End"
+            "title": "Page End",
+            "description": "Inclusive source-unit end; interpret using source."
           },
           "token_count": {
             "type": "integer",
@@ -713,7 +733,10 @@
             "type": "string",
             "enum": [
               "pdf",
-              "vision"
+              "vision",
+              "markdown",
+              "pptx",
+              "docx"
             ],
             "title": "Source"
           },
@@ -841,7 +864,8 @@
                 "type": "null"
               }
             ],
-            "title": "Page Count"
+            "title": "Page Count",
+            "description": "PDF pages, PPTX slides, or logical section units for Markdown/DOCX."
           },
           "ocr_page_count": {
             "anyOf": [
@@ -940,6 +964,18 @@
             "maxLength": 20000,
             "minLength": 1,
             "title": "Content"
+          },
+          "source": {
+            "type": "string",
+            "enum": [
+              "pdf",
+              "vision",
+              "markdown",
+              "pptx",
+              "docx"
+            ],
+            "title": "Source",
+            "default": "pdf"
           }
         },
         "additionalProperties": false,

@@ -20,6 +20,7 @@ def test_layout_order_and_tags() -> None:
     assert [m["role"] for m in messages] == ["system", "system", "user", "user", "assistant", "user"]
     assert messages[0]["content"] == prompts.POLICY
     assert messages[1]["content"] == prompts.INSTRUCTIONS["student_tutor.v3"]
+
     docs = messages[2]["content"]
     assert '<document id="S1" title="Bio &quot;Week 3&quot; &lt;slides&gt;" pages="12-13">' in docs
     assert '<document id="S2" title="Bio" pages="4">' in docs
@@ -99,3 +100,12 @@ def test_topics_are_listed_and_escaped() -> None:
     assert "<topics><topic>a &quot;b&quot; &lt;c&gt;</topic></topics>" in docs
     assert 'topic="a &quot;b&quot; &lt;c&gt;"' in docs
     assert "<topics>" not in prompts.build_messages("teacher", RESULTS, [], "q")[0][2]["content"]
+
+
+def test_native_locations_do_not_claim_pdf_pages() -> None:
+    markdown = RESULTS[0] | {"source": "markdown", "section_path": "Storage > Transactions"}
+    slide = RESULTS[1] | {"source": "pptx", "page_start": 3, "page_end": 3}
+    docs = prompts.build_messages("teacher", [markdown, slide], [], "q")[0][2]["content"]
+    assert 'section="Storage &gt; Transactions"' in docs
+    assert 'slides="3"' in docs
+    assert "pages=" not in docs

@@ -501,15 +501,28 @@
             "type": "string",
             "title": "Title"
           },
+          "section_path": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Section Path"
+          },
           "page_start": {
             "type": "integer",
             "minimum": 1.0,
-            "title": "Page Start"
+            "title": "Page Start",
+            "description": "PDF page, PPTX slide, or internal section anchor; show section_path for Markdown/DOCX."
           },
           "page_end": {
             "type": "integer",
             "minimum": 1.0,
-            "title": "Page End"
+            "title": "Page End",
+            "description": "Inclusive source-unit end; interpret using source."
           },
           "kind": {
             "type": "string",
@@ -524,7 +537,10 @@
             "type": "string",
             "enum": [
               "pdf",
-              "vision"
+              "vision",
+              "markdown",
+              "pptx",
+              "docx"
             ],
             "title": "Source"
           },

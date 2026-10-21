@@ -21,9 +21,17 @@ export interface components {
       document_id: string;
       /** Title */
       title: string;
-      /** Page Start */
+      /** Section Path */
+      section_path?: string | null;
+      /**
+       * Page Start
+       * @description PDF page, PPTX slide, or internal section anchor; show section_path for Markdown/DOCX.
+       */
       page_start: number;
-      /** Page End */
+      /**
+       * Page End
+       * @description Inclusive source-unit end; interpret using source.
+       */
       page_end: number;
       /**
        * Kind
@@ -34,7 +42,7 @@ export interface components {
        * Source
        * @enum {string}
        */
-      source: 'pdf' | 'vision';
+      source: 'pdf' | 'vision' | 'markdown' | 'pptx' | 'docx';
       /** Content */
       content: string;
       /** Image */

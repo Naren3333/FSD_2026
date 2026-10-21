@@ -50,7 +50,7 @@ func visible(relation, docType string) bool {
 }
 
 // tooLarge is the upload limit, in words.
-var tooLarge = fmt.Sprintf("PDFs must be no larger than %d MiB and text documents %d MiB.", maxPDF>>20, maxText>>20)
+var tooLarge = fmt.Sprintf("PDF, PPTX and DOCX files must be no larger than %d MiB; text and Markdown %d MiB.", maxPDF>>20, maxText>>20)
 
 func (s server) upload(w http.ResponseWriter, r *http.Request) {
 	classroom := r.URL.Query().Get("classroom_id")
@@ -62,7 +62,12 @@ func (s server) upload(w http.ResponseWriter, r *http.Request) {
 		platform.Invalid(w, problem)
 		return
 	}
-	file, size, sum, err := spool(http.MaxBytesReader(w, r.Body, maxPDF))
+	kind := strings.Split(r.Header.Get("Content-Type"), ";")[0]
+	limit := int64(maxPDF)
+	if kind == mimeText || kind == mimeMarkdown {
+		limit = maxText
+	}
+	file, size, sum, err := spool(http.MaxBytesReader(w, r.Body, limit))
 	var tooBig *http.MaxBytesError
 	var disk *fs.PathError
 	switch {
@@ -77,7 +82,6 @@ func (s server) upload(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer discard(file)
-	kind := strings.Split(r.Header.Get("Content-Type"), ";")[0]
 	chunks, status, err := extractFile(file, kind)
 	if errors.Is(err, errTooLarge) {
 		platform.Error(w, http.StatusRequestEntityTooLarge, "UPLOAD_TOO_LARGE", tooLarge)
@@ -145,7 +149,7 @@ func discard(file *os.File) {
 // up to one byte past its limit) and rewinds it for storage.
 func extractFile(file *os.File, kind string) ([]Chunk, string, error) {
 	limit := int64(maxText + 1)
-	if kind == mimePDF {
+	if kind == mimePDF || kind == mimePPTX || kind == mimeDOCX {
 		limit = int64(len(pdfMagic))
 	}
 	data, err := io.ReadAll(io.LimitReader(file, limit))
@@ -299,8 +303,8 @@ func (s server) reindex(w http.ResponseWriter, r *http.Request) {
 	if !platform.TeacherOf(s.access, w, r, v.Classroom) {
 		return
 	}
-	if v.Type != mimePDF {
-		platform.Error(w, http.StatusConflict, "NOT_INDEXABLE", "Only PDFs are indexed.")
+	if !indexable(v.Type) {
+		platform.Error(w, http.StatusConflict, "NOT_INDEXABLE", "Only PDF, Markdown, PPTX and DOCX documents are indexed.")
 		return
 	}
 	queued, err := s.store.queueIndex(r.Context(), org, v.ID)

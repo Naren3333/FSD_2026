@@ -278,13 +278,15 @@ export class ChatComponent {
     this.content
       .original(source.document_id)
       .then((url) => {
-        if (tab) tab.location.href = `${url}#page=${source.page_start}`;
-        else this.state.error.set('Allow pop-ups for this site to open the PDF.');
+        if (tab)
+          tab.location.href =
+            source.source === 'pdf' || source.source === 'vision' ? `${url}#page=${source.page_start}` : url;
+        else this.state.error.set('Allow pop-ups for this site to open the document.');
         setTimeout(() => URL.revokeObjectURL(url), 60000);
       })
       .catch((error: unknown) => {
         tab?.close();
-        this.state.error.set(`The PDF could not be opened. ${messageOf(error, '')}`.trim());
+        this.state.error.set(`The document could not be opened. ${messageOf(error, '')}`.trim());
       });
   }
   when(iso: string): string {

@@ -37,10 +37,14 @@ class Citation(Contract):
     chunk_id: UUID
     document_id: UUID
     title: str
-    page_start: int = Field(ge=1)
-    page_end: int = Field(ge=1)
+    section_path: str | None = None
+    page_start: int = Field(
+        ge=1,
+        description="PDF page, PPTX slide, or internal section anchor; show section_path for Markdown/DOCX.",
+    )
+    page_end: int = Field(ge=1, description="Inclusive source-unit end; interpret using source.")
     kind: Literal["text", "table", "figure"]
-    source: Literal["pdf", "vision"]
+    source: Literal["pdf", "vision", "markdown", "pptx", "docx"]
     content: str
     image: str | None  # GET /api/content/documents/{document_id}/figures/{image}
     # The teacher deleted the document: its passage and figure are gone (content and image are empty).

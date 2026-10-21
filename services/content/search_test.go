@@ -175,7 +175,7 @@ func TestIngestSendsThePDFAndDecodesFigures(t *testing.T) {
 	}
 	ai := f.client()
 	for i := 0; i < 2; i++ {
-		result, err := ai.ingest(t.Context(), "Biology & more", strings.NewReader("%PDF-1.7"), 8, testBilled)
+		result, err := ai.ingest(t.Context(), "Biology & more", mimePDF, strings.NewReader("%PDF-1.7"), 8, testBilled)
 		if err != nil || result.Outcome != "indexed" || string(result.Figures[0].PNG) != "png" {
 			t.Fatalf("%+v %v", result, err)
 		}
@@ -192,17 +192,17 @@ func TestErrorsCarryStatusAndCodeAndRefusedTokensAreDropped(t *testing.T) {
 		w.Write([]byte(`{"error":{"code":"UNAUTHENTICATED","message":"x"}}`))
 	}
 	ai := f.client()
-	_, err := ai.ingest(t.Context(), "t", strings.NewReader("x"), 1, testBilled)
+	_, err := ai.ingest(t.Context(), "t", mimePDF, strings.NewReader("x"), 1, testBilled)
 	var e *aiError
 	if !errors.As(err, &e) || e.Status != http.StatusUnauthorized || e.Code != "UNAUTHENTICATED" || !transient(err) {
 		t.Fatalf("%v", err)
 	}
-	ai.ingest(t.Context(), "t", strings.NewReader("x"), 1, testBilled)
+	ai.ingest(t.Context(), "t", mimePDF, strings.NewReader("x"), 1, testBilled)
 	if f.tokens.Load() != 2 {
 		t.Fatalf("a refused token was reused")
 	}
 	f.Close()
-	if _, err = ai.ingest(t.Context(), "t", strings.NewReader("x"), 1, testBilled); !transient(err) {
+	if _, err = ai.ingest(t.Context(), "t", mimePDF, strings.NewReader("x"), 1, testBilled); !transient(err) {
 		t.Fatalf("ai-core down is not retried: %v", err)
 	}
 }
@@ -227,7 +227,7 @@ func TestRerankSendsThePassagePartsForAICoreToJoin(t *testing.T) {
 		json.NewEncoder(w).Encode(map[string]any{"scores": []float64{0.5}})
 	}
 	section := "Chapter 1 > Leaves"
-	if _, err := f.client().rerank(t.Context(), "q", []passage{{"Biology", &section, "Stomata"}}, testBilled); err != nil {
+	if _, err := f.client().rerank(t.Context(), "q", []passage{{"Biology", &section, "Stomata", ""}}, testBilled); err != nil {
 		t.Fatal(err)
 	}
 	want := map[string]any{"title": "Biology", "section_path": section, "content": "Stomata"}
@@ -250,7 +250,7 @@ func TestTheBilledUserIsSentAndTheSpendLimitIsRecognised(t *testing.T) {
 		w.WriteHeader(http.StatusTooManyRequests)
 		w.Write([]byte(`{"error":{"code":"AI_SPEND_LIMIT","message":"used up","resets_at":"2026-10-14T00:00:00+08:00"}}`))
 	}
-	_, err := f.client().ingest(t.Context(), "t", strings.NewReader("x"), 1, testBilled)
+	_, err := f.client().ingest(t.Context(), "t", mimePDF, strings.NewReader("x"), 1, testBilled)
 	limit, ok := spendLimit(err)
 	if !ok || limit.Message != "used up" || limit.ResetsAt.IsZero() {
 		t.Fatalf("%#v", err)

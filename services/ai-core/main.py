@@ -40,6 +40,7 @@ from contracts import (
     ResponseContract,
 )
 from ingest import IngestError, IngestResult, costs, ingest, passage_text, vision_config
+from ingest.native import FORMATS, MARKDOWN
 from settings import get_settings
 
 log = logging.getLogger("ai-core")
@@ -298,7 +299,7 @@ async def rerank_reserved(request: RerankRequest, http: Request) -> RerankRespon
 
 async def rerank_billed(request: RerankRequest, http: Request, billing: Billing) -> RerankResponse:
     await billing.check(request.billed_to)
-    documents = [passage_text(p.title, p.section_path, p.content) for p in request.passages]
+    documents = [passage_text(p.title, p.section_path, p.content, p.source) for p in request.passages]
     try:
         scores, tokens = await rerank.rerank(request.query, documents)
     except PROVIDER_ERRORS as error:
@@ -317,7 +318,9 @@ async def rerank_billed(request: RerankRequest, http: Request, billing: Billing)
 PDF_BODY = {
     "requestBody": {
         "required": True,
-        "content": {"application/pdf": {"schema": {"type": "string", "format": "binary"}}},
+        "content": {
+            mime: {"schema": {"type": "string", "format": "binary"}} for mime in ["application/pdf", *FORMATS]
+        },
     }
 }
 
@@ -331,7 +334,7 @@ async def ingest_pdf(
     billed_role: spend.Role = Query(),
     _caller: Claims = Depends(SERVICE),
 ) -> IngestResponse:
-    """One PDF (the raw body) → chunks with embeddings and the figure crops they point at. Stateless: the caller
+    """One supported document (the raw body) → chunks with embeddings and the figure crops they point at. Stateless: the caller
     stores the result. A document problem is a `failed` outcome; a provider outage is an error to retry. The
     model calls are charged to `billed_user` (the teacher who uploaded the document), whatever the outcome."""
     billed = spend.Billed(user_id=billed_user, org_id=billed_org, role=billed_role)
@@ -339,8 +342,9 @@ async def ingest_pdf(
 
 
 async def ingest_reserved(request: Request, title: str, billed: spend.Billed) -> IngestResponse:
-    if request.headers.get("content-type", "").split(";")[0].strip() != "application/pdf":
-        raise failure(415, "UNSUPPORTED_MEDIA_TYPE", "Send the PDF as application/pdf.")
+    mime = request.headers.get("content-type", "").split(";")[0].strip()
+    if mime not in {"application/pdf", *FORMATS}:
+        raise failure(415, "UNSUPPORTED_MEDIA_TYPE", "Send a PDF, Markdown, PPTX or DOCX document.")
     try:
         openai_client.get_client()  # without a key every model call would fail: refuse before any work
     except openai_client.NotConfiguredError as error:
@@ -348,15 +352,15 @@ async def ingest_reserved(request: Request, title: str, billed: spend.Billed) ->
     billing = billing_of(request)
     await billing.check(billed)
     with tempfile.TemporaryDirectory(prefix="ingest-") as folder:
-        path = Path(folder) / "document.pdf"
-        await receive(request, path)
+        path = Path(folder) / "document"
+        await receive(request, path, 5 * 1024 * 1024 if mime == MARKDOWN else None)
         with costs.recording(correlation_of(request)) as record:
             # "error" until it ends otherwise: an unexpected error is a 500 for the caller to retry
             record.outcome = "error"
             try:
                 result = await unless_disconnected(
                     request,
-                    _ingest(request.app.state.ingest_slots, path, title, lambda: billing.check(billed)),
+                    _ingest(request.app.state.ingest_slots, path, title, lambda: billing.check(billed), mime),
                 )
                 record.outcome = "indexed"
             except IngestError as e:
@@ -452,7 +456,11 @@ def indexed_response(result: IngestResult) -> IngestResponse:
 
 
 async def _ingest(
-    slots: asyncio.Semaphore, path: Path, title: str, check: Callable[[], Awaitable[None]]
+    slots: asyncio.Semaphore,
+    path: Path,
+    title: str,
+    check: Callable[[], Awaitable[None]],
+    mime: str = "application/pdf",
 ) -> IngestResult:
     """The ingest, once one of the slots is free. The allowance is checked again then: the check before the wait
     may be long out of date, as other uploads by the same user ran (and were charged) in the meantime."""
@@ -461,7 +469,7 @@ async def _ingest(
     try:
         await check()
         with costs.stage("total"):
-            return await ingest(path, title, vision_config(get_settings()))
+            return await ingest(path, title, vision_config(get_settings()), mime)
     finally:
         slots.release()
 
@@ -489,14 +497,14 @@ async def unless_disconnected[T](
         task.cancel()
 
 
-async def receive(request: Request, path: Path) -> None:
+async def receive(request: Request, path: Path, max_bytes: int | None = None) -> None:
     """Stream the body to disk, refusing more than MAX_PDF_BYTES without reading it all into memory."""
     size = 0
     with path.open("wb") as out:
         async for part in request.stream():
             size += len(part)
-            if size > MAX_PDF_BYTES:
-                raise failure(413, "PAYLOAD_TOO_LARGE", "The PDF is larger than 50 MiB.")
+            if size > min(MAX_PDF_BYTES, max_bytes if max_bytes is not None else MAX_PDF_BYTES):
+                raise failure(413, "PAYLOAD_TOO_LARGE", "The document exceeds its upload size limit.")
             await asyncio.to_thread(out.write, part)
     if size == 0:
-        raise failure(422, "VALIDATION_ERROR", "The PDF is empty.")
+        raise failure(422, "VALIDATION_ERROR", "The document is empty.")

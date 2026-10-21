@@ -77,8 +77,10 @@ def passages_of(results: list[dict[str, Any]], floor: float) -> list[Passage]:
             r["chunk_id"],
             r["document_id"],
             r.get("title") or "",
-            int(r.get("page_start") or 1),
+            int(r.get("page_start") or 1) if r.get("source", "pdf") in ("pdf", "vision") else None,
             r["content"],
+            r.get("section_path"),
+            r.get("source", "pdf"),
         )
         for i, r in enumerate(results, start=1)
         if r["content"].strip()

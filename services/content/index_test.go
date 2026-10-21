@@ -187,6 +187,39 @@ func (f *fixture) runAll() {
 	}
 }
 
+func TestNativeIndexJobsPreserveMimeAndHeadingPath(t *testing.T) {
+	for _, format := range []struct{ mime, source string }{{mimeMarkdown, "markdown"}, {mimePPTX, "pptx"}, {mimeDOCX, "docx"}} {
+		t.Run(format.source, func(t *testing.T) {
+			f := newFixture(t)
+			id := f.upload(docTeachingMaterial)
+			if _, err := f.db.Exec(t.Context(), "UPDATE documents SET mime_type=$2 WHERE id=$1", id, format.mime); err != nil {
+				t.Fatal(err)
+			}
+			result := goodResult()
+			result.Chunks = result.Chunks[:1]
+			result.Figures = nil
+			path := "Storage > Transactions"
+			result.Chunks[0].Source = format.source
+			result.Chunks[0].SectionPath = &path
+			result.Chunks[0].Cites = []string{}
+			f.ai.ingest = func(w http.ResponseWriter, r *http.Request) {
+				if r.Header.Get("Content-Type") != format.mime {
+					t.Errorf("ingest MIME: %s", r.Header.Get("Content-Type"))
+				}
+				f.reply(result)(w, r)
+			}
+			f.runAll()
+			if got := f.value("SELECT source||':'||section_path FROM document_chunks WHERE document_id=$1", id); got != format.source+":"+path {
+				t.Fatal(got)
+			}
+			queued, err := f.s.store.queueIndex(t.Context(), f.org, id)
+			if err != nil || !queued {
+				t.Fatalf("native retry: %v %v", queued, err)
+			}
+		})
+	}
+}
+
 func TestIndexingStoresChunksFiguresAndOneEvent(t *testing.T) {
 	f := newFixture(t)
 	id := f.upload("teaching_material")

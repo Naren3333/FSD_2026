@@ -86,6 +86,11 @@ describe('markdown', () => {
   it('describes page ranges', () => {
     expect(pages({ page_start: 4, page_end: 4 })).toBe('page 4');
     expect(pages(cite(A))).toBe('pages 2–3');
+    expect(pages({ page_start: 2, page_end: 2, source: 'pptx' })).toBe('slide 2');
+    expect(
+      pages({ page_start: 4, page_end: 4, source: 'markdown', section_path: 'Storage > Transactions' }),
+    ).toBe('Storage > Transactions');
+    expect(pages({ page_start: 1, page_end: 3, source: 'docx' })).toBe('Document text');
   });
 });
 

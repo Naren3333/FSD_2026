@@ -34,3 +34,22 @@ func TestUnsupportedFiles(t *testing.T) {
 		}
 	}
 }
+
+func TestNativeFormatsQueueIndexingWithoutPretendingTheyAreExtracted(t *testing.T) {
+	for _, kind := range []string{mimeMarkdown, mimePPTX, mimeDOCX} {
+		body := []byte("PK\x03\x04document")
+		if kind == mimeMarkdown {
+			body = []byte("# Topic\n## Section\nA paragraph.")
+		}
+		chunks, status, err := extract(body, kind)
+		if err != nil || status != statusIndexing || len(chunks) != 0 || !indexable(kind) {
+			t.Fatalf("%s: %s %v %v", kind, status, chunks, err)
+		}
+	}
+	if _, _, err := extract([]byte("not an Office package"), mimeDOCX); err == nil {
+		t.Fatal("accepted an invalid Office header")
+	}
+	if _, _, err := extract([]byte{0xff}, mimeMarkdown); err == nil {
+		t.Fatal("accepted non-UTF-8 Markdown")
+	}
+}

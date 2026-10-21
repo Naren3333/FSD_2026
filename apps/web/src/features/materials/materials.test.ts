@@ -163,6 +163,24 @@ describe('materials states', () => {
     await page.settle();
     expect(page.library()).toContain('No materials have been shared in this classroom yet.');
   });
+
+  it('labels native formats without inventing Word or Markdown pages', async () => {
+    const page = render(
+      Promise.resolve([
+        doc({ mime_type: 'application/vnd.openxmlformats-officedocument.presentationml.presentation' }),
+        doc({
+          id: 'd2',
+          mime_type: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+        }),
+        doc({ id: 'd3', mime_type: 'text/markdown' }),
+      ]),
+    );
+    await page.settle();
+    expect(page.library()).toContain('3 slides, 5 passages. Available to the assistant.');
+    expect(page.library()).not.toContain('3 pages');
+    expect(page.root.querySelector<HTMLInputElement>('input[type=file]')?.accept).toContain('.pptx');
+    expect(page.root.textContent).toContain('PPTX speaker notes are included');
+  });
 });
 
 describe('viewing a material', () => {

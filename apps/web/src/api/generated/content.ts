@@ -17,7 +17,12 @@ export interface components {
       classroom_id: string;
       title: string;
       /** @enum {unknown} */
-      mime_type: 'text/plain' | 'application/pdf';
+      mime_type:
+        | 'text/plain'
+        | 'application/pdf'
+        | 'text/markdown'
+        | 'application/vnd.openxmlformats-officedocument.presentationml.presentation'
+        | 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
       /** @enum {unknown} */
       status: 'extracted' | 'extraction_unsupported' | 'indexing' | 'indexed' | 'failed';
       revision: number;
@@ -25,6 +30,7 @@ export interface components {
       /** @enum {unknown} */
       doc_type: 'teaching_material' | 'rubric' | 'marking_scheme';
       chunks?: components['schemas']['Chunk'][];
+      /** @description PDF pages, PPTX slides, or internal Markdown/DOCX section units. */
       page_count?: number;
       chunk_count?: number;
       embedding_model?: string;
@@ -55,6 +61,7 @@ export interface components {
       /** @enum {unknown} */
       kind: 'table' | 'figure' | 'text';
       label: string | null;
+      /** @description PDF page, PPTX slide, or internal Markdown/DOCX section anchor; interpret using source. */
       page_start: number;
       image: string | null;
       content: string;
@@ -68,13 +75,15 @@ export interface components {
       /** @enum {unknown} */
       doc_type: 'teaching_material' | 'rubric' | 'marking_scheme';
       section_path: string | null;
+      /** @description PDF page, PPTX slide, or internal Markdown/DOCX section anchor; interpret using source. */
       page_start: number;
+      /** @description Inclusive source-unit end; interpret using source. */
       page_end: number;
       content: string;
       /** @enum {unknown} */
       kind: 'text' | 'table' | 'figure';
       /** @enum {unknown} */
-      source: 'pdf' | 'vision';
+      source: 'pdf' | 'vision' | 'markdown' | 'pptx' | 'docx';
       image: string | null;
       score: number;
       related: components['schemas']['RelatedItem'][];

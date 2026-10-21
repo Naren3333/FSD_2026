@@ -13,6 +13,7 @@ user deleted) keeps nothing more; the stream then ends with a NOT_FOUND `error` 
 """
 
 import asyncio
+import html
 import json
 import logging
 import re
@@ -42,6 +43,7 @@ CITATION_FIELDS = (
     "chunk_id",
     "document_id",
     "title",
+    "section_path",
     "page_start",
     "page_end",
     "kind",
@@ -342,6 +344,15 @@ class Turn:
         """The results, best first, that fit in one prompt message."""
         kept: list[dict[str, Any]] = []
         size = 0
+
+        def section_markup(result: dict[str, Any]) -> str:
+            if result.get("source") in ("markdown", "docx"):
+                return html.escape(str(result.get("section_path") or ""))
+            return ""
+
+        def context_chars(result: dict[str, Any]) -> int:
+            return len(result.get("content") or "") + len(section_markup(result)) + PASSAGE_OVERHEAD
+
         # Count with the offline tokenizer and reserve space for markup, history and the current question.
         budget = max(
             0,
@@ -363,13 +374,15 @@ class Turn:
         candidates = priority + [r for r in self.results if str(r["chunk_id"]) not in represented]
         for r in candidates:
             content = r.get("content") or ""
-            cost = token_bound(content) + token_bound(str(r.get("title") or "")) + PASSAGE_OVERHEAD
+            cost = (
+                token_bound(content)
+                + token_bound(str(r.get("title") or ""))
+                + token_bound(section_markup(r))
+                + PASSAGE_OVERHEAD
+            )
             if (
                 size + cost > budget
-                or sum(len(k.get("content") or "") + PASSAGE_OVERHEAD for k in kept)
-                + len(content)
-                + PASSAGE_OVERHEAD
-                > MAX_DOCUMENTS_CHARS
+                or sum(context_chars(k) for k in kept) + context_chars(r) > MAX_DOCUMENTS_CHARS
             ):
                 continue
             size += cost

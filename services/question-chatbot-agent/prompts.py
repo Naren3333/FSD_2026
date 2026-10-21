@@ -210,7 +210,12 @@ def _history(history: list[dict]) -> list[dict]:
 
 
 def _pages(r: dict) -> str:
+    source = r.get("source", "pdf")
+    if source in ("markdown", "docx"):
+        section = html.escape(str(r.get("section_path") or "Document text"))
+        return f' section="{section}"'
+    name = "slides" if source == "pptx" else "pages"
     start, end = r.get("page_start"), r.get("page_end")
     if start is None:
         return ""
-    return f' pages="{start}"' if end in (None, start) else f' pages="{start}-{end}"'
+    return f' {name}="{start}"' if end in (None, start) else f' {name}="{start}-{end}"'

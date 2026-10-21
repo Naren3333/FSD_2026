@@ -1,5 +1,20 @@
 # Operations and recovery
 
+## Native teaching materials (ADR 0013)
+
+The native format implementation accepts Markdown (`.md`/`.markdown`, UTF-8, 5 MiB), PPTX and DOCX (50 MiB). Plain `.txt` retains extraction-only status. Native files are read locally into heading-aware chunks; uncached embeddings still cost AI usage and pass the same ai-core allowance checks. PowerPoint speaker notes become searchable classroom material, as stated in the upload form. Native Office images/SmartArt/charts are not interpreted in this version.
+
+After reviewing/testing the change, deploy the matching services together, retaining all volumes and the spend ledger:
+
+```powershell
+docker compose up -d --build ai-core content question-chatbot-agent question-generation-agent web
+python scripts/wait_ready.py
+```
+
+Content applies additive migration 006 on startup. Existing documents are retained and are not automatically reindexed. New native uploads enter the normal indexing queue. Chat shows slide numbers for PPTX and section paths for Markdown/Word; the legacy numeric `page_*` API fields are logical section anchors for unpaginated native formats, not rendered pages.
+
+The owner deferred execution of this change's tests. Start with `python scripts/check.py --keep-going` when ready; that runs local checks and mock-provider unit tests, not the paid golden suite. Real database/integration/E2E verification is still required separately against an isolated test stack. Preserve existing usage ledgers; do not reset test volumes to obtain a fresh AI budget.
+
 Compose refuses to start while `.env` lacks a value it requires ("Run scripts/setup.py or scripts/upgrade_local.py"). `python scripts/upgrade_local.py` (`make upgrade_local`) appends every value `setup.py` would generate that `.env` lacks and never changes an existing line; with the stack up it also creates missing databases and Keycloak clients. `POSTGRES_PASSWORD`, `KEYCLOAK_ADMIN_PASSWORD` and the local people's passwords are read only when their volume is first created, so adding them to an old `.env` does not change a running stack's existing passwords.
 
 ## Upgrading a local setup made before ADR 0002

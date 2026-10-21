@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"errors"
 	"fmt"
 	"strings"
@@ -19,7 +20,7 @@ const (
 
 var docTypes = map[string]bool{docTeachingMaterial: true, docRubric: true, docMarkingScheme: true}
 
-// Document statuses: a text file is extracted on upload; a PDF is indexing until ai-core's result is indexed or
+// Document statuses: a text file is extracted on upload; an indexable document is indexing until ai-core's result is indexed or
 // failed.
 const (
 	statusExtracted = "extracted"
@@ -30,9 +31,12 @@ const (
 
 // Media types Content accepts and serves.
 const (
-	mimePDF  = "application/pdf"
-	mimeText = "text/plain"
-	mimePNG  = "image/png"
+	mimePDF      = "application/pdf"
+	mimeText     = "text/plain"
+	mimeMarkdown = "text/markdown"
+	mimePPTX     = "application/vnd.openxmlformats-officedocument.presentationml.presentation"
+	mimeDOCX     = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+	mimePNG      = "image/png"
 
 	// pdfMagic starts every PDF; extract needs only this much of one.
 	pdfMagic = "%PDF-"
@@ -61,7 +65,7 @@ type Document struct {
 	SHA       string  `json:"sha256"`
 	DocType   string  `json:"doc_type"`
 	Chunks    []Chunk `json:"chunks,omitempty"`
-	// Set for PDFs once indexing ends: indexed (searchable) or failed with a reason.
+	// Set for indexable documents once indexing ends: indexed (searchable) or failed with a reason.
 	PageCount      *int       `json:"page_count,omitempty"`
 	ChunkCount     *int       `json:"chunk_count,omitempty"`
 	EmbeddingModel *string    `json:"embedding_model,omitempty"`
@@ -99,20 +103,33 @@ func extract(data []byte, kind string) ([]Chunk, string, error) {
 		}
 		return []Chunk{}, statusIndexing, nil // the indexing worker sends it to ai-core
 	}
+	if kind == mimePPTX || kind == mimeDOCX {
+		if !bytes.HasPrefix(data, []byte("PK\x03\x04")) {
+			return nil, "", errors.New("file is not an Office Open XML package")
+		}
+		return []Chunk{}, statusIndexing, nil
+	}
 	if len(data) > maxText {
 		return nil, "", errTooLarge
 	}
-	if kind != mimeText || !utf8.Valid(data) || strings.ContainsRune(string(data), 0) {
-		return nil, "", errors.New("upload UTF-8 plain text or a valid PDF")
+	if (kind != mimeText && kind != mimeMarkdown) || !utf8.Valid(data) || strings.ContainsRune(string(data), 0) {
+		return nil, "", errors.New("upload UTF-8 text/Markdown, a valid PDF, or a PPTX/DOCX package")
 	}
 	runes := []rune(string(data))
 	if len(runes) == 0 {
 		return nil, "", errors.New("document is empty")
 	}
 	chunks := []Chunk{}
+	if kind == mimeMarkdown {
+		return chunks, statusIndexing, nil
+	}
 	for start := 0; start < len(runes); start += 1000 {
 		end := min(start+1000, len(runes))
 		chunks = append(chunks, Chunk{len(chunks), string(runes[start:end]), start, end})
 	}
 	return chunks, statusExtracted, nil
+}
+
+func indexable(kind string) bool {
+	return kind == mimePDF || kind == mimeMarkdown || kind == mimePPTX || kind == mimeDOCX
 }

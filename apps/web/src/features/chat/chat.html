@@ -154,7 +154,10 @@
                           @if (source.source === 'vision') {
                             <p class="caption">This passage was written by a model from the page image.</p>
                           }
-                          @if (source.page_end > source.page_start) {
+                          @if (
+                            (source.source === 'pdf' || source.source === 'vision') &&
+                            source.page_end > source.page_start
+                          ) {
                             <p class="caption">
                               The assistant was given this whole passage from {{ pageText(source) }}; the
                               cited point can be on any of these pages.
@@ -164,7 +167,11 @@
                           <!-- prettier-ignore -->
                           <div class="passage" tabindex="0" [attr.aria-label]="'Passage from ' + source.title + ', ' + pageText(source)">{{ source.content }}</div>
                           <button type="button" class="secondary open-page" (click)="openPage(source)">
-                            Open the PDF at page {{ source.page_start }}
+                            @if (source.source === 'pdf' || source.source === 'vision') {
+                              Open the PDF at page {{ source.page_start }}
+                            } @else {
+                              Open original document
+                            }
                           </button>
                           @if (source.image) {
                             @if (figures()[source.chunk_id]; as url) {

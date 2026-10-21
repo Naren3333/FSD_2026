@@ -80,7 +80,7 @@ def test_answer_streams_cites_and_saves(api: TestClient, fakes: Fakes, store: Me
     assert tokens(events) == f"Light is absorbed [doc:{C1}]. Stomata [doc:{C2}] open."
     citations = events[-2][1]["citations"]
     assert [c["chunk_id"] for c in citations] == [C1, C2]
-    assert set(citations[0]) == {"chunk_id", "document_id", "title", "page_start", "page_end", "kind", "source",
+    assert set(citations[0]) == {"chunk_id", "document_id", "title", "section_path", "page_start", "page_end", "kind", "source",
                                  "content", "image"}  # fmt: skip
     answer = saved(store, tid)
     assert events[-1][1] == {"message_id": answer["id"], "outcome": "answered"}
@@ -881,3 +881,20 @@ def test_coverage_notice_cannot_introduce_a_citation_marker(api: TestClient, fak
     assert "Citation coverage is incomplete" in tokens(events)
     assert fake_marker not in tokens(events)
     assert events[-2][1]["citations"] == []
+
+
+def test_native_heading_markup_counts_toward_context_budget(api: TestClient, fakes: Fakes) -> None:
+    main.app.state.settings = replace(SETTINGS, context_tokens=1500)
+    fakes.results = [
+        result(
+            C1,
+            "Transactions group related changes.",
+            1,
+            source="docx",
+            section_path="Deep & heading > " * 100,
+        )
+    ]
+    fakes.replies.append(rewrite("transactions"))
+    events = post(api, thread(api), "What about transactions?")
+    assert events[-1][1]["outcome"] == "no_results"
+    assert len(fakes.calls("/v1/inference")) == 1

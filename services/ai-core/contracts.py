@@ -62,6 +62,7 @@ class Passage(Contract):
     title: str = Field(min_length=1, max_length=200)
     section_path: str | None = Field(default=None, max_length=20000)
     content: str = Field(min_length=1, max_length=20000)
+    source: Literal["pdf", "vision", "markdown", "pptx", "docx"] = "pdf"
 
 
 class RerankRequest(Contract):
@@ -81,11 +82,14 @@ class IngestChunk(Contract):
     content: str
     embed_text: str
     section_path: str | None
-    page_start: int = Field(ge=1)
-    page_end: int = Field(ge=1)
+    page_start: int = Field(
+        ge=1,
+        description="PDF page, PPTX slide, or internal section anchor for Markdown/DOCX; not a rendered page for native text.",
+    )
+    page_end: int = Field(ge=1, description="Inclusive source-unit end; interpret using source.")
     token_count: int = Field(ge=0)
     kind: Literal["text", "table", "figure"]
-    source: Literal["pdf", "vision"]
+    source: Literal["pdf", "vision", "markdown", "pptx", "docx"]
     image: str | None  # a figure's crop, one of the response's figures
     label: str | None
     cites: list[str]
@@ -104,7 +108,9 @@ class IngestResponse(Contract):
     outcome: Literal["indexed", "failed"]
     failure_reason: Literal["NO_TEXT_LAYER", "ENCRYPTED", "CORRUPT", "TOO_LARGE"] | None = None
     failure_detail: str | None = None
-    page_count: int | None = Field(default=None, ge=0)
+    page_count: int | None = Field(
+        default=None, ge=0, description="PDF pages, PPTX slides, or logical section units for Markdown/DOCX."
+    )
     ocr_page_count: int | None = Field(default=None, ge=0)
     embedding_model: str | None = None
     chunks: list[IngestChunk] = Field(default_factory=list)

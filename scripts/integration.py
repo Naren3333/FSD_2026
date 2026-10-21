@@ -1027,7 +1027,7 @@ def databases() -> None:
     # a migration file deleted by mistake fails here; add each new migration's number to it.
     versions = "SELECT string_agg(version::text, ',' ORDER BY version) FROM schema_migrations"
     for service, expected in [
-        ("content", "1,2,3,4,5"),
+        ("content", "1,2,3,4,5,6"),
         ("identity", "1,2,3,4,5,6,7,8"),
         ("assessment", "1,2,3,4,5"),
         ("grading", "1,2,3,4,5,6,7"),

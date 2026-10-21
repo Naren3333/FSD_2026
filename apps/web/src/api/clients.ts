@@ -1,6 +1,6 @@
 import { Injectable, inject } from '@angular/core';
 import { Gateway } from '../core/gateway';
-import { isPdf } from '../shared/files';
+import { documentMime } from '../shared/files';
 import type {
   Assessment,
   AssessmentPage,
@@ -172,7 +172,7 @@ export class ContentApi {
     return this.gateway.request('content', `/documents?${query}`, {
       method: 'POST',
       body: file,
-      contentType: isPdf(file) ? 'application/pdf' : 'text/plain',
+      contentType: documentMime(file) || 'application/octet-stream',
       timeout: UPLOAD_TIMEOUT,
     });
   }

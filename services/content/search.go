@@ -306,7 +306,7 @@ func (s server) rerankHits(ctx context.Context, query string, hits []hit, who bi
 	defer cancel()
 	passages := make([]passage, len(hits))
 	for i, h := range hits {
-		passages[i] = passage{h.Title, h.SectionPath, h.Content}
+		passages[i] = passage{h.Title, h.SectionPath, h.Content, h.Source}
 	}
 	scores, err := s.ai.rerank(ctx, query, passages, who)
 	if _, ok := spendLimit(err); ok || platform.AIBusy(err) {

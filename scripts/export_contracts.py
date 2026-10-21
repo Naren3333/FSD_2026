@@ -287,13 +287,25 @@ document = obj(
         "id": UUID,
         "classroom_id": UUID,
         "title": TITLE,
-        "mime_type": {"enum": ["text/plain", "application/pdf"]},
+        "mime_type": {
+            "enum": [
+                "text/plain",
+                "application/pdf",
+                "text/markdown",
+                "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+                "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+            ]
+        },
         "status": {"enum": ["extracted", "extraction_unsupported", "indexing", "indexed", "failed"]},
         "revision": {"type": "integer", "minimum": 1},
         "sha256": {"type": "string", "pattern": "^[a-f0-9]{64}$"},
         "doc_type": DOC_TYPE,
         "chunks": array(chunk, maximum=10000),
-        "page_count": {"type": "integer", "minimum": 0},
+        "page_count": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "PDF pages, PPTX slides, or internal Markdown/DOCX section units.",
+        },
         "chunk_count": {"type": "integer", "minimum": 0},
         "embedding_model": TEXT,
         "indexed_at": {"type": "string", "format": "date-time"},
@@ -309,7 +321,11 @@ related = obj(
         "chunk_id": UUID,
         "kind": {"enum": ["table", "figure", "text"]},
         "label": NULLABLE_TEXT,
-        "page_start": {"type": "integer", "minimum": 1},
+        "page_start": {
+            "type": "integer",
+            "minimum": 1,
+            "description": "PDF page, PPTX slide, or internal Markdown/DOCX section anchor; interpret using source.",
+        },
         "image": {"type": ["string", "null"], "pattern": FIGURE["pattern"]},
         "content": TEXT,
     }
@@ -321,11 +337,19 @@ search_hit = obj(
         "title": TEXT,
         "doc_type": DOC_TYPE,
         "section_path": NULLABLE_TEXT,
-        "page_start": {"type": "integer", "minimum": 1},
-        "page_end": {"type": "integer", "minimum": 1},
+        "page_start": {
+            "type": "integer",
+            "minimum": 1,
+            "description": "PDF page, PPTX slide, or internal Markdown/DOCX section anchor; interpret using source.",
+        },
+        "page_end": {
+            "type": "integer",
+            "minimum": 1,
+            "description": "Inclusive source-unit end; interpret using source.",
+        },
         "content": TEXT,
         "kind": {"enum": ["text", "table", "figure"]},
-        "source": {"enum": ["pdf", "vision"]},
+        "source": {"enum": ["pdf", "vision", "markdown", "pptx", "docx"]},
         "image": {"type": ["string", "null"], "pattern": FIGURE["pattern"]},
         "score": {"type": "number"},
         "related": array(related),
@@ -796,7 +820,13 @@ for name, routes in operations.items():
             "required": True,
             "content": {
                 kind: {"schema": {"type": "string", "format": "binary", "maxLength": size}}
-                for kind, size in [("text/plain", 5242880), ("application/pdf", 52428800)]
+                for kind, size in [
+                    ("text/plain", 5242880),
+                    ("text/markdown", 5242880),
+                    ("application/pdf", 52428800),
+                    ("application/vnd.openxmlformats-officedocument.presentationml.presentation", 52428800),
+                    ("application/vnd.openxmlformats-officedocument.wordprocessingml.document", 52428800),
+                ]
             },
         }
         upload["parameters"].append(
@@ -859,7 +889,13 @@ for name, routes in operations.items():
                         "description": "Authorized original file, as uploaded",
                         "content": {
                             kind: {"schema": {"type": "string", "format": "binary"}}
-                            for kind in ["application/pdf", "text/plain"]
+                            for kind in [
+                                "application/pdf",
+                                "text/plain",
+                                "text/markdown",
+                                "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+                                "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                            ]
                         },
                     },
                     **errors([401, 403, 404, 500, 503]),
@@ -920,7 +956,11 @@ payloads = {
             "org_id": TEXT,
             "revision": {"type": "integer", "minimum": 1},
             "doc_type": DOC_TYPE,
-            "page_count": {"type": "integer", "minimum": 0},
+            "page_count": {
+                "type": "integer",
+                "minimum": 0,
+                "description": "PDF pages, PPTX slides, or internal Markdown/DOCX section units.",
+            },
             "chunk_count": {"type": "integer", "minimum": 1},
             "embedding_model": TEXT,
         }

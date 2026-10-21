@@ -1,20 +1,11 @@
-"""Ingest: one PDF → embedded chunks and the figure crops they point at. Ported from fsd_test's knowledge service.
+"""Structured ingestion for PDFs and native Markdown/PPTX/DOCX teaching materials.
 
-ai-core is stateless (ADR 0002): Content sends the PDF and stores what comes back (chunks, vectors, crops) in its
-own database and bucket. Nothing here reads or writes business data; the only disk state is the vision cache,
-model answers keyed by page content (ingest.vision), which makes a reindex free.
+Content owns business rows, originals, vectors and crops. ai-core keeps operational caches
+for prepared structure, vision results and exact embedding inputs. Native readers are local;
+PDFs retain their existing selective-vision path. All uncached model work uses ai-core billing.
 
-Tables: the vision pass (ingest.vision) looks at every page first, then the parser reads the tables it found from
-the text layer. A vision failure only costs that page its tables.
-
-Figures: the vision pass also describes the informative figures. Their crops come back named by content hash, so
-a reindex never renames an image the live chunks still point at.
-
-Scans: a page without a text layer is transcribed by the vision pass (OCR); its text chunks are source "vision".
-NO_TEXT_LAYER is left for scans with OCR off, or whose transcripts come back empty.
-
-Size: a PDF over INGEST_MAX_PAGES pages fails TOO_LARGE before any model call, and one over INGEST_MAX_CHUNKS chunks
-before its embeddings, so one upload cannot spend a teacher's whole allowance.
+Source-unit and chunk limits fail before embeddings. Native source anchors are slides or
+logical sections, not inferred Word/Markdown pages; see ADR 0013.
 """
 
 import asyncio
@@ -30,7 +21,7 @@ from learning_transport.metrics import increment
 import local_cache
 import openai_client
 import pdf
-from ingest import costs, rescue, reuse, vision
+from ingest import costs, native, rescue, reuse, vision
 from ingest.chunker import PATH_SEPARATOR, Chunk, chunk_paras, encoding
 from ingest.headings import outline
 from ingest.parse import Document, IngestError, open_checked, read_pages
@@ -81,7 +72,9 @@ class IngestResult:
     embedding_model: str
 
 
-async def ingest(path: Path, title: str, vision_cfg: VisionConfig | None) -> IngestResult:
+async def ingest(
+    path: Path, title: str, vision_cfg: VisionConfig | None, mime: str = "application/pdf"
+) -> IngestResult:
     """The document's chunks and vectors. Raises IngestError for a PDF that cannot be indexed (its reason is
     the document's), and anything else (a provider outage) for the caller to retry. Call inside
     costs.recording() to get the ingest's cost record."""
@@ -90,8 +83,13 @@ async def ingest(path: Path, title: str, vision_cfg: VisionConfig | None) -> Ing
         record.title = title
     settings = get_settings()
     # a bad or oversized PDF fails with its own reason, before any vision call
-    await pdf.in_thread(_check, path, settings.ingest_max_pages)
-    pages, ocr_pages, chunks, crops = await _prepared(path, vision_cfg)
+    if mime == "application/pdf":
+        await pdf.in_thread(_check, path, settings.ingest_max_pages)
+        pages, ocr_pages, chunks, crops = await _prepared(path, vision_cfg)
+    else:
+        pages, ocr_pages, chunks, crops = await _native_prepared(path, mime)
+        if pages > settings.ingest_max_pages:
+            raise IngestError("TOO_LARGE", "Too many slides or logical sections")
     if record:
         record.pages, record.chunks = pages, len(chunks)
     if not chunks:
@@ -102,6 +100,16 @@ async def ingest(path: Path, title: str, vision_cfg: VisionConfig | None) -> Ing
         )
     chunks = await asyncio.to_thread(_storage_chunks, chunks)
     texts = [embed_text(title, c) for c in chunks]
+    if mime != "application/pdf":
+
+        def oversized_native_input() -> bool:
+            return any(
+                len(c.content) > 20000 or len(encoding().encode(text, disallowed_special=())) > 2200
+                for c, text in zip(chunks, texts, strict=True)
+            )
+
+        if await asyncio.to_thread(oversized_native_input):
+            raise IngestError("TOO_LARGE", "A native section path or table exceeds the embedding-input limit")
     tally = openai_client.Tally()
     with costs.stage("embed"):
         try:
@@ -130,6 +138,54 @@ async def ingest(path: Path, title: str, vision_cfg: VisionConfig | None) -> Ing
         figures=figures,
         embedding_model=settings.embedding_model,
     )
+
+
+async def _native_prepared(path: Path, mime: str) -> tuple[int, int, list[Chunk], dict[str, bytes]]:
+    settings = get_settings()
+    if mime not in native.FORMATS:
+        raise IngestError("CORRUPT", "Unsupported native document type")
+    options = f"native-v1|{mime}|{settings.chunk_tokens}|{settings.chunk_overlap}|"
+
+    def fingerprint() -> str:
+        hashed = hashlib.sha256(options.encode())
+        with path.open("rb") as source:
+            while block := source.read(1024 * 1024):
+                hashed.update(block)
+        return hashed.hexdigest()
+
+    name = await asyncio.to_thread(fingerprint)
+    entry = settings.cache_dir / "prepared-native-v1" / f"{name}.json"
+    async with local_cache.singleflight("native:" + name):
+        saved = await asyncio.to_thread(local_cache.read, entry)
+        if isinstance(saved, dict):
+            try:
+                chunks = [Chunk(**{**c, "cites": tuple(c["cites"])}) for c in saved["chunks"]]
+                increment("learning_prepared_cache_hits_total")
+                return int(saved["units"]), 0, chunks, {}
+            except (KeyError, TypeError, ValueError):
+                pass
+
+        def prepare() -> tuple[int, list[Chunk]]:
+            document = native.read(path, mime, settings.ingest_max_pages)
+            if document.unit > settings.ingest_max_pages:
+                raise IngestError("TOO_LARGE", "Too many slides or logical sections")
+            chunks = chunk_paras(
+                document.paras,
+                max_tokens=settings.chunk_tokens,
+                overlap=settings.chunk_overlap,
+                page_boundaries=True,
+            )
+            return document.unit, [replace(c, source=native.FORMATS[mime]) for c in chunks]
+
+        with costs.stage("parse"):
+            units, chunks = await pdf.in_thread(prepare)
+        if len(chunks) > settings.ingest_max_chunks:
+            raise IngestError("TOO_LARGE", "Too many document chunks")
+        await asyncio.to_thread(
+            local_cache.write, entry, {"units": units, "chunks": [asdict(c) for c in chunks]}
+        )
+        increment("learning_prepared_cache_misses_total")
+        return units, 0, chunks, {}
 
 
 async def _see(path: Path, cfg: VisionConfig | None) -> list[vision.PageVision | None] | None:
@@ -269,14 +325,18 @@ def _storage_chunks(chunks: list[Chunk]) -> list[Chunk]:
 
 
 def embed_text(title: str, chunk: Chunk) -> str:
-    return passage_text(title, chunk.section_path, chunk.embed_body or chunk.content)
+    return passage_text(title, chunk.section_path, chunk.embed_body or chunk.content, chunk.source)
 
 
-def passage_text(title: str, section_path: str | None, content: str) -> str:
-    """Title + the chunk's deepest heading + content: what gets embedded, and what the
-    reranker scores. Only the deepest heading: where font sizes don't follow a document's real structure
+def passage_text(title: str, section_path: str | None, content: str, source: str = "pdf") -> str:
+    """Native structure retains the full heading path for both embedding and reranking.
+    PDFs retain the existing deepest-heading rule: where font sizes don't follow a document's real structure
     (GAO-style reports), the ancestors in section_path can be wrong, and as model input they'd pull unrelated
     chunks toward queries about those headings."""
-    leaf = section_path.rsplit(PATH_SEPARATOR, 1)[-1] if section_path else None
+    leaf = (
+        (section_path if source in native.FORMATS.values() else section_path.rsplit(PATH_SEPARATOR, 1)[-1])
+        if section_path
+        else None
+    )
     head = f"{title}\n{leaf}" if leaf else title
     return f"{head}\n\n{content}"

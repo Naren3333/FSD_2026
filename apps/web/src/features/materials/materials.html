@@ -104,17 +104,18 @@
         <app-field
           controlId="document-file"
           label="Educational file"
-          hint="PDF up to 50 MiB, or UTF-8 .txt up to 5 MiB."
+          hint="PDF, PPTX or DOCX up to 50 MiB; UTF-8 Markdown (.md/.markdown) or .txt up to 5 MiB."
         >
           <input
             appFieldControl
             #fileInput
             id="document-file"
             type="file"
-            accept=".txt,.pdf"
+            accept=".txt,.pdf,.md,.markdown,.pptx,.docx"
             (change)="selectFile($event)"
           />
         </app-field>
+        <p class="caption">PPTX speaker notes are included. For embedded diagrams, upload a PDF export.</p>
         @if (file()) {
           <p>{{ file()?.name }}</p>
         }

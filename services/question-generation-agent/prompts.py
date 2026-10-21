@@ -21,8 +21,10 @@ class Passage:
     chunk_id: str
     document_id: str
     title: str
-    page: int
+    page: int | None
     text: str
+    section_path: str | None = None
+    source: str = "pdf"
 
 
 GENERATION_INSTRUCTIONS = """You write assessment questions for a teacher from passages of their own class materials. The teacher reviews every question before any student sees it.
@@ -101,7 +103,16 @@ def guidance_schema() -> dict[str, Any]:
 
 
 def _passages(passages: list[Passage]) -> list[dict[str, Any]]:
-    return [{"number": p.number, "document": p.title, "page": p.page, "text": p.text} for p in passages]
+    return [
+        {
+            "number": p.number,
+            "document": p.title,
+            "page": p.page,
+            "text": p.text,
+            **({"section": p.section_path, "format": p.source} if p.source not in ("pdf", "vision") else {}),
+        }
+        for p in passages
+    ]
 
 
 def _size(value: Any) -> int:

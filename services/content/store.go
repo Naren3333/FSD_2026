@@ -124,7 +124,7 @@ func (p pgStore) queueIndex(ctx context.Context, org, id string) (bool, error) {
 		return false, err
 	}
 	defer tx.Rollback(ctx)
-	tag, err := tx.Exec(ctx, "UPDATE documents SET status='indexing',failure_reason=NULL,failure_detail=NULL WHERE id=$1 AND org_id=$2 AND status<>'indexing' AND mime_type='application/pdf'", id, org)
+	tag, err := tx.Exec(ctx, "UPDATE documents SET status='indexing',failure_reason=NULL,failure_detail=NULL WHERE id=$1 AND org_id=$2 AND status<>'indexing' AND mime_type IN ($3,$4,$5,$6)", id, org, mimePDF, mimeMarkdown, mimePPTX, mimeDOCX)
 	if err != nil || tag.RowsAffected() == 0 {
 		return false, err
 	}

@@ -53,7 +53,8 @@
         },
         "page_count": {
           "type": "integer",
-          "minimum": 0
+          "minimum": 0,
+          "description": "PDF pages, PPTX slides, or internal Markdown/DOCX section units."
         },
         "chunk_count": {
           "type": "integer",

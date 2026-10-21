@@ -98,6 +98,10 @@ function inlines(s: string, numbers: Map<string, number>): Inline[] {
 }
 
 /** A citation's page or page range, as the source list shows it. */
-export function pages(c: Pick<Citation, 'page_start' | 'page_end'>): string {
-  return c.page_start === c.page_end ? `page ${c.page_start}` : `pages ${c.page_start}–${c.page_end}`;
+export function pages(
+  c: Pick<Citation, 'page_start' | 'page_end'> & Partial<Pick<Citation, 'source' | 'section_path'>>,
+): string {
+  if (c.source === 'markdown' || c.source === 'docx') return c.section_path || 'Document text';
+  const unit = c.source === 'pptx' ? 'slide' : 'page';
+  return c.page_start === c.page_end ? `${unit} ${c.page_start}` : `${unit}s ${c.page_start}–${c.page_end}`;
 }
