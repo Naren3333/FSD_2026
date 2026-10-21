@@ -14,6 +14,7 @@ import { NoClassroomComponent } from '../../shared/no-classroom';
 import { Section } from '../../shared/section';
 import { SectionStateComponent } from '../../shared/section-state';
 import { StatusComponent } from '../../shared/status';
+import { pageUnit } from '../../shared/files';
 import { requiredText } from '../../shared/validators';
 import { Block, Inline, markdown, pages } from './markdown';
 
@@ -248,6 +249,24 @@ export class ChatComponent {
   pageText(source: Citation): string {
     return pages(source);
   }
+  isPdf(source: Citation): boolean {
+    return pageUnit(source.mime_type) === 'page';
+  }
+  /** The document's title and, when it has them, the passage's pages or slides. */
+  where(source: Citation): string {
+    const at = pages(source);
+    return at ? `${source.title}, ${at}` : source.title;
+  }
+  openText(source: Citation): string {
+    switch (pageUnit(source.mime_type)) {
+      case 'page':
+        return `Open the PDF at page ${source.page_start}`;
+      case 'slide':
+        return `Download the slides (see slide ${source.page_start})`;
+      default:
+        return 'Open the document';
+    }
+  }
   sourceId(message: ChatMessage, n: number): string {
     return `source-${message.id}-${n}`;
   }
@@ -272,19 +291,20 @@ export class ChatComponent {
         })),
       );
   }
-  /** The original PDF in a new tab at the source's first page; the tab opens on the click so it isn't blocked. */
+  /** The original in a new tab, a PDF at the source's first page; the tab opens on the click so it isn't blocked. */
   openPage(source: Citation): void {
     const tab = window.open('', '_blank');
     this.content
       .original(source.document_id)
       .then((url) => {
-        if (tab) tab.location.href = `${url}#page=${source.page_start}`;
-        else this.state.error.set('Allow pop-ups for this site to open the PDF.');
+        // Only a PDF viewer understands #page; a deck downloads, and a text file opens at its start.
+        if (tab) tab.location.href = this.isPdf(source) ? `${url}#page=${source.page_start}` : url;
+        else this.state.error.set('Allow pop-ups for this site to open the document.');
         setTimeout(() => URL.revokeObjectURL(url), 60000);
       })
       .catch((error: unknown) => {
         tab?.close();
-        this.state.error.set(`The PDF could not be opened. ${messageOf(error, '')}`.trim());
+        this.state.error.set(`The document could not be opened. ${messageOf(error, '')}`.trim());
       });
   }
   when(iso: string): string {

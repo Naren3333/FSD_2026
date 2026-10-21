@@ -141,7 +141,10 @@
                             <small>
                               {{ pageText(source) }}
                               @if (source.kind !== 'text') {
-                                <span>· {{ source.kind === 'table' ? 'Table' : 'Figure' }}</span>
+                                <span
+                                  >{{ pageText(source) ? '· ' : ''
+                                  }}{{ source.kind === 'table' ? 'Table' : 'Figure' }}</span
+                                >
                               }
                             </small>
                           </span>
@@ -152,26 +155,26 @@
                           </p>
                         } @else {
                           @if (source.source === 'vision') {
-                            <p class="caption">This passage was written by a model from the page image.</p>
+                            <p class="caption">
+                              This passage was written by a model from
+                              {{ isPdf(source) ? 'the page image' : 'a picture in the document' }}.
+                            </p>
                           }
                           @if (source.page_end > source.page_start) {
                             <p class="caption">
                               The assistant was given this whole passage from {{ pageText(source) }}; the
-                              cited point can be on any of these pages.
+                              cited point can be on any of them.
                             </p>
                           }
                           <!-- One line: the passage keeps its own line breaks (pre-wrap), so no whitespace around it. -->
                           <!-- prettier-ignore -->
-                          <div class="passage" tabindex="0" [attr.aria-label]="'Passage from ' + source.title + ', ' + pageText(source)">{{ source.content }}</div>
+                          <div class="passage" tabindex="0" [attr.aria-label]="'Passage from ' + where(source)">{{ source.content }}</div>
                           <button type="button" class="secondary open-page" (click)="openPage(source)">
-                            Open the PDF at page {{ source.page_start }}
+                            {{ openText(source) }}
                           </button>
                           @if (source.image) {
                             @if (figures()[source.chunk_id]; as url) {
-                              <img
-                                [src]="url"
-                                [alt]="'Figure from ' + source.title + ', ' + pageText(source)"
-                              />
+                              <img [src]="url" [alt]="'Figure from ' + where(source)" />
                             } @else {
                               <p class="caption">
                                 {{ figureErrors()[source.chunk_id] || 'Loading figure…' }}

@@ -201,13 +201,13 @@ def test_a_table_is_a_table_chunk(api: TestClient, embeddings: FakeOpenAI) -> No
 @pytest.mark.parametrize(
     ("send", "status", "code"),
     [
-        (lambda c: post(c, textbook(), content_type="text/plain"), 415, "UNSUPPORTED_MEDIA_TYPE"),
+        (lambda c: post(c, textbook(), content_type="application/msword"), 415, "UNSUPPORTED_MEDIA_TYPE"),
         (lambda c: post(c, b""), 422, "VALIDATION_ERROR"),
         (lambda c: post(c, textbook(), title=""), 422, "VALIDATION_ERROR"),
         (lambda c: c.post("/v1/ingest", content=textbook(), headers={"content-type": "application/pdf"}), 422,
          "VALIDATION_ERROR"),
     ],
-    ids=["not-pdf", "empty", "blank-title", "no-title"],
+    ids=["unsupported-type", "empty", "blank-title", "no-title"],
 )  # fmt: skip
 def test_bad_requests(
     api: TestClient, send: Callable[[TestClient], Response], status: int, code: str
@@ -217,7 +217,7 @@ def test_bad_requests(
 
 
 def test_more_than_50_mib_is_refused(api: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(main, "MAX_PDF_BYTES", 1000)
+    monkeypatch.setattr(main, "MAX_DOCUMENT_BYTES", 1000)
     resp = post(api, textbook())
     assert (resp.status_code, resp.json()["error"]["code"]) == (413, "PAYLOAD_TOO_LARGE")
 

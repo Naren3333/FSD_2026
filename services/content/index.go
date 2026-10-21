@@ -36,7 +36,7 @@ type objects interface {
 	removeAll(ctx context.Context, prefix string) error
 }
 
-// indexer sends PDFs with a pending index_jobs row to ai-core and stores the chunks, vectors and figure crops it
+// indexer sends documents with a pending index_jobs row to ai-core and stores the chunks, vectors and figure crops it
 // returns. Every write that ends a job checks the job's lease, so a run that lost its lease (it outlived it, or
 // another worker took the job over) changes nothing.
 type indexer struct {
@@ -47,8 +47,8 @@ type indexer struct {
 }
 
 type job struct {
-	document, lease, org, classroom, title, key, docType, owner string
-	revision, attempts                                          int
+	document, lease, org, classroom, title, key, docType, owner, kind string
+	revision, attempts                                                int
 }
 
 func (x indexer) run(ctx context.Context) {
@@ -89,8 +89,8 @@ func (x indexer) claim(ctx context.Context) (job, error) {
 	err := x.db.QueryRow(ctx, `WITH due AS (SELECT document_id FROM index_jobs WHERE next_attempt<=now() ORDER BY next_attempt LIMIT 1 FOR UPDATE SKIP LOCKED)
 UPDATE index_jobs j SET attempts=j.attempts+1, lease=$1, next_attempt=now()+make_interval(secs=>$2)
 FROM due, documents d WHERE j.document_id=due.document_id AND d.id=j.document_id
-RETURNING j.document_id, j.attempts, d.org_id, d.classroom_id, d.title, d.object_key, d.doc_type, d.revision, d.owner_id`, j.lease, leaseTime.Seconds()).
-		Scan(&j.document, &j.attempts, &j.org, &j.classroom, &j.title, &j.key, &j.docType, &j.revision, &j.owner)
+RETURNING j.document_id, j.attempts, d.org_id, d.classroom_id, d.title, d.object_key, d.doc_type, d.revision, d.owner_id, d.mime_type`, j.lease, leaseTime.Seconds()).
+		Scan(&j.document, &j.attempts, &j.org, &j.classroom, &j.title, &j.key, &j.docType, &j.revision, &j.owner, &j.kind)
 	return j, err
 }
 
@@ -145,7 +145,7 @@ func (x indexer) ingest(ctx context.Context, j job) (ingestResult, error) {
 	}
 	defer object.Close()
 	// The teacher who uploaded the document pays for its model calls.
-	return x.ai.ingest(ctx, j.title, object, size, billed{UserID: j.owner, OrgID: j.org, Role: "teacher"})
+	return x.ai.ingest(ctx, j.title, j.kind, object, size, billed{UserID: j.owner, OrgID: j.org, Role: "teacher"})
 }
 
 // validate rejects an ingest result Content cannot store as-is, rather than storing part of it.

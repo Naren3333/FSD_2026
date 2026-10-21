@@ -37,6 +37,14 @@ class Citation(Contract):
     chunk_id: UUID
     document_id: UUID
     title: str
+    # Where page_start points: a PDF's page or a deck's slide; a text or Markdown file has one page. Citations saved
+    # before other formats were indexed (ADR 0013) are all from PDFs.
+    mime_type: Literal[
+        "application/pdf",
+        "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+        "text/markdown",
+        "text/plain",
+    ] = "application/pdf"
     page_start: int = Field(ge=1)
     page_end: int = Field(ge=1)
     kind: Literal["text", "table", "figure"]

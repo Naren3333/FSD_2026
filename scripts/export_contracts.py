@@ -280,6 +280,15 @@ chunk = obj(
     }
 )
 DOC_TYPE = {"enum": ["teaching_material", "rubric", "marking_scheme"]}
+# The media types Content accepts (ADR 0013), with their upload limits.
+PPTX = "application/vnd.openxmlformats-officedocument.presentationml.presentation"
+UPLOAD_LIMITS = [
+    ("application/pdf", 52428800),
+    (PPTX, 52428800),
+    ("text/markdown", 5242880),
+    ("text/plain", 5242880),
+]
+MIME_TYPE = {"enum": [kind for kind, _ in UPLOAD_LIMITS]}
 TITLE = {"type": "string", "minLength": 1, "maxLength": 160}
 FIGURE = {"type": "string", "pattern": "^[a-f0-9]{16}\\.png$"}
 document = obj(
@@ -287,7 +296,7 @@ document = obj(
         "id": UUID,
         "classroom_id": UUID,
         "title": TITLE,
-        "mime_type": {"enum": ["text/plain", "application/pdf"]},
+        "mime_type": MIME_TYPE,
         "status": {"enum": ["extracted", "extraction_unsupported", "indexing", "indexed", "failed"]},
         "revision": {"type": "integer", "minimum": 1},
         "sha256": {"type": "string", "pattern": "^[a-f0-9]{64}$"},
@@ -319,6 +328,7 @@ search_hit = obj(
         "chunk_id": UUID,
         "document_id": UUID,
         "title": TEXT,
+        "mime_type": MIME_TYPE,
         "doc_type": DOC_TYPE,
         "section_path": NULLABLE_TEXT,
         "page_start": {"type": "integer", "minimum": 1},
@@ -796,7 +806,7 @@ for name, routes in operations.items():
             "required": True,
             "content": {
                 kind: {"schema": {"type": "string", "format": "binary", "maxLength": size}}
-                for kind, size in [("text/plain", 5242880), ("application/pdf", 52428800)]
+                for kind, size in UPLOAD_LIMITS
             },
         }
         upload["parameters"].append(
@@ -859,7 +869,7 @@ for name, routes in operations.items():
                         "description": "Authorized original file, as uploaded",
                         "content": {
                             kind: {"schema": {"type": "string", "format": "binary"}}
-                            for kind in ["application/pdf", "text/plain"]
+                            for kind, _ in UPLOAD_LIMITS
                         },
                     },
                     **errors([401, 403, 404, 500, 503]),

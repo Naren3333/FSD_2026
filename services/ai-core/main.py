@@ -39,12 +39,12 @@ from contracts import (
     RerankResponse,
     ResponseContract,
 )
-from ingest import IngestError, IngestResult, costs, ingest, passage_text, vision_config
+from ingest import KINDS, IngestError, IngestResult, costs, ingest, passage_text, vision_config
 from settings import get_settings
 
 log = logging.getLogger("ai-core")
 
-MAX_PDF_BYTES = 50 * 1024 * 1024
+MAX_DOCUMENT_BYTES = 50 * 1024 * 1024
 INGEST_CONCURRENCY = 2  # PDFs at once; more callers wait for a slot
 DISCONNECT_POLL = 2.0  # seconds between checks that an ingest's caller is still there
 ERRORS: dict[int | str, dict[str, Any]] = {
@@ -314,16 +314,17 @@ async def rerank_billed(request: RerankRequest, http: Request, billing: Billing)
     return RerankResponse(scores=scores, model_version=model, usage_tokens=tokens)
 
 
-PDF_BODY = {
+DOCUMENT_BODY = {
     "requestBody": {
         "required": True,
-        "content": {"application/pdf": {"schema": {"type": "string", "format": "binary"}}},
+        "content": {kind: {"schema": {"type": "string", "format": "binary"}} for kind in KINDS},
     }
 }
+SUFFIXES = {"application/pdf": ".pdf", "text/markdown": ".md", "text/plain": ".txt"}
 
 
-@app.post("/v1/ingest", response_model=IngestResponse, responses=ERRORS, openapi_extra=PDF_BODY)
-async def ingest_pdf(
+@app.post("/v1/ingest", response_model=IngestResponse, responses=ERRORS, openapi_extra=DOCUMENT_BODY)
+async def ingest_document(
     request: Request,
     title: str = Query(min_length=1, max_length=300),
     billed_user: str = Query(min_length=1, max_length=200),
@@ -331,16 +332,18 @@ async def ingest_pdf(
     billed_role: spend.Role = Query(),
     _caller: Claims = Depends(SERVICE),
 ) -> IngestResponse:
-    """One PDF (the raw body) → chunks with embeddings and the figure crops they point at. Stateless: the caller
-    stores the result. A document problem is a `failed` outcome; a provider outage is an error to retry. The
-    model calls are charged to `billed_user` (the teacher who uploaded the document), whatever the outcome."""
+    """One document (the raw body: a PDF, a PowerPoint deck, Markdown or plain text, as its Content-Type says) →
+    chunks with embeddings and the figure crops they point at. Stateless: the caller stores the result. A document
+    problem is a `failed` outcome; a provider outage is an error to retry. The model calls are charged to
+    `billed_user` (the teacher who uploaded the document), whatever the outcome."""
     billed = spend.Billed(user_id=billed_user, org_id=billed_org, role=billed_role)
     return await budgeted(request, billed, lambda: ingest_reserved(request, title, billed))
 
 
 async def ingest_reserved(request: Request, title: str, billed: spend.Billed) -> IngestResponse:
-    if request.headers.get("content-type", "").split(";")[0].strip() != "application/pdf":
-        raise failure(415, "UNSUPPORTED_MEDIA_TYPE", "Send the PDF as application/pdf.")
+    kind = request.headers.get("content-type", "").split(";")[0].strip().lower()
+    if kind not in KINDS:
+        raise failure(415, "UNSUPPORTED_MEDIA_TYPE", "Send a PDF, a .pptx deck, Markdown or plain text.")
     try:
         openai_client.get_client()  # without a key every model call would fail: refuse before any work
     except openai_client.NotConfiguredError as error:
@@ -348,7 +351,7 @@ async def ingest_reserved(request: Request, title: str, billed: spend.Billed) ->
     billing = billing_of(request)
     await billing.check(billed)
     with tempfile.TemporaryDirectory(prefix="ingest-") as folder:
-        path = Path(folder) / "document.pdf"
+        path = Path(folder) / f"document{SUFFIXES.get(kind, '.pptx')}"
         await receive(request, path)
         with costs.recording(correlation_of(request)) as record:
             # "error" until it ends otherwise: an unexpected error is a 500 for the caller to retry
@@ -356,7 +359,7 @@ async def ingest_reserved(request: Request, title: str, billed: spend.Billed) ->
             try:
                 result = await unless_disconnected(
                     request,
-                    _ingest(request.app.state.ingest_slots, path, title, lambda: billing.check(billed)),
+                    _ingest(request.app.state.ingest_slots, path, title, kind, lambda: billing.check(billed)),
                 )
                 record.outcome = "indexed"
             except IngestError as e:
@@ -452,7 +455,7 @@ def indexed_response(result: IngestResult) -> IngestResponse:
 
 
 async def _ingest(
-    slots: asyncio.Semaphore, path: Path, title: str, check: Callable[[], Awaitable[None]]
+    slots: asyncio.Semaphore, path: Path, title: str, kind: str, check: Callable[[], Awaitable[None]]
 ) -> IngestResult:
     """The ingest, once one of the slots is free. The allowance is checked again then: the check before the wait
     may be long out of date, as other uploads by the same user ran (and were charged) in the meantime."""
@@ -461,7 +464,7 @@ async def _ingest(
     try:
         await check()
         with costs.stage("total"):
-            return await ingest(path, title, vision_config(get_settings()))
+            return await ingest(path, title, vision_config(get_settings()), kind)
     finally:
         slots.release()
 
@@ -490,13 +493,13 @@ async def unless_disconnected[T](
 
 
 async def receive(request: Request, path: Path) -> None:
-    """Stream the body to disk, refusing more than MAX_PDF_BYTES without reading it all into memory."""
+    """Stream the body to disk, refusing more than MAX_DOCUMENT_BYTES without reading it all into memory."""
     size = 0
     with path.open("wb") as out:
         async for part in request.stream():
             size += len(part)
-            if size > MAX_PDF_BYTES:
-                raise failure(413, "PAYLOAD_TOO_LARGE", "The PDF is larger than 50 MiB.")
+            if size > MAX_DOCUMENT_BYTES:
+                raise failure(413, "PAYLOAD_TOO_LARGE", "The document is larger than 50 MiB.")
             await asyncio.to_thread(out.write, part)
     if size == 0:
-        raise failure(422, "VALIDATION_ERROR", "The PDF is empty.")
+        raise failure(422, "VALIDATION_ERROR", "The document is empty.")

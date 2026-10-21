@@ -267,11 +267,12 @@ def classroom(u: Users) -> dict[str, Any]:
 
 
 def documents(u: Users, room_id: str) -> None:
-    """Uploads, extraction, PDF indexing jobs, teaching material only, and deleting a document."""
+    """Uploads of each accepted format, indexing jobs, teaching material only, and deleting a document."""
     documents = f"/content/documents?classroom_id={room_id}"
     text = b"A fraction is a part of a whole."
     doc = request(u.teacher, "POST", f"{documents}&title=Integration", 201, content=text, headers=TEXT)
-    assert doc["status"] == "extracted" and doc["chunks"][0]["text"] == text.decode()
+    # every format is indexed by ai-core (ADR 0013): nothing is chunked on upload
+    assert doc["status"] == "indexing" and not doc.get("chunks")
     request(u.other, "GET", f"/content/documents/{doc['id']}", 403)
     request(u.student, "GET", f"/content/documents/{doc['id']}")
     original = u.student.get(f"/content/documents/{doc['id']}/original")
@@ -280,6 +281,18 @@ def documents(u: Users, room_id: str) -> None:
     assert page["total"] == 1 and [item["id"] for item in page["items"]] == [doc["id"]]
     request(u.other, "GET", f"/content/documents/page?classroom_id={room_id}", 403)
     request(u.student, "GET", f"/content/documents/page?classroom_id={room_id}&limit=101", 422)
+
+    deck = {"Content-Type": "application/vnd.openxmlformats-officedocument.presentationml.presentation"}
+    request(u.teacher, "POST", f"{documents}&title=Deck", 422, content=b"%PDF-1.7\n", headers=deck)
+    slides = request(u.teacher, "POST", f"{documents}&title=Deck", 201, content=b"PK\x03\x04", headers=deck)
+    assert slides["status"] == "indexing" and slides["mime_type"] == deck["Content-Type"]
+    notes = {"Content-Type": "text/markdown"}
+    markdown = request(
+        u.teacher, "POST", f"{documents}&title=Notes", 201, content=b"# Fractions", headers=notes
+    )
+    assert markdown["status"] == "indexing"
+    for extra in (slides, markdown):
+        request(u.teacher, "DELETE", f"/content/documents/{extra['id']}", 204)
 
     pdf = request(u.teacher, "POST", f"{documents}&title=PDF", 201, content=b"%PDF-1.7\n", headers=PDF)
     assert pdf["status"] == "indexing" and pdf["doc_type"] == "teaching_material"

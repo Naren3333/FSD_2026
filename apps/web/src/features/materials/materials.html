@@ -48,7 +48,7 @@
               }
             </span>
             <small>{{ status(doc).detail }}</small>
-            <small>Revision {{ doc.revision }} · {{ doc.mime_type }}</small>
+            <small>Revision {{ doc.revision }} · {{ format(doc) }}</small>
             @if (doc.doc_type !== 'teaching_material') {
               <small>
                 Uploaded before marking schemes were retired. Students never see it, and new questions and
@@ -57,10 +57,13 @@
             }
           }
           <button class="secondary" (click)="view(doc)">
-            {{ isPdf(doc) ? 'View PDF' : 'View document' }}
+            View {{ format(doc) }}
             <span class="visually-hidden">{{ doc.title }}</span>
           </button>
-          @if (session.isTeacher() && (doc.status === 'failed' || doc.status === 'extraction_unsupported')) {
+          @if (
+            session.isTeacher() &&
+            (doc.status === 'failed' || doc.status === 'extraction_unsupported' || doc.status === 'extracted')
+          ) {
             <button class="secondary" (click)="reindex(doc)" [disabled]="state.busy()">
               {{ doc.status === 'failed' ? 'Retry indexing' : 'Index document' }}
               <span class="visually-hidden">{{ doc.title }}</span>
@@ -104,14 +107,14 @@
         <app-field
           controlId="document-file"
           label="Educational file"
-          hint="PDF up to 50 MiB, or UTF-8 .txt up to 5 MiB."
+          hint="PDF or PowerPoint .pptx up to 50 MiB, or Markdown .md or UTF-8 .txt up to 5 MiB."
         >
           <input
             appFieldControl
             #fileInput
             id="document-file"
             type="file"
-            accept=".txt,.pdf"
+            [accept]="accept"
             (change)="selectFile($event)"
           />
         </app-field>

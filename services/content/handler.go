@@ -50,7 +50,7 @@ func visible(relation, docType string) bool {
 }
 
 // tooLarge is the upload limit, in words.
-var tooLarge = fmt.Sprintf("PDFs must be no larger than %d MiB and text documents %d MiB.", maxPDF>>20, maxText>>20)
+var tooLarge = fmt.Sprintf("PDFs and PowerPoint decks must be no larger than %d MiB, and text or Markdown files %d MiB.", maxFile>>20, maxText>>20)
 
 func (s server) upload(w http.ResponseWriter, r *http.Request) {
 	classroom := r.URL.Query().Get("classroom_id")
@@ -62,7 +62,7 @@ func (s server) upload(w http.ResponseWriter, r *http.Request) {
 		platform.Invalid(w, problem)
 		return
 	}
-	file, size, sum, err := spool(http.MaxBytesReader(w, r.Body, maxPDF))
+	file, size, sum, err := spool(http.MaxBytesReader(w, r.Body, maxFile))
 	var tooBig *http.MaxBytesError
 	var disk *fs.PathError
 	switch {
@@ -141,12 +141,15 @@ func discard(file *os.File) {
 	_ = os.Remove(file.Name())
 }
 
-// extractFile reads as much of a spooled upload as extract needs (a PDF's first bytes, or a whole text document
-// up to one byte past its limit) and rewinds it for storage.
+// extractFile reads as much of a spooled upload as extract needs (a PDF's or a deck's first bytes, or a whole text
+// document up to one byte past its limit) and rewinds it for storage.
 func extractFile(file *os.File, kind string) ([]Chunk, string, error) {
 	limit := int64(maxText + 1)
-	if kind == mimePDF {
+	switch kind {
+	case mimePDF:
 		limit = int64(len(pdfMagic))
+	case mimePPTX:
+		limit = int64(len(zipMagic))
 	}
 	data, err := io.ReadAll(io.LimitReader(file, limit))
 	if err != nil {
@@ -282,7 +285,8 @@ func (s server) figure(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-// reindex queues a PDF for indexing again: after a failure, or a PDF uploaded before indexing existed.
+// reindex queues a document for indexing again: after a failure, or a PDF or text file uploaded before it would
+// have been indexed.
 func (s server) reindex(w http.ResponseWriter, r *http.Request) {
 	// The role check comes first so a student is refused before any lookup; TeacherOf decides below.
 	if !platform.Teacher(w, r) {
@@ -299,8 +303,8 @@ func (s server) reindex(w http.ResponseWriter, r *http.Request) {
 	if !platform.TeacherOf(s.access, w, r, v.Classroom) {
 		return
 	}
-	if v.Type != mimePDF {
-		platform.Error(w, http.StatusConflict, "NOT_INDEXABLE", "Only PDFs are indexed.")
+	if !isIndexable(v.Type) {
+		platform.Error(w, http.StatusConflict, "NOT_INDEXABLE", "Documents of this type are not indexed.")
 		return
 	}
 	queued, err := s.store.queueIndex(r.Context(), org, v.ID)

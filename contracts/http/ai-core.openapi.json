@@ -424,9 +424,9 @@
     },
     "/v1/ingest": {
       "post": {
-        "summary": "Ingest Pdf",
-        "description": "One PDF (the raw body) \u2192 chunks with embeddings and the figure crops they point at. Stateless: the caller\nstores the result. A document problem is a `failed` outcome; a provider outage is an error to retry. The\nmodel calls are charged to `billed_user` (the teacher who uploaded the document), whatever the outcome.",
-        "operationId": "ingest_pdf_v1_ingest_post",
+        "summary": "Ingest Document",
+        "description": "One document (the raw body: a PDF, a PowerPoint deck, Markdown or plain text, as its Content-Type says) \u2192\nchunks with embeddings and the figure crops they point at. Stateless: the caller stores the result. A document\nproblem is a `failed` outcome; a provider outage is an error to retry. The model calls are charged to\n`billed_user` (the teacher who uploaded the document), whatever the outcome.",
+        "operationId": "ingest_document_v1_ingest_post",
         "parameters": [
           {
             "name": "title",
@@ -571,6 +571,24 @@
           "required": true,
           "content": {
             "application/pdf": {
+              "schema": {
+                "type": "string",
+                "format": "binary"
+              }
+            },
+            "application/vnd.openxmlformats-officedocument.presentationml.presentation": {
+              "schema": {
+                "type": "string",
+                "format": "binary"
+              }
+            },
+            "text/markdown": {
+              "schema": {
+                "type": "string",
+                "format": "binary"
+              }
+            },
+            "text/plain": {
               "schema": {
                 "type": "string",
                 "format": "binary"

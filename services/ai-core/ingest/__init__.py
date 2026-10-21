@@ -1,4 +1,5 @@
-"""Ingest: one PDF → embedded chunks and the figure crops they point at. Ported from fsd_test's knowledge service.
+"""Ingest: one document → embedded chunks and the figure crops they point at. Ported from fsd_test's knowledge
+service; PDFs, PowerPoint decks, Markdown and plain text (ADR 0013).
 
 ai-core is stateless (ADR 0002): Content sends the PDF and stores what comes back (chunks, vectors, crops) in its
 own database and bucket. Nothing here reads or writes business data; the only disk state is the vision cache,
@@ -13,7 +14,11 @@ a reindex never renames an image the live chunks still point at.
 Scans: a page without a text layer is transcribed by the vision pass (OCR); its text chunks are source "vision".
 NO_TEXT_LAYER is left for scans with OCR off, or whose transcripts come back empty.
 
-Size: a PDF over INGEST_MAX_PAGES pages fails TOO_LARGE before any model call, and one over INGEST_MAX_CHUNKS chunks
+Other formats carry their structure in the file, so they skip the PDF's layout work: a deck (ingest.slides) is read
+slide by slide, with only its larger pictures sent to the figure model; Markdown and plain text (ingest.text) cost no
+model call but their embeddings.
+
+Size: a PDF over INGEST_MAX_PAGES pages (a deck over as many slides) fails TOO_LARGE before any model call, and one over INGEST_MAX_CHUNKS chunks
 before its embeddings, so one upload cannot spend a teacher's whole allowance.
 """
 
@@ -30,7 +35,7 @@ from learning_transport.metrics import increment
 import local_cache
 import openai_client
 import pdf
-from ingest import costs, rescue, reuse, vision
+from ingest import costs, rescue, reuse, slides, text, vision
 from ingest.chunker import PATH_SEPARATOR, Chunk, chunk_paras, encoding
 from ingest.headings import outline
 from ingest.parse import Document, IngestError, open_checked, read_pages
@@ -39,7 +44,13 @@ from settings import Settings, get_settings
 
 log = logging.getLogger("ai-core.ingest")
 
-__all__ = ["IngestError", "IngestResult", "VisionConfig", "ingest", "passage_text", "vision_config"]
+__all__ = ["KINDS", "IngestError", "IngestResult", "VisionConfig", "ingest", "passage_text", "vision_config"]
+
+PDF = "application/pdf"
+PPTX = "application/vnd.openxmlformats-officedocument.presentationml.presentation"
+MARKDOWN = "text/markdown"
+TEXT = "text/plain"
+KINDS = (PDF, PPTX, MARKDOWN, TEXT)  # the media types ingest reads
 
 
 @dataclass(frozen=True)
@@ -81,17 +92,26 @@ class IngestResult:
     embedding_model: str
 
 
-async def ingest(path: Path, title: str, vision_cfg: VisionConfig | None) -> IngestResult:
-    """The document's chunks and vectors. Raises IngestError for a PDF that cannot be indexed (its reason is
-    the document's), and anything else (a provider outage) for the caller to retry. Call inside
-    costs.recording() to get the ingest's cost record."""
+async def ingest(path: Path, title: str, vision_cfg: VisionConfig | None, kind: str = PDF) -> IngestResult:
+    """The document's chunks and vectors. `kind` is its media type, one of KINDS. Raises IngestError for a
+    document that cannot be indexed (its reason is the document's), and anything else (a provider outage) for the
+    caller to retry. Call inside costs.recording() to get the ingest's cost record."""
     record = costs.current()
     if record:
         record.title = title
     settings = get_settings()
-    # a bad or oversized PDF fails with its own reason, before any vision call
-    await pdf.in_thread(_check, path, settings.ingest_max_pages)
-    pages, ocr_pages, chunks, crops = await _prepared(path, vision_cfg)
+    if kind == PDF:
+        # a bad or oversized PDF fails with its own reason, before any vision call
+        await pdf.in_thread(_check, path, settings.ingest_max_pages)
+        pages, ocr_pages, chunks, crops = await _prepared(path, vision_cfg)
+    elif kind == PPTX:
+        pages, chunks, crops = await _prepared_deck(path, vision_cfg)
+        ocr_pages = 0
+    elif kind in (MARKDOWN, TEXT):
+        pages, ocr_pages, crops = 1, 0, {}
+        chunks = await asyncio.to_thread(_text_chunks, path, kind == MARKDOWN)
+    else:
+        raise ValueError(f"unsupported media type {kind}")
     if record:
         record.pages, record.chunks = pages, len(chunks)
     if not chunks:
@@ -130,6 +150,48 @@ async def ingest(path: Path, title: str, vision_cfg: VisionConfig | None) -> Ing
         figures=figures,
         embedding_model=settings.embedding_model,
     )
+
+
+def _text_chunks(path: Path, markup: bool) -> list[Chunk]:
+    try:
+        content = path.read_bytes().decode("utf-8-sig")
+    except UnicodeDecodeError as e:
+        raise IngestError("CORRUPT", f"The file is not UTF-8 text: {e}") from None
+    if "\x00" in content:
+        raise IngestError("CORRUPT", "The file is not text: it contains NUL characters")
+    settings = get_settings()
+    return chunk_paras(
+        text.paragraphs(content, markup), max_tokens=settings.chunk_tokens, overlap=settings.chunk_overlap
+    )
+
+
+async def _prepared_deck(path: Path, cfg: VisionConfig | None) -> tuple[int, list[Chunk], dict[str, bytes]]:
+    """A deck's slide count, chunks and figure crops. The description calls are cached by picture, so a reindex
+    is free; parsing a deck is quick enough to need no cache of its own."""
+    settings = get_settings()
+    with costs.stage("parse"):
+        deck = await asyncio.to_thread(slides.read_deck, path)
+    if deck.slide_count > settings.ingest_max_pages:
+        raise IngestError(
+            "TOO_LARGE", f"{deck.slide_count} slides, more than the {settings.ingest_max_pages} allowed"
+        )
+    with costs.stage("vision"):
+        figures = await slides.describe(
+            slides.pictures(deck),
+            cfg.figure_model if cfg else None,
+            cfg.cache_dir if cfg else settings.cache_dir / "vision",
+            cfg.max_pages if cfg else 0,
+        )
+    with costs.stage("parse"):
+        chunks = await asyncio.to_thread(
+            chunk_paras,
+            slides.paragraphs(deck, figures),
+            frozenset(),
+            max_tokens=settings.chunk_tokens,
+            overlap=settings.chunk_overlap,
+            page_boundaries=settings.slide_chunks,
+        )
+    return deck.slide_count, chunks, {f.image: f.png for f in figures.values()}
 
 
 async def _see(path: Path, cfg: VisionConfig | None) -> list[vision.PageVision | None] | None:

@@ -42,6 +42,7 @@ CITATION_FIELDS = (
     "chunk_id",
     "document_id",
     "title",
+    "mime_type",
     "page_start",
     "page_end",
     "kind",
@@ -419,7 +420,11 @@ class Turn:
         if self.rewriter is None:
             return []
         by_id = {str(r["chunk_id"]): r for r in self.results}
-        return [{k: by_id[cid].get(k) for k in CITATION_FIELDS} for cid in self.rewriter.cited]
+        # a field the search result lacks (mime_type, from a Content older than ADR 0013) takes its contract default
+        return [
+            {k: r.get(k) for k in CITATION_FIELDS if k != "mime_type" or k in r}
+            for r in (by_id[cid] for cid in self.rewriter.cited)
+        ]
 
     async def _save(self, outcome: str) -> str | None:
         if self.rewriter is not None and (held := self.rewriter.flush()):

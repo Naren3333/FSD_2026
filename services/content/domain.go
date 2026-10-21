@@ -3,6 +3,7 @@ package main
 import (
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -19,8 +20,8 @@ const (
 
 var docTypes = map[string]bool{docTeachingMaterial: true, docRubric: true, docMarkingScheme: true}
 
-// Document statuses: a text file is extracted on upload; a PDF is indexing until ai-core's result is indexed or
-// failed.
+// Document statuses: an upload is indexing until ai-core's result is indexed or failed. Text files uploaded before
+// they were indexed (docs/decisions/0013-native-document-formats.md) were extracted; migration 006 queues them.
 const (
 	statusExtracted = "extracted"
 	statusIndexing  = "indexing"
@@ -30,20 +31,26 @@ const (
 
 // Media types Content accepts and serves.
 const (
-	mimePDF  = "application/pdf"
-	mimeText = "text/plain"
-	mimePNG  = "image/png"
+	mimePDF      = "application/pdf"
+	mimePPTX     = "application/vnd.openxmlformats-officedocument.presentationml.presentation"
+	mimeMarkdown = "text/markdown"
+	mimeText     = "text/plain"
+	mimePNG      = "image/png"
 
-	// pdfMagic starts every PDF; extract needs only this much of one.
+	// pdfMagic starts every PDF; zipMagic every .pptx (a zip). extract needs only this much of either.
 	pdfMagic = "%PDF-"
+	zipMagic = "PK\x03\x04"
 )
 
-const (
-	maxPDF   = 50 << 20
-	maxText  = 5 << 20
-	maxTitle = 160 // characters
+// indexable are the media types ai-core indexes: all that Content accepts.
+var indexable = []string{mimePDF, mimePPTX, mimeMarkdown, mimeText}
 
-	// uploadDeadline is how long one upload may take: a 50 MiB PDF at about 1.5 Mbit/s, matching the web app.
+const (
+	maxFile  = 50 << 20 // a PDF or a deck
+	maxText  = 5 << 20  // plain text or Markdown
+	maxTitle = 160      // characters
+
+	// uploadDeadline is how long one upload may take: a 50 MiB file at about 1.5 Mbit/s, matching the web app.
 	uploadDeadline = 5 * time.Minute
 	// removeDeadline is how long deleting a document's objects and row may take.
 	removeDeadline = time.Minute
@@ -61,7 +68,8 @@ type Document struct {
 	SHA       string  `json:"sha256"`
 	DocType   string  `json:"doc_type"`
 	Chunks    []Chunk `json:"chunks,omitempty"`
-	// Set for PDFs once indexing ends: indexed (searchable) or failed with a reason.
+	// Set once indexing ends: indexed (searchable) or failed with a reason. A text file counts one page; a deck's
+	// pages are its slides.
 	PageCount      *int       `json:"page_count,omitempty"`
 	ChunkCount     *int       `json:"chunk_count,omitempty"`
 	EmbeddingModel *string    `json:"embedding_model,omitempty"`
@@ -90,29 +98,34 @@ type Chunk struct {
 
 var errTooLarge = fmt.Errorf("text documents must be no larger than %d MiB", maxText>>20)
 
-// extract chunks a text document. A PDF is only checked here, by its first bytes (data need hold no more than
-// pdfMagic): it is indexed asynchronously.
+// extract checks an upload of the given media type. Only its first bytes are read for a PDF or a deck (data need
+// hold no more than pdfMagic or zipMagic); a text file is read whole, to check it is UTF-8. Every accepted upload is
+// indexed asynchronously, so it is indexing with no chunks of its own.
 func extract(data []byte, kind string) ([]Chunk, string, error) {
-	if kind == mimePDF {
+	switch kind {
+	case mimePDF:
 		if !strings.HasPrefix(string(data), pdfMagic) {
 			return nil, "", errors.New("file is not a PDF")
 		}
-		return []Chunk{}, statusIndexing, nil // the indexing worker sends it to ai-core
+	case mimePPTX:
+		if !strings.HasPrefix(string(data), zipMagic) {
+			return nil, "", errors.New("file is not a PowerPoint .pptx deck (a password-protected deck or an old .ppt can't be read)")
+		}
+	case mimeText, mimeMarkdown:
+		if len(data) > maxText {
+			return nil, "", errTooLarge
+		}
+		if !utf8.Valid(data) || strings.ContainsRune(string(data), 0) {
+			return nil, "", errors.New("text files must be UTF-8")
+		}
+		if strings.TrimSpace(string(data)) == "" {
+			return nil, "", errors.New("document is empty")
+		}
+	default:
+		return nil, "", errors.New("upload a PDF, a PowerPoint .pptx deck, a Markdown .md file or UTF-8 plain text")
 	}
-	if len(data) > maxText {
-		return nil, "", errTooLarge
-	}
-	if kind != mimeText || !utf8.Valid(data) || strings.ContainsRune(string(data), 0) {
-		return nil, "", errors.New("upload UTF-8 plain text or a valid PDF")
-	}
-	runes := []rune(string(data))
-	if len(runes) == 0 {
-		return nil, "", errors.New("document is empty")
-	}
-	chunks := []Chunk{}
-	for start := 0; start < len(runes); start += 1000 {
-		end := min(start+1000, len(runes))
-		chunks = append(chunks, Chunk{len(chunks), string(runes[start:end]), start, end})
-	}
-	return chunks, statusExtracted, nil
+	return []Chunk{}, statusIndexing, nil // the indexing worker sends it to ai-core
 }
+
+// isIndexable reports whether ai-core indexes documents of this media type.
+func isIndexable(kind string) bool { return slices.Contains(indexable, kind) }

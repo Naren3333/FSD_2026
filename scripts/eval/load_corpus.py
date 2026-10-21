@@ -16,9 +16,17 @@ import argparse
 import secrets
 import sys
 import time
+from pathlib import Path
 
 from common import CLASSES, PDF_DIR, STUDENT2, Session, corpus, load_state, save_state
 from local_stack import admin_client, check, ensure_person
+
+# A corpus entry is sent as its file's format (ADR 0013), so a deck can sit next to its exported PDF.
+MEDIA_TYPES = {
+    ".pptx": "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+    ".md": "text/markdown",
+    ".txt": "text/plain",
+}
 
 
 def ensure_student2(state: dict) -> None:
@@ -93,7 +101,7 @@ def main() -> None:
                     "/content/documents",
                     params={"classroom_id": room, "title": title, "doc_type": meta["doc_type"]},
                     content=data,
-                    headers={"Content-Type": "application/pdf"},
+                    headers={"Content-Type": MEDIA_TYPES.get(Path(name).suffix.lower(), "application/pdf")},
                 )
             ).json()
             print(f"uploaded {title}")

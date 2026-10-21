@@ -51,6 +51,7 @@ type hit struct {
 	ChunkID     string    `json:"chunk_id"`
 	DocumentID  string    `json:"document_id"`
 	Title       string    `json:"title"`
+	MimeType    string    `json:"mime_type"` // where page_start points: a PDF page, a deck's slide, or (text, Markdown) nowhere
 	DocType     string    `json:"doc_type"`
 	SectionPath *string   `json:"section_path"`
 	PageStart   int       `json:"page_start"`
@@ -221,14 +222,14 @@ func (s server) embedQuery(ctx context.Context, query string, who billed) ([]flo
 const legColumns = "id,document_id,doc_type,section_path,page_start,page_end,content,kind,source,image,cites"
 
 // resultColumns are a leg's hits with their document's title; the legs select from r JOIN documents d.
-const resultColumns = "r.id,r.document_id,d.title,r.doc_type,r.section_path,r.page_start,r.page_end,r.content,r.kind,r.source,r.image,r.cites"
+const resultColumns = "r.id,r.document_id,d.title,d.mime_type,r.doc_type,r.section_path,r.page_start,r.page_end,r.content,r.kind,r.source,r.image,r.cites"
 
 func scanHits(rows pgx.Rows) ([]hit, error) {
 	defer rows.Close()
 	out := []hit{}
 	for rows.Next() {
 		var h hit
-		if err := rows.Scan(&h.ChunkID, &h.DocumentID, &h.Title, &h.DocType, &h.SectionPath, &h.PageStart, &h.PageEnd, &h.Content, &h.Kind, &h.Source, &h.Image, &h.cites); err != nil {
+		if err := rows.Scan(&h.ChunkID, &h.DocumentID, &h.Title, &h.MimeType, &h.DocType, &h.SectionPath, &h.PageStart, &h.PageEnd, &h.Content, &h.Kind, &h.Source, &h.Image, &h.cites); err != nil {
 			return nil, err
 		}
 		h.Related = []related{}

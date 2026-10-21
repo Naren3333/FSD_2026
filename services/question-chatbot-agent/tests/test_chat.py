@@ -27,7 +27,8 @@ DOC = str(uuid4())
 def result(chunk_id: str, content: str, page: int, **extra: Any) -> dict[str, Any]:
     """A Content /v1/search result, with every field it returns."""
     return {"chunk_id": chunk_id, "document_id": DOC, "title": "Biology: Photosynthesis",
-            "doc_type": "teaching_material", "section_path": "Light reactions", "page_start": page, "page_end": page,
+            "doc_type": "teaching_material", "mime_type": "application/pdf", "section_path": "Light reactions",
+            "page_start": page, "page_end": page,
             "content": content, "kind": "text", "source": "pdf", "image": None, "score": 0.9, "related": [],
             **extra}  # fmt: skip
 
@@ -80,8 +81,8 @@ def test_answer_streams_cites_and_saves(api: TestClient, fakes: Fakes, store: Me
     assert tokens(events) == f"Light is absorbed [doc:{C1}]. Stomata [doc:{C2}] open."
     citations = events[-2][1]["citations"]
     assert [c["chunk_id"] for c in citations] == [C1, C2]
-    assert set(citations[0]) == {"chunk_id", "document_id", "title", "page_start", "page_end", "kind", "source",
-                                 "content", "image"}  # fmt: skip
+    assert set(citations[0]) == {"chunk_id", "document_id", "title", "mime_type", "page_start", "page_end", "kind",
+                                 "source", "content", "image"}  # fmt: skip
     answer = saved(store, tid)
     assert events[-1][1] == {"message_id": answer["id"], "outcome": "answered"}
     assert (answer["outcome"], answer["prompt_version"], answer["model"], answer["usage_tokens"]) == (

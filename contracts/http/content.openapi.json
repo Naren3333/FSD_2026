@@ -57,8 +57,10 @@
           },
           "mime_type": {
             "enum": [
-              "text/plain",
-              "application/pdf"
+              "application/pdf",
+              "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+              "text/markdown",
+              "text/plain"
             ]
           },
           "status": {
@@ -242,6 +244,14 @@
             "type": "string",
             "minLength": 1
           },
+          "mime_type": {
+            "enum": [
+              "application/pdf",
+              "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+              "text/markdown",
+              "text/plain"
+            ]
+          },
           "doc_type": {
             "enum": [
               "teaching_material",
@@ -303,6 +313,7 @@
           "chunk_id",
           "document_id",
           "title",
+          "mime_type",
           "doc_type",
           "section_path",
           "page_start",
@@ -636,18 +647,32 @@
         "requestBody": {
           "required": true,
           "content": {
-            "text/plain": {
+            "application/pdf": {
+              "schema": {
+                "type": "string",
+                "format": "binary",
+                "maxLength": 52428800
+              }
+            },
+            "application/vnd.openxmlformats-officedocument.presentationml.presentation": {
+              "schema": {
+                "type": "string",
+                "format": "binary",
+                "maxLength": 52428800
+              }
+            },
+            "text/markdown": {
               "schema": {
                 "type": "string",
                 "format": "binary",
                 "maxLength": 5242880
               }
             },
-            "application/pdf": {
+            "text/plain": {
               "schema": {
                 "type": "string",
                 "format": "binary",
-                "maxLength": 52428800
+                "maxLength": 5242880
               }
             }
           }
@@ -1311,6 +1336,18 @@
             "description": "Authorized original file, as uploaded",
             "content": {
               "application/pdf": {
+                "schema": {
+                  "type": "string",
+                  "format": "binary"
+                }
+              },
+              "application/vnd.openxmlformats-officedocument.presentationml.presentation": {
+                "schema": {
+                  "type": "string",
+                  "format": "binary"
+                }
+              },
+              "text/markdown": {
                 "schema": {
                   "type": "string",
                   "format": "binary"

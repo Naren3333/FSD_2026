@@ -99,3 +99,13 @@ def test_topics_are_listed_and_escaped() -> None:
     assert "<topics><topic>a &quot;b&quot; &lt;c&gt;</topic></topics>" in docs
     assert 'topic="a &quot;b&quot; &lt;c&gt;"' in docs
     assert "<topics>" not in prompts.build_messages("teacher", RESULTS, [], "q")[0][2]["content"]
+
+
+def test_a_deck_is_located_by_slide_and_a_text_file_not_at_all() -> None:
+    results = [
+        {**RESULTS[1], "chunk_id": "c-3", "mime_type": prompts.PPTX, "page_start": 7, "page_end": 7},
+        {**RESULTS[1], "chunk_id": "c-4", "mime_type": "text/markdown", "page_start": 1, "page_end": 1},
+    ]
+    docs = prompts.build_messages("teacher", results, [], "q")[0][2]["content"]
+    assert '<document id="S1" title="Bio" slides="7">' in docs
+    assert '<document id="S2" title="Bio">' in docs

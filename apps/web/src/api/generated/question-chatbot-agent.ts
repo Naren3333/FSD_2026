@@ -21,6 +21,16 @@ export interface components {
       document_id: string;
       /** Title */
       title: string;
+      /**
+       * Mime Type
+       * @default application/pdf
+       * @enum {string}
+       */
+      mime_type?:
+        | 'application/pdf'
+        | 'application/vnd.openxmlformats-officedocument.presentationml.presentation'
+        | 'text/markdown'
+        | 'text/plain';
       /** Page Start */
       page_start: number;
       /** Page End */

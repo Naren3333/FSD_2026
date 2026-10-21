@@ -17,7 +17,11 @@ export interface components {
       classroom_id: string;
       title: string;
       /** @enum {unknown} */
-      mime_type: 'text/plain' | 'application/pdf';
+      mime_type:
+        | 'application/pdf'
+        | 'application/vnd.openxmlformats-officedocument.presentationml.presentation'
+        | 'text/markdown'
+        | 'text/plain';
       /** @enum {unknown} */
       status: 'extracted' | 'extraction_unsupported' | 'indexing' | 'indexed' | 'failed';
       revision: number;
@@ -65,6 +69,12 @@ export interface components {
       /** Format: uuid */
       document_id: string;
       title: string;
+      /** @enum {unknown} */
+      mime_type:
+        | 'application/pdf'
+        | 'application/vnd.openxmlformats-officedocument.presentationml.presentation'
+        | 'text/markdown'
+        | 'text/plain';
       /** @enum {unknown} */
       doc_type: 'teaching_material' | 'rubric' | 'marking_scheme';
       section_path: string | null;

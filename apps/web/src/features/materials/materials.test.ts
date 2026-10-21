@@ -136,7 +136,7 @@ describe('materials states', () => {
     await teacher.settle();
     expect(teacher.library()).toContain('3 pages, 5 passages. Available to the assistant.');
     expect(teacher.library()).toContain('Indexing failed');
-    expect(teacher.library()).toContain('the PDF has no readable text layer');
+    expect(teacher.library()).toContain('no readable text was found in it (a scanned PDF has no text layer)');
     expect(teacher.library()).toContain('Retry indexing');
     teacher.fixture.destroy();
 

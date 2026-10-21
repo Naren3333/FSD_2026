@@ -501,6 +501,17 @@
             "type": "string",
             "title": "Title"
           },
+          "mime_type": {
+            "type": "string",
+            "enum": [
+              "application/pdf",
+              "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+              "text/markdown",
+              "text/plain"
+            ],
+            "title": "Mime Type",
+            "default": "application/pdf"
+          },
           "page_start": {
             "type": "integer",
             "minimum": 1.0,

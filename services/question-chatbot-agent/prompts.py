@@ -209,8 +209,16 @@ def _history(history: list[dict]) -> list[dict]:
     return out
 
 
+PDF = "application/pdf"
+PPTX = "application/vnd.openxmlformats-officedocument.presentationml.presentation"
+UNPAGED = ("text/plain", "text/markdown")
+
+
 def _pages(r: dict) -> str:
+    """Where the passage is: a PDF's pages, a deck's slides, or nothing for a text file, which has no pages."""
     start, end = r.get("page_start"), r.get("page_end")
-    if start is None:
+    kind = r.get("mime_type") or PDF
+    if start is None or kind in UNPAGED:
         return ""
-    return f' pages="{start}"' if end in (None, start) else f' pages="{start}-{end}"'
+    unit = "slides" if kind == PPTX else "pages"
+    return f' {unit}="{start}"' if end in (None, start) else f' {unit}="{start}-{end}"'

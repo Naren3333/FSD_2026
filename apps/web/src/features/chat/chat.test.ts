@@ -86,13 +86,17 @@ describe('markdown', () => {
   it('describes page ranges', () => {
     expect(pages({ page_start: 4, page_end: 4 })).toBe('page 4');
     expect(pages(cite(A))).toBe('pages 2–3');
+    const deck = 'application/vnd.openxmlformats-officedocument.presentationml.presentation' as const;
+    expect(pages({ page_start: 7, page_end: 7, mime_type: deck })).toBe('slide 7');
+    expect(pages({ page_start: 7, page_end: 8, mime_type: deck })).toBe('slides 7–8');
+    expect(pages({ page_start: 1, page_end: 1, mime_type: 'text/markdown' })).toBe('');
   });
 });
 
 describe('document status', () => {
   it('never presents extraction as indexing', () => {
     expect(describeDocument(doc({ status: 'extracted', mime_type: 'text/plain' })).detail).toMatch(
-      /not indexed/,
+      /Index it to use it with the assistant/,
     );
     expect(describeDocument(doc({ status: 'extraction_unsupported' })).label).toBe('Not indexed');
     expect(describeDocument(doc({ status: 'indexed', page_count: 12, chunk_count: 20 })).detail).toBe(
@@ -102,7 +106,7 @@ describe('document status', () => {
       '1 page, 1 passage. Available to the assistant.',
     );
     expect(describeDocument(doc({ status: 'failed', failure_reason: 'NO_TEXT_LAYER' })).detail).toMatch(
-      /no readable text layer/,
+      /no readable text was found/,
     );
   });
 });

@@ -116,7 +116,7 @@ func (p pgStore) findIndexed(ctx context.Context, org, id, image string) (Docume
 	return v, err
 }
 
-// queueIndex marks a PDF as indexing and queues its job, unless it is already indexing. Chunks from an earlier
+// queueIndex marks a document as indexing and queues its job, unless it is already indexing. Chunks from an earlier
 // index stay searchable until a new result replaces them; a failed reindex keeps them.
 func (p pgStore) queueIndex(ctx context.Context, org, id string) (bool, error) {
 	tx, err := p.db.Begin(ctx)
@@ -124,7 +124,7 @@ func (p pgStore) queueIndex(ctx context.Context, org, id string) (bool, error) {
 		return false, err
 	}
 	defer tx.Rollback(ctx)
-	tag, err := tx.Exec(ctx, "UPDATE documents SET status='indexing',failure_reason=NULL,failure_detail=NULL WHERE id=$1 AND org_id=$2 AND status<>'indexing' AND mime_type='application/pdf'", id, org)
+	tag, err := tx.Exec(ctx, "UPDATE documents SET status='indexing',failure_reason=NULL,failure_detail=NULL WHERE id=$1 AND org_id=$2 AND status<>'indexing' AND mime_type=ANY($3)", id, org, indexable)
 	if err != nil || tag.RowsAffected() == 0 {
 		return false, err
 	}

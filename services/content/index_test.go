@@ -9,6 +9,7 @@ import (
 	"learning/platform"
 	"net/http"
 	"os"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -151,11 +152,16 @@ func (f *fixture) reply(result any) func(http.ResponseWriter, *http.Request) {
 
 // upload stores a PDF document waiting for the indexer, as the upload handler does.
 func (f *fixture) upload(docType string) string {
+	return f.uploadFile(docType, mimePDF, statusIndexing, "%PDF-1.7")
+}
+
+// uploadFile stores a document of the given media type and status.
+func (f *fixture) uploadFile(docType, kind, status, body string) string {
 	id := uuid.NewString()
 	key := f.org + "/" + id + "/1"
-	f.store.put(context.Background(), key, []byte("%PDF-1.7"), "application/pdf")
+	f.store.put(context.Background(), key, []byte(body), kind)
 	d := newDocument{
-		Document: Document{ID: id, Classroom: f.room, Title: "Biology", Type: mimePDF, Status: statusIndexing, Revision: 1, SHA: strings.Repeat("a", 64), DocType: docType, Chunks: []Chunk{}},
+		Document: Document{ID: id, Classroom: f.room, Title: "Biology", Type: kind, Status: status, Revision: 1, SHA: strings.Repeat("a", 64), DocType: docType, Chunks: []Chunk{}},
 		Org:      f.org,
 		Owner:    "teacher",
 		Key:      key,
@@ -306,6 +312,40 @@ func TestAPurgeDuringIndexingLeavesNoCropsAndRefusesLateUploads(t *testing.T) {
 	late := newDocument{Document: Document{ID: uuid.NewString(), Classroom: f.room, Title: "Late", Type: mimeText, Status: statusExtracted, Revision: 1, SHA: strings.Repeat("b", 64), DocType: docTeachingMaterial, Chunks: []Chunk{}}, Org: f.org, Owner: "teacher", Key: "late"}
 	if _, err = f.s.store.insertDocument(ctx, late); !errors.Is(err, errClassroomPurged) {
 		t.Fatalf("upload into a purged classroom: %v", err)
+	}
+}
+
+func TestEachDocumentIsSentToAICoreAsItsType(t *testing.T) {
+	f := newFixture(t)
+	reply := f.reply(indexedResult())
+	var sent []string
+	f.ai.ingest = func(w http.ResponseWriter, r *http.Request) {
+		sent = append(sent, r.Header.Get("Content-Type"))
+		reply(w, r)
+	}
+	deck := f.uploadFile("teaching_material", mimePPTX, statusIndexing, "PK\x03\x04")
+	notes := f.uploadFile("teaching_material", mimeMarkdown, statusIndexing, "# Notes")
+	f.runAll()
+	if len(sent) != 2 || !slices.Contains(sent, mimePPTX) || !slices.Contains(sent, mimeMarkdown) {
+		t.Fatalf("sent as %v", sent)
+	}
+	for _, id := range []string{deck, notes} {
+		if got := f.value("SELECT status FROM documents WHERE id=$1", id); got != "indexed" {
+			t.Fatal(got)
+		}
+	}
+}
+
+func TestATextFileUploadedBeforeIndexingCanBeIndexed(t *testing.T) {
+	f := newFixture(t)
+	ctx := context.Background()
+	id := f.uploadFile("teaching_material", mimeText, statusExtracted, "Photosynthesis makes glucose.")
+	if queued, err := f.s.store.queueIndex(ctx, f.org, id); err != nil || !queued {
+		t.Fatalf("reindex: %v %v", queued, err)
+	}
+	f.runAll()
+	if got := f.value("SELECT status FROM documents WHERE id=$1", id); got != "indexed" {
+		t.Fatal(got)
 	}
 }
 

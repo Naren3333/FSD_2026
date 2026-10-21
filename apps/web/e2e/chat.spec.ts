@@ -39,11 +39,10 @@ test('teacher uploads materials and an enrolled student asks the real assistant'
     buffer: Buffer.from('Photosynthesis turns light into chemical energy.'),
   });
   await page.getByRole('button', { name: 'Upload document', exact: true }).click();
-  await expect(
-    page.getByText('Document uploaded. Text files are not indexed for the assistant.', { exact: true }),
-  ).toBeVisible();
+  await expect(page.getByText('Document uploaded. Indexing has started.', { exact: true })).toBeVisible();
   const notes = page.locator('.record').filter({ hasText: 'Notes ' + suffix });
-  await expect(notes.locator('.badge').first()).toHaveText('Text extracted');
+  // Text files are indexed too (ADR 0013); without provider keys the test stack never finishes.
+  await expect(notes.locator('.badge').first()).toHaveText(/^Index(ing|ed|ing failed)$/);
   await page.getByLabel('Document title').fill('Slides ' + suffix);
   await expect(page.getByLabel('Document type')).toHaveCount(0);
   await page.getByLabel('Educational file').setInputFiles({

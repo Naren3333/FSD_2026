@@ -163,11 +163,11 @@ func (f *fakeAICore) client() *aiCore {
 	return &aiCore{platform.AICore{Base: f.URL, Tokens: &platform.ServiceToken{URL: f.URL + "/token", ID: "content-indexer", Secret: "secret", Client: f.Client()}, Client: f.Client()}}
 }
 
-func TestIngestSendsThePDFAndDecodesFigures(t *testing.T) {
+func TestIngestSendsTheDocumentAsItsTypeAndDecodesFigures(t *testing.T) {
 	f := newFakeAICore(t)
 	f.ingest = func(w http.ResponseWriter, r *http.Request) {
 		body, _ := io.ReadAll(r.Body)
-		if r.Header.Get("Content-Type") != "application/pdf" || string(body) != "%PDF-1.7" || r.URL.Query().Get("title") != "Biology & more" || r.Header.Get("Authorization") != "Bearer token-1" {
+		if r.Header.Get("Content-Type") != mimePPTX || string(body) != "PK\x03\x04" || r.URL.Query().Get("title") != "Biology & more" || r.Header.Get("Authorization") != "Bearer token-1" {
 			w.WriteHeader(http.StatusBadRequest)
 			return
 		}
@@ -175,7 +175,7 @@ func TestIngestSendsThePDFAndDecodesFigures(t *testing.T) {
 	}
 	ai := f.client()
 	for i := 0; i < 2; i++ {
-		result, err := ai.ingest(t.Context(), "Biology & more", strings.NewReader("%PDF-1.7"), 8, testBilled)
+		result, err := ai.ingest(t.Context(), "Biology & more", mimePPTX, strings.NewReader("PK\x03\x04"), 4, testBilled)
 		if err != nil || result.Outcome != "indexed" || string(result.Figures[0].PNG) != "png" {
 			t.Fatalf("%+v %v", result, err)
 		}
@@ -192,17 +192,17 @@ func TestErrorsCarryStatusAndCodeAndRefusedTokensAreDropped(t *testing.T) {
 		w.Write([]byte(`{"error":{"code":"UNAUTHENTICATED","message":"x"}}`))
 	}
 	ai := f.client()
-	_, err := ai.ingest(t.Context(), "t", strings.NewReader("x"), 1, testBilled)
+	_, err := ai.ingest(t.Context(), "t", mimePDF, strings.NewReader("x"), 1, testBilled)
 	var e *aiError
 	if !errors.As(err, &e) || e.Status != http.StatusUnauthorized || e.Code != "UNAUTHENTICATED" || !transient(err) {
 		t.Fatalf("%v", err)
 	}
-	ai.ingest(t.Context(), "t", strings.NewReader("x"), 1, testBilled)
+	ai.ingest(t.Context(), "t", mimePDF, strings.NewReader("x"), 1, testBilled)
 	if f.tokens.Load() != 2 {
 		t.Fatalf("a refused token was reused")
 	}
 	f.Close()
-	if _, err = ai.ingest(t.Context(), "t", strings.NewReader("x"), 1, testBilled); !transient(err) {
+	if _, err = ai.ingest(t.Context(), "t", mimePDF, strings.NewReader("x"), 1, testBilled); !transient(err) {
 		t.Fatalf("ai-core down is not retried: %v", err)
 	}
 }
@@ -250,7 +250,7 @@ func TestTheBilledUserIsSentAndTheSpendLimitIsRecognised(t *testing.T) {
 		w.WriteHeader(http.StatusTooManyRequests)
 		w.Write([]byte(`{"error":{"code":"AI_SPEND_LIMIT","message":"used up","resets_at":"2026-10-14T00:00:00+08:00"}}`))
 	}
-	_, err := f.client().ingest(t.Context(), "t", strings.NewReader("x"), 1, testBilled)
+	_, err := f.client().ingest(t.Context(), "t", mimePDF, strings.NewReader("x"), 1, testBilled)
 	limit, ok := spendLimit(err)
 	if !ok || limit.Message != "used up" || limit.ResetsAt.IsZero() {
 		t.Fatalf("%#v", err)

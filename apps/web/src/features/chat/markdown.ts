@@ -1,4 +1,5 @@
 import type { Citation } from '../../api/models';
+import { pageUnit } from '../../shared/files';
 
 /** One run of answer text: plain, bold, italic, code, or (ref > 0) the number of a cited source. */
 export interface Inline {
@@ -97,7 +98,11 @@ function inlines(s: string, numbers: Map<string, number>): Inline[] {
   return out;
 }
 
-/** A citation's page or page range, as the source list shows it. */
-export function pages(c: Pick<Citation, 'page_start' | 'page_end'>): string {
-  return c.page_start === c.page_end ? `page ${c.page_start}` : `pages ${c.page_start}–${c.page_end}`;
+/** A citation's page or page range (a deck's slides), as the source list shows it; '' for a text file. */
+export function pages(
+  c: Pick<Citation, 'page_start' | 'page_end'> & { mime_type?: Citation['mime_type'] },
+): string {
+  const unit = pageUnit(c.mime_type);
+  if (!unit) return '';
+  return c.page_start === c.page_end ? `${unit} ${c.page_start}` : `${unit}s ${c.page_start}–${c.page_end}`;
 }

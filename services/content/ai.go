@@ -30,9 +30,10 @@ type passage struct {
 	Content     string  `json:"content"`
 }
 
-// ingester turns a PDF into chunks with embeddings and the figure crops they point at.
+// ingester turns a document (of one of the indexable media types) into chunks with embeddings and the figure crops
+// they point at.
 type ingester interface {
-	ingest(ctx context.Context, title string, pdf io.Reader, size int64, who billed) (ingestResult, error)
+	ingest(ctx context.Context, title, kind string, document io.Reader, size int64, who billed) (ingestResult, error)
 }
 
 // aiError, billed and the checks on ai-core's answers are the platform's (shared with Grading's marking).
@@ -87,12 +88,12 @@ type ingestResult struct {
 	Figures        []ingestFigure `json:"figures"`
 }
 
-// ingest sends one PDF to ai-core: chunks with embeddings and the figure crops they point at, or a failed outcome
-// when the PDF itself cannot be indexed.
-func (a *aiCore) ingest(ctx context.Context, title string, pdf io.Reader, size int64, who billed) (ingestResult, error) {
+// ingest sends one document to ai-core as its media type: chunks with embeddings and the figure crops they point at,
+// or a failed outcome when the document itself cannot be indexed.
+func (a *aiCore) ingest(ctx context.Context, title, kind string, document io.Reader, size int64, who billed) (ingestResult, error) {
 	var out ingestResult
 	query := url.Values{"title": {title}, "billed_user": {who.UserID}, "billed_org": {who.OrgID}, "billed_role": {who.Role}}
-	err := a.Call(ctx, "/v1/ingest?"+query.Encode(), mimePDF, pdf, size, &out)
+	err := a.Call(ctx, "/v1/ingest?"+query.Encode(), kind, document, size, &out)
 	return out, err
 }
 

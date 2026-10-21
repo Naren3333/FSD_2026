@@ -23,7 +23,7 @@ const (
 	classID    = "8b3e7f40-ac6d-4e5f-9a4b-3c4d5e6f7081"
 )
 
-// documentStore serves two documents by id; the embedded interface leaves every other method unimplemented, so a
+// documentStore serves two documents by id, of a type Content never accepted; the embedded interface leaves every other method unimplemented, so a
 // test fails loudly if a handler reaches one it shouldn't.
 type documentStore struct {
 	store
@@ -35,7 +35,7 @@ func (documentStore) findDocument(_ context.Context, _, id string) (Document, []
 	if docType == "" {
 		return Document{}, nil, platform.ErrNotFound
 	}
-	return Document{ID: id, Classroom: classID, Title: "Doc", DocType: docType, Type: "text/plain"}, []byte("[]"), nil
+	return Document{ID: id, Classroom: classID, Title: "Doc", DocType: docType, Type: "application/msword"}, []byte("[]"), nil
 }
 
 func (d documentStore) listDocuments(_ context.Context, _, _ string, teacher bool, paging ...platform.ListWindow) ([]Document, error) {
@@ -162,7 +162,7 @@ func TestUploadStoresTheDocumentAndItsOriginal(t *testing.T) {
 	var inserted newDocument
 	files := &fileStore{}
 	w := upload(t, uploadStore{inserted: &inserted, commitAttempted: true}, files, "&title=Notes")
-	if w.Code != http.StatusCreated || inserted.Title != "Notes" || inserted.DocType != docTeachingMaterial || inserted.Status != statusExtracted {
+	if w.Code != http.StatusCreated || inserted.Title != "Notes" || inserted.DocType != docTeachingMaterial || inserted.Status != statusIndexing {
 		t.Fatalf("%d %+v", w.Code, inserted.Document)
 	}
 	if len(files.puts) != 1 || files.puts[0] != inserted.Key || inserted.Org != "org" || inserted.Owner != "teacher-1" {
@@ -224,13 +224,28 @@ func TestUploadStoresAWholePDFAndItsHash(t *testing.T) {
 	}
 }
 
+func TestUploadAcceptsADeckLargerThanTheTextLimit(t *testing.T) {
+	var inserted newDocument
+	files := &fileStore{}
+	deck := zipMagic + strings.Repeat("x", 6<<20)
+	w := uploadBody(t, uploadStore{inserted: &inserted, commitAttempted: true}, files, "&title=Slides", mimePPTX, deck)
+	if w.Code != http.StatusCreated || inserted.Status != statusIndexing || inserted.Type != mimePPTX {
+		t.Fatalf("%d %+v", w.Code, inserted.Document)
+	}
+	if len(files.bodies) != 1 || string(files.bodies[0]) != deck {
+		t.Fatal("the stored original differs from the upload")
+	}
+}
+
 func TestUploadRefusesOversizedAndUnsupportedFiles(t *testing.T) {
 	cases := []struct {
 		kind, body string
 		code       int
 	}{
 		{mimeText, strings.Repeat("a", maxText+1), http.StatusRequestEntityTooLarge},
+		{mimeMarkdown, strings.Repeat("a", maxText+1), http.StatusRequestEntityTooLarge},
 		{mimePDF, strings.Repeat("a", 64), http.StatusUnprocessableEntity},
+		{mimePPTX, strings.Repeat("a", 64), http.StatusUnprocessableEntity},
 		{"image/png", "png", http.StatusUnprocessableEntity},
 	}
 	for _, c := range cases {
@@ -241,7 +256,7 @@ func TestUploadRefusesOversizedAndUnsupportedFiles(t *testing.T) {
 	}
 }
 
-func TestReindexNeedsTheClassroomsTeacherAndAPDF(t *testing.T) {
+func TestReindexNeedsTheClassroomsTeacherAndAnIndexableType(t *testing.T) {
 	cases := []struct {
 		name, relation, id string
 		roles              []string
@@ -251,7 +266,7 @@ func TestReindexNeedsTheClassroomsTeacherAndAPDF(t *testing.T) {
 		{"unknown document", platform.RelationTeacher, classID, []string{"teacher"}, http.StatusNotFound},
 		{"a student", platform.RelationStudent, teachingID, []string{"student"}, http.StatusForbidden},
 		{"teacher token, student relation", platform.RelationStudent, teachingID, []string{"teacher"}, http.StatusForbidden},
-		{"not a PDF", platform.RelationTeacher, teachingID, []string{"teacher"}, http.StatusConflict},
+		{"not an indexable type", platform.RelationTeacher, teachingID, []string{"teacher"}, http.StatusConflict},
 	}
 	for _, tc := range cases {
 		s := server{store: documentStore{}, access: platformtest.Access(tc.relation)}

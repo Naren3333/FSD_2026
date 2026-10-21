@@ -121,7 +121,7 @@ func TestOnlyTheClassroomsTeacherUploads(t *testing.T) {
 func TestAPDFOverTheLimitIsTooLarge(t *testing.T) {
 	var inserted newDocument
 	files := &fileStore{}
-	pdf := pdfMagic + "1.7\n" + strings.Repeat("x", maxPDF)
+	pdf := pdfMagic + "1.7\n" + strings.Repeat("x", maxFile)
 	w := uploadBody(t, uploadStore{inserted: &inserted}, files, "&title=Notes", mimePDF, pdf)
 	if w.Code != http.StatusRequestEntityTooLarge || !strings.Contains(w.Body.String(), "UPLOAD_TOO_LARGE") || len(files.puts) != 0 || inserted.ID != "" {
 		t.Fatalf("%d %s, stored %v", w.Code, w.Body.String(), files.puts)
