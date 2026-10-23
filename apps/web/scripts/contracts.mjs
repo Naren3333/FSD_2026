@@ -14,6 +14,7 @@ const SERVICES = [
   'analytics',
   'question-chatbot-agent',
   'question-generation-agent',
+  'student-performance-agent',
 ];
 const contracts = new URL('../../../contracts/http/', import.meta.url);
 const generated = new URL('../src/api/generated/', import.meta.url);

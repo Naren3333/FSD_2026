@@ -4,6 +4,7 @@ import (
 	"errors"
 	"learning/platform"
 	"net/http"
+	"slices"
 	"strings"
 	"unicode/utf8"
 )
@@ -58,7 +59,19 @@ func (s server) enrolledWork(w http.ResponseWriter, r *http.Request) (classroom,
 		return "", "", nil, false
 	}
 	students, ok = s.roster.Roster(w, r, classroom)
-	return classroom, assessment, students, ok
+	if !ok {
+		return "", "", nil, false
+	}
+	// student_id narrows the work to one enrolled student, as the performance agent reads it (adr 0014); a
+	// student no longer on the roster has none.
+	if student := r.URL.Query().Get("student_id"); student != "" {
+		if slices.Contains(students, student) {
+			students = []string{student}
+		} else {
+			students = []string{}
+		}
+	}
+	return classroom, assessment, students, true
 }
 
 // get is one evaluation with its student's answers, for the classroom's teacher only, so an open grade can

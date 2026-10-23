@@ -22,6 +22,7 @@ import type {
   GradingCounts,
   Guidance,
   GuidanceRequest,
+  Interpretation,
   Mark,
   NewAssessment,
   OwnResult,
@@ -444,6 +445,23 @@ export class QuestionGenerationApi {
       method: 'POST',
       body: request,
       timeout: GENERATION_TIMEOUT,
+    });
+  }
+}
+
+/* the agent may take several model turns; kong allows it five minutes. */
+const INTERPRETATION_TIMEOUT = 5 * 60 * 1000 + 10 * 1000;
+
+/* a draft interpretation of one student's finalized results, for the classroom's teacher (adr 0014). */
+@Injectable({ providedIn: 'root' })
+export class PerformanceAgentApi {
+  private readonly gateway = inject(Gateway);
+
+  interpret(classroomId: string, studentId: string): Promise<Interpretation> {
+    return this.gateway.request('performance-agent', '/performance_interpretation', {
+      method: 'POST',
+      body: { classroom_id: classroomId, student_id: studentId },
+      timeout: INTERPRETATION_TIMEOUT,
     });
   }
 }

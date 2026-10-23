@@ -648,14 +648,14 @@ operations = {
     ],
     "grading": [
         # one page of the enrolled students' evaluations, newest first, or of one assessment's, oldest
-        # first.
+        # first; student_id narrows it to one enrolled student's (adr 0014).
         paged(
             operation(
                 "GET",
                 "/v1/evaluations",
                 None,
                 evaluation_page,
-                query=["classroom_id", "assessment_id"],
+                query=["classroom_id", "assessment_id", "student_id"],
             ),
             100,
             20,

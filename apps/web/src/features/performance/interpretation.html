@@ -1,0 +1,84 @@
+<section class="ai-notice interpretation" aria-labelledby="interpretation-heading">
+  <span class="badge">AI draft for your review</span>
+  <h3 id="interpretation-heading">Interpret these results</h3>
+  <p>
+    An AI agent reads this student's finalized results, looks at the answers behind weak topics, and drafts
+    observations, possible misconceptions and next steps. Every statement cites the questions it rests on, and
+    it never changes a grade. Interpreting uses your daily AI allowance.
+  </p>
+  <button
+    id="interpret-button"
+    type="button"
+    (click)="interpret()"
+    [disabled]="result.loading() || !classroomId || !studentId"
+  >
+    {{ result.value() ? 'Interpret again' : 'Interpret results' }}
+  </button>
+  <app-section-state [section]="result" loading="Reading results and drafting an interpretation…" />
+  @if (result.ready() && result.value(); as draft) {
+    <div class="interpretation-result" aria-live="polite">
+      <h4>Observations</h4>
+      <ul class="findings">
+        @for (item of draft.observations; track $index) {
+          <li>
+            <p>{{ item.text }}</p>
+            <ul class="cited" aria-label="Evidence">
+              @for (e of cited(item.evidence_ids); track e.question_id) {
+                <li>{{ evidenceText(e) }}</li>
+              }
+            </ul>
+          </li>
+        }
+      </ul>
+      @if (draft.possible_misconceptions.length) {
+        <h4>Possible misconceptions</h4>
+        <ul class="findings">
+          @for (item of draft.possible_misconceptions; track $index) {
+            <li>
+              <p>{{ item.text }}</p>
+              <ul class="cited" aria-label="Evidence">
+                @for (e of cited(item.evidence_ids); track e.question_id) {
+                  <li>{{ evidenceText(e) }}</li>
+                }
+              </ul>
+            </li>
+          }
+        </ul>
+      }
+      @if (draft.suggested_interventions.length) {
+        <h4>Suggested next steps</h4>
+        <ul>
+          @for (step of draft.suggested_interventions; track $index) {
+            <li>{{ step }}</li>
+          }
+        </ul>
+      }
+      @if (draft.recommended_topic_ids.length) {
+        <h4>Topics to practise</h4>
+        <ul>
+          @for (topicId of draft.recommended_topic_ids; track topicId) {
+            <li>{{ topic(topicId) }}</li>
+          }
+        </ul>
+      }
+      @if (dropped()) {
+        <p class="caption">{{ dropped() }}</p>
+      }
+      <details>
+        <summary>
+          How the agent worked ({{ draft.steps.length }} {{ draft.steps.length === 1 ? 'step' : 'steps' }},
+          {{ draft.model_turns }} model {{ draft.model_turns === 1 ? 'turn' : 'turns' }})
+        </summary>
+        @if (draft.steps.length) {
+          <ol>
+            @for (step of draft.steps; track $index) {
+              <li>{{ stepText(step) }}</li>
+            }
+          </ol>
+        } @else {
+          <p class="caption">It reported from the results summary without looking anything else up.</p>
+        }
+      </details>
+    </div>
+  }
+</section>

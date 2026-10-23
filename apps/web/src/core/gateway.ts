@@ -13,7 +13,8 @@ export type Service =
   | 'grading'
   | 'analytics'
   | 'chatbot'
-  | 'question-generation';
+  | 'question-generation'
+  | 'performance-agent';
 
 export interface RequestOptions {
   method?: 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE';

@@ -54,6 +54,17 @@ QUESTION_GENERATION = {
     "routes": [{"name": "question-generation", "paths": ["/api/question-generation"], "strip_path": True}],
 }
 
+# performance interpretation runs several bounded model turns (adr 0014): its deadline forces a report after
+# two minutes, and the last turns may take a minute each.
+PERFORMANCE_AGENT = {
+    "name": "student-performance-agent",
+    "url": "http://student-performance-agent:8080/v1",
+    "connect_timeout": 5000,
+    "read_timeout": 300_000,
+    "write_timeout": TIMEOUT_MS,
+    "routes": [{"name": "performance-agent", "paths": ["/api/performance-agent"], "strip_path": True}],
+}
+
 PLUGINS = [
     {
         "name": "jwt",
@@ -105,7 +116,12 @@ def main() -> None:
     )
     config = {
         "_format_version": "3.0",
-        "services": [*(business_service(name) for name in BUSINESS_SERVICES), CHATBOT, QUESTION_GENERATION],
+        "services": [
+            *(business_service(name) for name in BUSINESS_SERVICES),
+            CHATBOT,
+            QUESTION_GENERATION,
+            PERFORMANCE_AGENT,
+        ],
         "consumers": [
             {
                 "username": "keycloak",

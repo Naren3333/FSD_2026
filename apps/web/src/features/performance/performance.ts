@@ -15,6 +15,7 @@ import { NoClassroomComponent } from '../../shared/no-classroom';
 import { Section } from '../../shared/section';
 import { SectionStateComponent } from '../../shared/section-state';
 import { StatusComponent } from '../../shared/status';
+import { InterpretationComponent } from './interpretation';
 
 @Component({
   selector: 'app-performance',
@@ -28,6 +29,7 @@ import { StatusComponent } from '../../shared/status';
     SectionStateComponent,
     PercentPipe,
     DecimalPipe,
+    InterpretationComponent,
   ],
   templateUrl: './performance.html',
 })

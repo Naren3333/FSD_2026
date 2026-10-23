@@ -499,6 +499,27 @@ thead th {
 .ai-notice h3 {
   margin-top: 12px;
 }
+/* the performance agent's draft (adr 0014): each statement with the questions it cites. */
+.interpretation h4 {
+  margin: 20px 0 8px;
+}
+.interpretation .findings {
+  padding-left: 20px;
+}
+.interpretation .findings > li p {
+  margin: 0 0 4px;
+}
+.interpretation .cited {
+  margin: 0 0 12px;
+  padding-left: 18px;
+  color: var(--muted);
+  font-size: 0.8125rem;
+  overflow-wrap: anywhere;
+}
+.interpretation details {
+  margin-top: 16px;
+  font-size: 0.875rem;
+}
 .welcome {
   padding: 70px 0 24px;
   max-width: 920px;

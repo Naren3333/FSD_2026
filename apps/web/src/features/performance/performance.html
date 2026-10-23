@@ -112,9 +112,13 @@
     }
   }
 </section>
-<aside class="ai-notice">
-  <span class="badge">Future capability</span>
-  <h3>Personalized guidance</h3>
-  <p>AI feedback and generated practice are not available yet. Document chat is under Ask the materials.</p>
-  <button disabled>AI guidance unavailable</button>
-</aside>
+@if (session.isTeacher() && result.ready() && result.value(); as shown) {
+  <app-interpretation [classroomId]="shown.classroom_id" [studentId]="shown.student_id" />
+} @else if (session.isStudent()) {
+  <aside class="ai-notice">
+    <span class="badge">Future capability</span>
+    <h3>Personalized practice</h3>
+    <p>Generated practice is not available yet. Document chat is under Ask the materials.</p>
+    <button disabled>Practice unavailable</button>
+  </aside>
+}

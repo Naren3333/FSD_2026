@@ -10,7 +10,13 @@ ROOT = Path(__file__).resolve().parents[1]
 # is ai-core's usage ledger (adr 0003).
 SERVICES = ["identity", "curriculum", "content", "assessment", "grading", "analytics", "chatbot", "aicore"]
 # private ai callers use service accounts with the required client role.
-AI_CLIENTS = ["content-indexer", "question-chatbot-agent", "grading-marker", "question-generation-agent"]
+AI_CLIENTS = [
+    "content-indexer",
+    "question-chatbot-agent",
+    "grading-marker",
+    "question-generation-agent",
+    "student-performance-agent",
+]
 # identity's service account for removing the sign-in account of a user who deleted theirs (adr 0011).
 ACCOUNTS_CLIENT = "identity-accounts"
 ACCOUNTS_ROLE = ("realm-management", "manage-users")

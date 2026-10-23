@@ -260,6 +260,18 @@ func TestTeacherListsAndCountsOnlyEnrolledStudents(t *testing.T) {
 	}
 }
 
+func TestTheTeacherListsOneEnrolledStudentsWork(t *testing.T) {
+	store := &memoryStore{}
+	s := server{store: store, access: platformtest.Access(platform.RelationTeacher), roster: platformtest.Roster{"student-1", "student-2"}}
+	if w := platformtest.Serve(s.routes, http.MethodGet, "/v1/evaluations?classroom_id="+room+"&student_id=student-2", "", "teacher-1", "teacher"); w.Code != http.StatusOK || strings.Join(store.students, ",") != "student-2" {
+		t.Fatalf("one student: %d, store given %v", w.Code, store.students)
+	}
+	// a student who is not on the roster has nothing listed, rather than everyone.
+	if w := platformtest.Serve(s.routes, http.MethodGet, "/v1/evaluations?classroom_id="+room+"&student_id=student-9", "", "teacher-1", "teacher"); w.Code != http.StatusOK || store.students == nil || len(store.students) != 0 {
+		t.Fatalf("an unenrolled student: %d, store given %v", w.Code, store.students)
+	}
+}
+
 func TestOnlyTheClassroomTeacherSavesMarks(t *testing.T) {
 	body := `{"marks":{"q2":{"criteria":{"c1":2},"feedback":"Good."}}}`
 	cases := []struct {

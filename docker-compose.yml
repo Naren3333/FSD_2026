@@ -207,6 +207,9 @@ services:
       question-generation-agent:
         condition: service_healthy
         required: false
+      student-performance-agent:
+        condition: service_healthy
+        required: false
     environment:
       KONG_DATABASE: 'off'
       KONG_DECLARATIVE_CONFIG: /config/kong.json
@@ -462,6 +465,16 @@ services:
       OIDC_ISSUER: http://localhost:${KEYCLOAK_PORT:-8081}/realms/learning
       OIDC_JWKS_URL: http://keycloak:8080/realms/learning/protocol/openid-connect/certs
       OIDC_AUDIENCE: learning
+      # stateless; reads with the teacher's token, never content or a database (adr 0014).
+      IDENTITY_URL: http://identity:8080
+      ANALYTICS_URL: http://analytics:8080
+      GRADING_URL: http://grading:8080
+      ASSESSMENT_URL: http://assessment:8080
+      CURRICULUM_URL: http://curriculum:8080
+      AI_CORE_URL: http://ai-core:8080
+      AI_TOKEN_URL: http://keycloak:8080/realms/learning/protocol/openid-connect/token
+      AI_CLIENT_ID: student-performance-agent
+      AI_CLIENT_SECRET: ${STUDENT_PERFORMANCE_AGENT_CLIENT_SECRET:?Run scripts/setup.py or scripts/upgrade_local.py}
     depends_on:
       keycloak:
         condition: service_started

@@ -33,7 +33,11 @@ from local_stack import (
 from setup import AI_CLIENTS, SERVICES, client_secret_key
 
 # gateway path → contract file
-CONTRACTS = {"chatbot": "question-chatbot-agent", "question-generation": "question-generation-agent"}
+CONTRACTS = {
+    "chatbot": "question-chatbot-agent",
+    "question-generation": "question-generation-agent",
+    "performance-agent": "student-performance-agent",
+}
 TEXT = {"Content-Type": "text/plain"}
 PDF = {"Content-Type": "application/pdf"}
 
@@ -590,6 +594,32 @@ def class_dashboard(u: Users, room_id: str, graded: Graded) -> None:
         request(u.other, "GET", path, 403)
 
 
+def performance_interpretation(u: Users, room_id: str) -> None:
+    """the agent interprets an enrolled student's finalized results for the classroom's teacher only (adr 0014): a draft resting on cited evidence with live ai, a plain refusal without provider keys."""
+    path = "/performance-agent/performance_interpretation"
+    body = {"classroom_id": room_id, "student_id": u.student_id}
+    # grading lists one enrolled student's work for the agent, and nobody else's.
+    query = f"/grading/evaluations?classroom_id={room_id}&student_id="
+    mine = request(u.teacher, "GET", query + u.student_id)
+    assert mine["total"] >= 1 and {v["student_id"] for v in mine["evaluations"]} == {u.student_id}, mine
+    assert request(u.teacher, "GET", query + "not-enrolled") == {"evaluations": [], "total": 0}
+    assert httpx.post(BASE + path, json=body).status_code == 401
+    request(u.student, "POST", path, 403, json=body)
+    request(u.other, "POST", path, 403, json=body)
+    request(u.teacher, "POST", path, 403, json={**body, "student_id": "not-enrolled"})
+    request(u.teacher, "POST", path, 422, json={"classroom_id": room_id})
+    answered = u.teacher.post(path, json=body, timeout=310)
+    if LIVE_AI:
+        assert answered.status_code == 200, answered.text
+        data = answered.json()
+        cited = {e["question_id"] for e in data["evidence"]}
+        assert data["observations"] and data["requires_teacher_review"] is True, data
+        assert all(set(o["evidence_ids"]) <= cited for o in data["observations"]), data
+    else:
+        assert answered.status_code in (200, 503), answered.text
+    validate_response("POST", path, answered.status_code, answered.json())
+
+
 @dataclass
 class Late:
     assessment_id: str
@@ -1018,40 +1048,6 @@ def ai_service_accounts(u: Users) -> None:
     assert ai_core_status(password_token("student", env()["STUDENT_PASSWORD"])) == 403
 
 
-# runs inside the analytics container: sends a valid request to each agent that is not authorized yet and
-# prints its status and error code.
-PLACEHOLDER_PROBE = """
-import json, sys, urllib.error, urllib.request
-token, room = sys.stdin.read().split()
-ids = ["00000000-0000-4000-8000-000000000001"]
-requests = {
-    "student-performance-agent:8080/v1/performance_interpretation": {
-        "student_id": "student", "classroom_id": room, "evidence_ids": ids, "topic_ids": ids,
-        "performance_summary": [{"topic_id": ids[0], "attempted": 1, "correct": 1}],
-    },
-}
-for path, body in requests.items():
-    headers = {"Authorization": "Bearer " + token, "Content-Type": "application/json"}
-    req = urllib.request.Request("http://" + path, data=json.dumps(body).encode(), headers=headers)
-    try:
-        response = urllib.request.urlopen(req, timeout=10)
-        print(path, response.status, "")
-    except urllib.error.HTTPError as e:
-        print(path, e.code, json.loads(e.read() or b"{}").get("error", {}).get("code", ""))
-"""
-
-
-def unauthorized_agents() -> None:
-    """performance interpretation still answers 501 to a valid, authorized request."""
-    token = service_token("content-indexer")
-    probe = docker("exec", "-T", "analytics", "python", "-c", PLACEHOLDER_PROBE, input=f"{token} {uuid4()}")
-    lines = probe.stdout.split("\n")
-    results = [line.split() for line in lines if line.strip()]
-    assert len(results) == 1, probe.stdout
-    for path, status, code in results:
-        assert (status, code) == ("501", "AI_CAPABILITY_NOT_IMPLEMENTED"), (path, status, code)
-
-
 def rate_limit_per_session() -> None:
     """kong's rate limit is each signed-in session's own: one session using it up leaves others unaffected."""
     busy, other = login("teacher", "TEACHER_PASSWORD"), login("student", "STUDENT_PASSWORD")
@@ -1155,8 +1151,8 @@ def main() -> None:
         "finalized results, the class dashboard's counts and class performance, Kafka analytics, consumer restart, duplicate event and business-key idempotency, "
         "draft and scheduled assessments, saved answers, late submissions, short-answer and rubric marking, "
         "AI marking suggestions, manual release (no analytics before it), part marks in analytics, "
-        "student privacy, database isolation, numbered migrations, pgvector, AI service accounts, 501 for unauthorized "
-        "agents, per-session rate limiting."
+        "student privacy, database isolation, numbered migrations, pgvector, AI service accounts, teacher-only "
+        "performance interpretation, per-session rate limiting."
     )
 
 
@@ -1170,6 +1166,7 @@ def run() -> None:
     graded = step("Assessment and grading", lambda: assess_and_grade(users, room_id))
     step("Restart and replayed events", lambda: replayed_events(users, room_id, graded))
     step("Class dashboard", lambda: class_dashboard(users, room_id, graded))
+    step("Performance interpretation", lambda: performance_interpretation(users, room_id))
     late = step("Assessment lifecycle", lambda: lifecycle(users, room_id))
     step("Marking and release", lambda: marking(users, room_id, late))
     step("Unenrollment", lambda: unenroll(users, room_id))
@@ -1179,7 +1176,6 @@ def run() -> None:
     step("Database isolation and migrations", databases)
     step("AI service accounts", lambda: ai_service_accounts(users))
     step("Protected operational measurements", lambda: operational_metrics(users))
-    step("Unauthorized agents answer 501", unauthorized_agents)
     step("Per-session rate limit", rate_limit_per_session)
     step("Removing this run's topics", remove_topics)
 

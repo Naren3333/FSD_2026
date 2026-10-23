@@ -62,8 +62,9 @@
     },
     "/v1/performance_interpretation": {
       "post": {
-        "summary": "Execute",
-        "operationId": "execute_v1_performance_interpretation_post",
+        "summary": "Interpret",
+        "description": "a draft interpretation of the student's finalized results, for their teacher to review; nothing is saved.",
+        "operationId": "interpret_v1_performance_interpretation_post",
         "requestBody": {
           "content": {
             "application/json": {
@@ -85,8 +86,18 @@
               }
             }
           },
-          "501": {
-            "description": "Not Implemented",
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden",
             "content": {
               "application/json": {
                 "schema": {
@@ -96,11 +107,41 @@
             }
           },
           "422": {
-            "description": "Validation Error",
+            "description": "Unprocessable Content",
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Too Many Requests",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "Bad Gateway",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Service Unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
                 }
               }
             }
@@ -154,18 +195,61 @@
         ],
         "title": "ErrorResponse"
       },
-      "HTTPValidationError": {
+      "Evidence": {
         "properties": {
-          "detail": {
-            "items": {
-              "$ref": "#/components/schemas/ValidationError"
-            },
-            "type": "array",
-            "title": "Detail"
+          "question_id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Question Id"
+          },
+          "evaluation_id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Evaluation Id"
+          },
+          "assessment_id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Assessment Id"
+          },
+          "assessment_title": {
+            "type": "string",
+            "title": "Assessment Title"
+          },
+          "topic_id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Topic Id"
+          },
+          "prompt": {
+            "type": "string",
+            "title": "Prompt"
+          },
+          "awarded": {
+            "type": "integer",
+            "minimum": 0.0,
+            "title": "Awarded"
+          },
+          "possible": {
+            "type": "integer",
+            "minimum": 1.0,
+            "title": "Possible"
           }
         },
+        "additionalProperties": false,
         "type": "object",
-        "title": "HTTPValidationError"
+        "required": [
+          "question_id",
+          "evaluation_id",
+          "assessment_id",
+          "assessment_title",
+          "topic_id",
+          "prompt",
+          "awarded",
+          "possible"
+        ],
+        "title": "Evidence",
+        "description": "a finalized question result an observation cites, for the teacher to check."
       },
       "Observation": {
         "properties": {
@@ -179,6 +263,7 @@
               "format": "uuid"
             },
             "type": "array",
+            "minItems": 1,
             "title": "Evidence Ids"
           }
         },
@@ -188,64 +273,43 @@
           "text",
           "evidence_ids"
         ],
-        "title": "Observation"
+        "title": "Observation",
+        "description": "a statement about the student and the questions (their finalized marks) it rests on."
       },
       "RequestContract": {
         "properties": {
-          "student_id": {
-            "type": "string",
-            "maxLength": 200,
-            "minLength": 1,
-            "title": "Student Id"
-          },
           "classroom_id": {
             "type": "string",
             "format": "uuid",
             "title": "Classroom Id"
           },
-          "performance_summary": {
-            "items": {
-              "$ref": "#/components/schemas/TopicSummary"
-            },
-            "type": "array",
-            "maxItems": 100,
-            "minItems": 1,
-            "title": "Performance Summary"
-          },
-          "evidence_ids": {
-            "items": {
-              "type": "string",
-              "format": "uuid"
-            },
-            "type": "array",
-            "maxItems": 100,
-            "minItems": 1,
-            "title": "Evidence Ids"
-          },
-          "topic_ids": {
-            "items": {
-              "type": "string",
-              "format": "uuid"
-            },
-            "type": "array",
-            "maxItems": 100,
-            "minItems": 1,
-            "title": "Topic Ids"
+          "student_id": {
+            "type": "string",
+            "maxLength": 200,
+            "minLength": 1,
+            "title": "Student Id"
           }
         },
         "additionalProperties": false,
         "type": "object",
         "required": [
-          "student_id",
           "classroom_id",
-          "performance_summary",
-          "evidence_ids",
-          "topic_ids"
+          "student_id"
         ],
-        "title": "RequestContract"
+        "title": "RequestContract",
+        "description": "the student to interpret, in a classroom the caller teaches; the agent gathers the evidence itself."
       },
       "ResponseContract": {
         "properties": {
+          "classroom_id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Classroom Id"
+          },
+          "student_id": {
+            "type": "string",
+            "title": "Student Id"
+          },
           "observations": {
             "items": {
               "$ref": "#/components/schemas/Observation"
@@ -274,77 +338,91 @@
             },
             "type": "array",
             "title": "Recommended Topic Ids"
+          },
+          "evidence": {
+            "items": {
+              "$ref": "#/components/schemas/Evidence"
+            },
+            "type": "array",
+            "title": "Evidence"
+          },
+          "steps": {
+            "items": {
+              "$ref": "#/components/schemas/Step"
+            },
+            "type": "array",
+            "title": "Steps"
+          },
+          "model_turns": {
+            "type": "integer",
+            "minimum": 1.0,
+            "title": "Model Turns"
+          },
+          "dropped": {
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "type": "object",
+            "title": "Dropped"
+          },
+          "requires_teacher_review": {
+            "type": "boolean",
+            "const": true,
+            "title": "Requires Teacher Review",
+            "default": true
           }
         },
         "additionalProperties": false,
         "type": "object",
         "required": [
+          "classroom_id",
+          "student_id",
           "observations",
           "possible_misconceptions",
           "suggested_interventions",
-          "recommended_topic_ids"
+          "recommended_topic_ids",
+          "evidence",
+          "steps",
+          "model_turns",
+          "dropped"
         ],
-        "title": "ResponseContract"
+        "title": "ResponseContract",
+        "description": "a draft interpretation for the classroom's teacher; it never changes a grade."
       },
-      "TopicSummary": {
+      "Step": {
         "properties": {
-          "topic_id": {
+          "tool": {
             "type": "string",
-            "format": "uuid",
-            "title": "Topic Id"
+            "title": "Tool"
           },
-          "attempted": {
-            "type": "integer",
-            "minimum": 0.0,
-            "title": "Attempted"
+          "reason": {
+            "type": "string",
+            "title": "Reason"
           },
-          "correct": {
-            "type": "integer",
-            "minimum": 0.0,
-            "title": "Correct"
+          "target": {
+            "type": "string",
+            "title": "Target"
+          },
+          "outcome": {
+            "type": "string",
+            "enum": [
+              "ok",
+              "refused",
+              "failed"
+            ],
+            "title": "Outcome"
           }
         },
         "additionalProperties": false,
         "type": "object",
         "required": [
-          "topic_id",
-          "attempted",
-          "correct"
+          "tool",
+          "reason",
+          "target",
+          "outcome"
         ],
-        "title": "TopicSummary"
-      },
-      "ValidationError": {
-        "properties": {
-          "loc": {
-            "items": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "integer"
-                }
-              ]
-            },
-            "type": "array",
-            "title": "Location"
-          },
-          "msg": {
-            "type": "string",
-            "title": "Message"
-          },
-          "type": {
-            "type": "string",
-            "title": "Error Type"
-          }
-        },
-        "type": "object",
-        "required": [
-          "loc",
-          "msg",
-          "type"
-        ],
-        "title": "ValidationError"
+        "title": "Step",
+        "description": "one tool call the agent chose, in order, and what came of it."
       }
     }
   }

@@ -7,6 +7,7 @@ import type { components as GradingApi } from './generated/grading';
 import type { components as IdentityApi } from './generated/identity';
 import type { components as ChatbotApi } from './generated/question-chatbot-agent';
 import type { components as GenerationApi } from './generated/question-generation-agent';
+import type { components as PerformanceAgentApi } from './generated/student-performance-agent';
 
 type Identity = IdentityApi['schemas'];
 type Curriculum = CurriculumApi['schemas'];
@@ -132,3 +133,8 @@ export type GenerateResult = Generation['GenerateResponse'];
 /* marking guidance for a short answer or free response the teacher wrote. */
 export type GuidanceRequest = Generation['GuidanceRequest'];
 export type Guidance = Generation['Guidance'];
+
+/* the performance agent's draft interpretation of one student's finalized results, for their teacher (adr 0014). */
+export type Interpretation = PerformanceAgentApi['schemas']['ResponseContract'];
+export type InterpretationEvidence = PerformanceAgentApi['schemas']['Evidence'];
+export type InterpretationStep = PerformanceAgentApi['schemas']['Step'];

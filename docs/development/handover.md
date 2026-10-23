@@ -25,7 +25,7 @@ Static verification completed: Ruff formatting/lint for changed Python services/
 The repository began empty. It contains exactly ten independent application services, their Dockerfiles and tests, an Angular client, and reproducible local Kong OSS / Keycloak / Kafka / PostgreSQL (pgvector) / S3-compatible object storage (SeaweedFS) infrastructure.
 
 - **Go:** Identity/Classroom, Curriculum, Content, Assessment and Grading. Transactional, explicitly authorized operations with bounded request handling and SQL transactions.
-- **Python/FastAPI:** deterministic Analytics and the four AI applications: ai-core (inference, ingest, rerank), the question chatbot (ADR 0002), question generation (ADR 0006) and performance interpretation (still a 501 placeholder).
+- **Python/FastAPI:** deterministic Analytics and the four AI applications: ai-core (inference, ingest, rerank), the question chatbot (ADR 0002), question generation (ADR 0006) and performance interpretation (ADR 0014).
 - **Angular 21**, strict TypeScript, for the browser. Shell, SQL and configuration are operational artifacts; there is no third backend language and no extra business service.
 
 ## Repository layout
@@ -89,7 +89,7 @@ DESIGN.md / UX-CONTRACT.md         UI design and behavioural ownership
 - **Question chatbot** (`/api/chatbot`, own `chatbot` database): skips rewriting simple standalone definitions; retains rewriting for history, ambiguity and multiple topics. Searches the primary query first and adds searches for uncovered topics, retaining the calibrated rerank floor. Evidence fits `CONTEXT_TOKENS` (8000 default) or the turn refuses without an answer call. Content receives the user's own token. Answers stream with citations and are always saved (`interrupted` on disconnect). Citations of deleted materials are blanked (`removed: true`).
 - **Question generation** (`/api/question-generation`, stateless): `POST /v1/questions` and `POST /v1/marking-guidance` for teachers; drafts must cite given passages and quote evidence found in them. `RELEVANCE_FLOOR` is 0.5, calibrated on the eval corpus (operations.md).
 - The two agents share their ai-core and Content transport in `learning_transport`.
-- **Student performance:** `/v1/performance_interpretation` validates and returns 501 `AI_CAPABILITY_NOT_IMPLEMENTED`.
+- **Performance interpretation** (`/api/performance-agent`, stateless): `POST /v1/performance_interpretation` for a classroom's teacher and one enrolled student. A bounded tool loop (`PERFORMANCE_MAX_TURNS` 5, `PERFORMANCE_DEADLINE` 120 s) over Analytics, Grading (`GET /v1/evaluations?student_id=`), Assessment and Curriculum; findings must cite questions it was shown, misconceptions only answers it read that lost marks (ADR 0014). Planned agentic work: `docs/architecture/agentic-workflows.md`.
 
 ### Web
 - Teachers land on the Class dashboard, students on Home. Sections: Classrooms, Curriculum (teacher), Materials with indexing status and delete, Ask the materials (streamed chat with sources), Assessments (editor with generation and marking guidance; student taking with autosave), Grading review with inline marking and AI suggestions, My results, Learning performance / My progress, Profile.
@@ -126,7 +126,7 @@ DESIGN.md / UX-CONTRACT.md         UI design and behavioural ownership
 The full requested definition of done is **not claimed**. The core workflow is implemented, but these remain incomplete or narrower than the brief:
 
 - Question bank, resits, numerical generated questions and student self-practice. Each student can submit an assessment once.
-- Document revisions beyond revision 1, lesson-plan persistence, and the performance interpretation agent.
+- Document revisions beyond revision 1 and lesson-plan persistence. Performance interpretations are drafts on request: none run on finalization or are saved.
 - Assessment trends, richer teacher summaries, and archival/reconciliation beyond Kafka's 7-day retention.
 - Offset pagination can drift under concurrent insertions; metadata pickers still accumulate their full authorized list. Cursor pagination and server-side picker search remain future work.
 - Production Kafka TLS/SASL/ACLs, network policies, per-service machine identities, managed OIDC persistence, signing-key rollover, separate migration/runtime roles, backups/restore testing, secret management and dependency/image audits.
@@ -134,4 +134,4 @@ The full requested definition of done is **not claimed**. The core workflow is i
 - Reservation estimates depend on configured model prices and image/token allowances. Uncertain provider outcomes or ledger-write failures retain conservative holds; operators must investigate these instead of blindly releasing them.
 - Static checks and focused browser tests are not a comprehensive accessibility, multi-browser, load, chaos or security assessment.
 
-Recommended next: question bank and resits (ADR 0004's "not built yet"), cursor pagination, then the performance interpretation agent, each behind its own ADR as AGENTS.md requires. Preserve teacher approval and evidence provenance throughout.
+Recommended next: question bank and resits (ADR 0004's "not built yet"), cursor pagination, and the next agentic workflows in `docs/architecture/agentic-workflows.md`, each behind its own ADR as AGENTS.md requires. Preserve teacher approval and evidence provenance throughout.

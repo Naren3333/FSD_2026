@@ -46,10 +46,13 @@ flowchart LR
   Grading -->|marking suggestions as grading-marker| AI
   QG -->|generate as question-generation-agent| AI
   QG -->|search with the teacher's token| Content
+  SP -->|generate as student-performance-agent| AI
+  SP -->|read with the teacher's token| Analytics
+  SP -->|read with the teacher's token| Grading
   subgraph AI applications
     AI[AI core: ingest, embed, generate, rerank]
     QG[Question generation]
-    SP[Performance interpretation: 501]
+    SP[Performance interpretation]
     QC[Question chatbot]
   end
 ```
@@ -98,4 +101,4 @@ Grading asks ai-core for marking suggestions when an assessment turns them on (A
 
 Question generation (ADR 0006) drafts questions and marking guidance for a classroom's teacher. It reads the topic from Curriculum and passages from Content's search with the teacher's own token, makes one structured ai-core call billed to the teacher, and returns only drafts whose cited passages and quoted evidence check out. It stores nothing: the teacher adds drafts to the editor, and Assessment validates them like any question. Generated questions keep their `sources` and `origin` for the teacher; the submission event leaves them out.
 
-The performance-interpretation agent defines versioned input/output contracts and returns `AI_CAPABILITY_NOT_IMPLEMENTED` (501) after authentication, role checking and validation. No agent accesses business databases or uses test doubles in runtime code. The agent contracts carry untrusted references; accepting a syntactically valid reference is not authorization to retrieve it.
+Performance interpretation (ADR 0014) is the first agent that chooses its own steps. For a classroom's teacher it reads one enrolled student's topic summary (Analytics), finalized results (Grading), the assessments' questions (Assessment) and topic names (Curriculum) with the teacher's own token, then runs at most five structured ai-core turns billed to the teacher. Each turn either calls read-only tools (read the answers behind a result, read a topic's prerequisites, compare with the class) or reports; the last turn must report. The report is checked against what the tools returned and comes back with its cited questions and the agent's steps. It stores nothing and never changes a grade, and it does not search Content. The workflows planned after it are listed in `agentic-workflows.md`. No agent accesses business databases or uses test doubles in runtime code.
