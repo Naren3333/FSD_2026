@@ -2,6 +2,8 @@
 
 Status: accepted 2026-10-17. The project owner asked for the plan in `plans/question-generation-design.md` to be built, with these decisions: teachers only, no numerical questions in the first version, and generation before a question bank.
 
+Amended by ADR 0015 (reviewer pass and retries).
+
 ## Context
 
 A teacher who has uploaded a classroom's PDFs still writes every question, accepted answer and rubric by hand. The question-generation agent was a 501 placeholder with a contract nobody called. Marking-scheme passages (ADR 0005) help AI marking, but only when the teacher has a scheme and finds the right passage for each question.
@@ -10,7 +12,7 @@ A teacher who has uploaded a classroom's PDFs still writes every question, accep
 
 **The agent is a fixed, stateless pipeline, published by Kong at `/api/question-generation` and called with the teacher's own token.**
 
-- `POST /v1/questions` takes a classroom, 1–10 of its documents, one curriculum topic (called a skill until ADR 0007), 1–3 question types (multiple choice, short answer, free response), a difficulty, a count of 1–10, an optional focus, and the prompts already in the editor. It returns drafts in Assessment's own question shape with `requires_teacher_review: true`. Nothing is saved.
+- `POST /v1/questions` takes a classroom, 1–10 of its documents, one curriculum topic (called a skill until ADR 0007), 1–3 question types (multiple choice, short answer, free response), a difficulty, a count for each type, 1–10 each and at most 10 in total (amended 2026-10-24), an optional focus, and the prompts already in the editor. It returns drafts in Assessment's own question shape with `requires_teacher_review: true`. Nothing is saved.
 - `POST /v1/marking-guidance` takes a question the teacher wrote (short answer or free response) and documents, and returns suggested accepted answers or a rubric and model answer, plus marking points written as a marking-scheme passage.
 - Only the classroom's teacher may call either (checked at Identity); students and service accounts get 403. Student self-practice would need its own ADR.
 - Each request: the topic is read from Curriculum and Content `POST /v1/search` runs with the teacher's token over the chosen documents (12 passages for questions, 6 for guidance). If the best reranked passage is below the relevance floor (`RELEVANCE_FLOOR`, default 0.5, calibrated on the eval corpus on 2026-10-19), the request fails with `422 INSUFFICIENT_SOURCE` instead of generating from too little. If reranking fell back to unscored order, the floor cannot be applied and the request fails with `503 RERANK_UNAVAILABLE`, as the chatbot's turn does. Then one structured `generate` call to ai-core as the `question-generation-agent` service account, billed to the teacher (ADR 0003: spend limit and AI_BUSY become 429).

@@ -1,7 +1,7 @@
 """the question-generation agent's http contract (adr 0006)."""
 
 from collections.abc import Sequence
-from typing import Annotated, Literal, Self
+from typing import Annotated, Literal, Self, get_args
 from uuid import UUID
 
 from learning_transport import Contract
@@ -29,6 +29,7 @@ MAX_FOCUS = 300
 MAX_EXISTING = 50
 
 Generatable = Literal["multiple_choice", "short_answer", "free_response"]
+TYPE_ORDER = get_args(Generatable)
 TeacherMarked = Literal["short_answer", "free_response"]
 Difficulty = Literal["introductory", "intermediate", "advanced"]
 Prompt = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=MAX_PROMPT)]
@@ -43,20 +44,33 @@ class GenerateRequest(Contract):
     classroom_id: UUID
     document_ids: list[UUID] = Field(min_length=1, max_length=MAX_DOCUMENTS)
     topic_id: UUID
-    question_types: list[Generatable] = Field(min_length=1, max_length=3)
+    counts: dict[Generatable, int]  # how many of each type to write
     difficulty: Difficulty
-    count: int = Field(ge=1, le=MAX_COUNT)
     focus: Annotated[str, StringConstraints(strip_whitespace=True, max_length=MAX_FOCUS)] = ""
     # the questions the editor already holds, so the agent can drop near-duplicates.
     existing_prompts: list[Annotated[str, StringConstraints(max_length=MAX_PROMPT)]] = Field(
         default=[], max_length=MAX_EXISTING
     )
+    review: bool = True  # false skips the reviewer pass for this request
 
     @model_validator(mode="after")
     def distinct(self) -> Self:
         _distinct(self.document_ids, "document_ids")
-        _distinct(self.question_types, "question_types")
+        if not self.counts:
+            raise ValueError("Choose at least one question type.")
+        if any(not 1 <= n <= MAX_COUNT for n in self.counts.values()):
+            raise ValueError(f"Ask for 1 to {MAX_COUNT} questions of each type.")
+        if sum(self.counts.values()) > MAX_COUNT:
+            raise ValueError(f"Ask for at most {MAX_COUNT} questions in total.")
         return self
+
+    @property
+    def question_types(self) -> list[Generatable]:
+        return [t for t in TYPE_ORDER if t in self.counts]
+
+    @property
+    def count(self) -> int:
+        return sum(self.counts.values())
 
 
 class Excerpt(Contract):
@@ -102,17 +116,41 @@ class DraftQuestion(Contract):
     origin: Literal["generated"] = "generated"
 
 
+ReviewStatus = Literal["passed", "flagged", "not_reviewed"]
+
+
+class Review(Contract):
+    status: ReviewStatus = "not_reviewed"
+    note: str = ""  # the reviewer's note for flagged; why review did not run for not_reviewed; "" for passed
+    round: int = 0  # 0 = first attempt, 1-2 = written in a retry
+    source: Literal["reviewer", "check"] = "reviewer"  # who wrote a flagged note: the model or our own code
+
+
 class Generated(Contract):
     question: DraftQuestion
     evidence: str  # quoted from a source passage; it supports the answer key
     explanation: str  # why the key is right, for the teacher
+    review: Review = Field(default_factory=Review)
+
+
+class Round(Contract):
+    generated: int  # questions in the model's reply
+    passed_checks: int
+    passed_review: int  # equals passed_checks when the round was not reviewed
+    rejected: dict[str, int]  # by reason, from checks and reviewer, this round only
+    reviewed: bool = False  # the review call returned verdicts for this round
+    retried: bool = False  # a later round ran after this one
+    sent_back: dict[str, int] = Field(default_factory=dict)  # by reason, the drafts fed back to the generator
 
 
 class GenerateResponse(Contract):
     questions: list[Generated]
     requested: int
+    requested_by_type: dict[str, int]
     returned: int
-    dropped: dict[str, int]  # questions the checks refused, by reason
+    dropped: dict[str, int]  # questions the checks or the reviewer refused, by reason
+    rounds: list[Round] = Field(default_factory=list)
+    model_calls: int = 0
     requires_teacher_review: Literal[True] = True
 
 

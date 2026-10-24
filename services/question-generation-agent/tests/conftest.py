@@ -27,6 +27,7 @@ SETTINGS = Settings(
     token_url="http://keycloak:8080/token",
     client_id="question-generation-agent",
     client_secret="secret",
+    review=False,
 )
 
 UNIT_TESTS = (

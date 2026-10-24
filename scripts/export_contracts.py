@@ -32,7 +32,7 @@ def save(path, data):
     text = json.dumps(data, indent=2) + "\n"
     target = ROOT / path
     if not CHECK:
-        target.write_text(text, encoding="utf-8")
+        target.write_text(text, encoding="utf-8", newline="\n")
     elif not target.exists() or target.read_text(encoding="utf-8") != text:
         stale.append(path)
 

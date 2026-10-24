@@ -2,7 +2,8 @@
   <summary>Generate questions from teaching materials</summary>
   <p class="caption">
     AI drafts questions from the teaching materials you choose, each with the passage it came from. Nothing is
-    added until you add it, and you can change any draft before saving. Generating uses your daily AI
+    added until you add it, and you can change any draft before saving. The review checks drafts against your
+    materials, so a mistake in the materials can still appear in a draft. Generating uses your daily AI
     allowance.
   </p>
 
@@ -32,18 +33,33 @@
         </select>
       </app-field>
       <fieldset class="levels">
-        <legend>Question types</legend>
+        <legend>Question types and how many</legend>
         @for (type of types; track type.value) {
-          <label class="check">
+          <div class="type-row">
+            <label class="check">
+              <input
+                #typeBox
+                type="checkbox"
+                [checked]="chosenTypes().includes(type.value)"
+                (change)="toggleType(type.value, typeBox.checked)"
+              />
+              {{ type.label }}
+            </label>
             <input
-              #typeBox
-              type="checkbox"
-              [checked]="chosenTypes().includes(type.value)"
-              (change)="toggleType(type.value, typeBox.checked)"
+              #countBox
+              type="number"
+              min="1"
+              [max]="maxCount"
+              [id]="'generate-count-' + type.value"
+              [attr.aria-label]="'Number of ' + type.label.toLowerCase() + ' questions'"
+              [value]="counts()[type.value]"
+              [disabled]="!chosenTypes().includes(type.value)"
+              (input)="setCount(type.value, countBox.valueAsNumber)"
+              (keydown.enter)="$event.preventDefault(); generate()"
             />
-            {{ type.label }}
-          </label>
+          </div>
         }
+        <p class="caption" aria-live="polite">{{ totalText() }}</p>
       </fieldset>
       <div class="field-row">
         <app-field controlId="generate-difficulty" label="Difficulty">
@@ -52,17 +68,6 @@
             <option value="intermediate">Intermediate</option>
             <option value="advanced">Advanced</option>
           </select>
-        </app-field>
-        <app-field controlId="generate-count" label="How many" [hint]="'1–' + maxCount + '.'">
-          <input
-            appFieldControl
-            id="generate-count"
-            type="number"
-            min="1"
-            [max]="maxCount"
-            [formControl]="count"
-            (keydown.enter)="$event.preventDefault(); generate()"
-          />
         </app-field>
       </div>
       <app-field
@@ -84,6 +89,10 @@
           (keydown.enter)="$event.preventDefault(); generate()"
         />
       </app-field>
+      <label class="check">
+        <input type="checkbox" [formControl]="skipReview" />
+        Skip the review (faster and cheaper; drafts are only checked against their quotes)
+      </label>
       <button
         id="generate-button"
         type="button"
@@ -101,13 +110,28 @@
     }
   }
 
-  <app-section-state [section]="result" loading="Reading your materials and drafting questions…" />
+  <app-section-state
+    [section]="result"
+    [loading]="
+      reviewing()
+        ? 'Writing and reviewing questions… this can take a few minutes.'
+        : 'Reading your materials and drafting questions…'
+    "
+  />
   @if (result.ready() && result.value(); as found) {
     <p class="caption" aria-live="polite">
-      {{ found.returned }} of {{ found.requested }}
-      {{ found.requested === 1 ? 'question' : 'questions' }} drafted.
+      {{ drafted() }}
       {{ dropped() }}
     </p>
+    @if (showRounds()) {
+      <details>
+        <summary>How the drafts were checked</summary>
+        @for (line of roundLines(); track $index) {
+          <p class="caption">{{ line }}</p>
+        }
+        <p class="caption">{{ modelCalls() }} AI {{ modelCalls() === 1 ? 'call' : 'calls' }} in total.</p>
+      </details>
+    }
     @if (!room) {
       <p class="caption">The assessment has the most questions it can take. Remove one to add a draft.</p>
     }
@@ -117,6 +141,11 @@
           <strong>AI-written draft</strong> · {{ typeName(item.draft.question.type) }} ·
           {{ marks(item.draft.question.points) }} · check it before adding it
         </p>
+        @if (item.draft.review?.status === 'passed') {
+          <p class="caption">Checked by a second AI reviewer against its passages.</p>
+        } @else if (reviewText(item.draft.review); as text) {
+          <p class="warning" role="status">{{ text }}</p>
+        }
         <p class="answer-text">{{ item.draft.question.prompt }}</p>
         @switch (item.draft.question.type) {
           @case ('multiple_choice') {

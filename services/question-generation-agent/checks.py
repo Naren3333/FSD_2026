@@ -1,7 +1,9 @@
 """deterministic checks on the model's replies (adr 0006)."""
 
 import json
+import re
 from collections import Counter
+from dataclasses import dataclass
 from difflib import SequenceMatcher
 from typing import Any
 from uuid import UUID
@@ -36,6 +38,27 @@ from prompts import Passage
 
 MIN_EVIDENCE = 20  # characters of quoted evidence, after normalizing
 DUPLICATE_RATIO = 0.9  # prompts at least this similar are the same question
+REWRITE_RATIO = 0.75  # a flagged draft this similar to a kept one is taken to be its older version
+
+LONG_KEY_MIN = 40  # characters before a key counts as long
+LONG_KEY_RATIO = 1.8  # times the average length of the other options
+LONG_KEY_NOTE = "The answer is much longer than the other options."
+
+# phrases that only refer to the source; wider wording ("described as", "in the passage") is the reviewer's
+# NEEDS_MATERIALS, since ordinary questions use it too.
+MATERIAL_PHRASES = (
+    "according to the passage",
+    "according to the passages",
+    "according to the materials",
+    "according to the text",
+    "in the passage above",
+    "in the text above",
+    "the examples above",
+    "the example above",
+    "in the examples",
+    "the described",
+)
+NEEDS_MATERIALS_PATTERN = re.compile(r"\b(?:" + "|".join(re.escape(p) for p in MATERIAL_PHRASES) + r")\b")
 
 # reasons a question is dropped.
 INVALID_PROMPT = "INVALID_PROMPT"
@@ -45,11 +68,22 @@ EVIDENCE_NOT_FOUND = "EVIDENCE_NOT_FOUND"
 INVALID_KEY = "INVALID_KEY"
 INVALID_RUBRIC = "INVALID_RUBRIC"
 INVALID_GUIDANCE = "INVALID_GUIDANCE"
+NEEDS_MATERIALS = "NEEDS_MATERIALS"
 DUPLICATE = "DUPLICATE"
+LONG_KEY = "LONG_KEY"  # set by long_key, never by the reviewer
 
 
 class UnreadableOutputError(Exception):
     """the reply as a whole could not be read."""
+
+
+@dataclass(frozen=True)
+class Rejected:
+    """a draft a check refused, as the generator is told about it on a retry."""
+
+    prompt: str
+    type: str
+    reason: str
 
 
 class RuleBrokenError(Exception):
@@ -228,8 +262,16 @@ def marking_points(item: dict[str, Any]) -> Excerpt:
     return Excerpt(text=text)
 
 
-def similar(a: str, b: str) -> bool:
-    return SequenceMatcher(None, normalize(a), normalize(b)).ratio() >= DUPLICATE_RATIO
+def similar(a: str, b: str, ratio: float = DUPLICATE_RATIO) -> bool:
+    return SequenceMatcher(None, normalize(a), normalize(b)).ratio() >= ratio
+
+
+def long_key(draft: DraftQuestion) -> bool:
+    """a multiple choice whose key is far longer than the other options, which gives it away."""
+    others = [o for o in draft.options if o != draft.answer]
+    if draft.type != "multiple_choice" or len(draft.options) < 3 or len(draft.answer) < LONG_KEY_MIN:
+        return False
+    return len(draft.answer) > LONG_KEY_RATIO * (sum(len(o) for o in others) / len(others))
 
 
 def question(item: Any, request: GenerateRequest, passages: list[Passage], seen: list[str]) -> Generated:
@@ -239,6 +281,8 @@ def question(item: Any, request: GenerateRequest, passages: list[Passage], seen:
     prompt, kind = _text(item, "prompt"), item.get("type")
     if not prompt or len(prompt) > MAX_PROMPT:
         raise RuleBrokenError(INVALID_PROMPT)
+    if NEEDS_MATERIALS_PATTERN.search(normalize(prompt)):
+        raise RuleBrokenError(NEEDS_MATERIALS)
     if kind not in request.question_types:
         raise RuleBrokenError(WRONG_TYPE)
     sources = cited(item, passages)
@@ -275,25 +319,36 @@ def question(item: Any, request: GenerateRequest, passages: list[Passage], seen:
 
 def questions(
     output: str, request: GenerateRequest, passages: list[Passage]
-) -> tuple[list[Generated], Counter[str]]:
-    """the reply's questions that pass every check, at most the number asked for, and the rest counted by reason."""
+) -> tuple[list[Generated], Counter[str], list[Rejected], int]:
+    """the reply's questions that pass every check, at most the number asked for of each type, the rest counted by reason, each refused one in reply order, and how many the reply held."""
     items = read_reply(output).get("questions")
     if not isinstance(items, list):
         raise UnreadableOutputError
     kept: list[Generated] = []
     dropped: Counter[str] = Counter()
+    rejected: list[Rejected] = []
     seen = [p for p in request.existing_prompts if p.strip()]
+    room = dict(request.counts)
     for item in items:
-        if len(kept) == request.count:
+        if not any(room.values()):
             break
+        if isinstance(item, dict) and isinstance(item.get("type"), str) and room.get(item["type"], 1) <= 0:
+            continue  # this type is full: not read, as drafts beyond the count always were
         try:
             generated = question(item, request, passages, seen)
         except RuleBrokenError as d:
             dropped[d.reason] += 1
+            known = isinstance(item, dict)
+            rejected.append(
+                Rejected(
+                    _text(item, "prompt") if known else "", _text(item, "type") if known else "", d.reason
+                )
+            )
             continue
         kept.append(generated)
+        room[generated.question.type] -= 1
         seen.append(generated.question.prompt)
-    return kept, dropped
+    return kept, dropped, rejected, len(items)
 
 
 def guidance(output: str, request: GuidanceRequest, passages: list[Passage]) -> Guidance:

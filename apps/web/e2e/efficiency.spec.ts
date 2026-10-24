@@ -1,5 +1,5 @@
 import { expect, test } from '@playwright/test';
-import { deleteTestDataAfterEach, expectNoHorizontalScroll, teacherWithClassroom } from './helpers';
+import { GATEWAY, deleteTestDataAfterEach, expectNoHorizontalScroll, teacherWithClassroom } from './helpers';
 
 deleteTestDataAfterEach();
 
@@ -15,10 +15,9 @@ test('materials page through real data, recover from a failed read and fall back
   const request = await reading;
   const headers = await request.allHeaders();
   const classroom = new URL(request.url()).searchParams.get('classroom_id')!;
-  const origin = new URL(request.url()).origin;
   for (let i = 0; i < 22; i++) {
     const response = await page.request.post(
-      `${origin}/api/content/documents?classroom_id=${classroom}&title=Material%20${i}`,
+      `${GATEWAY}/content/documents?classroom_id=${classroom}&title=Material%20${i}`,
       {
         headers: { Authorization: headers['authorization'], 'Content-Type': 'text/plain' },
         data: 'A real teaching material for the pagination test.',

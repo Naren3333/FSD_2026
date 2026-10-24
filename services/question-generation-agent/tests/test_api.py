@@ -14,9 +14,8 @@ BODY: dict[str, Any] = {
     "classroom_id": ROOM,
     "document_ids": [DOC],
     "topic_id": TOPIC,
-    "question_types": ["multiple_choice", "short_answer", "free_response"],
+    "counts": {"multiple_choice": 1, "short_answer": 1, "free_response": 1},
     "difficulty": "intermediate",
-    "count": 3,
     "focus": "unit tests and boundaries",
 }
 GUIDANCE_BODY: dict[str, Any] = {
@@ -31,7 +30,11 @@ def test_a_teacher_gets_checked_questions_from_their_own_search(api, fakes: Fake
     fakes.replies = [
         reply({"questions": [choice(), short(), written(), choice(evidence="made up evidence here")]})
     ]
-    resp = api.post(GENERATE, json={**BODY, "count": 4}, headers=as_user())
+    resp = api.post(
+        GENERATE,
+        json={**BODY, "counts": {"multiple_choice": 2, "short_answer": 1, "free_response": 1}},
+        headers=as_user(),
+    )
     assert resp.status_code == 200, resp.text
     data = resp.json()
     assert [q["question"]["type"] for q in data["questions"]] == [
@@ -39,7 +42,12 @@ def test_a_teacher_gets_checked_questions_from_their_own_search(api, fakes: Fake
         "short_answer",
         "free_response",
     ]
-    assert data["requested"] == 4 and data["returned"] == 3 and data["dropped"] == {"EVIDENCE_NOT_FOUND": 1}
+    assert (
+        data["requested"] == 4
+        and data["requested_by_type"] == {"multiple_choice": 2, "short_answer": 1, "free_response": 1}
+        and data["returned"] == 3
+        and data["dropped"] == {"EVIDENCE_NOT_FOUND": 1}
+    )
     assert data["requires_teacher_review"] is True
     assert data["questions"][0]["question"]["sources"][0] == {
         "document_id": DOC, "chunk_id": CHUNK_1, "page": 3, "text": fakes.results[0]["content"],
@@ -221,10 +229,11 @@ def test_search_failures(api, fakes: Fakes, status, code, expected_status, expec
 @pytest.mark.parametrize(
     "change",
     [
-        {"count": 11},
-        {"count": 0},
-        {"question_types": ["numerical"]},
-        {"question_types": ["short_answer", "short_answer"]},
+        {"counts": {"numerical": 1}},
+        {"counts": {"multiple_choice": 0}},
+        {"counts": {"multiple_choice": 11}},
+        {"counts": {"multiple_choice": 6, "short_answer": 5}},
+        {"counts": {}},
         {"document_ids": []},
         {"document_ids": [DOC, DOC]},
         {"focus": "x" * 301},

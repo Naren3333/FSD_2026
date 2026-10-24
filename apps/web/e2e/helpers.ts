@@ -110,7 +110,7 @@ export function deleteTestTopic(name: string): void {
 }
 
 /* the stack's kong gateway and keycloak, on the ports scripts/local_stack.py reads: the environment's (stack_tests.py sets the test stack's), else .env's, else the development defaults. */
-const GATEWAY = `http://127.0.0.1:${process.env['KONG_PORT'] || env['KONG_PORT'] || '8000'}/api`;
+export const GATEWAY = `http://127.0.0.1:${process.env['KONG_PORT'] || env['KONG_PORT'] || '8000'}/api`;
 const KEYCLOAK = `http://127.0.0.1:${process.env['KEYCLOAK_PORT'] || env['KEYCLOAK_PORT'] || '8081'}`;
 
 /* deletes a classroom a test created through identity's api, as the seeded teacher who created it, so every service purges its data for it as for a teacher's deletion and test classrooms never pile up. */

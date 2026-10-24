@@ -494,19 +494,19 @@
             "format": "uuid",
             "title": "Topic Id"
           },
-          "question_types": {
-            "items": {
-              "type": "string",
+          "counts": {
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "propertyNames": {
               "enum": [
                 "multiple_choice",
                 "short_answer",
                 "free_response"
               ]
             },
-            "type": "array",
-            "maxItems": 3,
-            "minItems": 1,
-            "title": "Question Types"
+            "type": "object",
+            "title": "Counts"
           },
           "difficulty": {
             "type": "string",
@@ -516,12 +516,6 @@
               "advanced"
             ],
             "title": "Difficulty"
-          },
-          "count": {
-            "type": "integer",
-            "maximum": 10.0,
-            "minimum": 1.0,
-            "title": "Count"
           },
           "focus": {
             "type": "string",
@@ -538,6 +532,11 @@
             "maxItems": 50,
             "title": "Existing Prompts",
             "default": []
+          },
+          "review": {
+            "type": "boolean",
+            "title": "Review",
+            "default": true
           }
         },
         "additionalProperties": false,
@@ -546,9 +545,8 @@
           "classroom_id",
           "document_ids",
           "topic_id",
-          "question_types",
-          "difficulty",
-          "count"
+          "counts",
+          "difficulty"
         ],
         "title": "GenerateRequest"
       },
@@ -565,6 +563,13 @@
             "type": "integer",
             "title": "Requested"
           },
+          "requested_by_type": {
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "type": "object",
+            "title": "Requested By Type"
+          },
           "returned": {
             "type": "integer",
             "title": "Returned"
@@ -575,6 +580,18 @@
             },
             "type": "object",
             "title": "Dropped"
+          },
+          "rounds": {
+            "items": {
+              "$ref": "#/components/schemas/Round"
+            },
+            "type": "array",
+            "title": "Rounds"
+          },
+          "model_calls": {
+            "type": "integer",
+            "title": "Model Calls",
+            "default": 0
           },
           "requires_teacher_review": {
             "type": "boolean",
@@ -588,6 +605,7 @@
         "required": [
           "questions",
           "requested",
+          "requested_by_type",
           "returned",
           "dropped"
         ],
@@ -605,6 +623,9 @@
           "explanation": {
             "type": "string",
             "title": "Explanation"
+          },
+          "review": {
+            "$ref": "#/components/schemas/Review"
           }
         },
         "additionalProperties": false,
@@ -746,6 +767,91 @@
           "descriptor"
         ],
         "title": "Level"
+      },
+      "Review": {
+        "properties": {
+          "status": {
+            "type": "string",
+            "enum": [
+              "passed",
+              "flagged",
+              "not_reviewed"
+            ],
+            "title": "Status",
+            "default": "not_reviewed"
+          },
+          "note": {
+            "type": "string",
+            "title": "Note",
+            "default": ""
+          },
+          "round": {
+            "type": "integer",
+            "title": "Round",
+            "default": 0
+          },
+          "source": {
+            "type": "string",
+            "enum": [
+              "reviewer",
+              "check"
+            ],
+            "title": "Source",
+            "default": "reviewer"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "title": "Review"
+      },
+      "Round": {
+        "properties": {
+          "generated": {
+            "type": "integer",
+            "title": "Generated"
+          },
+          "passed_checks": {
+            "type": "integer",
+            "title": "Passed Checks"
+          },
+          "passed_review": {
+            "type": "integer",
+            "title": "Passed Review"
+          },
+          "rejected": {
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "type": "object",
+            "title": "Rejected"
+          },
+          "reviewed": {
+            "type": "boolean",
+            "title": "Reviewed",
+            "default": false
+          },
+          "retried": {
+            "type": "boolean",
+            "title": "Retried",
+            "default": false
+          },
+          "sent_back": {
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "type": "object",
+            "title": "Sent Back"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "generated",
+          "passed_checks",
+          "passed_review",
+          "rejected"
+        ],
+        "title": "Round"
       },
       "Rubric": {
         "properties": {

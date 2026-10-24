@@ -450,6 +450,9 @@ services:
       AI_TOKEN_URL: http://keycloak:8080/realms/learning/protocol/openid-connect/token
       AI_CLIENT_ID: question-generation-agent
       AI_CLIENT_SECRET: ${QUESTION_GENERATION_AGENT_CLIENT_SECRET:?Run scripts/setup.py or scripts/upgrade_local.py}
+      QUESTION_REVIEW: ${QUESTION_REVIEW:-on}
+      QUESTION_REVIEW_RETRIES: ${QUESTION_REVIEW_RETRIES:-2}
+      QUESTION_REVIEW_DEADLINE: ${QUESTION_REVIEW_DEADLINE:-240}
     depends_on:
       keycloak:
         condition: service_started

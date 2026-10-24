@@ -42,25 +42,33 @@ export interface components {
       classroom_id: string;
       document_ids: string[];
       topic_id: string;
-      question_types: ('multiple_choice' | 'short_answer' | 'free_response')[];
+      counts: {
+        [key: string]: number;
+      };
       difficulty: 'introductory' | 'intermediate' | 'advanced';
-      count: number;
       focus?: string;
       existing_prompts?: string[];
+      review?: boolean;
     };
     GenerateResponse: {
       questions: components['schemas']['Generated'][];
       requested: number;
+      requested_by_type: {
+        [key: string]: number;
+      };
       returned: number;
       dropped: {
         [key: string]: number;
       };
+      rounds?: components['schemas']['Round'][];
+      model_calls?: number;
       requires_teacher_review?: true;
     };
     Generated: {
       question: components['schemas']['DraftQuestion'];
       evidence: string;
       explanation: string;
+      review?: components['schemas']['Review'];
     };
     Guidance: {
       type: 'short_answer' | 'free_response';
@@ -81,6 +89,25 @@ export interface components {
     Level: {
       points: number;
       descriptor: string;
+    };
+    Review: {
+      status?: 'passed' | 'flagged' | 'not_reviewed';
+      note?: string;
+      round?: number;
+      source?: 'reviewer' | 'check';
+    };
+    Round: {
+      generated: number;
+      passed_checks: number;
+      passed_review: number;
+      rejected: {
+        [key: string]: number;
+      };
+      reviewed?: boolean;
+      retried?: boolean;
+      sent_back?: {
+        [key: string]: number;
+      };
     };
     Rubric: {
       criteria: components['schemas']['Criterion'][];

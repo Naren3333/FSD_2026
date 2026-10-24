@@ -6,6 +6,7 @@
   --brand: #176b70;
   --border: #cbd7df;
   --danger: #a52b36;
+  --warning: #7a4f00;
   /* hover fill for light controls, the tint behind badges and the current item, the sidebar's accent, focus rings. */
   --hover: #e8f0f3;
   --brand-tint: #e7f1f1;
@@ -405,6 +406,13 @@ code,
 .feedback .error,
 .error {
   color: var(--danger);
+}
+/* something the teacher should look at, not a failure. */
+.warning {
+  color: var(--warning);
+  border-left: 3px solid var(--warning);
+  padding-left: 10px;
+  font-size: 0.875rem;
 }
 .grade {
   border-top: 1px solid var(--border);
@@ -1164,6 +1172,19 @@ label.check input {
 .levels label.check {
   align-items: flex-start;
   padding: 10px 0;
+}
+.type-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0 12px;
+}
+.type-row label.check {
+  flex: 1 1 12rem;
+}
+.type-row input[type='number'] {
+  width: 5rem;
+  flex: none;
 }
 .levels label.check input {
   margin-top: 2px;

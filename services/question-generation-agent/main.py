@@ -44,7 +44,7 @@ TEACHER_ONLY = requires(TEACHER)
 
 def pipeline(request: Request, claims: Claims) -> Pipeline:
     state = request.app.state
-    return Pipeline(state.services, request, claims, state.settings.relevance_floor)
+    return Pipeline(state.services, request, claims, state.settings)
 
 
 @app.get("/health/ready")

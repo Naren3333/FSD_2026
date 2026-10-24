@@ -6,7 +6,7 @@ The agentic features we could build, in the order we plan to take them, and wher
 |---|---|---|---|
 | 1 | Performance interpretation agent | Built (ADR 0014) | No |
 | 2 | Marking critic and escalation | Proposed | No |
-| 3 | Question generation critic loop | Proposed | Reads the passages generation already has |
+| 3 | Question generation critic loop | Built (ADR 0015) | Reads the passages generation already has |
 | 4 | Adaptive resit agent | Proposed, needs a question bank | Only if it generates new questions |
 | 5 | Teacher class-insights copilot | Proposed | Yes, if it searches materials |
 | 6 | Interpretation on finalization | Proposed, after 1 | No |
@@ -29,7 +29,7 @@ After `services/grading/marker.go` suggests a mark for a written answer, a secon
 
 ## 3. Question generation critic loop
 
-A reviewer pass checks each generated question: answerable from its cited passages alone, distractors plausible but wrong, not a near-duplicate of the assessment's questions. Failures go back to the generator with the reviewer's reason for up to two retries, instead of only being dropped. Services: question-generation-agent, ai-core. Effort: small. It reads the passages generation already retrieved and does not change how they are found.
+Built. A reviewer model pass checks each generated question against its cited passages only: answerable, key matches what the reviewer worked out, one right answer, plausible wrong options, not a repeat. Rejected drafts go back to the generator with the reason, up to two retries inside one deadline; weak wrong options are flagged for the teacher instead of dropped, and a reviewer failure returns drafts marked not reviewed. Teachers can skip the review per request. Services: question-generation-agent, ai-core, web generator panel. See ADR 0015.
 
 ## 4. Adaptive resit agent
 

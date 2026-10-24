@@ -1,6 +1,9 @@
 """question generation and marking guidance (adr 0006): a fixed pipeline, not an agent."""
 
 import logging
+import time
+from collections import Counter
+from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any
 
@@ -9,8 +12,18 @@ from learning_transport import RELATION_TEACHER, Claims, UpstreamError, failure,
 
 import checks
 import prompts
+import review
 from clients import Services, billed
-from contracts import GenerateRequest, GenerateResponse, Guidance, GuidanceRequest
+from config import Settings
+from contracts import (
+    Generated,
+    GenerateRequest,
+    GenerateResponse,
+    Guidance,
+    GuidanceRequest,
+    Review,
+    Round,
+)
 from prompts import Passage
 
 log = logging.getLogger("question-generation-agent.pipeline")
@@ -20,6 +33,9 @@ GENERATION_PASSAGES = 12
 GUIDANCE_PASSAGES = 6
 GENERATION_TOKENS = 6000
 GUIDANCE_TOKENS = 2000
+REVIEW_TOKENS = 3000
+WEAK_DISTRACTORS = "WEAK_DISTRACTORS"
+UNREADABLE_REPLY = "UNREADABLE_REPLY"
 NOT_TEACHER = ("FORBIDDEN", "Only the classroom's teacher can generate questions or marking guidance.")
 
 
@@ -83,13 +99,128 @@ def passages_of(results: list[dict[str, Any]], floor: float) -> list[Passage]:
     ]
 
 
+def not_run(n: int) -> Review:
+    return Review(status="not_reviewed", note="The review could not run.", round=n)
+
+
+def flag_long_key(draft: Generated) -> Generated:
+    """a draft whose key gives itself away, flagged by our own check rather than the reviewer."""
+    flagged = Review(status="flagged", note=checks.LONG_KEY_NOTE, source="check")
+    return draft.model_copy(update={"review": flagged})
+
+
+def omitted(n: int) -> Review:
+    return Review(status="not_reviewed", note="The reviewer gave no verdict on this draft.", round=n)
+
+
+@dataclass
+class Run:
+    """what a reviewed generation has so far."""
+
+    accepted: list[Generated] = field(default_factory=list)  # passed the checks and the review
+    unreviewed: list[Generated] = field(default_factory=list)  # passed the checks; the review did not run
+    weak: list[tuple[Generated, str]] = field(
+        default_factory=list
+    )  # flagged drafts with their reason; kept if nothing better turns up
+    attempts: list[checks.Rejected] = field(
+        default_factory=list
+    )  # every refused question, fed back to the generator
+    dropped: Counter[str] = field(default_factory=Counter)
+    rounds: list[Round] = field(default_factory=list)
+    calls: int = 0
+    stop_error: UpstreamError | None = None
+    unreadable_retry: bool = False
+
+    def shortfall(self, body: GenerateRequest) -> dict[str, int]:
+        """how many more of each type are still wanted, leaving out the types that are full."""
+        have = Counter(g.question.type for g in self.accepted + self.unreviewed)
+        return {t: body.counts[t] - have[t] for t in body.question_types if body.counts[t] > have[t]}
+
+    def next_request(self, body: GenerateRequest, shortfall: dict[str, int]) -> GenerateRequest:
+        """the next round's request: the shortfall, with the drafts held as existing; weak and rejected drafts go back only as previous_attempts, so a corrected rewrite is not a duplicate."""
+        held = [g.question.prompt for g in self.accepted + self.unreviewed]
+        return body.model_copy(
+            update={"counts": shortfall, "existing_prompts": [*body.existing_prompts, *held]}
+        )
+
+    def checked(
+        self, rejected: list[checks.Rejected], dropped: Counter[str], sent_back: dict[str, int]
+    ) -> dict[str, int]:
+        """the checks' refusals: counted, and fed back (and counted in `sent_back`) unless writing them again would not help."""
+        self.dropped.update(dropped)
+        fed = [r for r in rejected if r.reason not in (checks.DUPLICATE, checks.WRONG_TYPE)]
+        self.attempts += fed
+        for r in fed:
+            sent_back[r.reason] = sent_back.get(r.reason, 0) + 1
+        return dropped
+
+    def judged(
+        self,
+        n: int,
+        kept: list[Generated],
+        verdicts: list[review.Verdict],
+        counts: dict[str, int],
+        sent_back: dict[str, int],
+    ) -> int:
+        """sorts the round's drafts by verdict, adds the reviewer's reasons to `counts` and returns how many passed."""
+        passed = 0
+        for draft, verdict in zip(kept, verdicts, strict=True):
+            if verdict.reason == review.NOT_REVIEWED:
+                # no verdict is not a failure: the draft is kept, and a usable draft is not paid to be replaced.
+                counts[review.NOT_REVIEWED] = counts.get(review.NOT_REVIEWED, 0) + 1
+                self.unreviewed.append(draft.model_copy(update={"review": omitted(n)}))
+                continue
+            long_key = verdict.passed and checks.long_key(draft.question)
+            if verdict.passed and not long_key:
+                passed += 1
+                self.accepted.append(draft.model_copy(update={"review": Review(status="passed", round=n)}))
+                continue
+            reason, note = (
+                (checks.LONG_KEY, checks.LONG_KEY_NOTE) if long_key else (verdict.reason, verdict.note)
+            )
+            counts[reason] = counts.get(reason, 0) + 1
+            self.attempts.append(checks.Rejected(draft.question.prompt, draft.question.type, reason))
+            sent_back[reason] = sent_back.get(reason, 0) + 1
+            if reason in (WEAK_DISTRACTORS, checks.LONG_KEY):
+                flagged = Review(
+                    status="flagged", note=note, round=n, source="check" if long_key else "reviewer"
+                )
+                self.weak.append((draft.model_copy(update={"review": flagged}), reason))
+            else:
+                self.dropped[verdict.reason] += 1
+        return passed
+
+    def assembled(self, body: GenerateRequest) -> list[Generated]:
+        """by type: passed drafts, those not reviewed, then flagged ones newest round first, at most the count of each type; a flagged draft that rewrites a chosen one, or is cut, is counted as dropped."""
+        final: list[Generated] = []
+        for t in body.question_types:
+            room = body.counts[t]
+            chosen = [g for g in self.accepted + self.unreviewed if g.question.type == t][:room]
+            flagged = sorted(
+                ((g, reason) for g, reason in self.weak if g.question.type == t),
+                key=lambda w: -w[0].review.round,
+            )
+            for g, reason in flagged:
+                older = any(
+                    checks.similar(g.question.prompt, c.question.prompt, checks.REWRITE_RATIO) for c in chosen
+                )
+                if len(chosen) >= room or older:
+                    self.dropped[reason] += 1
+                else:
+                    chosen.append(g)
+            final += chosen
+        return final
+
+
 class Pipeline:
-    def __init__(self, services: Services, request: Request, claims: Claims, floor: float) -> None:
-        self.services, self.request, self.claims, self.floor = services, request, claims, floor
+    def __init__(self, services: Services, request: Request, claims: Claims, settings: Settings) -> None:
+        self.services, self.request, self.claims, self.settings = services, request, claims, settings
+        self.floor = settings.relevance_floor
         self.authorization = request.headers["authorization"]
         self.correlation: str = request.state.correlation_id
 
     async def generate(self, body: GenerateRequest) -> GenerateResponse:
+        started = time.monotonic()
         classroom = str(body.classroom_id)
         await require_relation(
             self.services.identity, self.request, classroom, allowed=(RELATION_TEACHER,), denied=NOT_TEACHER
@@ -100,36 +231,167 @@ class Pipeline:
                 raise failure(422, "UNKNOWN_TOPIC", "Choose a topic from your curriculum.")
             query = f"{topic.name}. {body.focus}" if body.focus else topic.name
             passages = await self._passages(classroom, query[:MAX_QUERY], body, GENERATION_PASSAGES)
-            messages = prompts.generation_messages(topic.name, body, passages)
-            output = await self.services.generate(
-                messages,
-                GENERATION_TOKENS,
-                prompts.generation_schema(body.question_types),
-                "questions.generated",
-                self.correlation,
-                billed(self.claims),
-            )
         except UpstreamError as e:
             log.warning("generation_failed", extra={"error": str(e)})
             raise refused(e) from None
-        try:
-            kept, dropped = checks.questions(output, body, passages)
-        except checks.UnreadableOutputError:
-            raise failure(
-                502, "AI_OUTPUT_REJECTED", "The model did not return a usable reply. Try again."
-            ) from None
-        log.info(
-            "generated", extra={"requested": body.count, "returned": len(kept), "dropped": dict(dropped)}
+        review = self.settings.review and body.review
+        return await self._rounds(topic.name, body, passages, started, review)
+
+    async def _ask(
+        self, messages: list[dict[str, str]], tokens: int, schema: dict[str, Any], name: str
+    ) -> str:
+        return await self.services.generate(
+            messages, tokens, schema, name, self.correlation, billed(self.claims)
         )
-        if not kept:
+
+    async def _rounds(
+        self, topic: str, body: GenerateRequest, passages: list[Passage], started: float, review: bool
+    ) -> GenerateResponse:
+        """generate, review and retry the shortfall (adr 0006); without a review, one round of checks only. a retry needs 1.5 times the longest round to fit in review_deadline; one very slow round can still pass the gateway timeout."""
+        run = Run()
+        round_started, longest = started, 0.0
+        for n in range(self.settings.review_retries + 1 if review else 1):
+            now = time.monotonic()
+            shortfall = run.shortfall(body)
+            if n > 0:
+                longest = max(longest, now - round_started)
+                if not shortfall or now - started + 1.5 * longest > self.settings.review_deadline:
+                    break
+                run.rounds[-1].retried = True
+            round_started = now
+            request = run.next_request(body, shortfall)
+            try:
+                output = await self._ask(
+                    prompts.generation_messages(topic, request, passages, run.attempts),
+                    GENERATION_TOKENS,
+                    prompts.generation_schema(request.question_types),
+                    "questions.generated",
+                )
+            except UpstreamError as e:
+                log.warning("generation_failed", extra={"error": str(e), "round": n})
+                if n == 0:
+                    raise refused(e) from None
+                run.stop_error = e
+                break
+            run.calls += 1
+            try:
+                kept, dropped, rejected, generated = checks.questions(output, request, passages)
+            except checks.UnreadableOutputError:
+                if n == 0:
+                    raise failure(
+                        502, "AI_OUTPUT_REJECTED", "The model did not return a usable reply. Try again."
+                    ) from None
+                run.rounds.append(
+                    Round(generated=0, passed_checks=0, passed_review=0, rejected={UNREADABLE_REPLY: 1})
+                )
+                run.unreadable_retry = True
+                break
+            sent_back: dict[str, int] = {}
+            counts = run.checked(rejected, dropped, sent_back)
+            if not kept:
+                run.rounds.append(
+                    Round(
+                        generated=generated,
+                        passed_checks=0,
+                        passed_review=0,
+                        rejected=counts,
+                        sent_back=sent_back,
+                    )
+                )
+                continue
+            if not review:
+                run.unreviewed += [flag_long_key(g) if checks.long_key(g.question) else g for g in kept]
+                run.rounds.append(
+                    Round(
+                        generated=generated,
+                        passed_checks=len(kept),
+                        passed_review=len(kept),
+                        rejected=counts,
+                        sent_back=sent_back,
+                    )
+                )
+                continue
+            try:
+                verdicts = await self._review(topic, body, kept, passages, run)
+            except (UpstreamError, checks.UnreadableOutputError) as e:
+                log.warning("review_failed", extra={"error": str(e), "round": n})
+                run.unreviewed += [g.model_copy(update={"review": not_run(n)}) for g in kept]
+                run.rounds.append(
+                    Round(
+                        generated=generated,
+                        passed_checks=len(kept),
+                        passed_review=len(kept),
+                        rejected=counts,
+                        sent_back=sent_back,
+                    )
+                )
+                run.stop_error = e if isinstance(e, UpstreamError) else None
+                break
+            passed = run.judged(n, kept, verdicts, counts, sent_back)
+            run.rounds.append(
+                Round(
+                    generated=generated,
+                    passed_checks=len(kept),
+                    passed_review=passed,
+                    rejected=counts,
+                    sent_back=sent_back,
+                    reviewed=True,
+                )
+            )
+        return self._response(body, run)
+
+    def _response(self, body: GenerateRequest, run: Run) -> GenerateResponse:
+        final = run.assembled(body)
+        log.info(
+            "generated",
+            extra={
+                "requested": body.count,
+                "returned": len(final),
+                "rounds": len(run.rounds),
+                "calls": run.calls,
+                "dropped": dict(run.dropped),
+            },
+        )
+        if not final:
+            if run.stop_error is not None:
+                raise refused(run.stop_error)
+            if run.unreadable_retry:
+                raise failure(
+                    502, "AI_OUTPUT_REJECTED", "The model did not return a usable reply. Try again."
+                )
             raise failure(
                 422,
                 "GENERATION_REJECTED",
                 "None of the generated questions passed the checks. Try another focus or other documents.",
             )
         return GenerateResponse(
-            questions=kept, requested=body.count, returned=len(kept), dropped=dict(dropped)
+            questions=final,
+            requested=body.count,
+            requested_by_type={t: n for t, n in body.counts.items()},
+            returned=len(final),
+            dropped=dict(run.dropped),
+            rounds=run.rounds,
+            model_calls=run.calls,
         )
+
+    async def _review(
+        self, topic: str, body: GenerateRequest, kept: list[Generated], passages: list[Passage], run: "Run"
+    ) -> list[review.Verdict]:
+        """one reviewer call over the drafts that passed the checks; it sees the editor's questions and those held so far."""
+        output = await self._ask(
+            prompts.review_messages(
+                topic,
+                body.difficulty,
+                kept,
+                passages,
+                [*body.existing_prompts, *(g.question.prompt for g in run.accepted + run.unreviewed)],
+            ),
+            REVIEW_TOKENS,
+            prompts.review_schema(),
+            "questions.reviewed",
+        )
+        run.calls += 1
+        return review.verdicts(output, len(kept))
 
     async def guidance(self, body: GuidanceRequest) -> Guidance:
         classroom = str(body.classroom_id)

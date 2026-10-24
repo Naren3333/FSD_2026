@@ -424,8 +424,8 @@ export class ChatApi {
   }
 }
 
-/* generation reads the documents and waits for the model; kong allows it three minutes. */
-const GENERATION_TIMEOUT = 3 * 60 * 1000 + 10 * 1000;
+/* generation reads the documents, waits for the model and its reviewer, and retries; kong allows it five minutes. */
+const GENERATION_TIMEOUT = 5 * 60 * 1000 + 10 * 1000;
 
 /* drafts from the classroom's documents for its teacher (adr 0006). */
 @Injectable({ providedIn: 'root' })

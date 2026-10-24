@@ -22,9 +22,8 @@ def request(**change: Any) -> GenerateRequest:
         "classroom_id": ROOM,
         "document_ids": [DOC],
         "topic_id": TOPIC,
-        "question_types": ["multiple_choice", "short_answer", "free_response"],
+        "counts": {"multiple_choice": 2, "short_answer": 2, "free_response": 1},
         "difficulty": "introductory",
-        "count": 5,
         **change,
     }
     return GenerateRequest.model_validate(body)
@@ -82,7 +81,9 @@ def written(**change: Any) -> dict[str, Any]:
 
 
 def run(*items: dict[str, Any], **change: Any) -> tuple[list[Any], dict[str, int]]:
-    kept, dropped = checks.questions(json.dumps({"questions": list(items)}), request(**change), PASSAGES)
+    kept, dropped, _, _ = checks.questions(
+        json.dumps({"questions": list(items)}), request(**change), PASSAGES
+    )
     return kept, dict(dropped)
 
 
@@ -187,7 +188,7 @@ def test_evidence_survives_typographic_quotes_and_line_breaks():
         Passage(1, CHUNK_1, DOC, "Slides", 1, "Write the test first:\n“red, green, refactor” is the cycle.")
     ]
     item = choice(evidence='write the test first: "red, green,  refactor" is the cycle')
-    kept, dropped = checks.questions(json.dumps({"questions": [item]}), request(), passages)
+    kept, dropped, _, _ = checks.questions(json.dumps({"questions": [item]}), request(), passages)
     assert len(kept) == 1 and not dropped
 
 
@@ -203,12 +204,25 @@ def test_near_duplicates_of_the_editors_questions_and_of_each_other_are_dropped(
 
 
 def test_never_more_questions_than_asked_for():
-    kept, dropped = run(choice(), short(), written(), count=2)
-    assert len(kept) == 2 and not dropped
+    kept, dropped = run(
+        choice(), choice(prompt="Why mock a payment service?"), short(), counts={"multiple_choice": 1}
+    )
+    assert len(kept) == 1 and not dropped
+
+
+def test_each_type_has_its_own_quota():
+    extra = choice(prompt="Why mock a payment service?")
+    kept, dropped = run(choice(), extra, short(), counts={"multiple_choice": 1, "short_answer": 1})
+    assert [g.question.type for g in kept] == ["multiple_choice", "short_answer"] and not dropped
+
+
+def test_reading_stops_once_every_quota_is_full():
+    kept, dropped = run(choice(), {"junk": True}, counts={"multiple_choice": 1})
+    assert len(kept) == 1 and not dropped
 
 
 def test_only_the_asked_types():
-    kept, dropped = run(choice(), short(), question_types=["short_answer"])
+    kept, dropped = run(choice(), short(), counts={"short_answer": 1})
     assert [g.question.type for g in kept] == ["short_answer"] and dropped == {"WRONG_TYPE": 1}
 
 
@@ -220,7 +234,7 @@ def test_an_unreadable_reply_is_rejected_whole(output):
 
 def test_at_most_five_sources_each_cut_to_assessments_limit():
     long = [Passage(n, CHUNK_1, DOC, "Slides", n, UNIT_TESTS + " x" * 1500) for n in range(1, 8)]
-    kept, _ = checks.questions(
+    kept, _, _, _ = checks.questions(
         json.dumps({"questions": [choice(source_passages=[1, 2, 3, 4, 5, 6, 7, 1])]}), request(), long
     )
     sources = kept[0].question.sources
@@ -230,7 +244,7 @@ def test_at_most_five_sources_each_cut_to_assessments_limit():
 def test_evidence_late_in_a_long_passage_is_stored_with_it():
     """the excerpt kept is the window around the evidence, so what the teacher sees holds the quote."""
     text = "Filler words. " * 300 + "\n" + UNIT_TESTS + " Trailing text." * 100
-    kept, dropped = checks.questions(
+    kept, dropped, _, _ = checks.questions(
         json.dumps({"questions": [choice()]}), request(), [Passage(1, CHUNK_1, DOC, "Slides", 1, text)]
     )
     assert not dropped
@@ -241,7 +255,7 @@ def test_evidence_late_in_a_long_passage_is_stored_with_it():
 def test_evidence_only_in_a_passage_beyond_the_fifth_keeps_that_passage():
     others = [Passage(n, CHUNK_2, DOC, "Slides", n, BOUNDARIES) for n in range(1, 7)]
     holding = Passage(7, CHUNK_1, DOC, "Slides", 9, UNIT_TESTS)
-    kept, dropped = checks.questions(
+    kept, dropped, _, _ = checks.questions(
         json.dumps({"questions": [choice(source_passages=[1, 2, 3, 4, 5, 6, 7])]}),
         request(),
         [*others, holding],
@@ -254,7 +268,7 @@ def test_evidence_only_in_a_passage_beyond_the_fifth_keeps_that_passage():
 def test_evidence_longer_than_an_excerpt_is_not_found():
     text = "word " * 1000
     item = choice(evidence=text.strip())
-    kept, dropped = checks.questions(
+    kept, dropped, _, _ = checks.questions(
         json.dumps({"questions": [item]}), request(), [Passage(1, CHUNK_1, DOC, "Slides", 1, text)]
     )
     assert not kept and dropped == {"EVIDENCE_NOT_FOUND": 1}
@@ -296,3 +310,78 @@ def test_guidance_that_breaks_a_rule_is_refused(item, kind, reason):
     with pytest.raises(checks.RuleBrokenError) as refused:
         checks.guidance(json.dumps(item), guidance_request(kind), PASSAGES)
     assert refused.value.reason == reason
+
+
+def test_refused_items_come_back_with_their_reason_in_reply_order():
+    bad = choice(prompt="Which test is it?", evidence="This sentence is nowhere in the passages.")
+    output = json.dumps({"questions": [choice(), bad, "not a dict"]})
+    kept, dropped, rejected, _ = checks.questions(output, request(), PASSAGES)
+    assert len(kept) == 1 and dict(dropped) == {"EVIDENCE_NOT_FOUND": 1, "INVALID_PROMPT": 1}
+    assert rejected == [
+        checks.Rejected("Which test is it?", "multiple_choice", "EVIDENCE_NOT_FOUND"),
+        checks.Rejected("", "", "INVALID_PROMPT"),
+    ]
+
+
+def test_a_prompt_that_needs_the_materials_is_dropped_but_plain_describes_pass():
+    bad = choice(prompt="In the described three-stage structure, what is the final stage called?")
+    fine = choice(prompt="Which test checks the interaction between modules?")
+    plain = choice(prompt="Which pattern is best described as a stand-in for a dependency?")
+    kept, dropped = run(bad, fine, plain, counts={"multiple_choice": 3})
+    assert dropped == {"NEEDS_MATERIALS": 1} and len(kept) == 2
+
+
+def test_ordinary_uses_of_text_and_material_pass():
+    fine = [
+        choice(prompt="What does the text-align property do?"),
+        choice(prompt="Which property of the material's structure sets its tensile strength?"),
+        choice(prompt="Which statement is best described as a regression test?"),
+    ]
+    kept, dropped = run(*fine, counts={"multiple_choice": 3})
+    assert dropped == {} and len(kept) == 3
+
+
+def test_ordinary_uses_of_passage_slide_materials_and_described_in_pass():
+    fine = [
+        choice(prompt="What led to the passage of the 19th Amendment?"),
+        choice(prompt="A block slides down the slide; what force acts on it?"),
+        choice(prompt="Which framework is described in the Vite docs?"),
+        choice(prompt="Which of the materials is a conductor?"),
+        choice(prompt="What role did the Senate play in the passage of the 19th Amendment?"),
+        choice(prompt="Which law is stated as described by Newton's third law?"),
+        choice(prompt="Which organelle is described as the powerhouse of the cell?"),
+        choice(prompt="Why is a coverslip placed on the slide before viewing cells?"),
+        choice(prompt="How many slides does a typical deck need?"),
+    ]
+    kept, dropped = run(*fine, counts={"multiple_choice": 9})
+    assert dropped == {} and len(kept) == 9
+
+
+def test_a_reference_to_the_passage_or_the_described_structure_is_dropped():
+    bad = [
+        choice(prompt="According to the passage, what is a stub?"),
+        choice(prompt="In the described three-stage structure, what is the final stage?"),
+        choice(prompt="Using the examples above, what does add(-1, 3) return?"),
+    ]
+    kept, dropped = run(*bad, counts={"multiple_choice": 3})
+    assert dropped == {"NEEDS_MATERIALS": 3} and kept == []
+
+
+def _mc(key: str, *others: str) -> Any:
+    kept, _ = run(choice(options=[key, *others], answer=key))
+    return kept[0].question
+
+
+def test_a_key_much_longer_than_the_other_options_is_noticed():
+    long = "A test that checks one function or class on its own with its dependencies replaced"
+    assert checks.long_key(_mc(long, "An end to end test", "A load test", "A smoke test"))
+    assert not checks.long_key(
+        _mc(
+            long,
+            "A test of all the modules working together as one",
+            "A test of the whole system from the user's side",
+            "A test of how fast the system responds under load",
+        )
+    )
+    assert not checks.long_key(_mc(long, "An end to end test"))
+    assert not checks.long_key(_mc("A unit test", "A load test", "A smoke test"))

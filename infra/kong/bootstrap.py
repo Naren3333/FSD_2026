@@ -44,12 +44,12 @@ CHATBOT = {
     ],
 }
 
-# allow generation to finish its search, model call and accounting before the gateway times out.
+# allow generation to finish its search, up to three generate and three review calls, and accounting before the gateway times out.
 QUESTION_GENERATION = {
     "name": "question-generation-agent",
     "url": "http://question-generation-agent:8080/v1",
     "connect_timeout": 5000,
-    "read_timeout": 180_000,
+    "read_timeout": 300_000,
     "write_timeout": TIMEOUT_MS,
     "routes": [{"name": "question-generation", "paths": ["/api/question-generation"], "strip_path": True}],
 }

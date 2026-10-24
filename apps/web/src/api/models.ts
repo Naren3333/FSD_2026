@@ -121,7 +121,7 @@ export type ClassPerformance = Analytics['ClassPerformanceResponse'];
 /* what a teacher asks the question-generation agent for (adr 0006). */
 export type GenerateRequest = Generation['GenerateRequest'];
 /* the question types the agent generates. */
-export type GeneratableType = GenerateRequest['question_types'][number];
+export type GeneratableType = Generation['DraftQuestion']['type'];
 export type Difficulty = GenerateRequest['difficulty'];
 /* a drafted question, with the quote from its sources that supports its key. */
 export type GeneratedQuestion = Generation['Generated'];
@@ -130,6 +130,9 @@ export type DraftQuestion = Generation['DraftQuestion'];
 /* a passage as the agent sends it, with null for a document, chunk or page it doesn't name; see fromagent. */
 export type AgentExcerpt = Generation['Excerpt'];
 export type GenerateResult = Generation['GenerateResponse'];
+/* what the reviewer made of a draft, and one round of writing and reviewing. */
+export type GenerateReview = Generation['Review'];
+export type GenerateRound = Generation['Round'];
 /* marking guidance for a short answer or free response the teacher wrote. */
 export type GuidanceRequest = Generation['GuidanceRequest'];
 export type Guidance = Generation['Guidance'];

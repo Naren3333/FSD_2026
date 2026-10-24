@@ -396,9 +396,8 @@ def question_generation(u: Users, room_id: str) -> None:
         "classroom_id": room_id,
         "document_ids": [pdf["id"]],
         "topic_id": topic["id"],
-        "question_types": ["multiple_choice", "short_answer"],
+        "counts": {"multiple_choice": 1, "short_answer": 1},
         "difficulty": "introductory",
-        "count": 2,
     }
     guidance = {
         "classroom_id": room_id,

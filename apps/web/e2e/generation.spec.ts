@@ -27,7 +27,7 @@ const doc = (id: string, title: string, docType: string) => ({
 });
 const source = { document_id: SLIDES, chunk_id: SLIDES, page: 2, text: 'A unit test checks one function.' };
 
-function draft(topicId: string, prompt: string) {
+function draft(topicId: string, prompt: string, review: object) {
   return {
     question: {
       prompt,
@@ -41,6 +41,7 @@ function draft(topicId: string, prompt: string) {
     },
     evidence: 'A unit test checks one function.',
     explanation: 'The slides define a unit test as checking one function.',
+    review,
   };
 }
 
@@ -65,8 +66,10 @@ test('a teacher generates questions and drafts marking guidance', async ({ page 
     }),
   );
   let generations = 0;
+  const requests: { review?: boolean; topic_id: string; counts?: Record<string, number> }[] = [];
   await page.route('**/api/question-generation/questions', (route) => {
     const body = route.request().postDataJSON();
+    requests.push(body);
     if (generations++ === 0)
       return json(route, 503, {
         error: {
@@ -76,10 +79,20 @@ test('a teacher generates questions and drafts marking guidance', async ({ page 
       });
     return json(route, 200, {
       questions: [
-        draft(body.topic_id, 'Which test checks one function?'),
-        draft(body.topic_id, 'Which test is fastest?'),
+        draft(body.topic_id, 'Which test checks one function?', { status: 'passed', note: '', round: 1 }),
+        draft(body.topic_id, 'Which test is fastest?', {
+          status: 'flagged',
+          note: 'Option C is obviously wrong.',
+          round: 2,
+        }),
       ],
+      rounds: [
+        { generated: 3, passed_checks: 2, passed_review: 1, rejected: { WRONG_KEY: 1 } },
+        { generated: 1, passed_checks: 1, passed_review: 1, rejected: {} },
+      ],
+      model_calls: 4,
       requested: 3,
+      requested_by_type: { multiple_choice: 2, short_answer: 1 },
       returned: 2,
       dropped: { DUPLICATE: 1 },
       requires_teacher_review: true,
@@ -108,12 +121,26 @@ test('a teacher generates questions and drafts marking guidance', async ({ page 
   // a marking scheme uploaded before they were retired is not a source for questions.
   await expect(page.getByRole('checkbox', { name: 'Testing scheme' })).toHaveCount(0);
   await page.locator('#generate-topic').selectOption({ label: 'Testing topic ' + suffix });
+  // a count for each ticked type; the unticked one is disabled.
+  await expect(page.getByText('5 questions in total (up to 10).')).toBeVisible();
+  await expect(page.getByLabel('Number of written response questions')).toBeDisabled();
+  await page.getByLabel('Number of multiple choice questions').fill('2');
+  await page.getByLabel('Number of short answer questions').fill('1');
+  await expect(page.getByText('3 questions in total (up to 10).')).toBeVisible();
   await page.getByRole('button', { name: 'Generate questions' }).click();
   await expect(page.getByText('Searching the class materials failed. Try again later.')).toBeVisible();
   // enter in the focus field generates instead of saving the assessment.
   await page.getByLabel('Focus (optional)').fill('unit tests');
   await page.getByLabel('Focus (optional)').press('Enter');
-  await expect(page.getByText(/2 of 3\s+questions drafted\.\s+1 draft was left out/)).toBeVisible();
+  await expect(
+    page.getByText(/Drafted: Multiple choice 2 of 2 · Short answer 0 of 1\.\s+1 draft was left out/),
+  ).toBeVisible();
+  expect(requests.at(-1)?.counts).toEqual({ multiple_choice: 2, short_answer: 1 });
+  await expect(page.getByText('Reviewer: Option C is obviously wrong.')).toBeVisible();
+  expect(requests.at(-1)?.review).toBe(true);
+  await page.getByText('How the drafts were checked').click();
+  await expect(page.getByText('Round 1:')).toBeVisible();
+  await expect(page.getByText('4 AI calls in total.')).toBeVisible();
   const firstDraft = page.getByRole('group', { name: 'Generated question 1' });
   await expect(firstDraft.getByText('AI-written draft')).toBeVisible();
   await firstDraft.getByRole('button', { name: 'Add to assessment generated question 1' }).click();
