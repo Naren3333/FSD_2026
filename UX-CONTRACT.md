@@ -5,7 +5,7 @@ Business authority: docs/requirements.md sections 6, 8, 15–18 and docs/decisio
 | Capability | Canonical owner | Source of truth | Allowed variants | Verification |
 |---|---|---|---|---|
 | Form | shared field component + Reactive Forms | this contract | create, submit, review | Angular tests + browser E2E |
-| Select/Listbox | native select | DESIGN.md | classroom, topic, type | keyboard/browser |
+| Select/Listbox | native select | DESIGN.md | classroom, topic, type (students answer multiple choice with a radio group) | keyboard/browser |
 | Date | native datetime-local input | DESIGN.md; assessment opening/due-date APIs | assessment scheduling | component + browser E2E |
 | Scrollbar | global styles.css | DESIGN.md | document and horizontal tables | static + browser |
 | Toast | shared status component | this contract | status, error | unit + browser |

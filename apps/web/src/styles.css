@@ -1414,6 +1414,191 @@ dialog .feedback.active {
 .answer-box {
   resize: vertical;
 }
+/* a student's open assessment: one centred column of questions, with submit in a bar at the bottom of the view. */
+.assessment-view {
+  max-width: 720px;
+  margin: 0 auto;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  padding-top: 16px;
+}
+.back-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  align-self: flex-start;
+  min-height: 44px;
+  font-weight: 600;
+  text-decoration: none;
+}
+.assessment-view-header {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 12px 24px;
+}
+.assessment-view-heading {
+  flex: 1 1 20rem;
+  min-width: 0;
+}
+.assessment-view-heading h2 {
+  font-size: 28px;
+  margin-bottom: 8px;
+  overflow-wrap: anywhere;
+}
+.assessment-view-heading .caption {
+  margin: 0 0 12px;
+}
+.answer-progress {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  font-size: 0.875rem;
+  color: var(--muted);
+}
+.progress-track {
+  flex: 0 1 12rem;
+  height: 6px;
+  border-radius: 999px;
+  background: var(--line);
+  overflow: hidden;
+}
+.progress-fill {
+  display: block;
+  height: 100%;
+  background: var(--brand);
+}
+.save-note {
+  margin: 0;
+  max-width: 100%;
+}
+.save-note .badge {
+  white-space: normal;
+}
+.question-list {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+.question-card {
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  padding: 20px;
+  min-width: 0;
+}
+.question-heading {
+  font-size: 17px;
+  font-weight: 600;
+  margin: 0 0 12px;
+}
+.question-marks {
+  font-size: 0.875rem;
+  font-weight: 400;
+  color: var(--muted);
+}
+.question-prompt {
+  color: var(--ink);
+  margin: 0 0 8px;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.question-card app-field {
+  margin-bottom: 0;
+}
+.question-card .answer-text {
+  margin: 0;
+}
+.answer-short {
+  max-width: 20rem;
+}
+/* a multiple choice answer: one full-width row per option. */
+.choice {
+  border: 0;
+  padding: 0;
+  margin: 0;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.choice legend {
+  font-size: 0.9rem;
+  font-weight: 600;
+  margin-bottom: 8px;
+  padding: 0;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.choice .option {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-height: 44px;
+  margin: 0;
+  padding: 8px 12px;
+  border: 1px solid var(--control);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  font-weight: 400;
+  cursor: pointer;
+  overflow-wrap: anywhere;
+}
+.choice .option input {
+  width: 20px;
+  height: 20px;
+  min-height: 20px;
+  margin: 0;
+  flex-shrink: 0;
+}
+.choice .option:hover {
+  background: var(--hover);
+}
+.choice .option:has(input:checked) {
+  border-color: var(--brand);
+  background: var(--brand-soft);
+}
+.choice .option:has(input:focus-visible) {
+  outline: 3px solid var(--focus);
+  outline-offset: 2px;
+}
+.choice .option input:focus-visible {
+  outline: none;
+}
+.choice[aria-invalid='true'] .option {
+  border-color: var(--danger);
+}
+.answer-bar {
+  position: sticky;
+  bottom: 0;
+  z-index: 5;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px 24px;
+  padding: 12px 16px;
+  background: var(--surface);
+  border-top: 1px solid var(--line);
+}
+.answer-bar-text {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+.answer-bar-text .caption {
+  margin: 0;
+}
+.answer-bar-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 8px 12px;
+}
+/* a control focused by tab is kept clear of the bar. */
+html:has(.answer-bar) {
+  scroll-padding-bottom: 96px;
+}
 .answer-text {
   white-space: pre-wrap;
   overflow-wrap: anywhere;
@@ -1607,7 +1792,25 @@ dialog .feedback.active {
   .skip-link {
     left: 16px;
   }
+  .assessment-view-heading h2 {
+    font-size: 22px;
+  }
+  .question-card {
+    padding: 16px;
+  }
+  .answer-bar {
+    flex-direction: column;
+    align-items: stretch;
+    margin-inline: -16px;
+  }
+  .answer-bar-actions {
+    justify-content: flex-start;
+  }
+  html:has(.answer-bar) {
+    scroll-padding-bottom: 160px;
+  }
 }
+
 /* on a phone the ai pill keeps its amount for screen readers only. */
 @media (max-width: 479.98px) {
   button.usage-pill .usage-amount {

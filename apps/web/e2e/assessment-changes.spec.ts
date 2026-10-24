@@ -94,6 +94,8 @@ test('a teacher edits and deletes a published assessment until a student submits
   await dialog.getByRole('button', { name: 'Delete assessment and grades', exact: true }).click();
   await expect(teacher.getByText('Sums marked ' + suffix + ' deleted.', { exact: true })).toBeVisible();
   await expect(teacher.getByText('No assessments yet. Create one using a curriculum topic.')).toBeVisible();
+  // the submitted assessment stays open on its own view until the student goes back to the list.
+  await student.getByRole('link', { name: 'Back to assessments' }).click();
   await student.getByRole('button', { name: 'Refresh assessments' }).click();
   await expect(student.getByText('No assessments yet. Your teacher has not published any.')).toBeVisible();
 });

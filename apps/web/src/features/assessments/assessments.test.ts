@@ -2,8 +2,8 @@
 import { signal } from '@angular/core';
 import { TestBed } from '@angular/core/testing';
 import { BrowserTestingModule, platformBrowserTesting } from '@angular/platform-browser/testing';
-import { ActivatedRoute, convertToParamMap } from '@angular/router';
-import { of } from 'rxjs';
+import { ActivatedRoute, Router, convertToParamMap, type ParamMap } from '@angular/router';
+import { BehaviorSubject, Subject } from 'rxjs';
 import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 import { AssessmentApi, ContentApi } from '../../api/clients';
 import type { Assessment, AssessmentSummary, Topic } from '../../api/models';
@@ -22,7 +22,11 @@ describe('optionLines', () => {
   });
 });
 
-beforeAll(() => TestBed.initTestEnvironment(BrowserTestingModule, platformBrowserTesting()));
+beforeAll(() => {
+  TestBed.initTestEnvironment(BrowserTestingModule, platformBrowserTesting());
+  // jsdom has no scrolling.
+  vi.spyOn(window, 'scrollTo').mockImplementation(() => undefined);
+});
 afterEach(() => vi.useRealTimers());
 
 const QUESTION = 'q1';
@@ -61,7 +65,9 @@ function setup(
       return { items, total: items.length };
     },
     list: vi.fn(() => Promise.resolve([summary])),
-    get: vi.fn(() => Promise.resolve(open)),
+    get: vi.fn((id: string) =>
+      Promise.resolve(id === open.id ? open : { ...open, id, title: 'Other ' + id }),
+    ),
     saved: vi.fn(() => Promise.resolve({ answers: saved, saved_at: null })),
     save: vi.fn((_id: string, answers: Record<string, string>) =>
       Promise.resolve({ answers, saved_at: '2026-10-17T02:00:00Z' }),
@@ -76,6 +82,9 @@ function setup(
   };
   const classroomId = signal('c1');
   const archived = signal<Topic[]>([]);
+  const params = new BehaviorSubject<ParamMap>(convertToParamMap({}));
+  const route = { queryParamMap: params.asObservable() };
+  const router = { navigate: vi.fn(() => Promise.resolve(true)), events: new Subject<unknown>() };
   TestBed.resetTestingModule();
   TestBed.configureTestingModule({
     providers: [
@@ -104,7 +113,8 @@ function setup(
           refresh: () => Promise.resolve(),
         },
       },
-      { provide: ActivatedRoute, useValue: { queryParamMap: of(convertToParamMap({})) } },
+      { provide: ActivatedRoute, useValue: route },
+      { provide: Router, useValue: router },
     ],
   });
   TestBed.overrideComponent(AssessmentsComponent, { set: { template: '', imports: [] } });
@@ -115,11 +125,18 @@ function setup(
   sheetFixture.componentRef.setInput('assessments', fixture.componentInstance.assessments);
   sheetFixture.componentRef.setInput('state', fixture.componentInstance.state);
   sheetFixture.detectChanges();
+  // the page's template, and so its static query, is left out.
+  fixture.componentInstance.sheet = sheetFixture.componentInstance;
   const settle = () => vi.advanceTimersByTimeAsync(0);
+  /* the address naming `open`, or the list's address. */
+  const go = (open?: string) => params.next(convertToParamMap(open ? { open } : {}));
   return {
     page: fixture.componentInstance,
     sheet: sheetFixture.componentInstance,
     api,
+    router,
+    route,
+    go,
     classroomId,
     archived,
     settle,
@@ -374,6 +391,174 @@ describe('opening after the classroom changed', () => {
     arrive(assessment());
     await settle();
     expect(sheet.selected()).toBeNull();
+  });
+});
+
+describe('a student opening an assessment by its address', () => {
+  it('opens it from the list by moving to its address', async () => {
+    vi.useFakeTimers();
+    const { page, router, route, settle } = setup('student');
+    await settle();
+    page.openFromList('a1');
+    expect(router.navigate).toHaveBeenCalledWith([], { relativeTo: route, queryParams: { open: 'a1' } });
+  });
+
+  it('opens the assessment the address names, and leaves it when the address no longer does', async () => {
+    vi.useFakeTimers();
+    const { page, sheet, go, settle } = setup('student');
+    await settle();
+    go('a1');
+    await settle();
+    expect(sheet.selected()?.id).toBe('a1');
+    expect(page.studentViewing()).toBe(true);
+    go();
+    await settle();
+    expect(sheet.selected()).toBeNull();
+    expect(page.studentViewing()).toBe(false);
+  });
+
+  it('saves a waiting save as the student leaves, and leaves nothing unsaved', async () => {
+    vi.useFakeTimers();
+    const { sheet, api, go, settle, unsaved } = setup('student');
+    await settle();
+    go('a1');
+    await settle();
+    sheet.answers.controls[QUESTION].setValue('0.5');
+    sheet.answers.markAsDirty();
+    expect(unsaved.any()).toBe(true);
+    go();
+    await settle();
+    expect(api.save).toHaveBeenCalledExactlyOnceWith('a1', { [QUESTION]: '0.5' });
+    expect(sheet.selected()).toBeNull();
+    expect(unsaved.any()).toBe(false);
+    await vi.advanceTimersByTimeAsync(5000);
+    expect(api.save).toHaveBeenCalledTimes(1);
+  });
+
+  it('keeps the student on the assessment, at its address, when the last save fails twice', async () => {
+    vi.useFakeTimers();
+    const { page, sheet, api, router, route, go, settle, unsaved } = setup('student');
+    await settle();
+    go('a1');
+    await settle();
+    api.save.mockRejectedValueOnce(new Error('offline')).mockRejectedValueOnce(new Error('offline'));
+    sheet.answers.controls[QUESTION].setValue('0.5');
+    sheet.answers.markAsDirty();
+    go();
+    await settle();
+    expect(api.save).toHaveBeenCalledTimes(2);
+    expect(sheet.selected()?.id).toBe('a1');
+    expect(sheet.answers.controls[QUESTION].value).toBe('0.5');
+    expect(sheet.answers.enabled).toBe(true);
+    expect(unsaved.any()).toBe(true);
+    expect(page.state.error()).toMatch(
+      /^Your latest answers could not be saved, so the assessment is still open/,
+    );
+    expect(router.navigate).toHaveBeenLastCalledWith([], {
+      relativeTo: route,
+      queryParams: { open: 'a1' },
+      replaceUrl: true,
+    });
+    // leaving again tries again, and the failure no longer shows once it works.
+    go();
+    await settle();
+    expect(api.save).toHaveBeenCalledTimes(3);
+    expect(sheet.selected()).toBeNull();
+    expect(page.state.error()).toBe('');
+  });
+
+  it('lets the student leave when the server refuses their answers for good, and says so on the list', async () => {
+    vi.useFakeTimers();
+    const { page, sheet, api, router, go, settle, unsaved } = setup('student');
+    await settle();
+    go('a1');
+    await settle();
+    api.save.mockRejectedValue(new ApiError('Assessment not found.', 404));
+    sheet.answers.controls[QUESTION].setValue('0.5');
+    sheet.answers.markAsDirty();
+    router.navigate.mockClear();
+    go();
+    await settle();
+    expect(sheet.selected()).toBeNull();
+    expect(unsaved.any()).toBe(false);
+    expect(page.state.error()).toBe(
+      'Your latest answers to Fractions could not be saved. Assessment not found.',
+    );
+    expect(router.navigate).not.toHaveBeenCalled();
+  });
+
+  it('opens another assessment the address names in place of the open one, keeping its answers saved', async () => {
+    vi.useFakeTimers();
+    const { page, sheet, api, go, settle } = setup('student');
+    api.list.mockResolvedValue([summary, { ...summary, id: 'a2', title: 'Other a2' }]);
+    page.load();
+    await settle();
+    go('a1');
+    await settle();
+    sheet.answers.controls[QUESTION].setValue('0.5');
+    sheet.answers.markAsDirty();
+    go('a2');
+    await settle();
+    expect(api.save).toHaveBeenCalledWith('a1', { [QUESTION]: '0.5' });
+    expect(sheet.selected()?.id).toBe('a2');
+    expect(page.state.error()).toBe('');
+  });
+
+  it('opens a deep link to an assessment that is not on the list page', async () => {
+    vi.useFakeTimers();
+    const { sheet, api, go, settle } = setup('student');
+    await settle();
+    go('a3');
+    await settle();
+    expect(api.get).toHaveBeenCalledWith('a3');
+    expect(sheet.selected()?.id).toBe('a3');
+  });
+
+  it('goes back to the list address when the assessment cannot be read', async () => {
+    vi.useFakeTimers();
+    const { page, sheet, api, router, route, go, settle } = setup('student');
+    await settle();
+    api.get.mockRejectedValueOnce(new Error('Assessment not found.'));
+    go('a3');
+    await settle();
+    expect(sheet.selected()).toBeNull();
+    expect(page.state.error()).toBe('Assessment not found.');
+    expect(router.navigate).toHaveBeenLastCalledWith([], {
+      relativeTo: route,
+      queryParams: {},
+      replaceUrl: true,
+    });
+  });
+
+  it('says it could not open an assessment of another classroom, and goes back to the list address', async () => {
+    vi.useFakeTimers();
+    const { page, sheet, api, router, route, go, settle } = setup('student');
+    await settle();
+    api.get.mockResolvedValueOnce(assessment({ id: 'a3', classroom_id: 'c9' }));
+    go('a3');
+    await settle();
+    expect(sheet.selected()).toBeNull();
+    expect(page.state.error()).toBe('The assessment could not be opened.');
+    expect(router.navigate).toHaveBeenLastCalledWith([], {
+      relativeTo: route,
+      queryParams: {},
+      replaceUrl: true,
+    });
+  });
+
+  it('goes back to the list address when the classroom changes', async () => {
+    vi.useFakeTimers();
+    const { router, route, classroomId, go, settle } = setup('student');
+    await settle();
+    go('a1');
+    await settle();
+    classroomId.set('c2');
+    TestBed.tick();
+    expect(router.navigate).toHaveBeenLastCalledWith([], {
+      relativeTo: route,
+      queryParams: {},
+      replaceUrl: true,
+    });
   });
 });
 

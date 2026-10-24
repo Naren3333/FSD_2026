@@ -57,6 +57,8 @@ export async function teacherWithClassroom(page: Page, name: string): Promise<vo
 /* narrows the page to a phone's width, saves a screenshot of it, and checks nothing scrolls sideways. */
 export async function expectNoHorizontalScroll(page: Page, screenshot: string): Promise<void> {
   await page.setViewportSize({ width: 390, height: 844 });
+  // the sidebar slides away into its drawer as the page narrows; the screenshot waits for it to finish.
+  await expect(page.getByRole('navigation', { name: 'Workspace' })).toBeHidden();
   await page.screenshot({ path: screenshot, fullPage: true });
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
 }

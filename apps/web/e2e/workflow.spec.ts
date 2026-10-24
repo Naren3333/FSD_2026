@@ -82,6 +82,9 @@ test('teacher and student complete a real assessment through Kong', async ({ bro
   const todo = student.getByRole('region', { name: 'To do' });
   await todo.getByRole('link', { name: 'Start Browser assessment ' + suffix }).click();
   await expect(student).toHaveURL(/\/assessments\?open=/);
+  // the assessment fills the page, from its top, with its title focused.
+  await expect(student.locator('#assessment-view-title')).toBeFocused();
+  await expect(student.locator('#assessment-view-title')).toHaveText('Browser assessment ' + suffix);
   await student.getByLabel('What is 0.1 plus 0.2?').fill('0.30');
   await expect(student.getByText('Full marks need rounding in binary named.')).toHaveCount(0);
   await student
@@ -89,10 +92,16 @@ test('teacher and student complete a real assessment through Kong', async ({ bro
     .fill('Neither number has an exact binary form, so both are rounded.');
   // work is saved as the student types.
   await expect(student.getByText(/^Saved at /)).toBeVisible();
+  await student.screenshot({ path: 'test-results/assessment-desktop.png', fullPage: true });
+  await expectNoHorizontalScroll(student, 'test-results/assessment-mobile.png');
+  // the sidebar's home link, used next, is in the drawer at phone width.
+  await student.setViewportSize({ width: 1280, height: 720 });
   await student.getByRole('button', { name: 'Submit answers', exact: true }).click();
   await expect(
     student.getByText('Answers submitted. Your teacher will review the grade.', { exact: true }),
   ).toBeVisible();
+  // submitted answers no longer hold the classroom in place.
+  await expect(student.getByLabel('Current classroom')).toBeEnabled();
   await student.getByRole('link', { name: 'Home', exact: true }).click();
   await student.getByRole('button', { name: 'Refresh home' }).click();
   await expect(todo.getByText(/All caught up/)).toBeVisible();
@@ -180,8 +189,6 @@ test('teacher and student complete a real assessment through Kong', async ({ bro
   await openMenu(teacher);
   await teacher.screenshot({ path: 'test-results/drawer-mobile.png' });
   await teacherMenu.getByRole('link', { name: 'Grading review', exact: true }).click();
-  // the screenshot waits for the drawer to finish closing.
-  await expect(teacherMenu).toBeHidden();
   await expectNoHorizontalScroll(teacher, 'test-results/review-mobile.png');
   await openMenu(teacher);
   // removing asks first, with cancel focused; the student then no longer sees the classroom.

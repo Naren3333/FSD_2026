@@ -4,7 +4,7 @@ import { PagerComponent } from '../../shared/pager';
 import { Component, ViewChild, computed, inject, signal } from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { ReactiveFormsModule, type ValidatorFn } from '@angular/forms';
-import { ActivatedRoute } from '@angular/router';
+import { ActivatedRoute, Router } from '@angular/router';
 import { AssessmentApi, ContentApi } from '../../api/clients';
 import type {
   Assessment,
@@ -121,6 +121,12 @@ export class AssessmentsComponent {
   readonly usesScheme = usesScheme;
   /* the assessment a link such as student home asked to open, until the classroom's list has it. */
   private requested = '';
+  /* the assessment the address names (`?open=`), or ''. */
+  private address = '';
+  /* the address's changes, followed one after another since leaving an assessment can wait on a save. */
+  private following: Promise<void> = Promise.resolve();
+  private readonly router = inject(Router);
+  private readonly route = inject(ActivatedRoute);
   readonly form = assessmentForm();
   /* re-read on every change to the form's questions, so the ai marking option knows whether it applies. */
   private readonly questionTypes = signal(this.form.controls.questions.getRawValue().map((q) => q.type));
@@ -131,17 +137,22 @@ export class AssessmentsComponent {
     inject(UnsavedChanges).track(() => this.form.dirty);
     this.form.controls.questions.valueChanges.pipe(takeUntilDestroyed()).subscribe(() => this.typesChanged());
     this.typesChanged();
-    onClassroomChange(() => {
+    let shownClassroom = '';
+    onClassroomChange((classroomId) => {
+      // an assessment of the classroom left behind no longer belongs in a student's address.
+      if (shownClassroom && classroomId !== shownClassroom && this.session.isStudent() && this.address) {
+        this.requested = '';
+        this.showList();
+      }
+      shownClassroom = classroomId;
       this.cancelEdit();
       this.assessments.page.set(0);
       this.load();
     });
-    inject(ActivatedRoute)
-      .queryParamMap.pipe(takeUntilDestroyed())
-      .subscribe((params) => {
-        this.requested = params.get('open') ?? '';
-        this.openRequested();
-      });
+    this.route.queryParamMap.pipe(takeUntilDestroyed()).subscribe((params) => {
+      const open = params.get('open') ?? '';
+      this.following = this.following.then(() => this.follow(open));
+    });
     // only the list: the topics, documents and any open form stay as they are.
     onSectionShown('assessments', () => {
       const classroomId = this.classroomId();
@@ -189,25 +200,71 @@ export class AssessmentsComponent {
     }
   }
 
+  /* a student with an assessment open sees only that assessment. */
+  studentViewing(): boolean {
+    return this.session.isStudent() && !!this.sheet?.selected();
+  }
+
+  /* a student opens an assessment by its address, so back returns to the list. */
+  openFromList(id: string): void {
+    void this.router.navigate([], { relativeTo: this.route, queryParams: { open: id } });
+  }
+
+  /* the list's address, in place of one naming an assessment. */
+  private showList(): void {
+    void this.router.navigate([], { relativeTo: this.route, queryParams: {}, replaceUrl: true });
+  }
+
+  /* follows the address: a student's open assessment is the one it names. */
+  private async follow(open: string): Promise<void> {
+    this.address = open;
+    const current = this.session.isStudent() ? (this.sheet?.selected()?.id ?? '') : '';
+    if (current && current === open) return;
+    if (current && this.sheet) {
+      if (!(await this.sheet.leave())) {
+        // the answers are not saved yet, so the student stays on them.
+        this.address = current;
+        void this.router.navigate([], {
+          relativeTo: this.route,
+          queryParams: { open: current },
+          replaceUrl: true,
+        });
+        return;
+      }
+      if (!open) this.focusLater('open-' + current);
+    }
+    this.requested = open;
+    this.openRequested();
+  }
+
   /* opens the requested assessment once it is in the current classroom's list. */
   private openRequested(): void {
     if (!this.requested || !this.classroomId() || this.assessments.loading()) return;
     const id = this.requested;
     const classroomId = this.classroomId();
     this.requested = '';
-    if (this.assessments.value()?.some((a) => a.id === id)) {
-      this.sheet?.open(id);
-      return;
-    }
-    // a home/deep link can name an assessment on another page; the server still authorizes the read.
-    void this.assessmentApi
-      .get(id)
-      .then((item) => {
-        if (this.classroomId() === classroomId && item.classroom_id === classroomId) this.sheet?.open(id);
-      })
-      .catch((error: unknown) =>
-        this.state.error.set(messageOf(error, 'The assessment could not be opened.')),
-      );
+    const opened = this.assessments.value()?.some((a) => a.id === id)
+      ? (this.sheet?.open(id) ?? Promise.resolve(false))
+      : // a home/deep link can name an assessment on another page; the server still authorizes the read.
+        this.assessmentApi.get(id).then(
+          (item) => {
+            if (this.classroomId() !== classroomId) return false;
+            if (item.classroom_id === classroomId && this.sheet) return this.sheet.open(id);
+            this.state.error.set('The assessment could not be opened.');
+            return false;
+          },
+          (error: unknown) => {
+            this.state.error.set(messageOf(error, 'The assessment could not be opened.'));
+            return false;
+          },
+        );
+    void opened.then((ok) => {
+      if (!this.session.isStudent()) return;
+      // the error shows on the list, and opening it again asks again.
+      if (!ok && this.address === id) this.showList();
+      // the student left before it arrived.
+      if (ok && this.address !== id && this.sheet?.selected()?.id === id) void this.sheet.leave();
+    });
   }
 
   // --- the teacher's editor
