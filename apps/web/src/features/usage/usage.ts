@@ -43,7 +43,8 @@ export class UsageComponent implements OnInit {
   escape(): void {
     if (!this.open()) return;
     this.open.set(false);
-    this.pill?.nativeElement.focus();
+    // focus elsewhere on the page stays where it is.
+    if (this.host.nativeElement.contains(document.activeElement)) this.pill?.nativeElement.focus();
   }
 
   @HostListener('document:click', ['$event'])

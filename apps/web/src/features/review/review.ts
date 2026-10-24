@@ -120,6 +120,8 @@ export class ReviewComponent {
       const classroomId = this.classroomId();
       const assessmentId = this.assessmentId();
       if (!classroomId || this.selected()) return;
+      // a student enrolled since the names were read would show without one.
+      this.names$ = null;
       const same = () => this.classroomId() === classroomId && this.assessmentId() === assessmentId;
       rereadQuietly(this.grades, () => this.read(classroomId, assessmentId, same));
     });

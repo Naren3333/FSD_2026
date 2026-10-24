@@ -326,6 +326,21 @@ describe('coming back to grading review', () => {
     expect(page.card('Ben Tan')).toBeDefined();
   });
 
+  it('names a student enrolled while the teacher was away', async () => {
+    const page = await leave(() => [grade('s1', 'draft')]);
+    const identity = TestBed.inject(IdentityApi) as unknown as { roster: () => Promise<unknown> };
+    identity.roster = () =>
+      Promise.resolve([
+        { id: 's1', username: 'ana', display_name: 'Ana Lim' },
+        { id: 's3', username: 'cara', display_name: 'Cara Ong' },
+      ]);
+    page.answer(() => [grade('s1', 'draft'), grade('s3', 'draft')]);
+    vi.setSystemTime(Date.now() + 21_000);
+    await page.router.navigateByUrl('/review');
+    await page.settle();
+    expect(page.card('Cara Ong')).toBeDefined();
+  });
+
   it('leaves a grade open for marking alone', async () => {
     const page = await leave(() => [grade('s1', 'draft')]);
     page.component.review(page.component.grades.value()?.grades[0] as Evaluation);

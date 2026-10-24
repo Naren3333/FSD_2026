@@ -1,4 +1,4 @@
-<a class="skip-link" href="#workspace">Skip to workspace</a>
+<a class="skip-link" href="#workspace" [attr.inert]="menuOpen() ? '' : null">Skip to workspace</a>
 @if (session.profile(); as profile) {
   <div class="app-shell" [class.menu-open]="menuOpen()">
     <aside id="sidebar" class="sidebar">

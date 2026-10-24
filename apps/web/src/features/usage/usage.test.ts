@@ -63,11 +63,24 @@ describe('the ai meter', () => {
     );
     expect(page.text(page.popover)).toContain('Refresh AI use');
 
+    (page.popover.querySelector('.usage-refresh') as HTMLButtonElement).focus();
     document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }));
     page.fixture.detectChanges();
     expect(page.pill.getAttribute('aria-expanded')).toBe('false');
     expect(page.popover.hidden).toBe(true);
     expect(document.activeElement).toBe(page.pill);
+  });
+
+  it('leaves focus that moved on to the page where it is when Escape closes it', () => {
+    const page = render(today(1.8));
+    const field = document.body.appendChild(document.createElement('input'));
+    page.pill.click();
+    page.fixture.detectChanges();
+    field.focus();
+    document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }));
+    page.fixture.detectChanges();
+    expect(page.pill.getAttribute('aria-expanded')).toBe('false');
+    expect(document.activeElement).toBe(field);
   });
 
   it('closes on a second press and on a click outside', () => {

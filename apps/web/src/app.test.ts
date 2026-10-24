@@ -202,6 +202,7 @@ describe('the signed-in shell', () => {
     expect(menu.getAttribute('aria-expanded')).toBe('true');
     await vi.waitFor(() => expect(document.activeElement?.classList.contains('brand')).toBe(true));
     expect(page.root.querySelector('main')?.hasAttribute('inert')).toBe(true);
+    expect(page.root.querySelector('.skip-link')?.hasAttribute('inert')).toBe(true);
     document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }));
     page.fixture.detectChanges();
     expect(menu.getAttribute('aria-expanded')).toBe('false');

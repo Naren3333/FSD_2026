@@ -173,12 +173,15 @@ test('teacher and student complete a real assessment through Kong', async ({ bro
   await expectNoHorizontalScroll(teacher, 'test-results/assessments-mobile.png');
   // on a phone the sidebar is a drawer: escape closes it and gives focus back to the menu button.
   await openMenu(teacher);
+  await expect(teacher.getByRole('link', { name: 'Learning Ledger' })).toBeFocused();
   await teacher.keyboard.press('Escape');
   await expect(teacherMenu).toBeHidden();
   await expect(teacher.getByRole('button', { name: 'Open menu' })).toBeFocused();
   await openMenu(teacher);
   await teacher.screenshot({ path: 'test-results/drawer-mobile.png' });
   await teacherMenu.getByRole('link', { name: 'Grading review', exact: true }).click();
+  // the screenshot waits for the drawer to finish closing.
+  await expect(teacherMenu).toBeHidden();
   await expectNoHorizontalScroll(teacher, 'test-results/review-mobile.png');
   await openMenu(teacher);
   // removing asks first, with cancel focused; the student then no longer sees the classroom.
