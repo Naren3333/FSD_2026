@@ -631,7 +631,7 @@ main {
   border-bottom: 1px solid var(--line);
 }
 .notice button {
-  min-height: 36px;
+  min-height: 44px;
   padding: 6px 12px;
 }
 .workspace-content {
@@ -647,7 +647,7 @@ app-usage {
   display: block;
 }
 button.usage-pill {
-  min-height: 36px;
+  min-height: 44px;
   padding: 4px 12px;
   border-radius: 999px;
   border: 1px solid var(--line);
