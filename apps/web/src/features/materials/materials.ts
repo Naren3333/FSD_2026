@@ -5,6 +5,7 @@ import { FormControl, FormGroup, ReactiveFormsModule } from '@angular/forms';
 import { ContentApi } from '../../api/clients';
 import type { DocType, DocumentRecord, FailureReason } from '../../api/models';
 import { ClassroomContext, onClassroomChange } from '../../core/classroom-context';
+import { onSectionShown, rereadQuietly } from '../../core/section-shown';
 import { Session } from '../../core/session';
 import { UnsavedChanges } from '../../core/unsaved-changes';
 import { ActionState } from '../../shared/action-state';
@@ -120,6 +121,13 @@ export class MaterialsComponent implements OnDestroy {
     onClassroomChange(() => {
       this.documents.page.set(0);
       this.load();
+    });
+    onSectionShown('materials', () => {
+      const id = this.classroomId();
+      if (id)
+        rereadQuietly(this.documents, () =>
+          this.documents.readPage((offset, limit) => this.content.documentPage(id, offset, limit)),
+        );
     });
   }
 

@@ -2,6 +2,7 @@ import { Component, inject } from '@angular/core';
 import { AssessmentApi, GradingApi } from '../../api/clients';
 import type { Assessment, Evidence, OwnResult } from '../../api/models';
 import { ClassroomContext, onClassroomChange } from '../../core/classroom-context';
+import { onSectionShown, rereadQuietly } from '../../core/section-shown';
 import { CurriculumNames } from '../../core/curriculum-names';
 import { date } from '../../shared/format';
 import { MarksPipe } from '../../shared/marks';
@@ -44,24 +45,28 @@ export class ResultsComponent {
 
   constructor() {
     onClassroomChange(() => this.load());
+    onSectionShown('results', () => {
+      const classroomId = this.classroomId();
+      if (classroomId) rereadQuietly(this.results, () => this.read(classroomId));
+    });
   }
 
   load(): void {
     const classroomId = this.classroomId();
     this.results.clear();
     if (!classroomId) return;
-    void this.results.load(async () => {
-      const results = await this.grading.mine(classroomId);
-      // the student's copy of each assessment: prompts and options, never the answer key.
-      const [assessments] = await Promise.all([
-        assessmentsOf(results, (id) => this.assessmentApi.get(id)),
-        // without the curriculum, topics show their ids.
-        this.curriculum
-          .need(results.flatMap((r) => r.evidence.map((e) => e.topic_id)))
-          .catch(() => undefined),
-      ]);
-      return { results, assessments };
-    });
+    void this.results.load(() => this.read(classroomId));
+  }
+
+  private async read(classroomId: string): Promise<Results> {
+    const results = await this.grading.mine(classroomId);
+    // the student's copy of each assessment: prompts and options, never the answer key.
+    const [assessments] = await Promise.all([
+      assessmentsOf(results, (id) => this.assessmentApi.get(id)),
+      // without the curriculum, topics show their ids.
+      this.curriculum.need(results.flatMap((r) => r.evidence.map((e) => e.topic_id))).catch(() => undefined),
+    ]);
+    return { results, assessments };
   }
 
   outcome(evidence: Pick<Evidence, 'correct' | 'awarded'>): string {

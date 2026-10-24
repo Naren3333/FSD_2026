@@ -1,13 +1,14 @@
 // @vitest-environment jsdom
-import { signal } from '@angular/core';
+import { Component, signal } from '@angular/core';
 import { TestBed } from '@angular/core/testing';
 import { BrowserTestingModule, platformBrowserTesting } from '@angular/platform-browser/testing';
-import { provideRouter } from '@angular/router';
+import { Router, provideRouter } from '@angular/router';
 import { readFileSync } from 'node:fs';
 import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 import { AppComponent } from './app';
 import { AiUsage } from './core/ai-usage';
 import { Auth } from './core/auth';
+import { UnsavedChanges } from './core/unsaved-changes';
 import { StatusComponent } from './shared/status';
 import { UsageComponent } from './features/usage/usage';
 
@@ -15,6 +16,9 @@ const template = (path: string) => readFileSync(new URL(path, import.meta.url), 
 
 beforeAll(() => TestBed.initTestEnvironment(BrowserTestingModule, platformBrowserTesting()));
 afterEach(() => vi.unstubAllGlobals());
+
+@Component({ standalone: true, template: '' })
+class StubPage {}
 
 const json = (status: number, body: unknown) =>
   new Response(JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json' } });
@@ -39,7 +43,10 @@ function render(fetch: (url: string) => Response) {
   TestBed.resetTestingModule();
   TestBed.configureTestingModule({
     providers: [
-      provideRouter([]),
+      provideRouter([
+        { path: 'elsewhere', component: StubPage },
+        { path: 'review', component: StubPage },
+      ]),
       { provide: Auth, useValue: auth },
       {
         provide: AiUsage,
@@ -66,7 +73,7 @@ function render(fetch: (url: string) => Response) {
     await fixture.whenStable();
     fixture.detectChanges();
   };
-  return { text, button, settle, auth, calls };
+  return { root, fixture, text, button, settle, auth, calls };
 }
 
 describe('an account signing in with a role it was not registered with', () => {
@@ -107,6 +114,109 @@ describe('an account signing in with a role it was not registered with', () => {
     await page.settle();
     expect(page.calls.filter((url) => url.endsWith('/api/identity/me'))).toHaveLength(2);
     expect(page.text()).not.toContain('Sign in with your teacher account.');
-    expect(page.text()).toContain('Teacher · o1');
+    expect(page.text()).toContain('T');
+    expect(page.text()).toContain('Teacher');
+    expect(page.text()).not.toContain('o1');
+  });
+});
+
+/* a teacher with one classroom c1, whose grading counts answer as given. */
+async function teacher(counts: unknown = { drafts: 7, finalized: 0, unreleased: 0 }) {
+  const page = render((url) =>
+    url.endsWith('/api/identity/me')
+      ? json(200, { id: 'u1', org_id: 'o1', role: 'teacher', username: 't', display_name: 'T' })
+      : url.includes('/classrooms/page')
+        ? json(200, { items: [{ id: 'c1', name: 'Sec 3 Science', teacher_id: 'u1' }], total: 1 })
+        : url.includes('/evaluations/counts')
+          ? json(200, counts)
+          : json(200, []),
+  );
+  await page.settle();
+  await vi.waitFor(() => {
+    page.fixture.detectChanges();
+    expect(page.root.querySelector('select')?.value).toBe('c1');
+  });
+  return page;
+}
+
+/* a control's accessible name from its content: hidden and aria-hidden parts left out. */
+function nameOf(element: Element): string {
+  const copy = element.cloneNode(true) as Element;
+  copy.querySelectorAll('[aria-hidden="true"], [hidden]').forEach((part) => part.remove());
+  return copy.textContent?.replace(/\s+/g, ' ').trim() ?? '';
+}
+
+describe('the signed-in shell', () => {
+  it('shows the account block without the org id', async () => {
+    const page = await teacher();
+    const account = page.root.querySelector('.account')!;
+    expect(account.textContent).toContain('T');
+    expect(account.textContent).toContain('Teacher');
+    expect(page.text()).not.toContain('o1');
+    expect(page.root.querySelector('.identity-note')).toBeNull();
+    expect(nameOf(page.button('Sign out'))).toBe('Sign out');
+  });
+
+  it('counts draft grades beside Grading review, keeping the link’s name', async () => {
+    const page = await teacher();
+    const link = () =>
+      [...page.root.querySelectorAll('nav a')].find(
+        (a) => nameOf(a) === 'Grading review',
+      ) as HTMLAnchorElement;
+    await vi.waitFor(() => {
+      page.fixture.detectChanges();
+      expect(link().querySelector('.nav-count')?.textContent?.trim()).toBe('7');
+    });
+    expect(link().querySelector('.nav-count')?.getAttribute('aria-hidden')).toBe('true');
+    const described = page.root.querySelector('#' + link().getAttribute('aria-describedby'));
+    expect(described?.textContent?.trim()).toBe('7 grades to review');
+  });
+
+  it('shows no count for an answer without one, and no error', async () => {
+    const page = await teacher({});
+    await page.fixture.whenStable();
+    page.fixture.detectChanges();
+    expect(page.root.querySelector('.nav-count')).toBeNull();
+    expect(page.root.querySelector('[role="alert"]')).toBeNull();
+  });
+
+  it('locks the classroom list while work is unsaved, saying why', async () => {
+    const page = await teacher();
+    TestBed.runInInjectionContext(() => TestBed.inject(UnsavedChanges).track(() => true));
+    // a form's input event marks the shell for checking in the app.
+    page.fixture.componentRef.changeDetectorRef.markForCheck();
+    page.fixture.detectChanges();
+    const select = page.root.querySelector('select')!;
+    expect(select.disabled).toBe(true);
+    const reason = page.root.querySelector('#' + select.getAttribute('aria-describedby'));
+    expect(reason?.textContent?.trim()).toBe('Finish or clear your current form before changing classrooms.');
+  });
+
+  it('opens the menu drawer, and closes it on Escape with focus back on Open menu', async () => {
+    const page = await teacher();
+    // focus needs the page in the document.
+    document.body.append(page.root);
+    const menu = page.root.querySelector('[aria-label="Open menu"]') as HTMLButtonElement;
+    menu.click();
+    page.fixture.detectChanges();
+    expect(menu.getAttribute('aria-expanded')).toBe('true');
+    await vi.waitFor(() => expect(document.activeElement?.classList.contains('brand')).toBe(true));
+    expect(page.root.querySelector('main')?.hasAttribute('inert')).toBe(true);
+    document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }));
+    page.fixture.detectChanges();
+    expect(menu.getAttribute('aria-expanded')).toBe('false');
+    expect(page.root.querySelector('main')?.hasAttribute('inert')).toBe(false);
+    await vi.waitFor(() => expect(document.activeElement).toBe(menu));
+    page.root.remove();
+  });
+
+  it('closes the menu drawer on navigation', async () => {
+    const page = await teacher();
+    const menu = page.root.querySelector('[aria-label="Open menu"]') as HTMLButtonElement;
+    menu.click();
+    page.fixture.detectChanges();
+    await TestBed.inject(Router).navigateByUrl('/elsewhere');
+    page.fixture.detectChanges();
+    expect(menu.getAttribute('aria-expanded')).toBe('false');
   });
 });

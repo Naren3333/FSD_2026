@@ -1,12 +1,16 @@
 // @vitest-environment jsdom
 import { TestBed } from '@angular/core/testing';
 import { BrowserTestingModule, platformBrowserTesting } from '@angular/platform-browser/testing';
-import { beforeAll, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 import { IdentityApi } from '../api/clients';
 import type { Classroom } from '../api/models';
 import { ClassroomContext } from './classroom-context';
 
 beforeAll(() => TestBed.initTestEnvironment(BrowserTestingModule, platformBrowserTesting()));
+afterEach(() => {
+  vi.restoreAllMocks();
+  localStorage.clear();
+});
 
 const room = (id: string): Classroom => ({ id, name: `Class ${id}`, teacher_id: 't1' });
 
@@ -87,5 +91,70 @@ describe('ClassroomContext', () => {
       false,
       'Identity is unavailable.',
     ]);
+  });
+
+  describe('remembering the choice', () => {
+    it('chooses the saved classroom over the first one', async () => {
+      localStorage.setItem('ledger.classroom.u1', 'b');
+      const context = setup(() => Promise.resolve([room('a'), room('b')]));
+      context.setUser('u1');
+      await context.refresh();
+      expect(context.classroomId()).toBe('b');
+    });
+
+    it('falls back to the first classroom when the saved one is gone, and forgets it', async () => {
+      localStorage.setItem('ledger.classroom.u1', 'gone');
+      const context = setup(() => Promise.resolve([room('a'), room('b')]));
+      context.setUser('u1');
+      await context.refresh();
+      expect(context.classroomId()).toBe('a');
+      expect(localStorage.getItem('ledger.classroom.u1')).toBeNull();
+    });
+
+    it('keeps the saved classroom when a read fails', async () => {
+      localStorage.setItem('ledger.classroom.u1', 'b');
+      const context = setup(() => Promise.reject(new Error('Identity is unavailable.')));
+      context.setUser('u1');
+      await expect(context.refresh()).rejects.toThrow();
+      expect(localStorage.getItem('ledger.classroom.u1')).toBe('b');
+    });
+
+    it('does not save the automatic choice on load', async () => {
+      const context = setup(() => Promise.resolve([room('a'), room('b')]));
+      context.setUser('u1');
+      await context.refresh();
+      expect(localStorage.getItem('ledger.classroom.u1')).toBeNull();
+    });
+
+    it('saves on select, forgets on choosing none, and keeps each user apart', async () => {
+      const context = setup(() => Promise.resolve([room('a'), room('b')]));
+      context.setUser('u1');
+      await context.refresh();
+      context.select('b');
+      expect(localStorage.getItem('ledger.classroom.u1')).toBe('b');
+      context.select('');
+      expect(localStorage.getItem('ledger.classroom.u1')).toBeNull();
+
+      localStorage.setItem('ledger.classroom.u1', 'a');
+      localStorage.setItem('ledger.classroom.u2', 'b');
+      const other = setup(() => Promise.resolve([room('a'), room('b')]));
+      other.setUser('u2');
+      await other.refresh();
+      expect(other.classroomId()).toBe('b');
+    });
+
+    it('works when storage throws', async () => {
+      for (const method of ['getItem', 'setItem', 'removeItem'] as const)
+        vi.spyOn(Storage.prototype, method).mockImplementation(() => {
+          throw new Error('blocked');
+        });
+      const context = setup(() => Promise.resolve([room('a'), room('b')]));
+      context.setUser('u1');
+      await context.refresh();
+      expect(context.classroomId()).toBe('a');
+      expect(() => context.select('b')).not.toThrow();
+      expect(() => context.select('')).not.toThrow();
+      expect(context.classroomId()).toBe('');
+    });
   });
 });

@@ -1,52 +1,31 @@
 <a class="skip-link" href="#workspace">Skip to workspace</a>
-<div class="app-shell">
-  <aside class="sidebar">
-    <a href="/" class="brand">
-      <span class="brand-symbol" aria-hidden="true">
-        L
-        <span>↗</span>
-      </span>
-      <span>
-        Learning
-        <br />
-        <strong>Ledger</strong>
-      </span>
-    </a>
-    <p class="sidebar-label">Teaching & learning</p>
-    <nav aria-label="Workspace">
-      @for (section of sections(); track section.path) {
-        <a [routerLink]="section.path" routerLinkActive="active" ariaCurrentWhenActive="page">
-          {{ section.label }}
+@if (session.profile(); as profile) {
+  <div class="app-shell" [class.menu-open]="menuOpen()">
+    <aside id="sidebar" class="sidebar">
+      <div class="sidebar-top">
+        <a #brand routerLink="/" class="brand">
+          <span class="brand-symbol" aria-hidden="true">L</span>
+          <span>Learning Ledger</span>
         </a>
-      }
-    </nav>
-  </aside>
-  <main id="workspace">
-    <header class="topbar">
-      <span class="workspace-label">LEARNING WORKSPACE</span>
-      @if (session.profile(); as profile) {
-        <div class="account">
-          <span>{{ session.isTeacher() ? 'Teacher' : 'Student' }} · {{ profile.org_id }}</span>
-          @if (session.expired()) {
-            <button (click)="login()" [disabled]="state.busy()">Sign in again</button>
-          }
-          <button class="secondary" (click)="logout()" [disabled]="state.busy()">Sign out</button>
-        </div>
-      } @else if (!session.signedIn) {
-        <button (click)="login()" [disabled]="state.busy()">Sign in</button>
-      }
-    </header>
-    @if (session.profile(); as profile) {
-      <div class="context-bar">
-        <div>
-          <label for="active-classroom">Current classroom</label>
+        <button type="button" class="icon-button menu-close" aria-label="Close menu" (click)="closeMenu()">
+          <app-icon name="x" />
+        </button>
+      </div>
+      <div class="classroom-switch">
+        <label for="active-classroom">Current classroom</label>
+        <div class="classroom-switch-row">
           <select
             id="active-classroom"
             [value]="context.classroomId()"
             (change)="selectClassroom($event)"
             [disabled]="hasUnsaved()"
+            [attr.aria-describedby]="hasUnsaved() ? 'classroom-lock' : null"
           >
-            <option value="">Choose a classroom</option>
+            @if (noClassrooms()) {
+              <option value="">No classrooms yet</option>
+            } @else {
+              <option value="">Choose a classroom</option>
+            }
             @for (room of context.classrooms(); track room.id) {
               <option [value]="room.id" [selected]="room.id === context.classroomId()">
                 {{ room.name }}
@@ -54,42 +33,114 @@
             }
           </select>
           @if (session.isStudent()) {
-            <button class="secondary context-refresh" (click)="refreshClassrooms()" [disabled]="state.busy()">
-              Refresh classrooms
-            </button>
+            <app-refresh-button
+              label="Refresh classrooms"
+              [busy]="state.busy()"
+              [disabled]="state.busy()"
+              (refresh)="refreshClassrooms()"
+            />
           }
         </div>
-        @if (session.isStudent()) {
-          <div class="identity-note">
-            @if (profile.username) {
-              <span>Your username</span>
-              <code>{{ profile.username }}</code>
-              <small>Share this username with your teacher for enrollment.</small>
-            } @else {
-              <span>Your ID</span>
-              <code>{{ profile.id }}</code>
-              <small>Your sign-in has no username; contact your administrator.</small>
-            }
-          </div>
+        @if (hasUnsaved()) {
+          <p id="classroom-lock" class="sidebar-note">
+            Finish or clear your current form before changing classrooms.
+          </p>
         }
+        @if (session.isTeacher() && noClassrooms()) {
+          <a routerLink="/classrooms" class="sidebar-create">Create a classroom</a>
+        }
+      </div>
+      <nav aria-label="Workspace">
+        @for (group of sections(); track group.label) {
+          @if (group.label) {
+            <p class="nav-group">{{ group.label }}</p>
+          }
+          @for (section of group.sections; track section.path) {
+            @if (section.path === 'review') {
+              <a
+                [routerLink]="section.path"
+                routerLinkActive="active"
+                ariaCurrentWhenActive="page"
+                [attr.aria-describedby]="draftCount() ? 'review-count' : null"
+              >
+                <app-icon [name]="section.icon" />
+                {{ section.label }}
+                @if (draftCount(); as count) {
+                  <span class="nav-count" aria-hidden="true">{{ count }}</span>
+                  <span id="review-count" hidden>
+                    {{ count }} {{ count === 1 ? 'grade' : 'grades' }} to review
+                  </span>
+                }
+              </a>
+            } @else {
+              <a [routerLink]="section.path" routerLinkActive="active" ariaCurrentWhenActive="page">
+                <app-icon [name]="section.icon" />
+                {{ section.label }}
+              </a>
+            }
+          }
+        }
+      </nav>
+      <div class="sidebar-status">
+        <app-status [state]="state" />
+      </div>
+      <div class="account">
+        <div class="account-who">
+          <strong>{{ profile.display_name || profile.username || 'Signed in' }}</strong>
+          <span>{{ session.isTeacher() ? 'Teacher' : 'Student' }}</span>
+        </div>
+        <a routerLink="/profile" routerLinkActive="active" ariaCurrentWhenActive="page" class="account-link">
+          <app-icon name="profile" />
+          Profile
+        </a>
+        <button type="button" class="quiet sign-out" (click)="logout()" [disabled]="state.busy()">
+          <app-icon name="logout" />
+          Sign out
+        </button>
+      </div>
+    </aside>
+    @if (menuOpen()) {
+      <div class="drawer-backdrop" (click)="closeMenu()" aria-hidden="true"></div>
+    }
+    <main id="workspace" [attr.inert]="menuOpen() ? '' : null">
+      <div class="topbar">
+        <button
+          #menuButton
+          type="button"
+          class="icon-button menu-button"
+          aria-label="Open menu"
+          aria-controls="sidebar"
+          [attr.aria-expanded]="menuOpen()"
+          (click)="openMenu()"
+        >
+          <app-icon name="menu" />
+        </button>
+        <span class="topbar-classroom">{{ context.classroomName() }}</span>
         <app-usage />
       </div>
-      <p class="draft-note">
-        {{
-          session.expired()
-            ? hasUnsaved()
-              ? 'Your session expired. Signing in again reloads the workspace; your browser asks before unsaved work on this page is lost.'
-              : 'Your session expired. Sign in again to continue.'
-            : hasUnsaved()
-              ? 'Finish or clear your current form before changing classrooms.'
-              : ''
-        }}
-      </p>
-      <app-status [state]="state" />
-      <router-outlet />
-    } @else if (session.signedIn) {
+      <div class="notice-row" role="status">
+        @if (session.expired()) {
+          <p class="notice">
+            {{
+              hasUnsaved()
+                ? 'Your session expired. Signing in again reloads the workspace; your browser asks before unsaved work on this page is lost.'
+                : 'Your session expired. Sign in again to continue.'
+            }}
+            <button type="button" (click)="login()" [disabled]="state.busy()">Sign in again</button>
+          </p>
+        }
+      </div>
+      <div class="workspace-content">
+        <router-outlet />
+      </div>
+    </main>
+  </div>
+} @else {
+  <main id="workspace" class="solo">
+    @if (session.signedIn) {
       <!-- signed in with keycloak, waiting for identity to return the profile: not the signed-out welcome. -->
-      <section class="signing-in" [attr.aria-busy]="state.busy()">
+      <section class="solo-card signing-in" [attr.aria-busy]="state.busy()">
+        <span class="brand-symbol" aria-hidden="true">L</span>
         @if (state.error()) {
           <h1>Your workspace didn't load</h1>
           <p role="alert" class="error">{{ state.error() }}</p>
@@ -103,8 +154,11 @@
         }
       </section>
     } @else {
-      <section class="welcome">
-        <p class="eyebrow">A clearer picture of learning</p>
+      <section class="solo-card welcome">
+        <p class="welcome-brand">
+          <span class="brand-symbol" aria-hidden="true">L</span>
+          Learning Ledger
+        </p>
         <h1>
           Every next step starts
           <br />
@@ -128,17 +182,12 @@
         <aside class="ai-notice">
           <span class="badge">What works today</span>
           <p>
-            Classroom tools, evidence-based grading, document chat with cited sources, and AI-drafted
-            questions, marking suggestions and interpretations of student results for teachers to review are
-            available. Generated practice for students is not available yet.
+            Classroom tools, graded assessments, document chat with sources, and AI drafts that teachers
+            review. Generated practice for students is not available yet.
           </p>
         </aside>
       </section>
       <app-status [state]="state" />
     }
-    <footer>
-      Learning Ledger
-      <span>Human review. Traceable evidence.</span>
-    </footer>
   </main>
-</div>
+}

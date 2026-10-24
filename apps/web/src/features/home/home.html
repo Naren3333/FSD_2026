@@ -1,10 +1,26 @@
 <app-page-header [title]="classroomName() || 'Home'" subtitle="Your work at a glance.">
   <app-refresh-button label="Refresh home" [disabled]="!classroomId()" (refresh)="refresh()" />
 </app-page-header>
+@if (profile(); as p) {
+  <div class="identity-note">
+    @if (p.username) {
+      <p>
+        Your username: <code>{{ p.username }}</code
+        >. Share it with your teacher so they can enroll you.
+      </p>
+    } @else {
+      <p>
+        Your ID: <code>{{ p.id }}</code
+        >. Your sign-in has no username; contact your administrator.
+      </p>
+    }
+  </div>
+}
 @if (!classroomId()) {
   <app-no-classroom>
     <p class="empty">
-      You are not in a classroom yet. Ask your teacher to enroll you, then choose Refresh classrooms above.
+      You are not in a classroom yet. Ask your teacher to enroll you, then choose Refresh classrooms beside
+      the classroom list.
     </p>
   </app-no-classroom>
 } @else {

@@ -4,6 +4,7 @@ import { RouterLink } from '@angular/router';
 import { AnalyticsApi, AssessmentApi, GradingApi } from '../../api/clients';
 import type { AssessmentSummary, OwnResult, Performance } from '../../api/models';
 import { ClassroomContext, onClassroomChange } from '../../core/classroom-context';
+import { onSectionShown, rereadQuietly } from '../../core/section-shown';
 import { CurriculumNames } from '../../core/curriculum-names';
 import { Session } from '../../core/session';
 import { dueState } from '../../shared/due';
@@ -33,6 +34,8 @@ import { RefreshButtonComponent } from '../../shared/refresh-button';
 })
 export class HomeComponent {
   private readonly session = inject(Session);
+  /* the signed-in student, whose username their teacher enrolls. */
+  readonly profile = this.session.profile;
   private readonly assessmentApi = inject(AssessmentApi);
   private readonly grading = inject(GradingApi);
   private readonly analytics = inject(AnalyticsApi);
@@ -80,6 +83,24 @@ export class HomeComponent {
 
   constructor() {
     onClassroomChange((classroomId) => this.load(classroomId));
+    onSectionShown('home', () => this.reread());
+  }
+
+  /* reads every part again in place, when the student comes back to home. */
+  private reread(): void {
+    const classroomId = this.classroomId();
+    const studentId = this.session.profile()?.id;
+    if (!classroomId || !studentId) return;
+    rereadQuietly(this.assessments, () => this.assessmentApi.list(classroomId));
+    rereadQuietly(this.results, () => this.grading.mine(classroomId));
+    rereadQuietly(this.performance, () => this.readPerformance(studentId, classroomId));
+  }
+
+  private async readPerformance(studentId: string, classroomId: string): Promise<Performance> {
+    const performance = await this.analytics.performance(studentId, classroomId);
+    // without the curriculum, topics show their ids.
+    await this.curriculum.need(performance.topics.map((s) => s.topic_id)).catch(() => undefined);
+    return performance;
   }
 
   refresh(): void {
@@ -92,12 +113,7 @@ export class HomeComponent {
     if (!classroomId || !studentId) return;
     void this.assessments.load(() => this.assessmentApi.list(classroomId));
     void this.results.load(() => this.grading.mine(classroomId));
-    void this.performance.load(async () => {
-      const performance = await this.analytics.performance(studentId, classroomId);
-      // without the curriculum, topics show their ids.
-      await this.curriculum.need(performance.topics.map((s) => s.topic_id)).catch(() => undefined);
-      return performance;
-    });
+    void this.performance.load(() => this.readPerformance(studentId, classroomId));
   }
 
   /* "due 13 oct 2026, 3:00 pm", or "overdue since …" once past; '' without a due date. */

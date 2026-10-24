@@ -1,9 +1,10 @@
 // @vitest-environment jsdom
-import { signal } from '@angular/core';
+import { Component, signal } from '@angular/core';
 import { TestBed } from '@angular/core/testing';
 import { BrowserTestingModule, platformBrowserTesting } from '@angular/platform-browser/testing';
+import { Router, provideRouter } from '@angular/router';
 import { readFileSync } from 'node:fs';
-import { beforeAll, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 import { AssessmentApi, GradingApi, IdentityApi } from '../../api/clients';
 import type { Assessment, Evaluation, EvaluationPage } from '../../api/models';
 import { ClassroomContext } from '../../core/classroom-context';
@@ -19,6 +20,10 @@ import { PageHeaderComponent } from '../../shared/page-header';
 const template = (path: string) => readFileSync(new URL(path, import.meta.url), 'utf8');
 
 beforeAll(() => TestBed.initTestEnvironment(BrowserTestingModule, platformBrowserTesting()));
+afterEach(() => vi.useRealTimers());
+
+@Component({ standalone: true, template: '' })
+class StubPage {}
 
 const quiz: Assessment = {
   id: 'a1',
@@ -50,6 +55,10 @@ function render(grades: Promise<Evaluation[]>, grading: Record<string, unknown> 
   );
   TestBed.configureTestingModule({
     providers: [
+      provideRouter([
+        { path: 'review', component: StubPage },
+        { path: 'home', component: StubPage },
+      ]),
       {
         provide: GradingApi,
         useValue: {
@@ -284,5 +293,49 @@ describe('a change whose re-read fails', () => {
     expect(page.text()).toContain('Grade finalized.');
     expect(page.text()).toContain('The grades could not be refreshed. Grading is unavailable.');
     expect(page.card('Ana Lim')).toBeDefined();
+  });
+});
+
+describe('coming back to grading review', () => {
+  /* the page as created by the navigation to review, then left for another section. */
+  async function leave(grades: () => Evaluation[]) {
+    vi.useFakeTimers({ toFake: ['Date'] });
+    let answer = grades;
+    const page = render(Promise.resolve([]), {
+      evaluations: vi.fn(() =>
+        Promise.resolve({ evaluations: answer(), total: answer().length } as EvaluationPage),
+      ),
+    });
+    const router = TestBed.inject(Router);
+    await router.navigateByUrl('/review');
+    await page.settle();
+    await router.navigateByUrl('/home');
+    return { ...page, router, answer: (next: () => Evaluation[]) => (answer = next) };
+  }
+
+  it('re-reads the grades in place, without showing loading, after 20 seconds away', async () => {
+    const page = await leave(() => [grade('s1', 'draft')]);
+    expect(page.card('Ana Lim')).toBeDefined();
+    page.answer(() => [grade('s1', 'draft'), grade('s2', 'draft')]);
+    vi.setSystemTime(Date.now() + 21_000);
+    await page.router.navigateByUrl('/review');
+    page.fixture.detectChanges();
+    expect(page.text()).not.toContain('Loading grades…');
+    expect(page.card('Ana Lim')).toBeDefined();
+    await page.settle();
+    expect(page.card('Ben Tan')).toBeDefined();
+  });
+
+  it('leaves a grade open for marking alone', async () => {
+    const page = await leave(() => [grade('s1', 'draft')]);
+    page.component.review(page.component.grades.value()?.grades[0] as Evaluation);
+    const calls = (TestBed.inject(GradingApi).evaluations as ReturnType<typeof vi.fn>).mock.calls.length;
+    vi.setSystemTime(Date.now() + 21_000);
+    await page.router.navigateByUrl('/review');
+    await page.settle();
+    expect((TestBed.inject(GradingApi).evaluations as ReturnType<typeof vi.fn>).mock.calls.length).toBe(
+      calls,
+    );
+    expect(page.component.selected()?.id).toBe('e-s1');
   });
 });

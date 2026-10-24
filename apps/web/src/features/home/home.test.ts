@@ -56,17 +56,27 @@ function render(
   results: Promise<Evaluation[]>,
   performance: Promise<Performance> = Promise.resolve(noEvidence),
   need: () => Promise<void> = () => Promise.resolve(),
+  { profile = { id: 'u1', role: 'student', username: 'stu' } as object, classroomId = 'c1' } = {},
 ) {
   TestBed.resetTestingModule();
   TestBed.configureTestingModule({
     providers: [
       provideRouter([]),
-      { provide: Session, useValue: { profile: signal({ id: 'u1', role: 'student' }) } },
+      { provide: Session, useValue: { profile: signal(profile) } },
       { provide: AssessmentApi, useValue: { list: () => assessments } },
       { provide: GradingApi, useValue: { mine: () => results } },
       { provide: AnalyticsApi, useValue: { performance: () => performance } },
       { provide: CurriculumNames, useValue: { need, topicName: () => '' } },
-      { provide: ClassroomContext, useValue: { classroomId: signal('c1'), classroomName: signal('3A') } },
+      {
+        provide: ClassroomContext,
+        useValue: {
+          classroomId: signal(classroomId),
+          classroomName: signal('3A'),
+          known: signal(true),
+          loading: signal(false),
+          error: signal(''),
+        },
+      },
     ],
   });
   TestBed.overrideComponent(HomeComponent, { set: { template: template('./home.html') } });
@@ -89,7 +99,8 @@ function render(
     await new Promise((resolve) => setTimeout(resolve));
     fixture.detectChanges();
   };
-  return { panel, settle };
+  const note = () => root.querySelector('.identity-note')?.textContent?.replace(/\s+/g, ' ').trim() ?? '';
+  return { panel, settle, note };
 }
 
 describe('waiting for your teacher', () => {
@@ -189,5 +200,26 @@ describe('topics to practise without the curriculum', () => {
     expect(page.panel('Topics to practise')).toContain('k1');
     expect(page.panel('Topics to practise')).toContain('1 of 5 correct');
     expect(page.panel('Topics to practise')).not.toContain('Curriculum is unavailable.');
+  });
+});
+
+describe('the student’s username card', () => {
+  it('shows the username to share with the teacher', () => {
+    const page = render(Promise.resolve([]), Promise.resolve([]));
+    expect(page.note()).toContain('Your username: stu.');
+    expect(page.note()).toContain('Share it with your teacher');
+  });
+
+  it('falls back to the id when the sign-in has no username', () => {
+    const page = render(Promise.resolve([]), Promise.resolve([]), undefined, undefined, {
+      profile: { id: 'u1', role: 'student', username: '' },
+    });
+    expect(page.note()).toContain('Your ID: u1.');
+    expect(page.note()).toContain('contact your administrator');
+  });
+
+  it('shows while the student is in no classroom yet', () => {
+    const page = render(Promise.resolve([]), Promise.resolve([]), undefined, undefined, { classroomId: '' });
+    expect(page.note()).toContain('Your username: stu.');
   });
 });

@@ -5,6 +5,7 @@ import {
   env,
   expectNoHorizontalScroll,
   login,
+  openMenu,
   topicToDelete,
 } from './helpers';
 
@@ -170,8 +171,16 @@ test('teacher and student complete a real assessment through Kong', async ({ bro
   await teacherMenu.getByRole('link', { name: 'Assessments', exact: true }).click();
   await expect(teacher.getByRole('heading', { name: 'Create an assessment' })).toBeVisible();
   await expectNoHorizontalScroll(teacher, 'test-results/assessments-mobile.png');
+  // on a phone the sidebar is a drawer: escape closes it and gives focus back to the menu button.
+  await openMenu(teacher);
+  await teacher.keyboard.press('Escape');
+  await expect(teacherMenu).toBeHidden();
+  await expect(teacher.getByRole('button', { name: 'Open menu' })).toBeFocused();
+  await openMenu(teacher);
+  await teacher.screenshot({ path: 'test-results/drawer-mobile.png' });
   await teacherMenu.getByRole('link', { name: 'Grading review', exact: true }).click();
   await expectNoHorizontalScroll(teacher, 'test-results/review-mobile.png');
+  await openMenu(teacher);
   // removing asks first, with cancel focused; the student then no longer sees the classroom.
   await teacherMenu.getByRole('link', { name: 'Classrooms', exact: true }).click();
   await roster.getByRole('button', { name: 'Remove Student Local from the classroom' }).click();
@@ -179,6 +188,7 @@ test('teacher and student complete a real assessment through Kong', async ({ bro
   await teacher.getByRole('button', { name: 'Remove student', exact: true }).click();
   await expect(teacher.getByText('Student removed from the classroom.', { exact: true })).toBeVisible();
   await expect(roster.getByText(/No students enrolled yet/)).toBeVisible();
+  await openMenu(student);
   await student.getByRole('button', { name: 'Refresh classrooms' }).click();
   await expect(student.getByRole('option', { name: 'Browser ' + suffix })).toHaveCount(0);
   await teacher.close();

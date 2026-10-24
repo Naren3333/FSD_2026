@@ -10,6 +10,7 @@ import type {
   Student,
 } from '../../api/models';
 import { ClassroomContext, onClassroomChange } from '../../core/classroom-context';
+import { onSectionShown, rereadQuietly } from '../../core/section-shown';
 import { CurriculumNames } from '../../core/curriculum-names';
 import { studentNames } from '../../shared/names';
 import { PagerComponent, pageCount } from '../../shared/pager';
@@ -101,6 +102,33 @@ export class DashboardComponent {
 
   constructor() {
     onClassroomChange((classroomId) => this.load(classroomId));
+    onSectionShown('dashboard', () => this.reread());
+  }
+
+  /* reads every tile and the current topics page again in place, when the teacher comes back to the dashboard. */
+  private reread(): void {
+    const classroomId = this.classroomId();
+    if (!classroomId) return;
+    const offset = this.page() * this.pageSize;
+    rereadQuietly(this.assessments, () => this.publishedProgress(classroomId));
+    rereadQuietly(this.counts, () => this.grading.counts(classroomId));
+    rereadQuietly(this.roster, async () => {
+      const roster = await this.identity.rosterPage(classroomId, offset, this.pageSize);
+      if (this.classroomId() === classroomId) this.enrolledTotal.set(roster.total);
+      return roster.students;
+    });
+    rereadQuietly(this.performance, async () => {
+      const page = await this.analytics.classPerformance(classroomId, offset, this.pageSize);
+      await this.curriculum
+        .need(page.students.flatMap((s) => s.topics.map((m) => m.topic_id)))
+        .catch(() => undefined);
+      return page;
+    });
+  }
+
+  // students never see drafts, so a draft has no submissions to count.
+  private async publishedProgress(classroomId: string): Promise<AssessmentProgress[]> {
+    return (await this.assessmentApi.progress(classroomId)).filter((a) => a.status === 'published');
   }
 
   refresh(): void {
@@ -112,10 +140,7 @@ export class DashboardComponent {
     this.page.set(page);
     if (!classroomId) return;
     this.enrolledTotal.set(undefined);
-    // students never see drafts, so a draft has no submissions to count.
-    void this.assessments.load(async () =>
-      (await this.assessmentApi.progress(classroomId)).filter((a) => a.status === 'published'),
-    );
+    void this.assessments.load(() => this.publishedProgress(classroomId));
     void this.counts.load(() => this.grading.counts(classroomId));
     void this.loadPerformance(classroomId);
   }

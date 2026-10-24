@@ -3,6 +3,7 @@ import { FormControl, FormGroup, ReactiveFormsModule } from '@angular/forms';
 import { AssessmentApi, GradingApi, IdentityApi } from '../../api/clients';
 import type { Assessment, AssessmentSummary, Evaluation, Evidence } from '../../api/models';
 import { ClassroomContext, onClassroomChange } from '../../core/classroom-context';
+import { onSectionShown, rereadQuietly } from '../../core/section-shown';
 import { CurriculumNames } from '../../core/curriculum-names';
 import { UnsavedChanges } from '../../core/unsaved-changes';
 import { ActionState } from '../../shared/action-state';
@@ -113,6 +114,14 @@ export class ReviewComponent {
       this.assessmentId.set('');
       this.page.set(0);
       this.load();
+    });
+    // the current page of grades, unless one is open for marking.
+    onSectionShown('review', () => {
+      const classroomId = this.classroomId();
+      const assessmentId = this.assessmentId();
+      if (!classroomId || this.selected()) return;
+      const same = () => this.classroomId() === classroomId && this.assessmentId() === assessmentId;
+      rereadQuietly(this.grades, () => this.read(classroomId, assessmentId, same));
     });
   }
 

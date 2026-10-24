@@ -21,6 +21,13 @@ export class ClassroomContext {
 
   private request = 0;
   private latest: Promise<void> = Promise.resolve();
+  /* the signed-in user, whose last chosen classroom is remembered in this browser. */
+  private userId = '';
+
+  /* names the user whose choice is saved and restored; call before the first refresh. */
+  setUser(id: string): void {
+    this.userId = id;
+  }
 
   /* reloads the list, keeping the current classroom when it is still there. */
   refresh(): Promise<void> {
@@ -37,7 +44,10 @@ export class ClassroomContext {
       this.classrooms.set(rooms);
       this.known.set(true);
       this.error.set('');
-      if (!rooms.some((room) => room.id === this.classroomId())) this.classroomId.set(rooms[0]?.id || '');
+      const has = (id: string) => !!id && rooms.some((room) => room.id === id);
+      const saved = this.saved();
+      if (saved && !has(saved)) this.save('');
+      if (!has(this.classroomId())) this.classroomId.set(has(saved) ? saved : rooms[0]?.id || '');
     } catch (error) {
       if (request !== this.request) return this.latest;
       this.error.set(messageOf(error, 'Your classrooms could not be loaded.'));
@@ -47,8 +57,34 @@ export class ClassroomContext {
     }
   }
 
+  /* an explicit choice, remembered for the next visit; '' forgets it. */
   select(classroomId: string): void {
     this.classroomId.set(classroomId);
+    this.save(classroomId);
+  }
+
+  private key(): string {
+    return `ledger.classroom.${this.userId}`;
+  }
+
+  /* storage can be missing or blocked; the app works without it. */
+  private saved(): string {
+    if (!this.userId) return '';
+    try {
+      return localStorage.getItem(this.key()) ?? '';
+    } catch {
+      return '';
+    }
+  }
+
+  private save(classroomId: string): void {
+    if (!this.userId) return;
+    try {
+      if (classroomId) localStorage.setItem(this.key(), classroomId);
+      else localStorage.removeItem(this.key());
+    } catch {
+      // the choice just isn't remembered.
+    }
   }
 }
 

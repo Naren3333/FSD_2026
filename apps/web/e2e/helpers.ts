@@ -24,7 +24,7 @@ export const env: Record<string, string> = Object.fromEntries(
 /* signs in through keycloak and waits for the workspace. */
 export async function login(page: Page, user: string, password: string): Promise<void> {
   await page.goto('/');
-  await page.getByRole('button', { name: 'Sign in', exact: true }).click();
+  await page.getByRole('button', { name: 'Sign in to your workspace' }).click();
   await page.getByLabel('Username or email').fill(user);
   await page.getByLabel('Password', { exact: true }).fill(password);
   await page.getByRole('button', { name: 'Sign In', exact: true }).click();
@@ -59,6 +59,14 @@ export async function expectNoHorizontalScroll(page: Page, screenshot: string): 
   await page.setViewportSize({ width: 390, height: 844 });
   await page.screenshot({ path: screenshot, fullPage: true });
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+}
+
+/* opens the navigation drawer when the page is narrow enough to have one; on a wide page the sidebar is already there. */
+export async function openMenu(page: Page): Promise<void> {
+  const menu = page.getByRole('button', { name: 'Open menu' });
+  if (!(await menu.isVisible())) return;
+  await menu.click();
+  await expect(page.getByRole('navigation', { name: 'Workspace' })).toBeVisible();
 }
 
 /* archives a topic from the curriculum page, through its confirmation dialog. */

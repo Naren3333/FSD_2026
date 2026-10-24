@@ -15,6 +15,7 @@ import type {
   Topic,
 } from '../../api/models';
 import { ClassroomContext, onClassroomChange } from '../../core/classroom-context';
+import { onSectionShown, rereadQuietly } from '../../core/section-shown';
 import { CurriculumNames } from '../../core/curriculum-names';
 import { ApiError } from '../../core/gateway';
 import { Session } from '../../core/session';
@@ -141,6 +142,17 @@ export class AssessmentsComponent {
         this.requested = params.get('open') ?? '';
         this.openRequested();
       });
+    // only the list: the topics, documents and any open form stay as they are.
+    onSectionShown('assessments', () => {
+      const classroomId = this.classroomId();
+      if (classroomId) rereadQuietly(this.assessments, () => this.readList(classroomId));
+    });
+  }
+
+  private readList(classroomId: string): Promise<AssessmentSummary[]> {
+    return this.assessments.readPage((offset, limit) =>
+      this.assessmentApi.assessmentPage(classroomId, offset, limit),
+    );
   }
 
   /* ai marking applies only to questions a teacher marks, so the option is off without one. */
@@ -169,13 +181,7 @@ export class AssessmentsComponent {
     this.assessments.clear();
     this.classDocs.clear();
     if (!classroomId) return;
-    void this.assessments
-      .load(() =>
-        this.assessments.readPage((offset, limit) =>
-          this.assessmentApi.assessmentPage(classroomId, offset, limit),
-        ),
-      )
-      .then(() => this.openRequested());
+    void this.assessments.load(() => this.readList(classroomId)).then(() => this.openRequested());
     if (this.session.isTeacher()) {
       // read fresh, so a topic a colleague just added is there to choose.
       void this.topicsState.load(() => this.curriculum.refresh());

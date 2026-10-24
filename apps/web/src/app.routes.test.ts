@@ -4,7 +4,7 @@ import { BrowserTestingModule, platformBrowserTesting } from '@angular/platform-
 import { CanActivateFn, CanMatchFn, Route, UrlTree, provideRouter } from '@angular/router';
 import { beforeAll, describe, expect, it } from 'vitest';
 import { IdentityApi } from './api/clients';
-import { SECTIONS, routes } from './app.routes';
+import { SECTIONS, navigation, routes } from './app.routes';
 import { Auth } from './core/auth';
 
 beforeAll(() => TestBed.initTestEnvironment(BrowserTestingModule, platformBrowserTesting()));
@@ -72,7 +72,7 @@ describe('sections for one role', () => {
   const shared = SECTIONS.filter((s) => !s.teacherOnly && !s.studentOnly).map((s) => s.path);
 
   it('lists the sections each role may not open', () => {
-    expect(teacherOnly).toEqual(['dashboard', 'classrooms', 'curriculum', 'review']);
+    expect(teacherOnly).toEqual(['dashboard', 'curriculum', 'review', 'classrooms']);
     expect(studentOnly).toEqual(['home', 'results']);
   });
 
@@ -95,5 +95,47 @@ describe('sections for one role', () => {
   it.each(shared)('opens the shared %s for both roles', async (path) => {
     expect(await guard(path, 'teacher')).toBe(true);
     expect(await guard(path, 'student')).toBe(true);
+  });
+});
+
+describe('navigation', () => {
+  /* each group as its label and its sections' labels. */
+  const outline = (role: 'teacher' | 'student') =>
+    navigation(role).map((group) => [group.label, group.sections.map((section) => section.label)]);
+
+  it('groups the teacher’s sections in order', () => {
+    expect(outline('teacher')).toEqual([
+      ['', ['Class dashboard']],
+      ['Teach', ['Assessments', 'Teaching materials', 'Curriculum']],
+      ['Review', ['Grading review', 'Learning performance']],
+      ['Assistant', ['Ask the materials']],
+      ['Setup', ['Classrooms']],
+    ]);
+  });
+
+  it('groups the student’s sections in order, with student labels', () => {
+    expect(outline('student')).toEqual([
+      ['', ['Home']],
+      ['My work', ['Assessments', 'My results', 'My progress']],
+      ['Learn', ['Teaching materials', 'Ask the materials']],
+    ]);
+  });
+
+  it('gives every link a path and an icon', () => {
+    const links = navigation('teacher').flatMap((group) => group.sections);
+    expect(links.find((link) => link.label === 'Grading review')).toEqual({
+      path: 'review',
+      label: 'Grading review',
+      icon: 'grading',
+    });
+  });
+
+  it('keeps Profile out of both lists, while both roles can still open it', async () => {
+    for (const role of ['teacher', 'student'] as const)
+      expect(
+        navigation(role).flatMap((group) => group.sections.map((section) => section.path)),
+      ).not.toContain('profile');
+    expect(await guard('profile', 'teacher')).toBe(true);
+    expect(await guard('profile', 'student')).toBe(true);
   });
 });
