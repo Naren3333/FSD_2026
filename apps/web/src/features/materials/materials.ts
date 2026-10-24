@@ -12,6 +12,7 @@ import { ActionState } from '../../shared/action-state';
 import { ConfirmDialogComponent } from '../../shared/confirm-dialog';
 import { messageOf } from '../../shared/errors';
 import { FieldComponent, FieldControlDirective } from '../../shared/field';
+import { IconComponent } from '../../shared/icon';
 import { documentLimit, documentMime, isIndexable } from '../../shared/files';
 import { date } from '../../shared/format';
 import { NoClassroomComponent } from '../../shared/no-classroom';
@@ -94,6 +95,7 @@ export function describe(doc: DocumentRecord): { label: string; detail: string }
     StatusComponent,
     SectionStateComponent,
     ConfirmDialogComponent,
+    IconComponent,
   ],
   templateUrl: './materials.html',
 })
@@ -171,10 +173,23 @@ export class MaterialsComponent implements OnDestroy {
   status(doc: DocumentRecord) {
     return describe(doc);
   }
-  /* the format and, once indexed, the day it was indexed, such as "powerpoint · indexed 24 oct 2026"; documents carry no upload date. */
-  details(doc: DocumentRecord): string {
-    return doc.indexed_at ? `${typeName(doc)} · Indexed ${date(doc.indexed_at)}` : typeName(doc);
+  /* the status chip's tone, so a failure or a document still to index stands out; the label always says it in words. */
+  tone(doc: DocumentRecord): string {
+    switch (doc.status) {
+      case 'indexed':
+        return 'badge-good';
+      case 'failed':
+        return 'badge-danger';
+      case 'indexing':
+      case 'extracted':
+        return 'badge-plain';
+      default:
+        return 'badge-warning';
+    }
   }
+  /* the day a document was indexed; documents carry no upload date. */
+  readonly date = date;
+  readonly typeName = typeName;
   isPdf(doc: DocumentRecord): boolean {
     return doc.mime_type === 'application/pdf';
   }
@@ -199,16 +214,30 @@ export class MaterialsComponent implements OnDestroy {
   }
   selectFile(event: Event): void {
     const input = event.target as HTMLInputElement;
-    const file = input.files?.[0] || null;
+    this.takeFile(input.files?.[0] || null, input);
+  }
+  /* a file dropped on the drop zone, taken as if it were chosen in the picker. */
+  drop(event: DragEvent): void {
+    event.preventDefault();
+    const files = event.dataTransfer?.files;
+    const file = files?.[0];
+    if (!files || !file) return;
+    const input = this.fileInput?.nativeElement;
+    // the picker then names the dropped file.
+    if (this.takeFile(file, input) && input) input.files = files;
+  }
+  /* keeps an acceptable file for upload, or refuses it with the reason; true when kept. */
+  private takeFile(file: File | null, input?: HTMLInputElement): boolean {
     if (file && (file.size === 0 || !documentMime(file) || file.size > documentLimit(file))) {
       this.state.error.set('Choose a nonempty PDF, PPTX or DOCX up to 50 MiB, or Markdown/.txt up to 5 MiB.');
       this.file.set(null);
       // the picker would otherwise still name the refused file.
-      input.value = '';
-      return;
+      if (input) input.value = '';
+      return false;
     }
     this.file.set(file);
     this.form.markAsDirty();
+    return true;
   }
   upload(): void {
     if (!this.state.validate(this.form, 'upload-form')) return;

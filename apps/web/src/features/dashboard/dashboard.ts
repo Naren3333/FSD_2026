@@ -71,13 +71,7 @@ export class DashboardComponent {
         c?.drafts,
         `${c?.finalized} finalized${unreleased} · Open Grading review`,
       ),
-      tile(
-        this.roster,
-        'Students enrolled',
-        '/classrooms',
-        this.enrolledTotal(),
-        'Manage students under Classrooms',
-      ),
+      tile(this.roster, 'Students enrolled', '/students', this.enrolledTotal(), 'Manage students'),
       {
         ...tile(
           this.assessments,

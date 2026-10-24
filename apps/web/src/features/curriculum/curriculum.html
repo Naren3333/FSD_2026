@@ -6,80 +6,134 @@
     (refresh)="load()"
   />
 </app-page-header>
-<div class="split">
-  <section class="panel">
-    <h3>Topics</h3>
+@if (session.isTeacher()) {
+  <section class="panel topic-add" aria-labelledby="topic-add-title">
+    <h3 id="topic-add-title">Add a topic</h3>
+    <form id="topic-form" class="create-form" novalidate [formGroup]="form" (ngSubmit)="create()">
+      <app-field
+        controlId="topic-name"
+        label="Name"
+        [control]="form.controls.name"
+        error="Enter a name of 1–160 characters."
+      >
+        <input appFieldControl id="topic-name" formControlName="name" maxlength="160" />
+      </app-field>
+      <div class="button-row">
+        <button [disabled]="state.busy()">Add topic</button>
+        <button type="reset" class="secondary" [disabled]="state.busy()">Clear form</button>
+      </div>
+    </form>
+  </section>
+}
+<section class="panel topic-card" aria-labelledby="topics-title">
+  <div class="panel-heading">
+    <h3 id="topics-title">Topics</h3>
     <p class="caption">20 active topics per page</p>
-    <app-pager
-      label="Topics pages"
-      [page]="effectiveTopicPage()"
-      (pageChange)="topicPage.set($event)"
-      [pageSize]="pageSize"
-      [total]="topics.value()?.length ?? 0"
-      noun="topics"
-      [disabled]="topics.loading() || state.busy()"
-    />
-    <app-section-state [section]="topics" loading="Loading topics…" />
+  </div>
+  <app-section-state [section]="topics" loading="Loading topics…" />
+  @if (topics.ready()) {
+    @if (visibleTopics().length) {
+      <div class="table-scroll">
+        <table class="stack-table topic-table">
+          <caption class="visually-hidden">
+            Active topics
+          </caption>
+          <thead>
+            <tr>
+              <th scope="col">Topic</th>
+              @if (session.isTeacher()) {
+                <th scope="col"><span class="visually-hidden">Actions</span></th>
+              }
+            </tr>
+          </thead>
+          <tbody>
+            @for (topic of visibleTopics(); track topic.id) {
+              <tr class="record">
+                <th scope="row">{{ topic.name }}</th>
+                @if (session.isTeacher()) {
+                  <td class="actions-cell">
+                    <button
+                      type="button"
+                      class="secondary"
+                      (click)="confirmArchive(topic)"
+                      [disabled]="state.busy()"
+                    >
+                      Archive<span class="visually-hidden"> topic {{ topic.name }}</span>
+                    </button>
+                  </td>
+                }
+              </tr>
+            }
+          </tbody>
+        </table>
+      </div>
+    } @else {
+      <p class="empty">No topics yet. Add a topic to begin authoring an assessment.</p>
+    }
+  }
+  <app-pager
+    label="Topics pages"
+    [page]="effectiveTopicPage()"
+    (pageChange)="topicPage.set($event)"
+    [pageSize]="pageSize"
+    [total]="topics.value()?.length ?? 0"
+    noun="topics"
+    [disabled]="topics.loading() || state.busy()"
+  />
+</section>
+@if (session.isTeacher()) {
+  <section class="panel topic-card" aria-labelledby="archived-title">
+    <div class="panel-heading">
+      <h3 id="archived-title">Archived topics</h3>
+      <p class="caption">Not offered for new questions. 20 archived topics per page</p>
+    </div>
     @if (topics.ready()) {
-      @for (topic of visibleTopics(); track topic.id) {
-        <article class="record">
-          <strong>{{ topic.name }}</strong>
-          @if (session.isTeacher()) {
-            <span class="button-row">
-              <button class="secondary" (click)="confirmArchive(topic)" [disabled]="state.busy()">
-                Archive<span class="visually-hidden"> topic {{ topic.name }}</span>
-              </button>
-            </span>
-          }
-        </article>
-      } @empty {
-        <p class="empty">No topics yet. Add a topic to begin authoring an assessment.</p>
-      }
-      @if (session.isTeacher()) {
-        <h3>Archived topics</h3>
-        <p class="caption">Not offered for new questions. 20 archived topics per page</p>
-        <app-pager
-          label="Archived topics pages"
-          [page]="effectiveArchivePage()"
-          (pageChange)="archivePage.set($event)"
-          [pageSize]="pageSize"
-          [total]="archived().length"
-          noun="archived topics"
-          [disabled]="topics.loading() || state.busy()"
-        />
-        @for (topic of visibleArchived(); track topic.id) {
-          <article class="record">
-            <strong>{{ topic.name }}</strong>
-            <span class="button-row">
-              <button class="secondary" (click)="restore(topic)" [disabled]="state.busy()">
-                Restore<span class="visually-hidden"> topic {{ topic.name }}</span>
-              </button>
-            </span>
-          </article>
-        } @empty {
-          <p class="empty">No archived topics. Archiving a topic moves it here, where you can restore it.</p>
-        }
+      @if (visibleArchived().length) {
+        <div class="table-scroll">
+          <table class="stack-table topic-table">
+            <caption class="visually-hidden">
+              Archived topics
+            </caption>
+            <thead>
+              <tr>
+                <th scope="col">Topic</th>
+                <th scope="col"><span class="visually-hidden">Actions</span></th>
+              </tr>
+            </thead>
+            <tbody>
+              @for (topic of visibleArchived(); track topic.id) {
+                <tr class="record">
+                  <th scope="row">{{ topic.name }}</th>
+                  <td class="actions-cell">
+                    <button
+                      type="button"
+                      class="secondary"
+                      (click)="restore(topic)"
+                      [disabled]="state.busy()"
+                    >
+                      Restore<span class="visually-hidden"> topic {{ topic.name }}</span>
+                    </button>
+                  </td>
+                </tr>
+              }
+            </tbody>
+          </table>
+        </div>
+      } @else {
+        <p class="empty">No archived topics. Archiving a topic moves it here, where you can restore it.</p>
       }
     }
+    <app-pager
+      label="Archived topics pages"
+      [page]="effectiveArchivePage()"
+      (pageChange)="archivePage.set($event)"
+      [pageSize]="pageSize"
+      [total]="archived().length"
+      noun="archived topics"
+      [disabled]="topics.loading() || state.busy()"
+    />
   </section>
-  @if (session.isTeacher()) {
-    <section class="panel">
-      <h3>Add a topic</h3>
-      <form id="topic-form" novalidate [formGroup]="form" (ngSubmit)="create()">
-        <app-field
-          controlId="topic-name"
-          label="Name"
-          [control]="form.controls.name"
-          error="Enter a name of 1–160 characters."
-        >
-          <input appFieldControl id="topic-name" formControlName="name" maxlength="160" />
-        </app-field>
-        <button [disabled]="state.busy()">Add topic</button>
-        <button type="reset" class="secondary clear-form" [disabled]="state.busy()">Clear form</button>
-      </form>
-    </section>
-  }
-</div>
+}
 @if (!archiving()) {
   <app-status [state]="state" />
 }

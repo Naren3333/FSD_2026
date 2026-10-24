@@ -2,6 +2,7 @@ import { test, expect } from '@playwright/test';
 import {
   createClassroom,
   deleteTestDataAfterEach,
+  enrollStudent,
   env,
   expectNoHorizontalScroll,
   login,
@@ -26,15 +27,13 @@ test('teacher and student complete a real assessment through Kong', async ({ bro
   await expect(teacher.locator('.identity-note')).toHaveCount(0);
   await expect(teacher.getByRole('link', { name: 'My results', exact: true })).toHaveCount(0);
   await expect(studentMenu.getByRole('link', { name: 'Class dashboard', exact: true })).toHaveCount(0);
-  // the dashboard links to classrooms too, so the menu link is the one to use.
+  // the dashboard links to these pages too, so the menu link is the one to use.
   const teacherMenu = teacher.getByRole('navigation', { name: 'Workspace' });
   const suffix = Date.now().toString();
   await createClassroom(teacher, 'Browser ' + suffix);
   // the teacher finds the student in the school's list by username and enrolls them.
+  await enrollStudent(teacher, studentUsername, 'Student Local', 'Browser ' + suffix);
   const everyone = teacher.getByRole('region', { name: 'All students' });
-  await everyone.getByLabel('Search students').fill(studentUsername);
-  await everyone.getByRole('button', { name: 'Enroll Student Local in Browser ' + suffix }).click();
-  await expect(teacher.getByText('Student Local enrolled.', { exact: true })).toBeVisible();
   const roster = teacher.getByRole('region', { name: 'Students in Browser ' + suffix });
   await expect(roster.getByText('Student Local', { exact: true })).toBeVisible();
   await expect(
@@ -203,12 +202,17 @@ test('teacher and student complete a real assessment through Kong', async ({ bro
   await expectNoHorizontalScroll(teacher, 'test-results/review-mobile.png');
   await openMenu(teacher);
   // removing asks first, with cancel focused; the student then no longer sees the classroom.
-  await teacherMenu.getByRole('link', { name: 'Classrooms', exact: true }).click();
+  await teacherMenu.getByRole('link', { name: 'Students', exact: true }).click();
+  await expectNoHorizontalScroll(teacher, 'test-results/students-mobile.png');
   await roster.getByRole('button', { name: 'Remove Student Local from the classroom' }).click();
   await expect(teacher.getByRole('button', { name: 'Cancel', exact: true })).toBeFocused();
   await teacher.getByRole('button', { name: 'Remove student', exact: true }).click();
   await expect(teacher.getByText('Student removed from the classroom.', { exact: true })).toBeVisible();
   await expect(roster.getByText(/No students enrolled yet/)).toBeVisible();
+  await openMenu(teacher);
+  await teacherMenu.getByRole('link', { name: 'Classrooms', exact: true }).click();
+  await expect(teacher.getByRole('article', { name: 'Browser ' + suffix })).toBeVisible();
+  await expectNoHorizontalScroll(teacher, 'test-results/classrooms-mobile.png');
   await openMenu(student);
   await student.getByRole('button', { name: 'Refresh classrooms' }).click();
   await expect(student.getByRole('option', { name: 'Browser ' + suffix })).toHaveCount(0);

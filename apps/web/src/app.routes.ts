@@ -55,6 +55,14 @@ export const SECTIONS: WorkspaceSection[] = [
     load: () => import('./features/materials/materials').then((m) => m.MaterialsComponent),
   },
   {
+    path: 'students',
+    label: 'Students',
+    teacherOnly: true,
+    icon: 'students',
+    group: 'Teach',
+    load: () => import('./features/students/students').then((m) => m.StudentsComponent),
+  },
+  {
     path: 'curriculum',
     label: 'Curriculum',
     teacherOnly: true,

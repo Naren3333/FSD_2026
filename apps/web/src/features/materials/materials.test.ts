@@ -87,7 +87,7 @@ function render(
   const fixture = TestBed.createComponent(MaterialsComponent);
   fixture.detectChanges();
   const root = fixture.nativeElement as HTMLElement;
-  const library = () => root.querySelector('section.panel')?.textContent ?? '';
+  const library = () => root.querySelector('[aria-labelledby="library-title"]')?.textContent ?? '';
   const settle = async () => {
     await new Promise((resolve) => setTimeout(resolve));
     fixture.detectChanges();
@@ -182,8 +182,8 @@ describe('materials states', () => {
     await page.settle();
     expect(page.library()).toContain('3 slides, 5 passages. Available to the assistant.');
     expect(page.library()).not.toContain('3 pages');
-    const details = [...page.root.querySelectorAll('article.record > small:first-of-type')].map(
-      (s) => s.textContent,
+    const details = [...page.root.querySelectorAll('tr.record td[data-label="Type"]')].map((s) =>
+      s.textContent?.trim(),
     );
     expect(details).toEqual(['PowerPoint', 'Word document', 'Markdown']);
     expect(page.library()).not.toContain('Revision');
@@ -200,10 +200,74 @@ describe('document details', () => {
     expect(typeName(doc({ mime_type: 'application/epub' as DocumentRecord['mime_type'] }))).toBe('EPUB');
     const page = render(Promise.resolve([doc({ indexed_at: '2026-10-24T04:00:00Z' })]));
     return page.settle().then(() => {
-      expect(page.root.querySelector('article.record > small')?.textContent).toBe(
-        'PDF · Indexed 24 Oct 2026',
-      );
+      const cell = (label: string) =>
+        page.root.querySelector(`tr.record td[data-label="${label}"]`)?.textContent?.trim();
+      expect(cell('Type')).toBe('PDF');
+      expect(cell('Indexed')).toBe('24 Oct 2026');
     });
+  });
+});
+
+describe('status chips', () => {
+  it('tones each status, always naming it in words', async () => {
+    const page = render(
+      Promise.resolve([
+        doc({ id: 'a', title: 'A', status: 'indexing' }),
+        doc({ id: 'b', title: 'B', status: 'indexed' }),
+        doc({ id: 'c', title: 'C', status: 'failed' }),
+        doc({ id: 'd', title: 'D', status: 'extraction_unsupported' }),
+        doc({ id: 'e', title: 'E', status: 'extracted', mime_type: 'text/plain' }),
+      ]),
+    );
+    await page.settle();
+    const chips = [...page.root.querySelectorAll('tr.record td[data-label="Status"] .badge')].map((chip) => [
+      chip.textContent,
+      chip.className,
+      !!chip.querySelector('app-icon'),
+    ]);
+    expect(chips).toEqual([
+      ['Indexing', 'badge badge-plain', true],
+      ['Indexed', 'badge badge-good', false],
+      ['Indexing failed', 'badge badge-danger', false],
+      ['Not indexed', 'badge badge-warning', false],
+      ['Text extracted', 'badge badge-plain', false],
+    ]);
+    page.fixture.destroy();
+  });
+});
+
+describe('dropping a file', () => {
+  /* a drop event carrying `file`, as a browser sends it. */
+  const dropped = (file: File) =>
+    ({ preventDefault: vi.fn(), dataTransfer: { files: [file] } }) as unknown as DragEvent;
+
+  it('takes an accepted file as if it were chosen, and names it in the picker', async () => {
+    const page = render(Promise.resolve([]));
+    await page.settle();
+    const input = page.root.querySelector<HTMLInputElement>('#document-file') as HTMLInputElement;
+    const named = vi.fn();
+    Object.defineProperty(input, 'files', { set: named, configurable: true });
+    const file = new File(['%PDF-1.7'], 'fractions.pdf', { type: 'application/pdf' });
+    const event = dropped(file);
+    page.fixture.componentInstance.drop(event);
+    page.fixture.detectChanges();
+    expect(event.preventDefault).toHaveBeenCalled();
+    expect(page.fixture.componentInstance.file()).toBe(file);
+    expect(named).toHaveBeenCalled();
+    expect(page.root.textContent).toContain('fractions.pdf');
+    expect(page.fixture.componentInstance.form.dirty).toBe(true);
+  });
+
+  it('refuses a file it cannot index or keep, with the same message as the picker', async () => {
+    const page = render(Promise.resolve([]));
+    await page.settle();
+    const component = page.fixture.componentInstance;
+    component.drop(dropped(new File(['x'], 'photo.png', { type: 'image/png' })));
+    page.fixture.detectChanges();
+    expect(component.file()).toBeNull();
+    expect(component.state.error()).toBe(
+      'Choose a nonempty PDF, PPTX or DOCX up to 50 MiB, or Markdown/.txt up to 5 MiB.',
+    );
   });
 });
 
@@ -253,13 +317,15 @@ describe('deleting a material', () => {
     };
   });
   const buttons = (root: HTMLElement, text: string) =>
-    [...root.querySelectorAll('article button')].filter((b) => b.textContent?.trim().startsWith(text));
+    [...root.querySelectorAll('tr.record button')].filter((b) =>
+      (b.getAttribute('aria-label') ?? b.textContent?.trim())?.startsWith(text),
+    );
 
   it('offers Delete to teachers only, and labels a retired marking scheme', async () => {
     const scheme = doc({ id: 'd2', title: 'Old mark scheme', doc_type: 'marking_scheme' });
     const teacher = render(Promise.resolve([doc({}), scheme]));
     await teacher.settle();
-    expect(buttons(teacher.root, 'Delete').map((b) => b.textContent?.trim())).toEqual([
+    expect(buttons(teacher.root, 'Delete').map((b) => b.getAttribute('aria-label'))).toEqual([
       'Delete Fractions notes',
       'Delete Old mark scheme',
     ]);

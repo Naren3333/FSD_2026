@@ -53,7 +53,7 @@
     @if (performance.ready() && performance.value(); as data) {
       @if (!data.total) {
         <p class="empty">
-          No students enrolled yet. Enroll them under <a routerLink="/classrooms">Classrooms</a>.
+          No students enrolled yet. Enroll them under <a routerLink="/students">Students</a>.
         </p>
       } @else if (!topicRows().length) {
         <p class="empty">

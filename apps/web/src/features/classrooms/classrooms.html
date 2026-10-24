@@ -1,6 +1,6 @@
 <app-page-header
   title="Classrooms"
-  subtitle="Keep teaching materials, assessments and evidence together in one classroom."
+  subtitle="Each classroom keeps its own materials, assessments and grades."
 >
   <app-refresh-button
     label="Refresh classrooms"
@@ -9,201 +9,95 @@
     (refresh)="refresh()"
   />
 </app-page-header>
-<div class="split">
-  <section class="panel">
-    <h3>Your classrooms</h3>
-    <p class="caption">20 classrooms per page</p>
-    <app-pager
-      label="Classrooms pages"
-      [page]="effectiveRoomPage()"
-      (pageChange)="roomPage.set($event)"
-      [pageSize]="roomPageSize"
-      [total]="classrooms().length"
-      noun="classrooms"
-      [disabled]="state.busy()"
-    />
-    @for (item of visibleRooms(); track item.id) {
-      <article class="record roster-row">
-        <strong>{{ item.name }}</strong>
-        <button
-          class="secondary"
-          (click)="confirmDelete(item)"
-          [disabled]="state.busy()"
-          [attr.aria-label]="'Delete ' + item.name"
-        >
-          Delete
-        </button>
-      </article>
-    } @empty {
-      <app-no-classroom><p class="empty">No classrooms yet. Create one to get started.</p></app-no-classroom>
-    }
-  </section>
-  @if (session.isTeacher()) {
-    <section class="panel">
-      <h3>Create a classroom</h3>
-      <form id="classroom-form" novalidate [formGroup]="form" (ngSubmit)="create()">
-        <app-field
-          controlId="class-name"
-          label="Classroom name"
-          [control]="form.controls.name"
-          error="Enter a name of 1–120 characters."
-        >
-          <input appFieldControl id="class-name" formControlName="name" maxlength="120" />
-        </app-field>
+@if (session.isTeacher()) {
+  <section class="panel create-classroom" aria-labelledby="create-title">
+    <h3 id="create-title">Create a classroom</h3>
+    <form id="classroom-form" class="create-form" novalidate [formGroup]="form" (ngSubmit)="create()">
+      <app-field
+        controlId="class-name"
+        label="Classroom name"
+        [control]="form.controls.name"
+        error="Enter a name of 1–120 characters."
+      >
+        <input appFieldControl id="class-name" formControlName="name" maxlength="120" />
+      </app-field>
+      <div class="button-row">
         <button [disabled]="state.busy()">Create classroom</button>
-        <button type="reset" class="secondary clear-form" [disabled]="state.busy()">Clear form</button>
-      </form>
-    </section>
-  }
-</div>
+        <button type="reset" class="secondary" [disabled]="state.busy()">Clear form</button>
+      </div>
+    </form>
+  </section>
+}
 @if (!deleting()) {
   <app-status [state]="state" />
 }
-@if (session.isTeacher()) {
-  <section class="panel roster" aria-labelledby="roster-title">
-    <div class="section-heading">
-      <h3 id="roster-title">Students in {{ classroomName() || 'this classroom' }}</h3>
-      <button
-        class="secondary"
-        (click)="loadRoster()"
-        [disabled]="rosterState.busy() || roster.loading() || !classroomId()"
-      >
-        Refresh students
-      </button>
-    </div>
-    <p class="caption">By name, {{ rosterPageSize }} a page</p>
-    <app-section-state [section]="roster" loading="Loading students…" />
-    @if (roster.ready()) {
-      @for (student of roster.value()?.students ?? []; track student.id) {
-        <article class="record roster-row">
-          <div>
-            <strong>{{ studentName(student) || 'Name not recorded yet' }}</strong>
-            @if (student.username && student.username !== studentName(student)) {
-              <span class="caption">{{ student.username }}</span>
-            }
-            @if (!studentName(student)) {
-              <span class="identifier">{{ student.id }}</span>
-            }
-          </div>
-          <button
-            class="secondary"
-            (click)="confirmRemove(student)"
-            [disabled]="rosterState.busy()"
-            [attr.aria-label]="'Remove ' + (studentName(student) || student.id) + ' from the classroom'"
-          >
-            Remove
-          </button>
-        </article>
-      } @empty {
-        @if (classroomId()) {
-          <p class="empty">No students enrolled yet. Enroll them from All students below.</p>
-        } @else {
-          <app-no-classroom><p class="empty">Select a classroom to see its students.</p></app-no-classroom>
-        }
-      }
-    }
-    <!-- not disabled while a page loads, so the button pressed keeps keyboard focus; only the newest page lands. -->
-    <app-pager
-      label="Classroom students pages"
-      [(page)]="rosterPage"
-      [pageSize]="rosterPageSize"
-      [total]="roster.value()?.total ?? 0"
-      [disabled]="rosterState.busy()"
-      (go)="showRosterPage()"
-    />
-    @if (!removing()) {
-      <app-status [state]="rosterState" />
-    }
-  </section>
-}
-@if (session.isTeacher()) {
-  <section class="panel roster" aria-labelledby="everyone-title">
-    <div class="section-heading">
-      <h3 id="everyone-title">All students</h3>
-      <button
-        class="secondary"
-        (click)="loadEveryone()"
-        [disabled]="everyoneState.busy() || everyone.loading()"
-      >
-        Refresh all students
-      </button>
-    </div>
-    <p class="caption">Everyone in your school who has signed in with a name</p>
-    <app-field controlId="student-search" label="Search students" hint="By name or username">
-      <input
-        #searchBox
-        appFieldControl
-        id="student-search"
-        type="search"
-        autocomplete="off"
-        [value]="search()"
-        (input)="searchFor(searchBox.value)"
-      />
-    </app-field>
-    <app-section-state [section]="everyone" loading="Loading students…" />
-    @if (everyone.ready()) {
-      @for (student of everyone.value()?.students ?? []; track student.id) {
-        <article class="record roster-row">
-          <div>
-            <strong>{{ studentName(student) }}</strong>
-            @if (student.username !== studentName(student)) {
-              <span class="caption">{{ student.username }}</span>
-            }
-          </div>
-          @if (enrolled().has(student.id)) {
-            <span class="badge badge-plain">Enrolled</span>
-          } @else {
-            <button
-              class="secondary"
-              (click)="enrollStudent(student)"
-              [disabled]="everyoneState.busy() || !classroomId()"
-              [attr.aria-label]="
-                'Enroll ' + studentName(student) + ' in ' + (classroomName() || 'this classroom')
-              "
-            >
-              Enroll
-            </button>
-          }
-        </article>
-      } @empty {
-        <p class="empty">
-          {{
-            search().trim()
-              ? 'No students match that search.'
-              : 'No students have signed in yet. Students appear here after their first sign-in.'
-          }}
-        </p>
-      }
-    }
-    <app-pager
-      label="All students pages"
-      [(page)]="page"
-      [pageSize]="pageSize"
-      [total]="everyone.value()?.total ?? 0"
-      [disabled]="everyoneState.busy()"
-      (go)="loadEveryone()"
-    />
-    <app-status [state]="everyoneState" />
-  </section>
-}
-<app-confirm-dialog
-  #removeDialog
-  dialogId="remove"
-  tone="danger"
-  heading="Remove this student?"
-  confirmLabel="Remove student"
-  [state]="rosterState"
-  (confirm)="remove()"
-  (closed)="closeRemove()"
->
-  @if (removing(); as student) {
-    <p>
-      {{ studentName(student) || student.id }} will lose access to {{ classroomName() || 'this classroom' }}.
-      Their submissions and grades are kept but leave your grading review and counts, and AI marking of their
-      work stops. Enroll them again to bring it back.
+<section class="classroom-list" aria-labelledby="classrooms-title">
+  <div class="panel-heading">
+    <h3 id="classrooms-title">Your classrooms</h3>
+    <p class="caption">20 classrooms per page</p>
+  </div>
+  @if (hasUnsaved() && classrooms().length > 1) {
+    <p id="classroom-open-lock" class="unsaved-notice">
+      Finish or clear your current form before changing classrooms.
     </p>
   }
-</app-confirm-dialog>
+  @if (visibleRooms().length) {
+    <div class="classroom-grid">
+      @for (item of visibleRooms(); track item.id) {
+        <article
+          class="classroom-card"
+          [class.current]="item.id === classroomId()"
+          [attr.aria-labelledby]="'room-' + item.id"
+        >
+          <div class="classroom-card-title">
+            <h3 [id]="'room-' + item.id">{{ item.name }}</h3>
+            @if (item.id === classroomId()) {
+              <span class="badge badge-good">Current</span>
+            }
+          </div>
+          <div class="classroom-card-actions">
+            <button
+              type="button"
+              class="secondary"
+              (click)="open(item)"
+              [disabled]="item.id !== classroomId() && hasUnsaved()"
+              [attr.aria-describedby]="
+                item.id !== classroomId() && hasUnsaved() ? 'classroom-open-lock' : null
+              "
+              [attr.aria-label]="'Open ' + item.name"
+            >
+              Open
+            </button>
+            @if (item.id === classroomId()) {
+              <a class="button-link" routerLink="/students">Students</a>
+            }
+            <button
+              type="button"
+              class="icon-button"
+              (click)="confirmDelete(item)"
+              [disabled]="state.busy()"
+              [attr.aria-label]="'Delete ' + item.name"
+              [title]="'Delete ' + item.name"
+            >
+              <app-icon name="trash" />
+            </button>
+          </div>
+        </article>
+      }
+    </div>
+  } @else {
+    <app-no-classroom><p class="empty">No classrooms yet. Create your first one above.</p></app-no-classroom>
+  }
+  <app-pager
+    label="Classrooms pages"
+    [page]="effectiveRoomPage()"
+    (pageChange)="roomPage.set($event)"
+    [pageSize]="roomPageSize"
+    [total]="classrooms().length"
+    noun="classrooms"
+    [disabled]="state.busy()"
+  />
+</section>
 <app-confirm-dialog
   #deleteDialog
   dialogId="delete"

@@ -1,6 +1,7 @@
 import { test, expect, Page } from '@playwright/test';
 import {
   deleteTestDataAfterEach,
+  enrollStudent,
   env,
   expectNoHorizontalScroll,
   login,
@@ -27,10 +28,7 @@ test('teacher uploads materials and an enrolled student asks the real assistant'
   const studentUsername = await student.locator('.identity-note code').innerText();
   const suffix = Date.now().toString();
   await teacherWithClassroom(page, 'Chat ' + suffix);
-  const everyone = page.getByRole('region', { name: 'All students' });
-  await everyone.getByLabel('Search students').fill(studentUsername);
-  await everyone.getByRole('button', { name: 'Enroll Student Local in Chat ' + suffix }).click();
-  await expect(page.getByText('Student Local enrolled.', { exact: true })).toBeVisible();
+  await enrollStudent(page, studentUsername, 'Student Local', 'Chat ' + suffix);
   await page.getByRole('link', { name: 'Teaching materials', exact: true }).click();
   await page.getByLabel('Document title').fill('Notes ' + suffix);
   await page.getByLabel('Educational file').setInputFiles({

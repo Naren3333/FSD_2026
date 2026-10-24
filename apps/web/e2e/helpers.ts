@@ -48,6 +48,24 @@ export async function createClassroom(page: Page, name: string): Promise<void> {
   await page.getByLabel('Current classroom').selectOption({ label: name });
 }
 
+/* opens Students, finds the student in the school's list by username and enrolls them in the current classroom. */
+export async function enrollStudent(
+  page: Page,
+  username: string,
+  studentName: string,
+  classroom: string,
+): Promise<void> {
+  await openMenu(page);
+  await page
+    .getByRole('navigation', { name: 'Workspace' })
+    .getByRole('link', { name: 'Students', exact: true })
+    .click();
+  const everyone = page.getByRole('region', { name: 'All students' });
+  await everyone.getByLabel('Search students').fill(username);
+  await everyone.getByRole('button', { name: `Enroll ${studentName} in ${classroom}` }).click();
+  await expect(page.getByText(`${studentName} enrolled.`, { exact: true })).toBeVisible();
+}
+
 /* signs in as the seeded teacher and creates a classroom to work in. */
 export async function teacherWithClassroom(page: Page, name: string): Promise<void> {
   await login(page, 'teacher', env.TEACHER_PASSWORD);

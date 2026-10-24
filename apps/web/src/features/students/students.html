@@ -1,0 +1,184 @@
+<app-page-header title="Students" [subtitle]="subtitle()">
+  @if (session.isTeacher()) {
+    <app-refresh-button
+      label="Refresh students"
+      [busy]="roster.loading()"
+      [disabled]="rosterState.busy() || roster.loading() || !classroomId()"
+      (refresh)="loadRoster()"
+    />
+  }
+</app-page-header>
+@if (session.isTeacher()) {
+  <div class="students-layout">
+    <section class="panel" aria-labelledby="roster-title">
+      <div class="panel-heading">
+        <h3 id="roster-title">Students in {{ classroomName() || 'this classroom' }}</h3>
+        <p class="caption">By name, {{ rosterPageSize }} a page</p>
+      </div>
+      <app-section-state [section]="roster" loading="Loading students…" />
+      @if (roster.ready()) {
+        @if (roster.value()?.students?.length) {
+          <div class="table-scroll">
+            <table class="stack-table roster-table">
+              <caption class="visually-hidden">
+                Students in
+                {{
+                  classroomName() || 'this classroom'
+                }}
+              </caption>
+              <thead>
+                <tr>
+                  <th scope="col">Name</th>
+                  <th scope="col">Username</th>
+                  <th scope="col"><span class="visually-hidden">Actions</span></th>
+                </tr>
+              </thead>
+              <tbody>
+                @for (student of roster.value()?.students ?? []; track student.id) {
+                  <tr>
+                    <th scope="row">
+                      <strong>{{ studentName(student) || 'Name not recorded yet' }}</strong>
+                      @if (!studentName(student)) {
+                        <span class="identifier">{{ student.id }}</span>
+                      }
+                    </th>
+                    <td data-label="Username">
+                      @if (!student.username) {
+                        <span aria-hidden="true">–</span><span class="visually-hidden">No username</span>
+                      } @else if (student.username !== studentName(student)) {
+                        {{ student.username }}
+                      } @else {
+                        <span aria-hidden="true">–</span><span class="visually-hidden">Same as name</span>
+                      }
+                    </td>
+                    <td class="actions-cell">
+                      <button
+                        type="button"
+                        class="icon-button"
+                        (click)="confirmRemove(student)"
+                        [disabled]="rosterState.busy()"
+                        [attr.aria-label]="
+                          'Remove ' + (studentName(student) || student.id) + ' from the classroom'
+                        "
+                        [title]="'Remove ' + (studentName(student) || student.id) + ' from the classroom'"
+                      >
+                        <app-icon name="trash" />
+                      </button>
+                    </td>
+                  </tr>
+                }
+              </tbody>
+            </table>
+          </div>
+        } @else if (classroomId()) {
+          <p class="empty">No students enrolled yet. Enroll them from All students.</p>
+        } @else {
+          <app-no-classroom><p class="empty">Select a classroom to see its students.</p></app-no-classroom>
+        }
+      }
+      <!-- not disabled while a page loads, so the button pressed keeps keyboard focus; only the newest page lands. -->
+      <app-pager
+        label="Classroom students pages"
+        [(page)]="rosterPage"
+        [pageSize]="rosterPageSize"
+        [total]="roster.value()?.total ?? 0"
+        [disabled]="rosterState.busy()"
+        (go)="showRosterPage()"
+      />
+      @if (!removing()) {
+        <app-status [state]="rosterState" />
+      }
+    </section>
+    <section class="panel" aria-labelledby="everyone-title">
+      <div class="panel-heading">
+        <h3 id="everyone-title">All students</h3>
+        <button
+          type="button"
+          class="secondary"
+          (click)="loadEveryone()"
+          [disabled]="everyoneState.busy() || everyone.loading()"
+        >
+          Refresh all students
+        </button>
+      </div>
+      <p class="caption everyone-caption">
+        Add students to {{ classroomName() || 'this classroom' }}. Everyone in your school who has signed in
+        with a name.
+      </p>
+      <app-field controlId="student-search" label="Search students" hint="By name or username">
+        <input
+          #searchBox
+          appFieldControl
+          id="student-search"
+          type="search"
+          autocomplete="off"
+          [value]="search()"
+          (input)="searchFor(searchBox.value)"
+        />
+      </app-field>
+      <app-section-state [section]="everyone" loading="Loading students…" />
+      @if (everyone.ready()) {
+        @for (student of everyone.value()?.students ?? []; track student.id) {
+          <article class="record roster-row">
+            <div>
+              <strong>{{ studentName(student) }}</strong>
+              @if (student.username !== studentName(student)) {
+                <span class="caption">{{ student.username }}</span>
+              }
+            </div>
+            @if (enrolled().has(student.id)) {
+              <span class="badge badge-plain">Enrolled</span>
+            } @else {
+              <button
+                type="button"
+                class="secondary"
+                (click)="enrollStudent(student)"
+                [disabled]="everyoneState.busy() || !classroomId()"
+                [attr.aria-label]="
+                  'Enroll ' + studentName(student) + ' in ' + (classroomName() || 'this classroom')
+                "
+              >
+                Enroll
+              </button>
+            }
+          </article>
+        } @empty {
+          <p class="empty">
+            {{
+              search().trim()
+                ? 'No students match that search.'
+                : 'No students have signed in yet. Students appear here after their first sign-in.'
+            }}
+          </p>
+        }
+      }
+      <app-pager
+        label="All students pages"
+        [(page)]="page"
+        [pageSize]="pageSize"
+        [total]="everyone.value()?.total ?? 0"
+        [disabled]="everyoneState.busy()"
+        (go)="loadEveryone()"
+      />
+      <app-status [state]="everyoneState" />
+    </section>
+  </div>
+}
+<app-confirm-dialog
+  #removeDialog
+  dialogId="remove"
+  tone="danger"
+  heading="Remove this student?"
+  confirmLabel="Remove student"
+  [state]="rosterState"
+  (confirm)="remove()"
+  (closed)="closeRemove()"
+>
+  @if (removing(); as student) {
+    <p>
+      {{ studentName(student) || student.id }} will lose access to {{ classroomName() || 'this classroom' }}.
+      Their submissions and grades are kept but leave your grading review and counts, and AI marking of their
+      work stops. Enroll them again to bring it back.
+    </p>
+  }
+</app-confirm-dialog>

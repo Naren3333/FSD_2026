@@ -72,7 +72,7 @@ describe('sections for one role', () => {
   const shared = SECTIONS.filter((s) => !s.teacherOnly && !s.studentOnly).map((s) => s.path);
 
   it('lists the sections each role may not open', () => {
-    expect(teacherOnly).toEqual(['dashboard', 'curriculum', 'review', 'classrooms']);
+    expect(teacherOnly).toEqual(['dashboard', 'students', 'curriculum', 'review', 'classrooms']);
     expect(studentOnly).toEqual(['home', 'results']);
   });
 
@@ -106,7 +106,7 @@ describe('navigation', () => {
   it('groups the teacher’s sections in order', () => {
     expect(outline('teacher')).toEqual([
       ['', ['Class dashboard']],
-      ['Teach', ['Assessments', 'Teaching materials', 'Curriculum']],
+      ['Teach', ['Assessments', 'Teaching materials', 'Students', 'Curriculum']],
       ['Review', ['Grading review', 'Learning performance']],
       ['Assistant', ['Ask the materials']],
       ['Setup', ['Classrooms']],

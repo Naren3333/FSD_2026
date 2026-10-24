@@ -289,9 +289,6 @@ form button {
   gap: 12px;
   justify-content: flex-end;
 }
-.clear-form {
-  margin: 12px 0 0 12px;
-}
 
 /* forms */
 input,
@@ -862,21 +859,7 @@ main.solo > app-status {
   align-items: center;
   gap: 8px 12px;
 }
-.section-heading {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  gap: 16px;
-  margin-top: 10px;
-}
-
 /* cards and lists */
-.split {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
-  gap: 24px;
-  align-items: start;
-}
 .panel {
   background: var(--surface);
   border: 1px solid var(--line);
@@ -924,9 +907,6 @@ main.solo > app-status {
 }
 .evidence-list .caption {
   display: block;
-}
-.roster {
-  margin-top: 24px;
 }
 .roster-row {
   flex-direction: row;
@@ -1106,11 +1086,6 @@ thead th {
 .badge-plain {
   background: var(--canvas);
   color: var(--muted);
-}
-.doc-tags {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
 }
 
 /* dialogs and status */
@@ -2354,6 +2329,178 @@ form .marking-bar-actions button {
   cursor: pointer;
 }
 
+/* classrooms: a compact create form above a grid of cards, one per classroom. */
+.create-classroom {
+  margin-bottom: 24px;
+}
+.create-form {
+  display: flex;
+  flex-direction: column;
+}
+.classroom-list {
+  margin-top: 24px;
+}
+.classroom-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+  gap: 16px;
+}
+.classroom-card {
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  gap: 16px;
+  min-width: 0;
+  padding: 16px 20px;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+}
+.classroom-card.current {
+  border-color: var(--brand);
+}
+.classroom-card-title {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 8px;
+}
+.classroom-card h3 {
+  margin: 0;
+  font-size: 17px;
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+.classroom-card-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+.classroom-card-actions .icon-button {
+  margin-left: auto;
+}
+@media (min-width: 700px) {
+  .create-form {
+    flex-direction: row;
+    align-items: flex-start;
+    gap: 16px;
+  }
+  .create-form app-field {
+    flex: 1;
+    margin-bottom: 0;
+  }
+  /* level with the input, under the field's label. */
+  .create-form .button-row {
+    flex-wrap: nowrap;
+    margin-top: calc(0.9rem * 1.55 + 7px);
+  }
+}
+
+/* a table row marked as a record (for tests and e2e) stays a row; under 700px .stack-table makes it a card. */
+@media (min-width: 700.02px) {
+  tr.record {
+    display: table-row;
+    padding: 0;
+    border-top: 0;
+  }
+}
+
+/* materials: a compact upload card above the library table. */
+.upload-card {
+  margin-bottom: 24px;
+}
+.upload-card form {
+  display: grid;
+  gap: 12px;
+}
+.upload-card form > app-field,
+.upload-card form > p {
+  margin: 0;
+}
+/* the title has no hint, so its line stays empty until there is an error to show. */
+.upload-card form > app-field small:empty {
+  min-height: 0;
+  margin: 0;
+}
+.drop-zone {
+  display: grid;
+  gap: 8px;
+  padding: 16px;
+  border: 2px dashed var(--control);
+  border-radius: var(--radius);
+  background: var(--canvas);
+}
+.drop-zone:focus-within {
+  border-color: var(--brand);
+}
+.drop-zone-hint {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0;
+  color: var(--muted);
+  font-size: 0.875rem;
+}
+.drop-zone app-field {
+  margin-bottom: 0;
+}
+.library-table tbody th {
+  font-weight: 400;
+}
+.library-table.student-library {
+  min-width: 0;
+}
+.library-title-cell small,
+.status-cell small {
+  display: block;
+  max-width: 28rem;
+  margin-top: 4px;
+}
+.type-cell,
+.indexed-cell,
+.status-cell .badge {
+  white-space: nowrap;
+}
+
+/* curriculum: the add form, then active and archived topics, in one column. */
+.topic-add {
+  margin-bottom: 24px;
+}
+.topic-card + .topic-card {
+  margin-top: 24px;
+}
+.topic-table {
+  min-width: 0;
+}
+.topic-table tbody th {
+  font-weight: 400;
+}
+
+/* students: the classroom's roster beside the school's list from 1100px, stacked below. */
+.students-layout {
+  display: grid;
+  gap: 24px;
+  align-items: start;
+}
+@media (min-width: 1100px) {
+  .students-layout {
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  }
+}
+.roster-table {
+  min-width: 0;
+}
+.roster-table tbody th {
+  font-weight: 400;
+}
+.roster-table .identifier {
+  display: block;
+}
+.everyone-caption {
+  margin: 0 0 16px;
+}
+
 /* breakpoints */
 @media (max-width: 1000px) {
   .topbar,
@@ -2362,9 +2509,6 @@ form .marking-bar-actions button {
   }
   .workspace-content {
     padding: 0 24px 32px;
-  }
-  .split {
-    grid-template-columns: 1fr;
   }
   .chat-layout {
     grid-template-columns: 1fr;
@@ -2432,14 +2576,6 @@ form .marking-bar-actions button {
   }
   .page-header h2 {
     font-size: 22px;
-  }
-  .section-heading {
-    align-items: flex-start;
-  }
-  .section-heading button {
-    font-size: 0.75rem;
-    padding: 8px;
-    min-width: 90px;
   }
   .panel {
     padding: 16px;

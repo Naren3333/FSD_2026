@@ -31,23 +31,23 @@ test('materials page through real data, recover from a failed read and fall back
   await pages.getByRole('button', { name: 'Next' }).focus();
   await page.keyboard.press('Enter');
   await expect(pages).toContainText('Page 2 of 2');
-  await expect(page.locator('article.record')).toHaveCount(2);
+  await expect(page.locator('tr.record')).toHaveCount(2);
   await page.route('**/api/content/documents/page*', (route) => route.abort('failed'));
   await page.getByRole('button', { name: 'Refresh materials' }).click();
   await expect(page.getByRole('alert').filter({ hasText: 'could not be reached' })).toBeVisible();
   await page.unroute('**/api/content/documents/page*');
   await page.getByRole('button', { name: 'Refresh materials' }).click();
-  await expect(page.locator('article.record')).toHaveCount(2);
+  await expect(page.locator('tr.record')).toHaveCount(2);
   for (let i = 0; i < 2; i++) {
     await page
-      .locator('article.record')
+      .locator('tr.record')
       .first()
       .getByRole('button', { name: /^Delete/ })
       .click();
     await expect(page.getByRole('button', { name: 'Cancel', exact: true })).toBeFocused();
     await page.getByRole('dialog').getByRole('button', { name: 'Delete document', exact: true }).click();
     await expect(page.getByRole('dialog')).not.toBeVisible();
-    await expect(page.locator('article.record')).toHaveCount(i === 0 ? 1 : 20);
+    await expect(page.locator('tr.record')).toHaveCount(i === 0 ? 1 : 20);
   }
   await expect(pages).not.toBeVisible();
   await expectNoHorizontalScroll(page, test.info().outputPath('materials-pagination-mobile.png'));

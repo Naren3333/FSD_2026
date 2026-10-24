@@ -1,5 +1,12 @@
 import { test, expect } from '@playwright/test';
-import { createClassroom, deleteTestDataAfterEach, env, login, topicToDelete } from './helpers';
+import {
+  createClassroom,
+  deleteTestDataAfterEach,
+  enrollStudent,
+  env,
+  login,
+  topicToDelete,
+} from './helpers';
 
 deleteTestDataAfterEach();
 
@@ -12,10 +19,7 @@ test('a teacher edits and deletes a published assessment until a student submits
   const suffix = Date.now().toString();
   const room = 'Changes ' + suffix;
   await createClassroom(teacher, room);
-  const everyone = teacher.getByRole('region', { name: 'All students' });
-  await everyone.getByLabel('Search students').fill(studentUsername);
-  await everyone.getByRole('button', { name: 'Enroll Student Local in ' + room }).click();
-  await expect(teacher.getByText('Student Local enrolled.', { exact: true })).toBeVisible();
+  await enrollStudent(teacher, studentUsername, 'Student Local', room);
   await teacher.getByRole('link', { name: 'Curriculum', exact: true }).click();
   await teacher.getByLabel('Name', { exact: true }).fill(topicToDelete('Changes topic ' + suffix));
   await teacher.getByRole('button', { name: 'Add topic', exact: true }).click();
