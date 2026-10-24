@@ -5,4 +5,6 @@ import { Component, Input } from '@angular/core';
 export class PageHeaderComponent {
   @Input({ required: true }) title = '';
   @Input() subtitle = '';
+  /* the heading's id, for a section that the heading names; the page can then move focus to it. */
+  @Input() headingId = '';
 }

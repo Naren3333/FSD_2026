@@ -2,7 +2,9 @@ import {
   ChangeDetectorRef,
   Component,
   DestroyRef,
+  EventEmitter,
   Input,
+  Output,
   ViewChild,
   computed,
   inject,
@@ -82,6 +84,8 @@ export class AnswerSheetComponent {
   /* how many of the open assessment's questions have an answer. */
   readonly answered = signal(0);
   @ViewChild('clearDialog') clearDialog?: ConfirmDialogComponent;
+  /* the teacher's close preview, with the previewed assessment's id: the page then leaves the preview's address. */
+  @Output() readonly closed = new EventEmitter<string>();
   private saveTimer: ReturnType<typeof setTimeout> | undefined;
   /* saves the student's answers as they type, while the open assessment still takes them. */
   private autosave: Subscription | undefined;
@@ -113,12 +117,6 @@ export class AnswerSheetComponent {
       clearInterval(dueCheck);
     });
     onClassroomChange(() => this.close());
-  }
-
-  /* opens the teacher's preview of an assessment, or closes it when it is the one open. */
-  togglePreview(id: string): void {
-    if (this.selected()?.id === id) this.closePreview();
-    else void this.open(id);
   }
 
   /* closes the assessment, as when it is deleted; its answers were saved as they were typed, or (a teacher's preview) never. */
@@ -177,11 +175,9 @@ export class AnswerSheetComponent {
   }
 
   /* closes the teacher's preview; its answers were never saved. */
-  closePreview(returnFocus = false): void {
-    const id = this.selected()?.id;
+  closePreview(): void {
     this.stopAutosave();
     this.selected.set(null);
-    if (returnFocus && id) this.focusLater('preview-' + id);
   }
 
   /* whether a student has answers here that are not submitted; a teacher's preview never counts. */

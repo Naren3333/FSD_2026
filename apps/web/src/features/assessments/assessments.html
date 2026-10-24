@@ -1,24 +1,174 @@
-<!-- a student with an assessment open sees only that assessment, in the answer sheet below. -->
-@if (!studentViewing()) {
-  <app-page-header
-    title="Assessments"
-    [subtitle]="
-      session.isTeacher()
-        ? 'Build an assessment as a draft, then publish it when it is ready.'
-        : 'Open an assessment to answer it. Answers save as you type until you submit.'
-    "
-  >
-    <app-refresh-button
-      label="Refresh assessments"
-      [busy]="assessments.loading()"
-      [disabled]="state.busy() || assessments.loading() || !classroomId()"
-      (refresh)="load()"
-    />
-  </app-page-header>
-  <div [class.split]="session.isTeacher()">
-    <section class="panel">
-      <h3>Classroom assessments</h3>
-      <p class="caption">Up to 100 most recent assessments</p>
+@if (session.isTeacher()) {
+  <!-- the list and the editor stay mounted, so a half-written assessment and the ai drafts survive moving between views. -->
+  <div [hidden]="view() !== 'list'">
+    <app-page-header
+      title="Assessments"
+      subtitle="Build an assessment as a draft, then publish it when it is ready."
+    >
+      <app-refresh-button
+        label="Refresh assessments"
+        [busy]="assessments.loading()"
+        [disabled]="state.busy() || assessments.loading() || !classroomId()"
+        (refresh)="load()"
+      />
+      <button type="button" id="new-assessment" (click)="newAssessment()" [disabled]="!classroomId()">
+        <app-icon name="plus" />New assessment
+      </button>
+    </app-page-header>
+    @if (form.dirty) {
+      <p class="unsaved-notice">
+        <app-icon name="edit" />
+        <span>
+          You have unsaved changes to {{ unsavedName() }}.
+          <a [routerLink]="[]" [queryParams]="{ edit: editing()?.id ?? 'new' }">Continue editing</a>
+        </span>
+      </p>
+    }
+    @if (view() === 'list' && !deleting()) {
+      <app-status [state]="state" />
+    }
+    <section class="panel" aria-labelledby="assessment-list-title">
+      <div class="panel-heading">
+        <h3 id="assessment-list-title">Classroom assessments</h3>
+        <p class="caption">Up to 100 most recent assessments</p>
+      </div>
+      <app-section-state [section]="assessments" loading="Loading assessments…" />
+      @if (assessments.ready()) {
+        @if (assessments.value()?.length) {
+          <div class="table-scroll">
+            <table class="stack-table assessment-table">
+              <caption class="visually-hidden">
+                Assessments in
+                {{
+                  classroomName() || 'this classroom'
+                }}
+              </caption>
+              <thead>
+                <tr>
+                  <th scope="col">Title</th>
+                  <th scope="col">Questions</th>
+                  <th scope="col">Schedule</th>
+                  <th scope="col">Submitted</th>
+                  <th scope="col"><span class="visually-hidden">Actions</span></th>
+                </tr>
+              </thead>
+              <tbody>
+                @for (item of assessments.value() ?? []; track item.id) {
+                  <tr>
+                    <th scope="row" class="assessment-title-cell">
+                      <span class="title-line">
+                        <strong>{{ item.title }}</strong>
+                        @if (item.status === 'draft') {
+                          <span class="badge badge-plain">Draft</span>
+                        }
+                      </span>
+                      @if (item.status === 'published' && submittedBy(item)) {
+                        <small class="caption">
+                          @if (item.submissions) {
+                            Students have submitted it, so its questions are fixed. Deleting it also deletes
+                            their grades.
+                          } @else {
+                            Students who have since left the class submitted it, so its questions are fixed.
+                            Deleting it also deletes their grades.
+                          }
+                        </small>
+                      }
+                    </th>
+                    <td data-label="Questions">
+                      {{ item.question_count }} {{ item.question_count === 1 ? 'question' : 'questions' }} ·
+                      {{ marksText(item.points) }}
+                    </td>
+                    <td data-label="Schedule">
+                      <span class="tag-row">
+                        <span>{{ schedule(item) || 'No due date' }}</span>
+                        @if (dueBadge(item); as badge) {
+                          <span class="badge badge-danger">{{ badge }}</span>
+                        }
+                      </span>
+                    </td>
+                    <td data-label="Submitted">
+                      @if (item.status === 'published' && item.submissions !== undefined) {
+                        {{ item.submissions }} submitted
+                      } @else {
+                        <span aria-hidden="true">–</span
+                        ><span class="visually-hidden">{{
+                          item.status === 'draft' ? 'Not published' : 'Not known'
+                        }}</span>
+                      }
+                    </td>
+                    <td class="actions-cell">
+                      <span class="row-actions">
+                        <button
+                          type="button"
+                          class="icon-button"
+                          [id]="'preview-' + item.id"
+                          aria-label="Preview assessment"
+                          title="Preview assessment"
+                          (click)="previewFromList(item.id)"
+                          [disabled]="state.busy()"
+                        >
+                          <app-icon name="eye" />
+                        </button>
+                        @if (item.status === 'draft') {
+                          <button
+                            type="button"
+                            class="secondary"
+                            (click)="editFromList(item)"
+                            [disabled]="state.busy()"
+                          >
+                            Edit draft<span class="visually-hidden"> {{ item.title }}</span>
+                          </button>
+                          <button
+                            type="button"
+                            class="secondary"
+                            (click)="publish(item)"
+                            [disabled]="state.busy()"
+                          >
+                            Publish<span class="visually-hidden"> {{ item.title }}</span>
+                          </button>
+                        } @else {
+                          <button
+                            type="button"
+                            class="secondary"
+                            (click)="editFromList(item)"
+                            [disabled]="state.busy()"
+                          >
+                            {{ submittedBy(item) ? 'Edit details' : 'Edit'
+                            }}<span class="visually-hidden"
+                              >{{ submittedBy(item) ? ' of ' : ' ' }}{{ item.title }}</span
+                            >
+                          </button>
+                        }
+                        <button
+                          type="button"
+                          class="icon-button"
+                          [attr.aria-label]="
+                            (item.status === 'draft' ? 'Delete draft ' : 'Delete ') + item.title
+                          "
+                          [title]="item.status === 'draft' ? 'Delete draft' : 'Delete'"
+                          (click)="confirmDelete(item)"
+                          [disabled]="state.busy()"
+                        >
+                          <app-icon name="trash" />
+                        </button>
+                      </span>
+                    </td>
+                  </tr>
+                }
+              </tbody>
+            </table>
+          </div>
+        } @else if (!classroomId()) {
+          <app-no-classroom><p class="empty">Select a classroom to continue.</p></app-no-classroom>
+        } @else {
+          <div class="empty-state">
+            <p class="empty">No assessments yet. Create one using a curriculum topic.</p>
+            <button type="button" class="secondary" (click)="newAssessment()">
+              <app-icon name="plus" />New assessment
+            </button>
+          </div>
+        }
+      }
       <app-pager
         label="Assessments pages"
         [page]="assessments.page()"
@@ -29,139 +179,152 @@
         [disabled]="assessments.loading() || state.busy()"
         (go)="load()"
       />
-      <app-section-state [section]="assessments" loading="Loading assessments…" />
-      @if (assessments.ready()) {
-        @for (item of assessments.value() ?? []; track item.id) {
-          <article class="record">
-            <strong>{{ item.title }}</strong>
-            <span class="tag-row">
-              @if (item.status === 'draft') {
-                <span class="badge badge-plain">Draft</span>
-              }
-              @if (session.isStudent() && item.submitted) {
-                <span class="badge">Submitted</span>
-              }
-              @if (dueBadge(item); as badge) {
-                <span class="badge badge-danger">{{ badge }}</span>
-              }
-            </span>
-            <span class="caption">
-              {{ item.question_count }} {{ item.question_count === 1 ? 'question' : 'questions' }} ·
-              {{ item.points }} {{ item.points === 1 ? 'mark' : 'marks' }}
-              @if (schedule(item); as when) {
-                · {{ when }}
-              }
-              @if (session.isTeacher() && item.status === 'published' && item.submissions !== undefined) {
-                · {{ item.submissions }} submitted
-              }
-            </span>
-            <span class="button-row">
-              @if (session.isTeacher()) {
-                <button
-                  class="secondary"
-                  [id]="'preview-' + item.id"
-                  (click)="sheet.togglePreview(item.id)"
-                  [disabled]="state.busy()"
-                  [attr.aria-expanded]="sheet.selected()?.id === item.id"
-                >
-                  {{ sheet.selected()?.id === item.id ? 'Close preview' : 'Preview assessment' }}
-                </button>
-              } @else {
-                <button
-                  class="secondary"
-                  [id]="'open-' + item.id"
-                  (click)="openFromList(item.id)"
-                  [disabled]="state.busy()"
-                >
-                  Open assessment
-                </button>
-              }
-              @if (session.isTeacher() && item.status === 'draft') {
-                <button class="secondary" (click)="edit(item)" [disabled]="state.busy()">
-                  Edit draft<span class="visually-hidden"> {{ item.title }}</span>
-                </button>
-                <button class="secondary" (click)="publish(item)" [disabled]="state.busy()">
-                  Publish<span class="visually-hidden"> {{ item.title }}</span>
-                </button>
-                <button class="secondary" (click)="confirmDelete(item)" [disabled]="state.busy()">
-                  Delete draft<span class="visually-hidden"> {{ item.title }}</span>
-                </button>
-              } @else if (session.isTeacher()) {
-                <button class="secondary" (click)="edit(item)" [disabled]="state.busy()">
-                  {{ submittedBy(item) ? 'Edit details' : 'Edit'
-                  }}<span class="visually-hidden"
-                    >{{ submittedBy(item) ? ' of ' : ' ' }}{{ item.title }}</span
-                  >
-                </button>
-                <button class="secondary" (click)="confirmDelete(item)" [disabled]="state.busy()">
-                  Delete<span class="visually-hidden"> {{ item.title }}</span>
-                </button>
-              }
-            </span>
-            @if (session.isTeacher() && item.status === 'published' && submittedBy(item)) {
-              <span class="caption">
-                @if (item.submissions) {
-                  Students have submitted it, so its questions are fixed. Deleting it also deletes their
-                  grades.
-                } @else {
-                  Students who have since left the class submitted it, so its questions are fixed. Deleting it
-                  also deletes their grades.
-                }
-              </span>
-            }
-          </article>
-        } @empty {
-          @if (!classroomId()) {
-            <app-no-classroom><p class="empty">Select a classroom to continue.</p></app-no-classroom>
-          } @else {
-            <p class="empty">
-              {{
-                session.isTeacher()
-                  ? 'No assessments yet. Create one using a curriculum topic.'
-                  : 'No assessments yet. Your teacher has not published any.'
-              }}
-            </p>
-          }
-        }
-      }
     </section>
-    @if (session.isTeacher()) {
-      <section class="panel" aria-labelledby="editor-title">
-        <h3 id="editor-title">
-          @if (editing(); as current) {
-            {{ (editingPublished() ? 'Edit assessment: ' : 'Edit draft: ') + current.title }}
-          } @else {
-            Create an assessment
+  </div>
+
+  <section class="editor-view" [hidden]="view() !== 'edit'" aria-labelledby="editor-title">
+    <a class="back-link" routerLink="/assessments">
+      <app-icon name="chevron-left" />
+      <span><span class="visually-hidden">Back to </span>Assessments</span>
+    </a>
+    <app-page-header [title]="editorTitle()" headingId="editor-title">
+      @if (!detailsOnly()) {
+        <button
+          type="button"
+          class="secondary"
+          id="generator-toggle"
+          aria-controls="generator-panel"
+          [attr.aria-expanded]="generatorOpen()"
+          (click)="toggleGenerator()"
+        >
+          <app-icon name="sparkles" />Generate questions from teaching materials
+        </button>
+      }
+    </app-page-header>
+    <p class="caption editor-caption">
+      @if (editing()) {
+        <span class="badge" [class.badge-plain]="!editingPublished()">
+          {{ editingPublished() ? 'Published' : 'Draft' }}
+        </span>
+      }
+      <span>
+        @if (detailsOnly()) {
+          Students have submitted this assessment, so its questions and grading settings stay as they are. You
+          can change its title, due date and late policy.
+        } @else if (editingPublished()) {
+          This assessment is published: students see your changes as soon as you save them. Work students have
+          saved on a question you change is cleared.
+        } @else {
+          Up to {{ maxQuestions }} questions. Save a draft at any time; publishing makes it final.
+        }
+      </span>
+    </p>
+
+    <div
+      class="editor-layout"
+      [class.has-outline]="!detailsOnly()"
+      [class.with-panel]="generatorOpen() && !detailsOnly()"
+    >
+      @if (!detailsOnly()) {
+        <nav class="editor-outline" aria-label="Questions">
+          <ol>
+            @for (question of questions.controls; track question; let i = $index) {
+              <li>
+                <button type="button" class="outline-row" (click)="goToQuestion(i)">
+                  <span class="outline-number">{{ i + 1 }}</span>
+                  <span class="outline-text">{{ promptLine(question) }}</span>
+                  <span class="outline-marks">{{ marksText(marksOf(question)) }}</span>
+                  @if (hasErrors(question)) {
+                    <span class="error-dot" aria-hidden="true"></span>
+                    <span class="visually-hidden">has errors</span>
+                  }
+                </button>
+              </li>
+            }
+          </ol>
+          @if (questions.length < maxQuestions) {
+            <button type="button" class="quiet outline-action" (click)="addQuestion()">
+              <app-icon name="plus" />Add another question
+            </button>
           }
-        </h3>
-        <p class="caption">
-          @if (detailsOnly()) {
-            Students have submitted this assessment, so its questions and grading settings stay as they are.
-            You can change its title, due date and late policy.
-          } @else if (editingPublished()) {
-            This assessment is published: students see your changes as soon as you save them. Work students
-            have saved on a question you change is cleared.
-          } @else {
-            Up to {{ maxQuestions }} questions. Save a draft at any time; publishing makes it final.
-          }
-        </p>
-        <form id="assessment-editor" novalidate [formGroup]="form" (ngSubmit)="save(false)">
+          <button type="button" class="quiet outline-action" (click)="goToSchedule()">
+            Schedule and grading
+          </button>
+        </nav>
+
+        <aside
+          id="generator-panel"
+          class="panel generator-panel"
+          aria-labelledby="generator-heading"
+          [hidden]="!generatorOpen()"
+        >
+          <div class="generator-panel-head">
+            <h3 id="generator-heading" tabindex="-1">Draft questions with AI</h3>
+            <button type="button" class="quiet" (click)="closeGenerator()">
+              Close<span class="visually-hidden"> question drafting</span>
+            </button>
+          </div>
+          <app-question-generator
+            [classroomId]="classroomId()"
+            [documents]="classDocs"
+            [existingPrompts]="prompts()"
+            [room]="questions.length < maxQuestions"
+            [disabled]="state.busy()"
+            (keep)="addGenerated($event)"
+          />
+        </aside>
+      }
+
+      <form id="assessment-editor" class="editor-form" novalidate [formGroup]="form" (ngSubmit)="save(false)">
+        <div class="panel editor-card">
           <app-field controlId="assessment-title" label="Assessment title" [control]="form.controls.title">
             <input appFieldControl id="assessment-title" formControlName="title" maxlength="160" />
           </app-field>
-          @if (!detailsOnly()) {
-            <app-question-generator
-              [classroomId]="classroomId()"
-              [documents]="classDocs"
-              [existingPrompts]="prompts()"
-              [room]="questions.length < maxQuestions"
-              [disabled]="state.busy()"
-              (keep)="addGenerated($event)"
-            />
-
-            @for (question of questions.controls; track question; let i = $index) {
-              <fieldset class="question-set" [formGroup]="question">
-                <legend>Question {{ i + 1 }}</legend>
+        </div>
+        @if (!detailsOnly()) {
+          @for (question of questions.controls; track question; let i = $index) {
+            <fieldset class="question-set" [formGroup]="question" [id]="'question-' + i">
+              <legend>Question {{ i + 1 }}</legend>
+              <div class="question-head">
+                <span class="tag-row">
+                  <span class="badge badge-plain">{{ typeName(question.controls.type.value) }}</span>
+                  @if (question.controls.origin.value === 'generated') {
+                    <span class="badge ai-chip"><app-icon name="sparkles" [size]="14" />AI-written</span>
+                  }
+                  @if (topicName(question.controls.topic_id.value); as topic) {
+                    <span class="question-topic">{{ topic }}</span>
+                  }
+                  <span class="question-marks">{{ marksText(marksOf(question)) }}</span>
+                </span>
+                <span class="question-head-actions">
+                  <button
+                    type="button"
+                    class="quiet"
+                    [attr.aria-expanded]="!isCollapsed(question)"
+                    [attr.aria-controls]="'question-' + i + '-body'"
+                    (click)="toggleCollapsed(question)"
+                  >
+                    <app-icon [name]="isCollapsed(question) ? 'chevron-right' : 'chevron-down'" />
+                    {{ isCollapsed(question) ? 'Expand' : 'Collapse'
+                    }}<span class="visually-hidden"> question {{ i + 1 }}</span>
+                  </button>
+                  @if (questions.length > 1) {
+                    <button
+                      type="button"
+                      class="icon-button"
+                      [attr.aria-label]="'Remove question ' + (i + 1)"
+                      title="Remove question"
+                      (click)="removeQuestion(i)"
+                    >
+                      <app-icon name="trash" />
+                    </button>
+                  }
+                </span>
+              </div>
+              @if (isCollapsed(question)) {
+                <p class="question-preview">{{ promptLine(question) }}</p>
+              }
+              <div class="question-body" [id]="'question-' + i + '-body'" [hidden]="isCollapsed(question)">
                 @if (question.controls.origin.value === 'generated') {
                   <details class="scheme-used">
                     <summary>
@@ -228,29 +391,29 @@
                       />
                     </app-field>
                   }
+                  <app-field
+                    [controlId]="'question-' + i + '-topic'"
+                    label="Curriculum topic"
+                    [error]="
+                      question.controls.topic_id.hasError('archived')
+                        ? 'This topic is archived. Choose an active topic.'
+                        : 'This field is required.'
+                    "
+                    [control]="question.controls.topic_id"
+                  >
+                    <select appFieldControl [id]="'question-' + i + '-topic'" formControlName="topic_id">
+                      <option value="">Choose a topic</option>
+                      @if (archivedTopic(question.controls.topic_id.value); as archived) {
+                        <option [value]="question.controls.topic_id.value" disabled>
+                          {{ archived }} (archived)
+                        </option>
+                      }
+                      @for (topic of topics(); track topic.id) {
+                        <option [value]="topic.id">{{ topic.name }}</option>
+                      }
+                    </select>
+                  </app-field>
                 </div>
-                <app-field
-                  [controlId]="'question-' + i + '-topic'"
-                  label="Curriculum topic"
-                  [error]="
-                    question.controls.topic_id.hasError('archived')
-                      ? 'This topic is archived. Choose an active topic.'
-                      : 'This field is required.'
-                  "
-                  [control]="question.controls.topic_id"
-                >
-                  <select appFieldControl [id]="'question-' + i + '-topic'" formControlName="topic_id">
-                    <option value="">Choose a topic</option>
-                    @if (archivedTopic(question.controls.topic_id.value); as archived) {
-                      <option [value]="question.controls.topic_id.value" disabled>
-                        {{ archived }} (archived)
-                      </option>
-                    }
-                    @for (topic of topics(); track topic.id) {
-                      <option [value]="topic.id">{{ topic.name }}</option>
-                    }
-                  </select>
-                </app-field>
                 @switch (question.controls.type.value) {
                   @case ('multiple_choice') {
                     <app-field
@@ -375,8 +538,36 @@
                               rows="4"
                             ></textarea>
                           </app-field>
+                          @let levels = parseLevels(criterion.controls.levels.value);
+                          @if (levels?.length) {
+                            <details class="rubric-read">
+                              <summary>Check how the rubric was read</summary>
+                              <table class="levels-table">
+                                <caption class="visually-hidden">
+                                  How criterion
+                                  {{
+                                    c + 1
+                                  }}'s levels were read
+                                </caption>
+                                <thead>
+                                  <tr>
+                                    <th scope="col">Points</th>
+                                    <th scope="col">What work at this level shows</th>
+                                  </tr>
+                                </thead>
+                                <tbody>
+                                  @for (level of levels; track $index) {
+                                    <tr>
+                                      <td>{{ level.points }}</td>
+                                      <td>{{ level.descriptor }}</td>
+                                    </tr>
+                                  }
+                                </tbody>
+                              </table>
+                            </details>
+                          }
                           @if (question.controls.criteria.length > 1) {
-                            <button type="button" class="secondary" (click)="removeCriterion(question, c)">
+                            <button type="button" class="quiet" (click)="removeCriterion(question, c)">
                               Remove criterion {{ c + 1 }}
                             </button>
                           }
@@ -420,50 +611,47 @@
                     [disabled]="state.busy()"
                   />
                 }
-                @if (questions.length > 1) {
-                  <button type="button" class="secondary" (click)="removeQuestion(i)">
-                    Remove question {{ i + 1 }}
-                  </button>
-                }
-              </fieldset>
-            }
-            @if (questions.hasError('schemeTotal')) {
-              <p class="error" role="alert">
-                An assessment has at most {{ maxMarkingPoints }} marking points. Remove some before saving.
-              </p>
-            }
-            @if (questions.length < maxQuestions) {
-              <button type="button" class="secondary add-question" (click)="addQuestion()">
-                Add question
-              </button>
-            }
+              </div>
+            </fieldset>
           }
+          @if (questions.hasError('schemeTotal')) {
+            <p class="error" role="alert">
+              An assessment has at most {{ maxMarkingPoints }} marking points. Remove some before saving.
+            </p>
+          }
+          @if (questions.length < maxQuestions) {
+            <button type="button" class="secondary add-question" (click)="addQuestion()">
+              <app-icon name="plus" />Add question
+            </button>
+          }
+        }
 
-          <fieldset class="question-set">
-            <legend>{{ detailsOnly() ? 'Schedule' : 'Schedule and grading' }}</legend>
-            <div class="field-row">
-              @if (!detailsOnly()) {
-                <app-field
-                  controlId="assessment-opens"
-                  label="Opens (optional)"
-                  hint="Hidden from students until then."
-                >
-                  <input
-                    appFieldControl
-                    id="assessment-opens"
-                    type="datetime-local"
-                    formControlName="opens_at"
-                  />
-                </app-field>
-              }
+        <fieldset class="question-set" id="schedule-grading">
+          <legend>{{ detailsOnly() ? 'Schedule' : 'Schedule and grading' }}</legend>
+          <div class="field-row">
+            @if (!detailsOnly()) {
               <app-field
-                controlId="assessment-due"
-                label="Due (optional)"
-                [hint]="detailsOnly() ? '' : 'Must be after it opens.'"
+                controlId="assessment-opens"
+                label="Opens (optional)"
+                hint="Hidden from students until then."
               >
-                <input appFieldControl id="assessment-due" type="datetime-local" formControlName="due_at" />
+                <input
+                  appFieldControl
+                  id="assessment-opens"
+                  type="datetime-local"
+                  formControlName="opens_at"
+                />
               </app-field>
-            </div>
+            }
+            <app-field
+              controlId="assessment-due"
+              label="Due (optional)"
+              [hint]="detailsOnly() ? '' : 'Must be after it opens.'"
+            >
+              <input appFieldControl id="assessment-due" type="datetime-local" formControlName="due_at" />
+            </app-field>
+          </div>
+          <div class="field-row">
             <app-field controlId="assessment-late" label="After the due date">
               <select appFieldControl id="assessment-late" formControlName="late_policy">
                 <option value="accept_flagged">Accept late work and mark it late</option>
@@ -477,56 +665,157 @@
                   <option value="manual">When I release the results</option>
                 </select>
               </app-field>
-              <label class="check">
-                <input type="checkbox" formControlName="ai_marking" />
-                Suggest marks with AI for questions I mark
-              </label>
-              <p class="caption">
-                {{
-                  canSuggest()
-                    ? 'Suggestions are drafts for you to accept or change, and use your daily AI allowance. Students never see them.'
-                    : 'Available when the assessment has a short-answer or written-response question.'
-                }}
-              </p>
             }
-          </fieldset>
+          </div>
+          @if (!detailsOnly()) {
+            <label class="check">
+              <input type="checkbox" formControlName="ai_marking" />
+              Suggest marks with AI for questions I mark
+            </label>
+            <p class="caption">
+              {{
+                canSuggest()
+                  ? 'Suggestions are drafts for you to accept or change, and use your daily AI allowance. Students never see them.'
+                  : 'Available when the assessment has a short-answer or written-response question.'
+              }}
+            </p>
+          }
+        </fieldset>
 
-          <p class="caption">
-            @if (editingPublished()) {
-              Once a student submits, only the title, due date and late policy can change.
-            } @else {
-              Students never see drafts. Each student can submit a published assessment once.
+        <p class="caption">
+          @if (editingPublished()) {
+            Once a student submits, only the title, due date and late policy can change.
+          } @else {
+            Students never see drafts. Each student can submit a published assessment once.
+          }
+        </p>
+        <app-section-state [section]="topicsState" loading="Loading curriculum topics…" />
+        <div class="editor-bar">
+          <div class="editor-bar-text">
+            <p class="caption">
+              {{ size() }}
+              @if (form.dirty) {
+                · <strong class="unsaved-mark">Unsaved changes</strong>
+              }
+            </p>
+            <!-- the page's status shows here in the editor, beside the buttons that cause it. -->
+            @if (view() === 'edit' && !deleting()) {
+              <app-status [state]="state" />
             }
-          </p>
-          <div class="button-row">
-            <button [disabled]="state.busy() || !classroomId()">
-              {{ editingPublished() ? 'Save changes' : editing() ? 'Save draft' : 'Create draft' }}
-            </button>
-            @if (!editingPublished()) {
+          </div>
+          <div class="editor-bar-actions">
+            @if (editing()) {
+              <button type="button" class="quiet" (click)="stopEditing()" [disabled]="state.busy()">
+                Stop editing
+              </button>
+            } @else {
+              <button type="button" class="quiet" (click)="cancelEdit()" [disabled]="state.busy()">
+                Clear form
+              </button>
+            }
+            @if (editingPublished()) {
+              <button type="submit" [disabled]="state.busy() || !classroomId()">Save changes</button>
+            } @else {
+              <button type="submit" class="secondary" [disabled]="state.busy() || !classroomId()">
+                {{ editing() ? 'Save draft' : 'Create draft' }}
+              </button>
               <button type="button" (click)="save(true)" [disabled]="state.busy() || !classroomId()">
                 Publish assessment
               </button>
             }
-            @if (editing()) {
-              <button type="button" class="secondary" (click)="cancelEdit()" [disabled]="state.busy()">
-                Stop editing
-              </button>
-            } @else {
-              <button type="button" class="secondary" (click)="cancelEdit()" [disabled]="state.busy()">
-                Clear form
-              </button>
-            }
           </div>
-          <app-section-state [section]="topicsState" loading="Loading curriculum topics…" />
-        </form>
-      </section>
+        </div>
+      </form>
+    </div>
+  </section>
+
+  @if (view() === 'preview') {
+    <div class="preview-head">
+      <a class="back-link" routerLink="/assessments">
+        <app-icon name="chevron-left" />
+        <span><span class="visually-hidden">Back to </span>Assessments</span>
+      </a>
+      @if (sheet.selected(); as previewed) {
+        <app-page-header [title]="'Preview: ' + previewed.title" headingId="preview-title" />
+      } @else {
+        <app-page-header title="Preview" />
+        @if (state.busy()) {
+          <p class="caption">Loading the preview…</p>
+        }
+      }
+    </div>
+  }
+} @else if (!studentViewing()) {
+  <!-- a student with an assessment open sees only that assessment, in the answer sheet below. -->
+  <app-page-header
+    title="Assessments"
+    subtitle="Open an assessment to answer it. Answers save as you type until you submit."
+  >
+    <app-refresh-button
+      label="Refresh assessments"
+      [busy]="assessments.loading()"
+      [disabled]="state.busy() || assessments.loading() || !classroomId()"
+      (refresh)="load()"
+    />
+  </app-page-header>
+  <section class="panel">
+    <h3>Classroom assessments</h3>
+    <p class="caption">Up to 100 most recent assessments</p>
+    <app-pager
+      label="Assessments pages"
+      [page]="assessments.page()"
+      (pageChange)="assessments.page.set($event)"
+      [pageSize]="assessments.pageSize"
+      [total]="assessments.total()"
+      noun="assessments"
+      [disabled]="assessments.loading() || state.busy()"
+      (go)="load()"
+    />
+    <app-section-state [section]="assessments" loading="Loading assessments…" />
+    @if (assessments.ready()) {
+      @for (item of assessments.value() ?? []; track item.id) {
+        <article class="record">
+          <strong>{{ item.title }}</strong>
+          <span class="tag-row">
+            @if (item.submitted) {
+              <span class="badge">Submitted</span>
+            }
+            @if (dueBadge(item); as badge) {
+              <span class="badge badge-danger">{{ badge }}</span>
+            }
+          </span>
+          <span class="caption">
+            {{ item.question_count }} {{ item.question_count === 1 ? 'question' : 'questions' }} ·
+            {{ item.points }} {{ item.points === 1 ? 'mark' : 'marks' }}
+            @if (schedule(item); as when) {
+              · {{ when }}
+            }
+          </span>
+          <span class="button-row">
+            <button
+              class="secondary"
+              [id]="'open-' + item.id"
+              (click)="openFromList(item.id)"
+              [disabled]="state.busy()"
+            >
+              Open assessment
+            </button>
+          </span>
+        </article>
+      } @empty {
+        @if (!classroomId()) {
+          <app-no-classroom><p class="empty">Select a classroom to continue.</p></app-no-classroom>
+        } @else {
+          <p class="empty">No assessments yet. Your teacher has not published any.</p>
+        }
+      }
     }
-  </div>
+  </section>
 }
-<!-- outside every block, for the static query; until the teacher's preview has its own view it sits under both columns. -->
-<app-answer-sheet #sheet [assessments]="assessments" [state]="state" />
-<!-- a student's open assessment shows the page's status beside its submit button. -->
-@if (!deleting() && !studentViewing()) {
+<!-- outside every block, for the static query. -->
+<app-answer-sheet #sheet [assessments]="assessments" [state]="state" (closed)="previewClosed($event)" />
+<!-- a student's open assessment shows the page's status beside its submit button; a teacher's list and editor show it in place. -->
+@if (!deleting() && (session.isTeacher() ? view() === 'preview' : !studentViewing())) {
   <app-status [state]="state" />
 }
 

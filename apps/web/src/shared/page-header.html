@@ -1,6 +1,6 @@
 <header class="page-header">
   <div class="page-header-title">
-    <h2>{{ title }}</h2>
+    <h2 [attr.id]="headingId || null" [attr.tabindex]="headingId ? -1 : null">{{ title }}</h2>
     @if (subtitle) {
       <p class="page-header-subtitle">{{ subtitle }}</p>
     }

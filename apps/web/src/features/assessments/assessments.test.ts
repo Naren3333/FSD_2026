@@ -14,7 +14,7 @@ import { Session } from '../../core/session';
 import { UnsavedChanges } from '../../core/unsaved-changes';
 import { AnswerSheetComponent } from './answer-sheet';
 import { AssessmentsComponent } from './assessments';
-import { optionLines } from './editor';
+import { fillForm, optionLines } from './editor';
 
 describe('optionLines', () => {
   it('takes one trimmed option per non-blank line', () => {
@@ -76,6 +76,7 @@ function setup(
     submission: vi.fn(() =>
       Promise.resolve({ answers: { [QUESTION]: '0.5' }, submitted_at: '2026-10-16T01:00:00Z', late: true }),
     ),
+    create: vi.fn((created: Partial<Assessment>) => Promise.resolve({ ...open, ...created, id: 'a9' })),
     update: vi.fn((_id: string, changed: unknown) => Promise.resolve(changed)),
     details: vi.fn((_id: string, changed: unknown) => Promise.resolve(changed)),
     remove: vi.fn((id: string) => Promise.resolve({ id })),
@@ -128,8 +129,9 @@ function setup(
   // the page's template, and so its static query, is left out.
   fixture.componentInstance.sheet = sheetFixture.componentInstance;
   const settle = () => vi.advanceTimersByTimeAsync(0);
-  /* the address naming `open`, or the list's address. */
-  const go = (open?: string) => params.next(convertToParamMap(open ? { open } : {}));
+  /* the address naming `open` (a string), or any query such as `{ edit }`, or the list's address. */
+  const go = (query?: string | Record<string, string>) =>
+    params.next(convertToParamMap(typeof query === 'string' ? { open: query } : (query ?? {})));
   return {
     page: fixture.componentInstance,
     sheet: sheetFixture.componentInstance,
@@ -922,34 +924,223 @@ describe('a teacher deleting an assessment when the list cannot be re-read', () 
   });
 });
 
-describe("a teacher's preview", () => {
-  it('closes from the same button that opened it', async () => {
+describe('a teacher moving between the list, the editor and a preview', () => {
+  const draft = assessment({
+    status: 'draft',
+    questions: [{ ...assessment().questions[0], answer: '0.5', tolerance: '0' }],
+  });
+
+  it('edits the assessment its address names once the list has it, and only once', async () => {
     vi.useFakeTimers();
-    const { sheet, api, settle } = setup('teacher');
+    const { page, api, go, settle } = setup('teacher', draft);
+    // before the list has loaded.
+    go({ edit: 'a1' });
     await settle();
-    sheet.togglePreview('a1');
+    expect(page.view()).toBe('edit');
+    expect(page.editing()?.id).toBe('a1');
+    expect(api.get).toHaveBeenCalledTimes(1);
+    // back and forward, or the address of a created draft, name the one being edited.
+    go({ edit: 'a1' });
     await settle();
-    expect(sheet.selected()?.id).toBe('a1');
-    sheet.togglePreview('a1');
-    expect(sheet.selected()).toBeNull();
     expect(api.get).toHaveBeenCalledTimes(1);
   });
 
-  it('returns focus to the button that opened it when its own Close preview closes it', async () => {
+  it('keeps unsaved work at its own address when another assessment is asked for', async () => {
     vi.useFakeTimers();
-    const { sheet, settle } = setup('teacher');
+    const { page, router, route, go, settle } = setup('teacher', draft);
+    await settle();
+    page.form.controls.title.setValue('Halves');
+    page.form.markAsDirty();
+    go({ edit: 'a1' });
+    await settle();
+    expect(page.editing()).toBeNull();
+    expect(page.state.error()).toBe('Save or clear the assessment you are editing first.');
+    expect(router.navigate).toHaveBeenLastCalledWith([], {
+      relativeTo: route,
+      queryParams: { edit: 'new' },
+      replaceUrl: true,
+    });
+  });
+
+  it('says it could not open an assessment that is not on the list, and goes back to the list', async () => {
+    vi.useFakeTimers();
+    const { page, api, router, route, go, settle } = setup('teacher', draft);
+    await settle();
+    go({ edit: 'a7' });
+    await settle();
+    expect(api.get).not.toHaveBeenCalled();
+    expect(page.state.error()).toBe('The assessment could not be opened.');
+    expect(router.navigate).toHaveBeenLastCalledWith([], {
+      relativeTo: route,
+      queryParams: {},
+      replaceUrl: true,
+    });
+  });
+
+  it('gives a created draft its own address, in place of the new assessment', async () => {
+    vi.useFakeTimers();
+    const { page, router, route, go, settle } = setup('teacher', draft);
+    await settle();
+    go({ edit: 'new' });
+    await settle();
+    fillForm(page.form, draft);
+    page.save(false);
+    await settle();
+    expect(page.editing()?.id).toBe('a9');
+    expect(page.state.message()).toBe('Draft created.');
+    expect(router.navigate).toHaveBeenLastCalledWith([], {
+      relativeTo: route,
+      queryParams: { edit: 'a9' },
+      replaceUrl: true,
+    });
+  });
+
+  it('goes back to the list after publishing, in place of the editor', async () => {
+    vi.useFakeTimers();
+    const { page, api, router, route, settle } = setup('teacher', draft);
+    await settle();
+    fillForm(page.form, draft);
+    page.save(true);
+    await settle();
+    expect(api.create).toHaveBeenCalledWith(expect.objectContaining({ status: 'published' }));
+    expect(page.editing()).toBeNull();
+    expect(router.navigate).toHaveBeenLastCalledWith([], {
+      relativeTo: route,
+      queryParams: {},
+      replaceUrl: true,
+    });
+  });
+
+  it('goes back to the list after saving changes to a published assessment', async () => {
+    vi.useFakeTimers();
+    const { page, router, route, settle } = setup('teacher', { ...draft, status: 'published' });
+    await settle();
+    await page.edit({ ...summary, submissions: 0 });
+    page.save(false);
+    await settle();
+    expect(page.state.message()).toBe('Fractions saved.');
+    expect(router.navigate).toHaveBeenLastCalledWith([], {
+      relativeTo: route,
+      queryParams: {},
+      replaceUrl: true,
+    });
+  });
+
+  it('opens the preview its address names, and closes it when the address no longer does', async () => {
+    vi.useFakeTimers();
+    const { page, sheet, go, settle } = setup('teacher', draft);
+    await settle();
+    go({ preview: 'a1' });
+    await settle();
+    expect(page.view()).toBe('preview');
+    expect(sheet.selected()?.id).toBe('a1');
+    go();
+    await settle();
+    expect(page.view()).toBe('list');
+    expect(sheet.selected()).toBeNull();
+    // a teacher's open link, such as from home, is their preview.
+    go('a1');
+    await settle();
+    expect(page.view()).toBe('preview');
+    expect(sheet.selected()?.id).toBe('a1');
+  });
+
+  it('goes back to the list address when the classroom changes on an assessment', async () => {
+    vi.useFakeTimers();
+    for (const query of [{ edit: 'a1' }, { preview: 'a1' }]) {
+      const { router, route, classroomId, go, settle } = setup('teacher', draft);
+      await settle();
+      go(query);
+      await settle();
+      router.navigate.mockClear();
+      classroomId.set('c2');
+      TestBed.tick();
+      expect(router.navigate).toHaveBeenLastCalledWith([], {
+        relativeTo: route,
+        queryParams: {},
+        replaceUrl: true,
+      });
+    }
+  });
+
+  it('keeps a new assessment at its address when the classroom changes', async () => {
+    vi.useFakeTimers();
+    const { router, classroomId, go, settle } = setup('teacher', draft);
+    await settle();
+    go({ edit: 'new' });
+    await settle();
+    router.navigate.mockClear();
+    classroomId.set('c2');
+    TestBed.tick();
+    expect(router.navigate).not.toHaveBeenCalled();
+  });
+
+  it("returns focus to the list's Preview assessment button when the preview's own Close preview closes it", async () => {
+    vi.useFakeTimers();
+    const { page, sheet, router, route, go, settle } = setup('teacher', draft);
     await settle();
     const toggle = document.body.appendChild(document.createElement('button'));
     toggle.id = 'preview-a1';
     try {
-      sheet.togglePreview('a1');
+      go({ preview: 'a1' });
       await settle();
-      sheet.closePreview(true);
+      page.previewClosed('a1');
+      expect(router.navigate).toHaveBeenLastCalledWith([], { relativeTo: route, queryParams: {} });
+      go();
       await settle();
       expect(sheet.selected()).toBeNull();
       expect(document.activeElement).toBe(toggle);
     } finally {
       toggle.remove();
+    }
+  });
+
+  it('moves focus to the preview heading once the preview opens', async () => {
+    vi.useFakeTimers();
+    const { go, settle } = setup('teacher', draft);
+    await settle();
+    const heading = document.body.appendChild(document.createElement('h2'));
+    heading.id = 'preview-title';
+    heading.tabIndex = -1;
+    try {
+      go({ preview: 'a1' });
+      await settle();
+      expect(document.activeElement).toBe(heading);
+    } finally {
+      heading.remove();
+    }
+  });
+
+  it('starts focus at the new view when the control that moved there is hidden', async () => {
+    vi.useFakeTimers();
+    const { go, settle } = setup('teacher', draft);
+    await settle();
+    const list = document.body.appendChild(document.createElement('div'));
+    const link = list.appendChild(document.createElement('a'));
+    link.href = '#';
+    const title = document.body.appendChild(document.createElement('input'));
+    title.id = 'assessment-title';
+    const add = document.body.appendChild(document.createElement('button'));
+    add.id = 'new-assessment';
+    try {
+      // a link such as continue editing, whose list is hidden once the editor shows.
+      link.focus();
+      list.hidden = true;
+      go({ edit: 'new' });
+      await settle();
+      expect(document.activeElement).toBe(title);
+      // a control still in view keeps focus.
+      add.focus();
+      go();
+      await settle();
+      expect(document.activeElement).toBe(add);
+      // the same view again moves nothing.
+      add.blur();
+      go();
+      await settle();
+      expect(document.activeElement).toBe(document.body);
+    } finally {
+      for (const el of [list, title, add]) el.remove();
     }
   });
 });

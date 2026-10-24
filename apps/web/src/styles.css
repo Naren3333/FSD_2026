@@ -912,11 +912,6 @@ main.solo > app-status {
   padding: 24px 0;
   line-height: 1.7;
 }
-.separated {
-  border-top: 1px solid var(--line);
-  padding-top: 24px;
-  margin-top: 28px;
-}
 .grade {
   border-top: 1px solid var(--line);
   padding: 24px 0;
@@ -1040,6 +1035,46 @@ thead th {
 }
 .cell-value {
   font-weight: 600;
+}
+/* a table read as stacked cards under 700px, each cell under its column's name (its data-label). */
+@media (max-width: 700px) {
+  .stack-table {
+    min-width: 0;
+  }
+  .stack-table thead {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip: rect(0 0 0 0);
+  }
+  .stack-table,
+  .stack-table tbody,
+  .stack-table tr,
+  .stack-table th,
+  .stack-table td {
+    display: block;
+  }
+  .stack-table tr {
+    border: 1px solid var(--line);
+    border-radius: var(--radius);
+    padding: 8px 12px;
+    margin-bottom: 12px;
+  }
+  .stack-table th,
+  .stack-table td {
+    border: 0;
+    padding: 6px 0;
+  }
+  .stack-table td[data-label]::before {
+    content: attr(data-label);
+    display: block;
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--muted);
+  }
 }
 
 /* chips */
@@ -1370,8 +1405,9 @@ dialog .feedback.active {
 /* assessment editor, answers and marking. */
 .question-set {
   border: 1px solid var(--line);
-  border-radius: var(--radius-lg);
-  padding: 18px;
+  border-radius: var(--radius);
+  background: var(--surface);
+  padding: 16px 20px 4px;
   margin: 0 0 18px;
   min-width: 0;
 }
@@ -1404,12 +1440,16 @@ dialog .feedback.active {
   margin-bottom: 18px;
 }
 .criterion {
-  border-left: 3px solid var(--brand-soft);
-  padding-left: 12px;
-  margin-bottom: 16px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  padding: 12px 16px;
+  margin-bottom: 12px;
+}
+.criterion app-field:last-of-type {
+  margin-bottom: 8px;
 }
 .add-question {
-  margin-bottom: 18px;
+  align-self: flex-start;
 }
 .answer-box {
   resize: vertical;
@@ -1570,7 +1610,8 @@ dialog .feedback.active {
 .choice[aria-invalid='true'] .option {
   border-color: var(--danger);
 }
-.answer-bar {
+.answer-bar,
+.editor-bar {
   position: sticky;
   bottom: 0;
   z-index: 5;
@@ -1582,21 +1623,25 @@ dialog .feedback.active {
   background: var(--surface);
   border-top: 1px solid var(--line);
 }
-.answer-bar-text {
+.answer-bar-text,
+.editor-bar-text {
   flex: 1 1 auto;
   min-width: 0;
 }
-.answer-bar-text .caption {
+.answer-bar-text .caption,
+.editor-bar-text .caption {
   margin: 0;
 }
-.answer-bar-actions {
+.answer-bar-actions,
+.editor-bar-actions {
   display: flex;
   flex-wrap: wrap;
   justify-content: flex-end;
   gap: 8px 12px;
 }
 /* a control focused by tab is kept clear of the bar. */
-html:has(.answer-bar) {
+html:has(.answer-bar),
+html:has(.editor-view:not([hidden]) .editor-bar) {
   scroll-padding-bottom: 96px;
 }
 .answer-text {
@@ -1662,21 +1707,311 @@ html:has(.answer-bar) {
   font-size: 0.85rem;
   color: var(--ink);
 }
-.generator {
-  border: 1px solid var(--line);
-  border-radius: 8px;
-  padding: 0 16px;
-  margin-bottom: 18px;
+/* the teacher's assessment list. */
+.panel-heading {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 4px 16px;
+  margin-bottom: 12px;
 }
-.generator[open] {
-  padding-bottom: 8px;
+.panel-heading h3 {
+  font-size: 17px;
+  font-weight: 600;
+  margin: 0;
 }
-.generator > summary {
+.panel-heading p {
+  margin: 0;
+}
+.empty-state {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 8px;
+  padding-bottom: 16px;
+}
+.empty-state .empty {
+  margin: 0;
+  padding-bottom: 0;
+}
+.unsaved-notice {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0 0 16px;
+  padding: 10px 14px;
+  border: 1px solid var(--warning);
+  border-radius: var(--radius-sm);
+  background: var(--warning-soft);
+  color: var(--warning);
+  font-size: 0.875rem;
+}
+.unsaved-notice a {
+  color: var(--warning);
+  font-weight: 600;
+}
+.assessment-table tbody th {
+  font-weight: 400;
+}
+.title-line {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 8px;
+}
+.assessment-title-cell small {
+  display: block;
+  max-width: 32rem;
+  margin-top: 4px;
+}
+.actions-cell {
+  text-align: right;
+}
+.row-actions {
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 4px 8px;
+}
+.row-actions .secondary {
+  padding: 8px 14px;
+  font-size: 0.875rem;
+}
+/* short cells and action names stay on one line; the title and schedule take the wrapping. */
+.assessment-table td[data-label='Questions'],
+.assessment-table td[data-label='Submitted'],
+.row-actions button {
+  white-space: nowrap;
+}
+/* the teacher's editor: an outline of its questions, the form, and the ai drafting panel. */
+.editor-view .page-header {
+  margin: 8px 0 12px;
+}
+.editor-caption {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin: 0 0 20px;
+}
+.editor-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 24px;
+  align-items: start;
+}
+.editor-outline {
+  display: none;
+}
+.editor-form {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  min-width: 0;
+}
+.editor-form > .question-set,
+.editor-form > p {
+  margin: 0;
+}
+.editor-card app-field {
+  margin-bottom: 0;
+}
+.editor-outline ol {
+  list-style: none;
+  margin: 0 0 8px;
+  padding: 0;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+
+  gap: 2px;
+}
+button.outline-row {
+  width: 100%;
+  justify-content: flex-start;
+  gap: 8px;
+  padding: 8px 10px;
+  background: transparent;
+  color: var(--ink);
+  font-size: 0.875rem;
+  font-weight: 400;
+  text-align: left;
+}
+button.outline-row:hover:not(:disabled) {
+  background: var(--hover);
+}
+.outline-number {
+  min-width: 1.25rem;
+  font-weight: 600;
+}
+.outline-text {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.outline-marks {
+  color: var(--muted);
+  font-size: 0.75rem;
+  white-space: nowrap;
+}
+.error-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--danger);
+  flex-shrink: 0;
+}
+button.outline-action {
+  justify-content: flex-start;
+  padding: 8px 10px;
+  font-size: 0.875rem;
+}
+.question-head {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px 12px;
+  margin-bottom: 12px;
+}
+.question-head-actions {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin-left: auto;
+}
+form .question-head button {
+  min-width: 0;
+}
+.question-topic {
+  font-size: 0.875rem;
+  color: var(--ink);
+}
+.question-preview {
+  margin: 0 0 12px;
+  color: var(--ink);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.ai-chip {
+  background: var(--ai-tint);
+  color: var(--ink);
+}
+.rubric-read {
+  margin: -4px 0 8px;
+  font-size: 0.875rem;
+}
+.rubric-read summary {
   min-height: 44px;
   display: flex;
   align-items: center;
   cursor: pointer;
+  color: var(--brand);
   font-weight: 600;
+}
+table.levels-table {
+  min-width: 0;
+}
+.levels-table th,
+.levels-table td {
+  padding: 8px 10px;
+  vertical-align: top;
+}
+.levels-table td:first-child {
+  width: 4rem;
+  font-weight: 600;
+}
+.unsaved-mark {
+  color: var(--warning);
+}
+form .editor-bar-actions button {
+  min-width: 0;
+}
+.assessment-view form > .caption {
+  margin: 16px 0 8px;
+}
+.generator-panel {
+  padding: 16px 20px;
+}
+.generator-panel-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 8px;
+}
+.generator-panel-head h3 {
+  font-size: 17px;
+  font-weight: 600;
+  margin: 0;
+}
+.draft-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 8px;
+}
+.suggestion .badge-good {
+  white-space: normal;
+}
+@media (min-width: 1100px) {
+  .editor-layout.has-outline {
+    grid-template-columns: 200px minmax(0, 1fr);
+  }
+  .has-outline > .editor-outline {
+    display: block;
+    grid-column: 1;
+    grid-row: 1 / span 2;
+    position: sticky;
+    top: 72px;
+    max-height: calc(100dvh - 88px);
+    overflow: auto;
+  }
+  .has-outline > .generator-panel,
+  .has-outline > .editor-form {
+    grid-column: 2;
+  }
+}
+@media (min-width: 1400px) {
+  .editor-layout.with-panel {
+    grid-template-columns: 200px minmax(0, 1fr) 320px;
+  }
+  .with-panel > .generator-panel {
+    grid-column: 3;
+    grid-row: 1 / span 2;
+    position: sticky;
+    top: 72px;
+    max-height: calc(100dvh - 88px);
+    overflow: auto;
+  }
+  .with-panel > .editor-form {
+    grid-row: 1;
+  }
+}
+/* the teacher's preview, in the student's centred column. */
+.preview-head {
+  max-width: 720px;
+  margin: 0 auto;
+  padding-top: 16px;
+}
+.preview-head .page-header {
+  margin: 8px 0 0;
+}
+.preview-banner {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  margin: 0;
+  padding: 12px 16px;
+  border: 1px solid var(--line);
+  border-left: 4px solid var(--brand);
+  border-radius: var(--radius-sm);
+  background: var(--brand-soft);
+  color: var(--ink);
+  font-size: 0.875rem;
 }
 .scheme-used {
   margin: 0 0 8px;
@@ -1798,16 +2133,31 @@ html:has(.answer-bar) {
   .question-card {
     padding: 16px;
   }
-  .answer-bar {
+  .answer-bar,
+  .editor-bar {
     flex-direction: column;
     align-items: stretch;
     margin-inline: -16px;
   }
-  .answer-bar-actions {
+  .answer-bar-actions,
+  .editor-bar-actions {
     justify-content: flex-start;
   }
-  html:has(.answer-bar) {
+  html:has(.answer-bar),
+  html:has(.editor-view:not([hidden]) .editor-bar) {
     scroll-padding-bottom: 160px;
+  }
+  .question-set {
+    padding-inline: 16px;
+  }
+  .actions-cell {
+    padding-top: 8px;
+    text-align: left;
+  }
+  .row-actions {
+    flex-wrap: wrap;
+    justify-content: flex-start;
+    gap: 4px;
   }
 }
 

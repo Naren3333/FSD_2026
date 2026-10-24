@@ -1,5 +1,4 @@
-<details class="generator">
-  <summary>Generate questions from teaching materials</summary>
+<div class="generator">
   <p class="caption">
     AI drafts questions from the teaching materials you choose, each with the passage it came from. Nothing is
     added until you add it, and you can change any draft before saving. The review checks drafts against your
@@ -137,12 +136,15 @@
     }
     @for (item of drafts(); track item.position; let n = $index) {
       <div class="suggestion" role="group" [attr.aria-label]="'Generated question ' + (n + 1)">
-        <p>
-          <strong>AI-written draft</strong> · {{ typeName(item.draft.question.type) }} ·
-          {{ marks(item.draft.question.points) }} · check it before adding it
+        <p class="draft-head">
+          <span class="badge ai-chip"><app-icon name="sparkles" [size]="14" />AI-written draft</span>
+          <span class="caption">
+            {{ typeName(item.draft.question.type) }} · {{ marks(item.draft.question.points) }} · check it
+            before adding it
+          </span>
         </p>
         @if (item.draft.review?.status === 'passed') {
-          <p class="caption">Checked by a second AI reviewer against its passages.</p>
+          <p><span class="badge badge-good">Checked by a second AI reviewer against its passages.</span></p>
         } @else if (reviewText(item.draft.review); as text) {
           <p class="warning" role="status">{{ text }}</p>
         }
@@ -213,4 +215,4 @@
       </div>
     }
   }
-</details>
+</div>

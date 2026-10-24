@@ -24,6 +24,7 @@ test('a teacher edits and deletes a published assessment until a student submits
 
   // two published assessments: one to edit, one to delete.
   for (const title of ['Quiz ' + suffix, 'Spare ' + suffix]) {
+    await teacher.locator('#new-assessment').click();
     await teacher.getByLabel('Assessment title').fill(title);
     const first = teacher.getByRole('group', { name: 'Question 1' });
     await first.getByLabel('Question', { exact: true }).fill('What is 2 plus 2?');
@@ -76,11 +77,12 @@ test('a teacher edits and deletes a published assessment until a student submits
   await expect(teacher.getByText('Sums marked ' + suffix + ' saved.', { exact: true })).toBeVisible();
   await expect(teacher.locator('strong').getByText('Sums marked ' + suffix, { exact: true })).toBeVisible();
 
-  // the teacher's preview closes from its own button, and focus goes back to the button that opened it.
+  // the teacher's preview opens on its own view; its close preview goes back to the list, with focus on the
+  // button that opened it.
   const preview = teacher.getByRole('button', { name: 'Preview assessment', exact: true });
   await preview.click();
   await expect(teacher.getByText(/Teacher preview\./)).toBeVisible();
-  // not the list's toggle, which also reads close preview while the preview is open.
+  await expect(teacher.getByRole('heading', { name: 'Preview: Sums marked ' + suffix })).toBeVisible();
   await teacher.locator('#answer-form').getByRole('button', { name: 'Close preview', exact: true }).click();
   await expect(teacher.getByText(/Teacher preview\./)).toHaveCount(0);
   await expect(preview).toBeFocused();

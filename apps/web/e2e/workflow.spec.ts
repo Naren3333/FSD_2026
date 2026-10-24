@@ -46,6 +46,8 @@ test('teacher and student complete a real assessment through Kong', async ({ bro
   await expect(teacher.getByText('Topic added.', { exact: true })).toBeVisible();
   await teacher.getByRole('link', { name: 'Assessments', exact: true }).click();
   await teacher.getByRole('button', { name: 'Refresh assessments' }).click();
+  await teacher.locator('#new-assessment').click();
+  await expect(teacher.getByLabel('Assessment title')).toBeFocused();
   await teacher.getByLabel('Assessment title').fill('Browser assessment ' + suffix);
   const first = teacher.getByRole('group', { name: 'Question 1' });
   await first.getByLabel('Question', { exact: true }).fill('What is 0.1 plus 0.2?');
@@ -178,8 +180,11 @@ test('teacher and student complete a real assessment through Kong', async ({ bro
   await expectNoHorizontalScroll(student, 'test-results/performance-mobile.png');
   // the editor and the grading review fit a phone screen.
   await teacherMenu.getByRole('link', { name: 'Assessments', exact: true }).click();
-  await expect(teacher.getByRole('heading', { name: 'Create an assessment' })).toBeVisible();
+  await expect(teacher.locator('strong').getByText('Browser assessment ' + suffix)).toBeVisible();
   await expectNoHorizontalScroll(teacher, 'test-results/assessments-mobile.png');
+  await teacher.locator('#new-assessment').click();
+  await expect(teacher.getByRole('heading', { name: 'Create an assessment' })).toBeVisible();
+  await expectNoHorizontalScroll(teacher, 'test-results/editor-mobile.png');
   // on a phone the sidebar is a drawer: escape closes it and gives focus back to the menu button.
   await openMenu(teacher);
   await expect(teacher.getByRole('link', { name: 'Learning Ledger' })).toBeFocused();

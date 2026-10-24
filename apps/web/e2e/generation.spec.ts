@@ -115,8 +115,10 @@ test('a teacher generates questions and drafts marking guidance', async ({ page 
 
   await page.getByRole('link', { name: 'Assessments', exact: true }).click();
   await page.getByRole('button', { name: 'Refresh assessments' }).click();
+  await page.locator('#new-assessment').click();
   await page.getByLabel('Assessment title').fill('Generated ' + suffix);
-  await page.getByText('Generate questions from teaching materials').click();
+  await page.getByRole('button', { name: 'Generate questions from teaching materials' }).click();
+  await expect(page.getByRole('heading', { name: 'Draft questions with AI' })).toBeFocused();
   await page.getByRole('checkbox', { name: 'Testing slides' }).check();
   // a marking scheme uploaded before they were retired is not a source for questions.
   await expect(page.getByRole('checkbox', { name: 'Testing scheme' })).toHaveCount(0);
@@ -127,7 +129,7 @@ test('a teacher generates questions and drafts marking guidance', async ({ page 
   await page.getByLabel('Number of multiple choice questions').fill('2');
   await page.getByLabel('Number of short answer questions').fill('1');
   await expect(page.getByText('3 questions in total (up to 10).')).toBeVisible();
-  await page.getByRole('button', { name: 'Generate questions' }).click();
+  await page.getByRole('button', { name: 'Generate questions', exact: true }).click();
   await expect(page.getByText('Searching the class materials failed. Try again later.')).toBeVisible();
   // enter in the focus field generates instead of saving the assessment.
   await page.getByLabel('Focus (optional)').fill('unit tests');
@@ -142,6 +144,13 @@ test('a teacher generates questions and drafts marking guidance', async ({ page 
   await expect(page.getByText('Round 1:')).toBeVisible();
   await expect(page.getByText('4 AI calls in total.')).toBeVisible();
   const firstDraft = page.getByRole('group', { name: 'Generated question 1' });
+  await expect(firstDraft.getByText('AI-written draft')).toBeVisible();
+  // closing the panel keeps its drafts.
+  const panelToggle = page.getByRole('button', { name: 'Generate questions from teaching materials' });
+  await page.getByRole('button', { name: 'Close question drafting' }).click();
+  await expect(panelToggle).toBeFocused();
+  await expect(firstDraft).toBeHidden();
+  await panelToggle.click();
   await expect(firstDraft.getByText('AI-written draft')).toBeVisible();
   await firstDraft.getByRole('button', { name: 'Add to assessment generated question 1' }).click();
   await expect(page.getByText('Generated question added as question 1.')).toBeVisible();

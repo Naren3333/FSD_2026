@@ -24,6 +24,7 @@ import type {
 import { AiUsage } from '../../core/ai-usage';
 import { CurriculumNames } from '../../core/curriculum-names';
 import { FieldComponent, FieldControlDirective } from '../../shared/field';
+import { IconComponent } from '../../shared/icon';
 import { Section } from '../../shared/section';
 import { SectionStateComponent } from '../../shared/section-state';
 import { MAX_PROMPT, clipText, draftQuestion, excerptLabel, fromAgent, marksText } from './editor';
@@ -106,7 +107,7 @@ export function reviewNote(review: GenerateReview | undefined): string {
 @Component({
   selector: 'app-question-generator',
   standalone: true,
-  imports: [ReactiveFormsModule, FieldComponent, FieldControlDirective, SectionStateComponent],
+  imports: [ReactiveFormsModule, FieldComponent, FieldControlDirective, IconComponent, SectionStateComponent],
   templateUrl: './generator.html',
 })
 export class QuestionGeneratorComponent implements OnChanges {

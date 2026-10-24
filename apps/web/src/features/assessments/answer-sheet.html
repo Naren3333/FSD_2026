@@ -1,5 +1,5 @@
 @if (selected(); as assessment) {
-  <div [class]="session.isStudent() ? 'assessment-view' : 'separated'">
+  <div class="assessment-view">
     @if (session.isStudent()) {
       <a class="back-link" routerLink="/assessments">
         <app-icon name="chevron-left" />
@@ -36,32 +36,34 @@
         </p>
       </header>
     } @else {
-      <h3>{{ assessment.title }}</h3>
-      @if (schedule(assessment); as when) {
-        <p class="caption">
-          {{ when }}.
+      <!-- the page header names the previewed assessment. -->
+      <p class="preview-banner">
+        <app-icon name="eye" />
+        <span>
+          Teacher preview. Students see the questions without answer keys, accepted answers, rubrics or
+          marking points.
+        </span>
+      </p>
+      <p class="caption">
+        {{ size(assessment) }}
+        @if (schedule(assessment); as when) {
+          · {{ when }}.
           {{
             assessment.late_policy === 'reject'
               ? 'Late work is not accepted.'
               : 'Late work is accepted and marked as late.'
           }}
-        </p>
-      }
+        }
+      </p>
     }
     <form id="answer-form" novalidate [formGroup]="answers" (ngSubmit)="submit()">
       <div class="question-list">
         @for (question of assessment.questions; track question.id; let i = $index) {
           <!-- not a fieldset: a group named "question n" belongs to the teacher's editor. -->
           <div class="question-card">
-            @if (session.isStudent()) {
-              <h3 class="question-heading">
-                Question {{ i + 1 }} <span class="question-marks">· {{ points(question) }}</span>
-              </h3>
-            } @else {
-              <h4 class="question-heading">
-                Question {{ i + 1 }} <span class="question-marks">· {{ points(question) }}</span>
-              </h4>
-            }
+            <h3 class="question-heading">
+              Question {{ i + 1 }} <span class="question-marks">· {{ points(question) }}</span>
+            </h3>
             @if (reading()) {
               <p class="question-prompt">{{ question.prompt }}</p>
               <p class="answer-text">{{ answers.get(question.id)?.value || 'No answer.' }}</p>
@@ -191,12 +193,9 @@
           </div>
         </div>
       } @else {
-        <p class="caption">
-          Teacher preview. Students see the questions without answer keys, accepted answers, rubrics or
-          marking points.
-        </p>
+        <p class="caption">Nothing you answer here is saved.</p>
         <div class="button-row">
-          <button type="button" class="secondary" (click)="closePreview(true)">Close preview</button>
+          <button type="button" class="secondary" (click)="closed.emit(assessment.id)">Close preview</button>
           @if (due() !== 'closed') {
             <button type="button" class="secondary" (click)="confirmClear()" [disabled]="state.busy()">
               Clear form
