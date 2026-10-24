@@ -115,13 +115,14 @@ test('teacher and student complete a real assessment through Kong', async ({ bro
       timeout: 5000,
     });
   }).toPass({ timeout: 60000 });
-  // the review shows names, not ids: the student, the assessment, the question and its topic.
-  await expect(teacher.getByRole('heading', { name: 'Student Local', exact: true })).toBeVisible();
+  // the review shows names, not ids: the student and the assessment in the queue, the question and its
+  // topic in the grade.
+  const queue = teacher.getByRole('region', { name: 'Grades', exact: true });
+  const gradePanel = teacher.getByRole('region', { name: 'Grade', exact: true });
+  await expect(queue.getByRole('heading', { name: 'Student Local', exact: true })).toBeVisible();
   await expect(
-    teacher.locator('article').getByText('Browser assessment ' + suffix, { exact: false }),
+    queue.locator('article').getByText('Browser assessment ' + suffix, { exact: false }),
   ).toBeVisible();
-  await expect(teacher.getByText('What is 0.1 plus 0.2?', { exact: false })).toBeVisible();
-  await expect(teacher.getByText('Topic: Browser topic ' + suffix, { exact: true })).toHaveCount(2);
   // a draft is the teacher's alone until it is finalized.
   await student.getByRole('link', { name: 'My results', exact: true }).click();
   await student.getByRole('button', { name: 'Refresh results' }).click();
@@ -129,14 +130,19 @@ test('teacher and student complete a real assessment through Kong', async ({ bro
   // the written response waits for the teacher, who marks it with the rubric and then finalizes.
   await expect(teacher.getByText('1 to mark', { exact: true })).toBeVisible();
   await teacher.getByRole('button', { name: 'Review grade', exact: true }).click();
+  await expect(gradePanel.getByText('What is 0.1 plus 0.2?', { exact: false })).toBeVisible();
+  await expect(gradePanel.getByText('Topic: Browser topic ' + suffix, { exact: true })).toHaveCount(2);
   await expect(
-    teacher.getByText('Neither number has an exact binary form, so both are rounded.'),
+    gradePanel.getByText('Neither number has an exact binary form, so both are rounded.'),
   ).toBeVisible();
   await teacher.getByRole('button', { name: 'Finalize this grade', exact: true }).click();
   await expect(teacher.getByText('Check the highlighted fields before continuing.')).toBeVisible();
   await teacher.getByRole('radio', { name: /Explains rounding/ }).check();
   await teacher.getByLabel('Feedback on question 2 (optional)').fill('Clear reasoning.');
   await teacher.screenshot({ path: 'test-results/marking-desktop.png', fullPage: true });
+  // the grade and its sticky bar fit a phone screen.
+  await expectNoHorizontalScroll(teacher, 'test-results/marking-mobile.png');
+  await teacher.setViewportSize({ width: 1280, height: 720 });
   await teacher.getByRole('button', { name: 'Finalize this grade', exact: true }).click();
   await expect(teacher.getByRole('button', { name: 'Cancel', exact: true })).toBeFocused();
   await teacher.getByLabel('Review notes').fill('Reviewed exact decimal answer.');

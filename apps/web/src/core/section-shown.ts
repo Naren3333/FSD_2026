@@ -4,7 +4,7 @@ import { filter } from 'rxjs';
 import type { Section } from '../shared/section';
 
 /* the first path segment of a url: the section it opens. */
-function sectionOf(url: string): string {
+export function sectionOf(url: string): string {
   return url.split(/[?#]/)[0].split('/').find(Boolean) ?? '';
 }
 

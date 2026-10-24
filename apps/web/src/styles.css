@@ -1611,7 +1611,8 @@ dialog .feedback.active {
   border-color: var(--danger);
 }
 .answer-bar,
-.editor-bar {
+.editor-bar,
+.marking-bar {
   position: sticky;
   bottom: 0;
   z-index: 5;
@@ -1624,7 +1625,8 @@ dialog .feedback.active {
   border-top: 1px solid var(--line);
 }
 .answer-bar-text,
-.editor-bar-text {
+.editor-bar-text,
+.marking-bar-text {
   flex: 1 1 auto;
   min-width: 0;
 }
@@ -1633,7 +1635,8 @@ dialog .feedback.active {
   margin: 0;
 }
 .answer-bar-actions,
-.editor-bar-actions {
+.editor-bar-actions,
+.marking-bar-actions {
   display: flex;
   flex-wrap: wrap;
   justify-content: flex-end;
@@ -1641,7 +1644,8 @@ dialog .feedback.active {
 }
 /* a control focused by tab is kept clear of the bar. */
 html:has(.answer-bar),
-html:has(.editor-view:not([hidden]) .editor-bar) {
+html:has(.editor-view:not([hidden]) .editor-bar),
+html:has(.marking-bar) {
   scroll-padding-bottom: 96px;
 }
 .answer-text {
@@ -1652,10 +1656,6 @@ html:has(.editor-view:not([hidden]) .editor-bar) {
   border-radius: var(--radius-sm);
   padding: 10px 12px;
   margin: 0 0 12px;
-}
-.mark-question {
-  border-top: 1px solid var(--line);
-  padding: 16px 0;
 }
 .levels {
   border: 0;
@@ -1957,6 +1957,336 @@ form .editor-bar-actions button {
 .suggestion .badge-good {
   white-space: normal;
 }
+/* grading review: the queue of grades beside the grade being marked. */
+.review-filters {
+  margin-bottom: 16px;
+}
+.review-filters .filter-row {
+  align-items: center;
+}
+.filter-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.filter-chips button {
+  min-height: 44px;
+  padding: 6px 14px;
+  border-radius: 999px;
+  border: 1px solid var(--control);
+  background: var(--surface);
+  color: var(--ink);
+  font-size: 0.875rem;
+  font-weight: 600;
+}
+.filter-chips button:hover:not(:disabled) {
+  background: var(--hover);
+}
+.filter-chips button[aria-pressed='true'] {
+  border-color: var(--brand);
+  background: var(--brand);
+  color: var(--on-dark);
+}
+.release-box {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 12px;
+  margin-left: auto;
+}
+.release-box .caption {
+  margin: 0;
+  max-width: 28rem;
+}
+.review-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 16px;
+  align-items: start;
+}
+.review-layout .panel {
+  min-width: 0;
+}
+.queue-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 4px 12px;
+  margin-bottom: 8px;
+}
+.queue-head h3 {
+  font-size: 17px;
+  font-weight: 600;
+  margin: 0;
+}
+.queue-head .caption {
+  margin: 0;
+}
+.grade-queue .grade {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px 12px;
+  padding: 12px;
+  margin: 0 -12px;
+  border-top: 1px solid var(--line);
+  border-left: 3px solid transparent;
+  font-size: 14px;
+}
+.grade-queue .grade.current {
+  background: var(--brand-soft);
+  border-left-color: var(--brand);
+}
+.grade-row-main {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+  flex: 1 1 12rem;
+}
+.grade-queue .grade h3 {
+  font-size: 15px;
+  font-weight: 600;
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+.grade-row-title,
+.grade-row-meta {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+.grade-row-meta {
+  font-variant-numeric: tabular-nums;
+}
+.grade-queue .grade button {
+  min-width: 0;
+}
+.grade-queue .empty .button-row,
+.grade-queue .empty p {
+  margin: 0 0 8px;
+}
+.grade-panel {
+  container-type: inline-size;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+.back-to-queue {
+  align-self: flex-start;
+  min-width: 0;
+}
+.grade-panel-head {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 12px 16px;
+}
+.grade-panel-title {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+  flex: 1 1 16rem;
+}
+.grade-panel-title h3 {
+  font-size: 20px;
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+.grade-panel-title .caption {
+  margin: 0;
+}
+.grade-panel-nav {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  gap: 8px;
+}
+.grade-panel-nav button {
+  min-width: 0;
+  gap: 4px;
+}
+.next-to-mark {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.next-to-mark .caption {
+  margin: 0;
+  font-size: 12px;
+}
+.next-to-mark .caption:empty {
+  display: none;
+}
+.grade-panel-empty {
+  padding: 32px 8px;
+  text-align: center;
+}
+.grade-panel-empty p {
+  margin: 0 0 4px;
+}
+.grade-panel .marking {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+.mark-question {
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  padding: 16px;
+  min-width: 0;
+}
+.mark-question > p:last-child {
+  margin-bottom: 0;
+}
+.mark-columns {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 8px 24px;
+}
+.mark-evidence,
+.mark-controls {
+  min-width: 0;
+}
+.mark-controls app-field:last-child {
+  margin-bottom: 0;
+}
+.mark-question-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 8px;
+  margin-bottom: 4px;
+}
+.mark-question-head h4 {
+  margin: 0;
+  font-size: 15px;
+}
+.mark-prompt {
+  margin: 0 0 4px;
+  overflow-wrap: anywhere;
+}
+.auto-correct {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 4px 12px;
+  margin-top: 4px;
+}
+.auto-correct-text {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--good);
+  font-size: 0.875rem;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+.auto-correct button {
+  min-width: 0;
+}
+.grade-panel .levels {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.grade-panel .levels legend {
+  margin-bottom: 8px;
+  padding: 0;
+}
+.level-option {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  min-height: 44px;
+  margin: 0;
+  padding: 10px 12px;
+  border: 1px solid var(--control);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  font-weight: 400;
+  cursor: pointer;
+  overflow-wrap: anywhere;
+}
+.level-option input {
+  width: 20px;
+  height: 20px;
+  min-height: 20px;
+  margin: 2px 0 0;
+  flex-shrink: 0;
+}
+.level-option:hover {
+  background: var(--hover);
+}
+.level-option:has(input:checked) {
+  border-color: var(--brand);
+  background: var(--brand-soft);
+}
+.level-option:has(input:focus-visible) {
+  outline: 3px solid var(--focus);
+  outline-offset: 2px;
+}
+.level-option input:focus-visible {
+  outline: none;
+}
+.levels[aria-invalid='true'] .level-option {
+  border-color: var(--danger);
+}
+.points-input {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.points-input input {
+  width: 6rem;
+}
+.marking-bar-text {
+  flex: 1 1 8rem;
+  margin: 0;
+  font-size: 0.875rem;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+form .marking-bar-actions button {
+  min-width: 0;
+}
+.marking-bar-actions {
+  flex-wrap: nowrap;
+}
+.marking-bar {
+  margin-inline: -20px;
+  margin-bottom: -20px;
+  border-radius: 0 0 var(--radius) var(--radius);
+}
+@container (min-width: 760px) {
+  .mark-columns:not(.collapsed) {
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  }
+}
+@media (min-width: 1100px) {
+  .review-layout {
+    grid-template-columns: 340px minmax(0, 1fr);
+  }
+  .grade-queue {
+    position: sticky;
+    top: 72px;
+    max-height: calc(100dvh - 88px);
+    overflow: auto;
+  }
+  .back-to-queue {
+    display: none;
+  }
+}
+@media (max-width: 1099.98px) {
+  .review-layout.has-open > .grade-queue,
+  .review-layout:not(.has-open) > .grade-panel {
+    display: none;
+  }
+}
 @media (min-width: 1100px) {
   .editor-layout.has-outline {
     grid-template-columns: 200px minmax(0, 1fr);
@@ -2134,17 +2464,29 @@ form .editor-bar-actions button {
     padding: 16px;
   }
   .answer-bar,
-  .editor-bar {
+  .editor-bar,
+  .marking-bar {
     flex-direction: column;
     align-items: stretch;
     margin-inline: -16px;
   }
   .answer-bar-actions,
-  .editor-bar-actions {
+  .editor-bar-actions,
+  .marking-bar-actions {
     justify-content: flex-start;
   }
+  .marking-bar {
+    margin-bottom: -16px;
+  }
+  .marking-bar-text {
+    flex: none;
+  }
+  .marking-bar-actions {
+    flex-wrap: wrap;
+  }
   html:has(.answer-bar),
-  html:has(.editor-view:not([hidden]) .editor-bar) {
+  html:has(.editor-view:not([hidden]) .editor-bar),
+  html:has(.marking-bar) {
     scroll-padding-bottom: 160px;
   }
   .question-set {

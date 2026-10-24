@@ -1,6 +1,6 @@
 <app-page-header
   title="Grading review"
-  subtitle="Automatic marks and AI suggestions are drafts until you review and finalize them."
+  subtitle="Automatic marks and AI suggestions stay drafts until you finalize them."
 >
   <app-refresh-button
     label="Refresh grades"
@@ -9,7 +9,7 @@
     (refresh)="refresh()"
   />
 </app-page-header>
-<section class="panel">
+<section class="panel review-filters">
   <div class="filter-row">
     <app-field controlId="review-assessment" label="Assessment" hint="Choose one to see all of its grades.">
       <select appFieldControl id="review-assessment" [formControl]="filter" (change)="choose()">
@@ -19,8 +19,17 @@
         }
       </select>
     </app-field>
+    @if (grades.value()) {
+      <div class="filter-chips" role="group" aria-label="Show">
+        @for (f of filters; track f.id) {
+          <button type="button" [attr.aria-pressed]="gradeFilter() === f.id" (click)="gradeFilter.set(f.id)">
+            {{ f.label }} ({{ filterCount(f.id) }})
+          </button>
+        }
+      </div>
+    }
     @if (assessmentId() && unreleased(); as count) {
-      <div>
+      <div class="release-box">
         <p class="caption">
           {{ count }} finalized {{ count === 1 ? 'grade is' : 'grades are' }} hidden from students until you
           release them.
@@ -32,257 +41,448 @@
     }
   </div>
   <app-section-state [section]="published" loading="Loading assessments…" />
-  <p class="caption">
-    {{
-      assessmentId() ? 'Every grade, oldest submission first' : 'Every grade in the classroom, newest first'
-    }}
-    · {{ pageSize }} a page
-  </p>
-  <app-section-state [section]="grades" loading="Loading grades…" />
-  @if (!classroomId()) {
+  @if (!open() && !finalizing() && !releasing()) {
+    <app-status [state]="state" />
+  }
+</section>
+@if (!classroomId()) {
+  <section class="panel">
     <app-no-classroom><p class="empty">Select a classroom to review its grades.</p></app-no-classroom>
-  } @else if (grades.ready()) {
-    @for (grade of grades.value()?.grades ?? []; track grade.id) {
-      <article class="grade">
-        <div>
-          <span class="tag-row">
-            <span class="badge" [class.badge-plain]="grade.status === 'draft'">
-              {{ grade.status === 'draft' ? 'Draft' : 'Finalized' }}
-            </span>
-            @if (grade.status === 'draft' && toMark(grade); as count) {
-              <span class="badge badge-danger">{{ count }} to mark</span>
-            }
-            @if (grade.late) {
-              <span class="badge badge-danger">Late</span>
-            }
-            @if (grade.status === 'finalized' && !grade.released_at) {
-              <span class="badge badge-plain">Not released</span>
-            }
-          </span>
-          <h3>
-            @if (studentName(grade); as name) {
-              {{ name }}
-            } @else {
-              Student not on the roster
-              <span class="identifier">{{ grade.student_id }}</span>
-            }
-          </h3>
-          <p>
-            {{ names.title(grade) || 'Assessment' }} ·
-            <strong>{{ grade.evidence | marks }}</strong>
-            marks
-            @if (submittedAt(grade); as when) {
-              · submitted {{ when }}
-            }
-          </p>
-        </div>
-        @if (selected()?.id !== grade.id) {
-          <div class="evidence-list">
-            @for (evidence of grade.evidence; track evidence.question_id) {
-              <p>
-                <strong>{{ evidence.awarded }} / {{ evidence.possible }}</strong>
-                · {{ outcome(evidence) }} ·
-                @if (names.prompt(grade, evidence); as text) {
-                  {{ text }}
+  </section>
+} @else {
+  <div class="review-layout" [class.has-open]="!!open()">
+    <section class="panel grade-queue" aria-labelledby="grade-queue-heading">
+      <div class="queue-head">
+        <h3 id="grade-queue-heading" tabindex="-1">Grades</h3>
+        <p class="caption">
+          {{ assessmentId() ? 'Oldest submission first' : 'Newest first' }} · {{ pageSize }} a page
+        </p>
+      </div>
+      <app-section-state [section]="grades" loading="Loading grades…" />
+      @if (grades.ready()) {
+        @for (grade of shown(); track grade.id) {
+          <article
+            class="grade"
+            [class.current]="open()?.id === grade.id"
+            [attr.aria-current]="open()?.id === grade.id || null"
+          >
+            <div class="grade-row-main">
+              <h3 [id]="'grade-name-' + grade.id">
+                @if (studentName(grade); as name) {
+                  {{ name }}
                 } @else {
-                  Question
-                  <span class="identifier">{{ evidence.question_id }}</span>
+                  Student not on the roster
+                  <span class="identifier">{{ grade.student_id }}</span>
                 }
-                <span class="caption"
-                  >Topic:
-                  @if (names.topic(evidence); as topic) {
-                    {{ topic }}
-                  } @else {
-                    <span class="identifier">{{ evidence.topic_id }}</span>
-                  }
+              </h3>
+              @if (!assessmentId()) {
+                <p class="grade-row-title">{{ names.title(grade) || 'Assessment' }}</p>
+              }
+              <span class="tag-row">
+                <span
+                  class="badge"
+                  [class.badge-plain]="grade.status === 'draft'"
+                  [class.badge-good]="grade.status === 'finalized'"
+                >
+                  {{ grade.status === 'draft' ? 'Draft' : 'Finalized' }}
                 </span>
+                @if (grade.status === 'draft' && toMark(grade); as count) {
+                  <span class="badge badge-warning">{{ count }} to mark</span>
+                }
+                @if (grade.late) {
+                  <span class="badge badge-danger">Late</span>
+                }
+                @if (grade.status === 'finalized' && !grade.released_at) {
+                  <span class="badge badge-plain">Not released</span>
+                }
+              </span>
+              <p class="caption grade-row-meta">
+                <strong>{{ grade.evidence | marks }}</strong> marks
+                @if (submittedAt(grade); as when) {
+                  · {{ when }}
+                }
               </p>
+            </div>
+            @if (grade.status === 'draft') {
+              <button
+                type="button"
+                class="secondary"
+                [id]="'open-' + grade.id"
+                [attr.aria-describedby]="'grade-name-' + grade.id"
+                (click)="review(grade)"
+                [disabled]="state.busy()"
+              >
+                Review grade
+              </button>
+            } @else {
+              <button
+                type="button"
+                class="secondary"
+                [id]="'open-' + grade.id"
+                [attr.aria-describedby]="'grade-name-' + grade.id"
+                (click)="view(grade)"
+                [disabled]="state.busy()"
+              >
+                View grade
+              </button>
+            }
+          </article>
+        } @empty {
+          @if (grades.value()?.grades?.length) {
+            <div class="empty">
+              <p>{{ filterEmpty() }}</p>
+              <button type="button" class="secondary" (click)="gradeFilter.set('all')">Show all</button>
+            </div>
+          } @else {
+            <p class="empty">
+              No grading evidence yet. Student submissions will appear here after processing. Refresh to check
+              again.
+            </p>
+          }
+        }
+      }
+      <!-- not disabled while a page loads, so the button pressed keeps keyboard focus; only the newest page lands. -->
+      <app-pager
+        label="Grade pages"
+        noun="grades"
+        [(page)]="page"
+        [pageSize]="pageSize"
+        [total]="grades.value()?.total ?? 0"
+        [disabled]="state.busy() || marks.dirty"
+        (go)="showPage()"
+      />
+    </section>
+    <section class="panel grade-panel" aria-label="Grade">
+      @if (open(); as grade) {
+        <button type="button" class="quiet back-to-queue" (click)="backToQueue()" [disabled]="state.busy()">
+          ← All grades
+        </button>
+        <header class="grade-panel-head">
+          <div class="grade-panel-title">
+            <h3 tabindex="-1" [id]="'marking-' + grade.id">
+              {{ studentLabel(grade) }} · {{ names.title(grade) || 'Assessment' }}
+            </h3>
+            <span class="tag-row">
+              <span
+                class="badge"
+                [class.badge-plain]="grade.status === 'draft'"
+                [class.badge-good]="grade.status === 'finalized'"
+              >
+                {{ grade.status === 'draft' ? 'Draft' : 'Finalized' }}
+              </span>
+              @if (grade.status === 'draft' && toMark(grade); as count) {
+                <span class="badge badge-warning">{{ count }} to mark</span>
+              }
+              @if (grade.late) {
+                <span class="badge badge-danger">Late</span>
+              }
+              @if (grade.status === 'finalized' && !grade.released_at) {
+                <span class="badge badge-plain">Not released</span>
+              }
+            </span>
+            @if (submittedAt(grade); as when) {
+              <p class="caption">Submitted {{ when }}</p>
             }
           </div>
-          @if (grade.status === 'draft') {
-            <button (click)="review(grade)" [disabled]="state.busy()">Review grade</button>
-          }
-        } @else if (selected(); as current) {
+          <div class="grade-panel-nav">
+            <button
+              type="button"
+              class="secondary"
+              (click)="previous()"
+              [disabled]="state.busy() || !previousGrade()"
+            >
+              <app-icon name="chevron-left" />Previous grade
+            </button>
+            <div class="next-to-mark">
+              <button
+                type="button"
+                class="secondary"
+                (click)="nextToMark()"
+                [disabled]="state.busy() || (!nextDraft() && !nextOnNextPage())"
+                aria-describedby="next-to-mark-note"
+              >
+                Next to mark<app-icon name="chevron-right" />
+              </button>
+              <span class="caption" id="next-to-mark-note">
+                @if (nextOnNextPage()) {
+                  Continues on the next page
+                } @else if (!nextDraft()) {
+                  Nothing left to mark here
+                }
+              </span>
+            </div>
+          </div>
+        </header>
+        @if (selected(); as current) {
           <form
             id="marking-form"
             class="marking"
             novalidate
             [formGroup]="marks"
             (ngSubmit)="saveMarks()"
-            [attr.aria-label]="'Marking ' + (studentName(grade) || 'this student')"
+            [attr.aria-label]="'Marking ' + (studentName(current) || 'this student')"
           >
-            <h4 tabindex="-1" [id]="'marking-' + grade.id">Mark each question</h4>
             @for (evidence of current.evidence; track evidence.question_id; let n = $index) {
+              @let collapsed = collapsible(evidence) && !overriding().has(evidence.question_id);
               <section class="mark-question" [formGroupName]="evidence.question_id">
+                <div class="mark-columns" [class.collapsed]="collapsed">
+                  <div class="mark-evidence">
+                    <div class="mark-question-head">
+                      <h4>
+                        Question {{ n + 1 }} · {{ evidence.possible }}
+                        {{ evidence.possible === 1 ? 'mark' : 'marks' }}
+                      </h4>
+                      @if (evidence.needs_marking) {
+                        <span class="badge badge-warning">To mark</span>
+                      }
+                    </div>
+                    <p class="mark-prompt">
+                      @if (names.prompt(current, evidence); as text) {
+                        {{ text }}
+                      } @else {
+                        Question <span class="identifier">{{ evidence.question_id }}</span>
+                      }
+                    </p>
+                    <p class="caption">
+                      Topic:
+                      @if (names.topic(evidence); as topic) {
+                        {{ topic }}
+                      } @else {
+                        <span class="identifier">{{ evidence.topic_id }}</span>
+                      }
+                    </p>
+                    @if (collapsible(evidence)) {
+                      <div class="auto-correct">
+                        <span class="auto-correct-text"
+                          ><app-icon name="check" />Correct · marked automatically · {{ evidence.awarded }} /
+                          {{ evidence.possible }}</span
+                        >
+                        <button
+                          type="button"
+                          class="quiet"
+                          [attr.aria-expanded]="!collapsed"
+                          [attr.aria-controls]="'override-' + evidence.question_id"
+                          (click)="toggleOverride(evidence.question_id)"
+                        >
+                          Override
+                        </button>
+                      </div>
+                    }
+                    <div class="mark-answer" [hidden]="collapsed">
+                      <p class="caption">Student's answer</p>
+                      <p class="answer-text">{{ current.answers[evidence.question_id] || '(blank)' }}</p>
+                      @if (evidence.suggestion; as suggestion) {
+                        <div
+                          class="suggestion"
+                          role="group"
+                          [attr.aria-label]="'AI suggestion for question ' + (n + 1)"
+                        >
+                          <p><strong>AI suggestion</strong> · check it before using it</p>
+                          @if (suggestion.status === 'ready') {
+                            <p>
+                              Suggests {{ suggestion.awarded }} / {{ evidence.possible }}
+                              @if (suggestion.confidence) {
+                                · {{ suggestion.confidence }} confidence
+                              }
+                            </p>
+                            @if (suggestion.scheme_passages) {
+                              <details class="scheme-used">
+                                <summary>
+                                  Read with {{ suggestion.scheme_passages }} marking
+                                  {{ suggestion.scheme_passages === 1 ? 'point' : 'points' }}
+                                </summary>
+                                @for (
+                                  excerpt of names.question(current, evidence)?.marking_scheme ?? [];
+                                  track $index
+                                ) {
+                                  <p class="passage">{{ excerpt.text }}</p>
+                                }
+                              </details>
+                            }
+                            @for (c of suggestion.criteria ?? []; track c.criterion_id) {
+                              <p>
+                                <strong>{{ levelName(current, evidence, c.criterion_id, c.points) }}</strong>
+                                ·
+                                {{ c.rationale }}
+                              </p>
+                              @for (quote of c.evidence_quotes; track $index) {
+                                <blockquote>“{{ quote }}”</blockquote>
+                              }
+                            }
+                            @if (suggestion.feedback) {
+                              <p>Suggested feedback: {{ suggestion.feedback }}</p>
+                            }
+                            @for (flag of suggestion.flags ?? []; track flag) {
+                              <p class="error">{{ flagText(flag) }}</p>
+                            }
+                            <button
+                              type="button"
+                              class="secondary"
+                              (click)="useSuggestion(current, evidence)"
+                              [disabled]="state.busy()"
+                            >
+                              Use suggestion for question {{ n + 1 }}
+                            </button>
+                          } @else {
+                            <p aria-live="polite">{{ suggestionReason(suggestion) }}</p>
+                          }
+                        </div>
+                      }
+                    </div>
+                  </div>
+                  <!-- collapsed controls stay in the form, so saving and validation are unchanged. -->
+                  <div class="mark-controls" [id]="'override-' + evidence.question_id" [hidden]="collapsed">
+                    @if (names.question(current, evidence)?.rubric; as rubric) {
+                      <div formGroupName="criteria">
+                        @for (criterion of rubric.criteria; track criterion.id) {
+                          @if (criterion.id; as criterionId) {
+                            @let group = 'level-' + evidence.question_id + '-' + criterionId;
+                            @let level = marks.get([evidence.question_id, 'criteria', criterionId]);
+                            @let missing = !!level?.touched && !!level?.invalid;
+                            <fieldset
+                              class="levels"
+                              role="radiogroup"
+                              [attr.aria-invalid]="missing || null"
+                              [attr.aria-describedby]="missing ? group + '-error' : null"
+                            >
+                              <legend>{{ criterion.title }}</legend>
+                              @for (level of criterion.levels; track level.points) {
+                                <label class="level-option">
+                                  <!-- one name per criterion makes a real radio group: one tab stop, arrow keys between levels. -->
+                                  <input
+                                    type="radio"
+                                    [attr.name]="group"
+                                    [formControlName]="criterionId"
+                                    [value]="level.points"
+                                  />
+                                  <span
+                                    ><strong>{{ level.points }}</strong> · {{ level.descriptor }}</span
+                                  >
+                                </label>
+                              }
+                              @if (missing) {
+                                <small class="error" [id]="group + '-error'">Choose a level.</small>
+                              }
+                            </fieldset>
+                          }
+                        }
+                      </div>
+                    } @else {
+                      <app-field
+                        class="points-field"
+                        [controlId]="'mark-' + evidence.question_id"
+                        [label]="'Marks for question ' + (n + 1)"
+                        [hint]="
+                          evidence.needs_marking
+                            ? 'Give 0–' + evidence.possible + '.'
+                            : 'Marked automatically. Change it only to override.'
+                        "
+                        [error]="'Give 0–' + evidence.possible + '.'"
+                        [control]="marks.get([evidence.question_id, 'awarded'])"
+                      >
+                        <span class="points-input">
+                          <input
+                            appFieldControl
+                            [id]="'mark-' + evidence.question_id"
+                            type="number"
+                            min="0"
+                            [max]="evidence.possible"
+                            formControlName="awarded"
+                          />
+                          <span aria-hidden="true">of {{ evidence.possible }}</span>
+                        </span>
+                      </app-field>
+                    }
+                    <app-field
+                      [controlId]="'feedback-' + evidence.question_id"
+                      [label]="'Feedback on question ' + (n + 1) + ' (optional)'"
+                      hint="The student sees this with their result."
+                      error="Feedback is at most 2000 characters."
+                      [control]="marks.get([evidence.question_id, 'feedback'])"
+                    >
+                      <textarea
+                        appFieldControl
+                        [id]="'feedback-' + evidence.question_id"
+                        formControlName="feedback"
+                        rows="3"
+                        maxlength="2000"
+                      ></textarea>
+                    </app-field>
+                  </div>
+                </div>
+              </section>
+            }
+            @if (!finalizing() && !releasing()) {
+              <app-status [state]="state" />
+            }
+            <div class="marking-bar">
+              <p class="marking-bar-text">{{ markingSummary(current) }}</p>
+              <div class="marking-bar-actions">
+                <button class="secondary" [disabled]="state.busy()">Save marks</button>
+                <button type="button" (click)="askFinalize()" [disabled]="state.busy()">
+                  Finalize this grade
+                </button>
+                <button type="button" class="quiet" (click)="closePanel()" [disabled]="state.busy()">
+                  Close
+                </button>
+              </div>
+            </div>
+          </form>
+        } @else {
+          @for (evidence of grade.evidence; track evidence.question_id; let n = $index) {
+            <section class="mark-question">
+              <div class="mark-question-head">
                 <h4>
                   Question {{ n + 1 }} · {{ evidence.possible }}
                   {{ evidence.possible === 1 ? 'mark' : 'marks' }}
                 </h4>
-                <p>{{ names.prompt(grade, evidence) || 'Question' }}</p>
-                <p class="caption">Student's answer</p>
-                <p class="answer-text">{{ grade.answers[evidence.question_id] || '(blank)' }}</p>
-                @if (evidence.suggestion; as suggestion) {
-                  <div
-                    class="suggestion"
-                    role="group"
-                    [attr.aria-label]="'AI suggestion for question ' + (n + 1)"
-                  >
-                    <p><strong>AI suggestion</strong> · check it before using it</p>
-                    @if (suggestion.status === 'ready') {
-                      <p>
-                        Suggests {{ suggestion.awarded }} / {{ evidence.possible }}
-                        @if (suggestion.confidence) {
-                          · {{ suggestion.confidence }} confidence
-                        }
-                      </p>
-                      @if (suggestion.scheme_passages) {
-                        <details class="scheme-used">
-                          <summary>
-                            Read with {{ suggestion.scheme_passages }} marking
-                            {{ suggestion.scheme_passages === 1 ? 'point' : 'points' }}
-                          </summary>
-                          @for (
-                            excerpt of names.question(grade, evidence)?.marking_scheme ?? [];
-                            track $index
-                          ) {
-                            <p class="passage">{{ excerpt.text }}</p>
-                          }
-                        </details>
-                      }
-                      @for (c of suggestion.criteria ?? []; track c.criterion_id) {
-                        <p>
-                          <strong>{{ levelName(grade, evidence, c.criterion_id, c.points) }}</strong> ·
-                          {{ c.rationale }}
-                        </p>
-                        @for (quote of c.evidence_quotes; track $index) {
-                          <blockquote>“{{ quote }}”</blockquote>
-                        }
-                      }
-                      @if (suggestion.feedback) {
-                        <p>Suggested feedback: {{ suggestion.feedback }}</p>
-                      }
-                      @for (flag of suggestion.flags ?? []; track flag) {
-                        <p class="error">{{ flagText(flag) }}</p>
-                      }
-                      <button
-                        type="button"
-                        class="secondary"
-                        (click)="useSuggestion(grade, evidence)"
-                        [disabled]="state.busy()"
-                      >
-                        Use suggestion for question {{ n + 1 }}
-                      </button>
-                    } @else {
-                      <p aria-live="polite">{{ suggestionReason(suggestion) }}</p>
-                    }
-                  </div>
-                }
-                @if (names.question(grade, evidence)?.rubric; as rubric) {
-                  <div formGroupName="criteria">
-                    @for (criterion of rubric.criteria; track criterion.id) {
-                      @if (criterion.id; as criterionId) {
-                        @let group = 'level-' + evidence.question_id + '-' + criterionId;
-                        @let level = marks.get([evidence.question_id, 'criteria', criterionId]);
-                        @let missing = !!level?.touched && !!level?.invalid;
-                        <fieldset
-                          class="levels"
-                          role="radiogroup"
-                          [attr.aria-invalid]="missing || null"
-                          [attr.aria-describedby]="missing ? group + '-error' : null"
-                        >
-                          <legend>{{ criterion.title }}</legend>
-                          @for (level of criterion.levels; track level.points) {
-                            <label class="check">
-                              <!-- one name per criterion makes a real radio group: one tab stop, arrow keys between levels. -->
-                              <input
-                                type="radio"
-                                [attr.name]="group"
-                                [formControlName]="criterionId"
-                                [value]="level.points"
-                              />
-                              <span
-                                ><strong>{{ level.points }}</strong> · {{ level.descriptor }}</span
-                              >
-                            </label>
-                          }
-                          @if (missing) {
-                            <small class="error" [id]="group + '-error'">Choose a level.</small>
-                          }
-                        </fieldset>
-                      }
-                    }
-                  </div>
+                <span class="badge badge-plain">{{ outcome(evidence) }}</span>
+              </div>
+              <p class="mark-prompt">
+                @if (names.prompt(grade, evidence); as text) {
+                  {{ text }}
                 } @else {
-                  <app-field
-                    [controlId]="'mark-' + evidence.question_id"
-                    [label]="'Marks for question ' + (n + 1)"
-                    [hint]="
-                      evidence.needs_marking
-                        ? 'Give 0–' + evidence.possible + '.'
-                        : 'Marked automatically. Change it only to override.'
-                    "
-                    [error]="'Give 0–' + evidence.possible + '.'"
-                    [control]="marks.get([evidence.question_id, 'awarded'])"
-                  >
-                    <input
-                      appFieldControl
-                      [id]="'mark-' + evidence.question_id"
-                      type="number"
-                      min="0"
-                      [max]="evidence.possible"
-                      formControlName="awarded"
-                    />
-                  </app-field>
+                  Question <span class="identifier">{{ evidence.question_id }}</span>
                 }
-                <app-field
-                  [controlId]="'feedback-' + evidence.question_id"
-                  [label]="'Feedback on question ' + (n + 1) + ' (optional)'"
-                  hint="The student sees this with their result."
-                  error="Feedback is at most 2000 characters."
-                  [control]="marks.get([evidence.question_id, 'feedback'])"
-                >
-                  <textarea
-                    appFieldControl
-                    [id]="'feedback-' + evidence.question_id"
-                    formControlName="feedback"
-                    rows="3"
-                    maxlength="2000"
-                  ></textarea>
-                </app-field>
-              </section>
-            }
-            <div class="button-row">
-              <button class="secondary" [disabled]="state.busy()">Save marks</button>
-              <button type="button" (click)="askFinalize()" [disabled]="state.busy()">
-                Finalize this grade
-              </button>
-              <button type="button" class="secondary" (click)="stopMarking()" [disabled]="state.busy()">
-                Close
-              </button>
-            </div>
-          </form>
+              </p>
+              <p class="caption">
+                Topic:
+                @if (names.topic(evidence); as topic) {
+                  {{ topic }}
+                } @else {
+                  <span class="identifier">{{ evidence.topic_id }}</span>
+                }
+              </p>
+              <p class="caption">Student's answer</p>
+              <p class="answer-text">{{ grade.answers[evidence.question_id] || '(blank)' }}</p>
+              <p>
+                <strong>{{ evidence.awarded }} / {{ evidence.possible }}</strong>
+                {{ evidence.possible === 1 ? 'mark' : 'marks' }}
+              </p>
+              @if (evidence.feedback) {
+                <p>Feedback: {{ evidence.feedback }}</p>
+              }
+            </section>
+          }
+          @if (!finalizing() && !releasing()) {
+            <app-status [state]="state" />
+          }
+          <div class="button-row">
+            <button type="button" class="quiet" (click)="closePanel()">Close</button>
+          </div>
         }
-      </article>
-    } @empty {
-      <p class="empty">
-        No grading evidence yet. Student submissions will appear here after processing. Refresh to check
-        again.
-      </p>
-    }
-  }
-  <!-- not disabled while a page loads, so the button pressed keeps keyboard focus; only the newest page lands. -->
-  <app-pager
-    label="Grade pages"
-    noun="grades"
-    [(page)]="page"
-    [pageSize]="pageSize"
-    [total]="grades.value()?.total ?? 0"
-    [disabled]="state.busy() || marks.dirty"
-    (go)="showPage()"
-  />
-</section>
-@if (!finalizing() && !releasing()) {
-  <app-status [state]="state" />
+      } @else {
+        <div class="grade-panel-empty">
+          <p><strong>Choose a grade to review</strong></p>
+          @if (grades.value()) {
+            <p class="caption">
+              {{ drafts() }} {{ drafts() === 1 ? 'draft is' : 'drafts are' }} waiting on this page.
+            </p>
+          }
+        </div>
+      }
+    </section>
+  </div>
 }
 <app-confirm-dialog
   #dialog
