@@ -1,5 +1,13 @@
 import { NgTemplateOutlet } from '@angular/common';
-import { Component, inject, signal } from '@angular/core';
+import {
+  Component,
+  ElementRef,
+  ViewChild,
+  afterRenderEffect,
+  inject,
+  signal,
+  untracked,
+} from '@angular/core';
 import { FormControl, FormGroup, ReactiveFormsModule } from '@angular/forms';
 import { ChatApi, ContentApi } from '../../api/clients';
 import type { ChatMessage, Citation, StreamEvent, Thread } from '../../api/models';
@@ -9,6 +17,7 @@ import { UnsavedChanges } from '../../core/unsaved-changes';
 import { ActionState } from '../../shared/action-state';
 import { messageOf } from '../../shared/errors';
 import { FieldComponent, FieldControlDirective } from '../../shared/field';
+import { IconComponent } from '../../shared/icon';
 import { dateTime, resetTime } from '../../shared/format';
 import { NoClassroomComponent } from '../../shared/no-classroom';
 import { Section } from '../../shared/section';
@@ -39,6 +48,7 @@ const OUTCOME_NOTES: Record<string, string> = {
     StatusComponent,
     SectionStateComponent,
     NgTemplateOutlet,
+    IconComponent,
   ],
   templateUrl: './chat.html',
 })
@@ -72,6 +82,54 @@ export class ChatComponent {
   readonly form = new FormGroup({
     question: new FormControl('', { nonNullable: true, validators: requiredText(MAX_QUESTION) }),
   });
+  /* the message list's scroll box, which follows a streaming answer while the user is at its end. */
+  @ViewChild('scroller') private scroller?: ElementRef<HTMLElement>;
+  /* the user scrolled up and newer messages are below them. */
+  readonly behind = signal(false);
+  private pinned = true;
+  /* the thread whose end was last scrolled to, so a newly opened one starts at its end. */
+  private shownThread: string | null | undefined = undefined;
+  private wasStreaming = false;
+  private readonly follow = afterRenderEffect(() => {
+    const list = this.messages.value();
+    const loading = this.messages.loading();
+    const thread = this.active()?.id ?? null;
+    const streaming = this.streaming();
+    untracked(() => {
+      const box = this.scroller?.nativeElement;
+      if (!box || loading) return;
+      // a newly opened thread, or a question just sent, shows its end.
+      const started = streaming && !this.wasStreaming;
+      this.wasStreaming = streaming;
+      if ((list && thread !== this.shownThread) || started) {
+        this.shownThread = thread;
+        this.pinned = true;
+      }
+      // an emptied list, such as a new conversation, has nothing to jump to.
+      if (this.pinned) this.scrollToEnd(box);
+      else this.behind.set(!!list?.length);
+    });
+  });
+
+  /* whether the user is at the end of the messages, read as they scroll. */
+  onScroll(): void {
+    const box = this.scroller?.nativeElement;
+    if (!box) return;
+    this.pinned = box.scrollHeight - box.scrollTop - box.clientHeight < 24;
+    if (this.pinned) this.behind.set(false);
+  }
+  jumpToLatest(): void {
+    const box = this.scroller?.nativeElement;
+    this.pinned = true;
+    if (!box) return;
+    this.scrollToEnd(box);
+    // the button goes away, so keyboard focus moves to the messages instead of the page.
+    box.focus({ preventScroll: true });
+  }
+  private scrollToEnd(box: HTMLElement): void {
+    box.scrollTop = box.scrollHeight;
+    this.behind.set(false);
+  }
 
   constructor() {
     inject(UnsavedChanges).track(() => this.form.dirty || this.streaming());

@@ -124,4 +124,10 @@ export class HomeComponent {
   overdue(item: AssessmentSummary): boolean {
     return dueState(item.due_at, item.late_policy) === 'late';
   }
+  /* the due chip's colour: danger once overdue, warning when due within three days. */
+  dueTone(item: AssessmentSummary): string {
+    if (this.overdue(item)) return 'badge-danger';
+    const left = item.due_at ? new Date(item.due_at).getTime() - Date.now() : Infinity;
+    return left < 3 * 24 * 60 * 60 * 1000 ? 'badge-warning' : 'badge-plain';
+  }
 }

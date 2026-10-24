@@ -1,11 +1,11 @@
 // @vitest-environment jsdom
-import { signal } from '@angular/core';
+import { signal, type WritableSignal } from '@angular/core';
 import { TestBed } from '@angular/core/testing';
 import { BrowserTestingModule, platformBrowserTesting } from '@angular/platform-browser/testing';
-import { ActivatedRoute, convertToParamMap } from '@angular/router';
+import { ActivatedRoute, convertToParamMap, provideRouter } from '@angular/router';
 import { readFileSync } from 'node:fs';
 import { of } from 'rxjs';
-import { beforeAll, describe, expect, it } from 'vitest';
+import { beforeAll, describe, expect, it, vi } from 'vitest';
 import { AnalyticsApi, IdentityApi, PerformanceAgentApi } from '../../api/clients';
 import type { Interpretation, Performance, Student } from '../../api/models';
 import { AiUsage } from '../../core/ai-usage';
@@ -14,7 +14,6 @@ import { CurriculumNames } from '../../core/curriculum-names';
 import { Session } from '../../core/session';
 import { FieldComponent } from '../../shared/field';
 import { SectionStateComponent } from '../../shared/section-state';
-import { StatusComponent } from '../../shared/status';
 import { InterpretationComponent } from './interpretation';
 import { PerformanceComponent } from './performance';
 import { PageHeaderComponent } from '../../shared/page-header';
@@ -40,10 +39,13 @@ function render(
   need: () => Promise<void> = () => Promise.resolve(),
   interpret: () => Promise<Interpretation> = () => new Promise(() => undefined),
   role: 'teacher' | 'student' = 'teacher',
+  classroomId: WritableSignal<string> = signal('c1'),
 ) {
+  const read = vi.fn((_studentId: string, _classroomId: string) => performance);
   TestBed.resetTestingModule();
   TestBed.configureTestingModule({
     providers: [
+      provideRouter([]),
       {
         provide: Session,
         useValue: {
@@ -53,14 +55,17 @@ function render(
         },
       },
       { provide: IdentityApi, useValue: { roster: () => roster } },
-      { provide: AnalyticsApi, useValue: { performance: () => performance } },
+      { provide: AnalyticsApi, useValue: { performance: read } },
       { provide: PerformanceAgentApi, useValue: { interpret } },
       { provide: AiUsage, useValue: { refresh: () => undefined } },
       {
         provide: CurriculumNames,
         useValue: { need, topicName: (id: string) => (id === 'k1' ? 'Halves' : '') },
       },
-      { provide: ClassroomContext, useValue: { classroomId: signal('c1') } },
+      {
+        provide: ClassroomContext,
+        useValue: { classroomId, known: signal(true), error: signal(''), loading: signal(false) },
+      },
       { provide: ActivatedRoute, useValue: { queryParamMap: of(convertToParamMap({ student })) } },
     ],
   });
@@ -72,7 +77,6 @@ function render(
     [InterpretationComponent, './interpretation.html'],
     [SectionStateComponent, '../../shared/section-state.html'],
     [FieldComponent, '../../shared/field.html'],
-    [StatusComponent, '../../shared/status.html'],
   ] as const)
     TestBed.overrideComponent(component, { set: { template: template(path) } });
   const fixture = TestBed.createComponent(PerformanceComponent);
@@ -84,7 +88,18 @@ function render(
     fixture.detectChanges();
   };
   const click = (selector: string) => (root.querySelector(selector) as HTMLButtonElement).click();
-  return { text, settle, click };
+  const button = (name: string) =>
+    [...root.querySelectorAll('button')].find(
+      (b) => b.textContent?.trim() === name || b.getAttribute('aria-label') === name,
+    ) as HTMLButtonElement | undefined;
+  /* chooses `value` in the teacher's student select, as a person would. */
+  const choose = (value: string) => {
+    const select = root.querySelector('#performance-student') as HTMLSelectElement;
+    select.value = value;
+    select.dispatchEvent(new Event('change'));
+    fixture.detectChanges();
+  };
+  return { text, settle, click, button, choose, read, fixture };
 }
 
 describe('performance states', () => {
@@ -238,6 +253,79 @@ describe('performance interpretation', () => {
     );
     await page.settle();
     expect(page.text()).not.toContain('Interpret results');
-    expect(page.text()).toContain('Practice unavailable');
+    expect(page.text()).toContain('Generated practice is not available yet.');
+    expect(page.button('Practice unavailable')).toBeUndefined();
+  });
+});
+
+describe('a student’s progress', () => {
+  const student = (performance: Promise<Performance>, classroomId = signal('c1')) =>
+    render(Promise.resolve([]), performance, '', undefined, undefined, 'student', classroomId);
+
+  it('loads with no click, and again when the classroom changes', async () => {
+    const classroomId = signal('c1');
+    const page = student(Promise.resolve(evidence([halves])), classroomId);
+    await page.settle();
+    expect(page.read).toHaveBeenCalledWith('s1', 'c1');
+    expect(page.text()).toContain('Halves');
+    expect(page.button('View my performance')).toBeUndefined();
+    classroomId.set('c2');
+    page.fixture.detectChanges();
+    await page.settle();
+    expect(page.read).toHaveBeenLastCalledWith('s1', 'c2');
+  });
+
+  it('asks for a classroom only when none is chosen', async () => {
+    const none = student(Promise.resolve(evidence([])), signal(''));
+    await none.settle();
+    expect(none.text()).toContain('Select a classroom to view performance.');
+    expect(none.read).not.toHaveBeenCalled();
+    expect(none.button('Refresh progress')?.disabled).toBe(true);
+
+    const empty = student(Promise.resolve(evidence([])));
+    await empty.settle();
+    expect(empty.text()).not.toContain('Select a classroom');
+    expect(empty.text()).toContain(
+      'No finalized results yet. After your teacher finalizes an assessment, your topics appear here.',
+    );
+  });
+
+  it('reads again from the refresh button', async () => {
+    const page = student(Promise.resolve(evidence([halves])));
+    await page.settle();
+    page.button('Refresh progress')?.click();
+    await page.settle();
+    expect(page.read).toHaveBeenCalledTimes(2);
+  });
+});
+
+describe('a teacher choosing a student', () => {
+  const ben: Student = { id: 's2', username: 'ben', display_name: 'Ben Tan' };
+
+  it('loads the chosen student at once, and clears the evidence for the empty option', async () => {
+    const page = render(Promise.resolve([ana, ben]), Promise.resolve(evidence([halves])), '');
+    await page.settle();
+    expect(page.read).not.toHaveBeenCalled();
+    expect(page.text()).toContain('Choose a student to see their finalized evidence.');
+    expect(page.button('Refresh performance')?.disabled).toBe(true);
+    page.choose('s2');
+    await page.settle();
+    expect(page.read).toHaveBeenCalledOnce();
+    expect(page.read).toHaveBeenCalledWith('s2', 'c1');
+    expect(page.text()).toContain('Halves');
+    page.choose('');
+    await page.settle();
+    expect(page.read).toHaveBeenCalledOnce();
+    expect(page.text()).not.toContain('Halves');
+    expect(page.text()).not.toContain('Choose a student.');
+  });
+
+  it('loads a linked student once, and reads again from the refresh button', async () => {
+    const page = render(Promise.resolve([ana]), Promise.resolve(evidence([halves])));
+    await page.settle();
+    expect(page.read).toHaveBeenCalledOnce();
+    page.button('Refresh performance')?.click();
+    await page.settle();
+    expect(page.read).toHaveBeenCalledTimes(2);
   });
 });

@@ -4,7 +4,7 @@ import { TestBed } from '@angular/core/testing';
 import { BrowserTestingModule, platformBrowserTesting } from '@angular/platform-browser/testing';
 import { provideRouter } from '@angular/router';
 import { readFileSync } from 'node:fs';
-import { beforeAll, describe, expect, it } from 'vitest';
+import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 import { AnalyticsApi, AssessmentApi, GradingApi } from '../../api/clients';
 import type { AssessmentSummary, Evaluation, Performance } from '../../api/models';
 import { ClassroomContext } from '../../core/classroom-context';
@@ -100,7 +100,7 @@ function render(
     fixture.detectChanges();
   };
   const note = () => root.querySelector('.identity-note')?.textContent?.replace(/\s+/g, ' ').trim() ?? '';
-  return { panel, settle, note };
+  return { panel, settle, note, root };
 }
 
 describe('waiting for your teacher', () => {
@@ -221,5 +221,37 @@ describe('the student’s username card', () => {
   it('shows while the student is in no classroom yet', () => {
     const page = render(Promise.resolve([]), Promise.resolve([]), undefined, undefined, { classroomId: '' });
     expect(page.note()).toContain('Your username: stu.');
+  });
+});
+
+describe('the to-do list', () => {
+  afterEach(() => vi.useRealTimers());
+
+  it('colours the due chip by how soon it is due, and fills only the first start button', async () => {
+    vi.useFakeTimers({ toFake: ['Date'] });
+    vi.setSystemTime(new Date('2026-10-16T00:00:00Z'));
+    const due = (id: string, due_at: string): AssessmentSummary => ({ ...assessment(id, false), due_at });
+    const page = render(
+      Promise.resolve([
+        due('late', '2026-10-15T00:00:00Z'),
+        due('soon', '2026-10-18T00:00:00Z'),
+        due('later', '2026-10-30T00:00:00Z'),
+        assessment('open', false),
+      ]),
+      Promise.resolve([]),
+    );
+    await page.settle();
+    const chip = (id: string) =>
+      [...page.root.querySelectorAll('.todo-row')]
+        .find((row) => row.querySelector('strong')?.textContent === `Quiz ${id}`)
+        ?.querySelector('.badge');
+    expect(chip('late')?.className).toContain('badge-danger');
+    expect(chip('late')?.textContent).toMatch(/^Overdue since /);
+    expect(chip('soon')?.className).toContain('badge-warning');
+    expect(chip('soon')?.textContent).toMatch(/^Due /);
+    expect(chip('later')?.className).toContain('badge-plain');
+    expect(chip('open')).toBeNull();
+    const starts = [...page.root.querySelectorAll('.todo-row a')];
+    expect(starts.map((a) => a.classList.contains('primary'))).toEqual([true, false, false, false]);
   });
 });

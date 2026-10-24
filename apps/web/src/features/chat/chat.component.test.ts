@@ -227,3 +227,101 @@ describe('a source whose material was deleted', () => {
     expect(content.figure).toHaveBeenCalledWith('d1', 'figure.png');
   });
 });
+
+describe('following the conversation', () => {
+  const said = (id: string, content: string): ChatMessage => ({
+    id,
+    role: 'assistant',
+    content,
+    outcome: 'answered',
+    citations: null,
+    created_at: '2026-10-17T00:00:00Z',
+  });
+
+  /* the chat page with only its message scroll box, whose layout jsdom lacks, so its sizes are stubbed. */
+  async function scrolling() {
+    TestBed.resetTestingModule();
+    TestBed.configureTestingModule({
+      providers: [
+        {
+          provide: ChatApi,
+          useValue: {
+            threads: () => Promise.resolve({ threads: [thread] }),
+            messages: () => Promise.resolve({ messages: [said('m1', 'First')] }),
+          },
+        },
+        { provide: ContentApi, useValue: {} },
+        { provide: AiUsage, useValue: { refresh: () => undefined } },
+        { provide: ClassroomContext, useValue: { classroomId: signal('c1') } },
+      ],
+    });
+    TestBed.overrideComponent(ChatComponent, {
+      set: {
+        template: `<div #scroller tabindex="0" (scroll)="onScroll()"></div>
+          @if (behind()) {<button type="button" (click)="jumpToLatest()">Jump to latest</button>}`,
+        imports: [],
+      },
+    });
+    const fixture = TestBed.createComponent(ChatComponent);
+    fixture.detectChanges();
+    const page = fixture.componentInstance;
+    const root = fixture.nativeElement as HTMLElement;
+    const box = root.querySelector('div') as HTMLElement;
+    const size = { height: 1000, top: 0 };
+    Object.defineProperty(box, 'scrollHeight', { get: () => size.height });
+    Object.defineProperty(box, 'clientHeight', { get: () => 400 });
+    Object.defineProperty(box, 'scrollTop', {
+      get: () => size.top,
+      set: (value: number) => (size.top = Math.min(value, size.height - 400)),
+    });
+    const render = async () => {
+      await new Promise((resolve) => setTimeout(resolve));
+      TestBed.tick();
+    };
+    page.open(thread);
+    await render();
+    /* a longer conversation, as a streamed token makes it. */
+    const grow = async (content: string) => {
+      size.height += 200;
+      page.messages.set([said('m1', content)]);
+      await render();
+    };
+    const jump = () =>
+      [...root.querySelectorAll('button')].find((b) => b.textContent?.trim() === 'Jump to latest');
+    return { page, box, size, grow, jump, render };
+  }
+
+  it('opens a thread at its end and stays there as the answer grows', async () => {
+    const { size, grow, jump } = await scrolling();
+    expect(size.top).toBe(600);
+    await grow('First, longer');
+    expect(size.top).toBe(800);
+    expect(jump()).toBeUndefined();
+  });
+
+  it('leaves a user who scrolled up where they are, and offers Jump to latest', async () => {
+    const { box, size, grow, jump, render } = await scrolling();
+    size.top = 100;
+    box.dispatchEvent(new Event('scroll'));
+    await grow('First, longer');
+    expect(size.top).toBe(100);
+    const button = jump();
+    expect(button).toBeDefined();
+    button?.click();
+    await render();
+    expect(size.top).toBe(800);
+    expect(jump()).toBeUndefined();
+    expect(document.activeElement).toBe(box);
+  });
+
+  it('hides Jump to latest once a new conversation empties the list', async () => {
+    const { page, box, size, grow, jump, render } = await scrolling();
+    size.top = 100;
+    box.dispatchEvent(new Event('scroll'));
+    await grow('First, longer');
+    expect(jump()).toBeDefined();
+    page.newThread();
+    await render();
+    expect(jump()).toBeUndefined();
+  });
+});

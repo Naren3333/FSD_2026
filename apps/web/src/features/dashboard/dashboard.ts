@@ -19,6 +19,8 @@ import { Section } from '../../shared/section';
 import { SectionStateComponent } from '../../shared/section-state';
 import { PageHeaderComponent } from '../../shared/page-header';
 import { RefreshButtonComponent } from '../../shared/refresh-button';
+import { IconComponent } from '../../shared/icon';
+import { dateTime } from '../../shared/format';
 
 @Component({
   selector: 'app-dashboard',
@@ -31,6 +33,7 @@ import { RefreshButtonComponent } from '../../shared/refresh-button';
     PercentPipe,
     SectionStateComponent,
     PagerComponent,
+    IconComponent,
   ],
   templateUrl: './dashboard.html',
 })
@@ -69,7 +72,8 @@ export class DashboardComponent {
         'Needs grading',
         '/review',
         c?.drafts,
-        `${c?.finalized} finalized${unreleased} · Open Grading review`,
+        `${c?.finalized} finalized${unreleased} · ${c?.drafts ? 'Start marking' : 'Open Grading review'}`,
+        !!c?.drafts,
       ),
       tile(this.roster, 'Students enrolled', '/students', this.enrolledTotal(), 'Manage students'),
       {
@@ -84,6 +88,19 @@ export class DashboardComponent {
       },
     ];
   });
+  /* "30 students · 4 published assessments", leaving out a part that has not loaded. */
+  readonly subtitle = computed(() => {
+    const enrolled = this.enrolledTotal();
+    const published = this.assessments.value()?.length;
+    const parts = [
+      enrolled !== undefined ? `${enrolled} ${enrolled === 1 ? 'student' : 'students'}` : '',
+      published !== undefined
+        ? `${published} published ${published === 1 ? 'assessment' : 'assessments'}`
+        : '',
+    ].filter(Boolean);
+    return this.classroomId() && parts.length ? parts.join(' · ') : 'Your class at a glance.';
+  });
+  readonly dateTime = dateTime;
   /* each student's evidence on this page, by topic. */
   private readonly metrics = computed(
     () =>
@@ -183,11 +200,28 @@ export class DashboardComponent {
 
   /* "12 of 20 students submitted", or just the count when former students' submissions exceed the roster. */
   submitted(progress: AssessmentProgress): string {
+    const parts = this.submittedParts(progress);
+    return parts.count + parts.rest;
+  }
+
+  /* the submitted text split into what shows ("12 of 20") and the rest, with the share for the bar. */
+  submittedParts(progress: AssessmentProgress): { count: string; rest: string; share: number | null } {
     const enrolled = this.enrolledTotal();
+    if (enrolled !== undefined && progress.submissions <= enrolled)
+      return {
+        count: `${progress.submissions} of ${enrolled}`,
+        rest: ' students submitted',
+        share: enrolled ? progress.submissions / enrolled : 0,
+      };
     const noun = progress.submissions === 1 ? 'student' : 'students';
-    return enrolled !== undefined && progress.submissions <= enrolled
-      ? `${progress.submissions} of ${enrolled} students submitted`
-      : `${progress.submissions} ${noun} submitted`;
+    return { count: String(progress.submissions), rest: ` ${noun} submitted`, share: null };
+  }
+
+  /* the topic cell's colour band by observed accuracy, and whether its evidence is too thin to judge. */
+  band(m: TopicMetric): string {
+    const tone =
+      m.observed_accuracy < 0.5 ? 'band-low' : m.observed_accuracy < 0.8 ? 'band-mid' : 'band-high';
+    return m.evidence_status === 'insufficient_evidence' ? `${tone} insufficient` : tone;
   }
 }
 
@@ -198,11 +232,13 @@ function tile(
   link: string,
   count: number | undefined,
   caption: string,
+  highlight = false,
 ) {
   const loading = section.loading();
   return {
     label,
     link,
+    highlight: count !== undefined && highlight,
     value: count !== undefined ? String(count) : loading ? '…' : '–',
     caption: count !== undefined ? caption : loading ? 'Loading…' : 'Unavailable',
     error: section.error(),

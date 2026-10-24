@@ -1,33 +1,35 @@
 <app-page-header
   [title]="session.isStudent() ? 'My progress' : 'Learning performance'"
   subtitle="Observed accuracy from finalized question results."
-/>
-<section class="panel">
-  <form id="performance-form" class="inline-form" novalidate [formGroup]="form" (ngSubmit)="load()">
-    @if (session.isTeacher()) {
-      <app-field
-        controlId="performance-student"
-        label="Student"
-        [hint]="rosterHint()"
-        error="Choose a student."
-        [control]="form.controls.student"
-      >
-        <select appFieldControl id="performance-student" formControlName="student">
+>
+  <app-refresh-button
+    [label]="session.isStudent() ? 'Refresh progress' : 'Refresh performance'"
+    [busy]="result.loading()"
+    [disabled]="result.loading() || !classroomId() || !student.value"
+    (refresh)="load()"
+  />
+</app-page-header>
+<section class="panel performance-panel">
+  @if (session.isTeacher() && classroomId()) {
+    <div class="student-picker">
+      <app-field controlId="performance-student" label="Student" [hint]="rosterHint()" [control]="student">
+        <select
+          appFieldControl
+          id="performance-student"
+          [formControl]="student"
+          (change)="choose($any($event.target).value)"
+        >
           <option value="">Choose a student</option>
-          @for (student of roster.value() ?? []; track student.id) {
-            <option [value]="student.id">{{ studentName(student) || student.id }}</option>
+          @for (s of roster.value() ?? []; track s.id) {
+            <option [value]="s.id">{{ studentName(s) || s.id }}</option>
           }
         </select>
       </app-field>
       @if (roster.error()) {
         <p role="alert" class="error">{{ roster.error() }}</p>
       }
-    }
-    <button [disabled]="result.loading() || roster.loading() || !classroomId()">
-      {{ session.isStudent() ? 'View my performance' : 'View performance' }}
-    </button>
-  </form>
-  <app-status [state]="state" />
+    </div>
+  }
   @if (!classroomId()) {
     <app-no-classroom><p class="empty">Select a classroom to view performance.</p></app-no-classroom>
   }
@@ -70,11 +72,20 @@
                       –
                     }
                   </td>
-                  <td>{{ row.observed_accuracy | percent: '1.0-1' }}</td>
                   <td>
-                    {{
-                      row.evidence_status === 'insufficient_evidence' ? 'Insufficient evidence' : 'Observed'
-                    }}
+                    <span class="accuracy-cell">
+                      <span class="meter" aria-hidden="true"
+                        ><span [style.width.%]="row.observed_accuracy * 100"></span
+                      ></span>
+                      <span>{{ row.observed_accuracy | percent: '1.0-1' }}</span>
+                    </span>
+                  </td>
+                  <td>
+                    @if (row.evidence_status === 'insufficient_evidence') {
+                      <span class="badge badge-plain">Insufficient evidence</span>
+                    } @else {
+                      Observed
+                    }
                   </td>
                   <td>
                     @if (row.weakness_indicator) {
@@ -93,30 +104,24 @@
           topic with five or more questions and under 60% correct. These are reporting thresholds, not a
           statistical validation.
         </p>
+      } @else if (session.isStudent()) {
+        <p class="empty">
+          No finalized results yet. After your teacher finalizes an assessment, your topics appear here.
+        </p>
       } @else {
         <p class="empty">
           No finalized assessment evidence for this student yet. Complete an assessment and ask the teacher to
           review it.
         </p>
       }
-    } @else {
-      <p class="empty">
-        {{
-          session.isStudent()
-            ? 'Select a classroom to view your assessment evidence.'
-            : 'Select a classroom and student to view their actual assessment evidence.'
-        }}
-      </p>
+    } @else if (session.isTeacher() && classroomId() && roster.value()?.length) {
+      <p class="empty">Choose a student to see their finalized evidence.</p>
     }
+  }
+  @if (session.isStudent() && classroomId()) {
+    <p class="caption">Generated practice is not available yet.</p>
   }
 </section>
 @if (session.isTeacher() && result.ready() && result.value(); as shown) {
   <app-interpretation [classroomId]="shown.classroom_id" [studentId]="shown.student_id" />
-} @else if (session.isStudent()) {
-  <aside class="ai-notice">
-    <span class="badge">Future capability</span>
-    <h3>Personalized practice</h3>
-    <p>Generated practice is not available yet. Document chat is under Ask the materials.</p>
-    <button disabled>Practice unavailable</button>
-  </aside>
 }

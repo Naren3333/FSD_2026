@@ -229,6 +229,15 @@ a.button-link {
   gap: 8px;
   text-decoration: none;
 }
+/* the page's one primary action, when it leads somewhere. */
+a.button-link.primary {
+  background: var(--brand);
+  color: var(--on-dark);
+  border-color: var(--brand);
+}
+a.button-link.primary:hover {
+  background: var(--brand-hover);
+}
 /* low-weight actions such as discard, close or clear form. */
 button.quiet {
   background: transparent;
@@ -343,14 +352,6 @@ app-field small {
   display: block;
   min-height: 20px;
   margin-top: 4px;
-}
-.inline-form {
-  display: flex;
-  align-items: center;
-  gap: 20px;
-}
-.inline-form app-field {
-  flex: 1;
 }
 .field-row {
   display: grid;
@@ -902,12 +903,6 @@ main.solo > app-status {
 .grade h3 {
   margin-top: 12px;
 }
-.evidence-list p {
-  margin-bottom: 8px;
-}
-.evidence-list .caption {
-  display: block;
-}
 .roster-row {
   flex-direction: row;
   justify-content: space-between;
@@ -958,6 +953,15 @@ main.solo > app-status {
 .stat:hover {
   border-color: var(--brand);
 }
+/* a tile with work waiting, such as drafts to grade. */
+.stat-highlight {
+  border-color: var(--brand);
+  background: var(--brand-soft);
+}
+.stat-highlight .caption {
+  color: var(--brand-hover);
+  font-weight: 600;
+}
 .stat-label {
   font-size: 0.8rem;
   font-weight: 600;
@@ -984,7 +988,9 @@ main.solo > app-status {
 }
 
 /* tables */
+/* positioned, so visually hidden text in a scrolled cell stays clipped inside it. */
 .table-scroll {
+  position: relative;
   max-width: 100%;
   overflow: auto;
   scrollbar-gutter: stable;
@@ -1137,17 +1143,52 @@ dialog .feedback.active {
 
 /* feature sections */
 /* the performance agent's draft (adr 0014): each statement with the questions it cites. */
+.interpretation {
+  margin-top: 24px;
+  border-left: 4px solid var(--ai-edge);
+}
+.interpretation-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px 12px;
+  margin-bottom: 8px;
+}
+.interpretation-head h3 {
+  font-size: 17px;
+  font-weight: 600;
+  margin: 0;
+}
+.interpretation > p {
+  font-size: 0.875rem;
+}
+.interpretation-result {
+  margin-top: 16px;
+  padding-top: 4px;
+  border-top: 1px solid var(--line);
+}
 .interpretation h4 {
   margin: 20px 0 8px;
 }
 .interpretation .findings {
-  padding-left: 20px;
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  display: grid;
+  gap: 12px;
+}
+.interpretation .findings > li {
+  padding: 10px 12px;
+  background: var(--ai-tint);
+  border-radius: var(--radius-sm);
 }
 .interpretation .findings > li p {
   margin: 0 0 4px;
+  color: var(--ink);
 }
 .interpretation .cited {
-  margin: 0 0 12px;
+  margin: 0;
   padding-left: 18px;
   color: var(--muted);
   font-size: 0.8125rem;
@@ -1157,10 +1198,27 @@ dialog .feedback.active {
   margin-top: 16px;
   font-size: 0.875rem;
 }
+/* my progress and learning performance. */
+.student-picker {
+  max-width: 420px;
+  margin-bottom: 16px;
+}
+.performance-panel > .caption {
+  margin: 8px 0 0;
+}
+.accuracy-cell {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  white-space: nowrap;
+}
+.accuracy-cell .meter {
+  width: 64px;
+}
 /* chat. */
 .chat-layout {
   display: grid;
-  grid-template-columns: minmax(220px, 300px) minmax(0, 1fr);
+  grid-template-columns: 280px minmax(0, 1fr);
   gap: 24px;
   align-items: start;
 }
@@ -1195,13 +1253,132 @@ dialog .feedback.active {
   background: var(--brand-soft);
   border-color: var(--brand);
 }
+/* under 1000px the conversations sit above the conversation, about five threads high. */
+.thread-panel .thread-list {
+  max-height: 340px;
+  overflow: auto;
+}
+.conversation-panel > h3 {
+  overflow-wrap: anywhere;
+}
+.message-scroll {
+  min-width: 0;
+}
+.message-scroll:focus-visible {
+  outline: 3px solid var(--focus);
+  outline-offset: 2px;
+}
 .conversation {
-  margin: 0 0 24px;
-  gap: 16px;
+  margin: 0 0 16px;
+  gap: 20px;
 }
 .turn {
+  display: grid;
+  justify-items: start;
+  min-width: 0;
+}
+/* the user's own question: a tinted bubble on the right. */
+.turn:not(.answer) {
+  justify-items: end;
+}
+.turn:not(.answer) .turn-text {
+  max-width: 80%;
+  background: var(--brand-soft);
+  border-radius: var(--radius) var(--radius) var(--radius-sm) var(--radius);
+  padding: 10px 14px;
+  margin: 0;
+}
+.turn.answer > * {
+  justify-self: stretch;
+}
+.turn.answer > .speaker {
+  justify-self: start;
+}
+.jump-latest {
+  align-self: center;
+  margin: 0 auto 8px;
+}
+.chat-form {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-areas:
+    'label .'
+    'input actions'
+    'hint hint';
+  column-gap: 12px;
+  align-items: end;
+  padding-top: 12px;
   border-top: 1px solid var(--line);
-  padding-top: 16px;
+}
+.chat-form app-field {
+  display: contents;
+}
+.chat-form label {
+  grid-area: label;
+}
+.chat-form textarea {
+  grid-area: input;
+  field-sizing: content;
+  min-height: calc(3lh + 22px);
+  max-height: calc(8lh + 22px);
+  resize: vertical;
+}
+.chat-form small {
+  grid-area: hint;
+}
+.chat-form .chat-actions {
+  grid-area: actions;
+  flex-direction: column;
+  gap: 8px;
+}
+.chat-form button {
+  min-width: 140px;
+}
+/* on a phone the buttons go under the question box. */
+@media (max-width: 700px) {
+  .chat-form {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-areas:
+      'label'
+      'input'
+      'hint'
+      'actions';
+  }
+  .chat-form .chat-actions {
+    flex-direction: row;
+    margin-top: 4px;
+  }
+}
+@media (min-width: 1000.02px) {
+  app-chat {
+    display: flex;
+    flex-direction: column;
+    height: calc(100dvh - 56px - 40px);
+  }
+  app-chat > .chat-layout {
+    flex: 1;
+    min-height: 480px;
+    align-items: stretch;
+  }
+  .chat-layout > .panel {
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
+  }
+  .thread-panel .thread-list {
+    max-height: none;
+    flex: 1;
+    min-height: 0;
+  }
+  .thread-panel > .caption {
+    margin-bottom: 12px;
+  }
+  .message-scroll {
+    flex: 1;
+    min-height: 0;
+    overflow: auto;
+    padding-right: 4px;
+  }
 }
 .speaker {
   display: block;
@@ -1353,12 +1530,246 @@ dialog .feedback.active {
 .dashboard-panel {
   margin-top: 24px;
 }
+.progress-table {
+  min-width: 0;
+}
+.progress-table a {
+  font-weight: 600;
+}
+.submitted-cell {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  white-space: nowrap;
+}
+/* a thin bar for a share such as submissions; the text beside it carries the value. */
+.meter {
+  display: inline-block;
+  flex: none;
+  width: 80px;
+  height: 6px;
+  border-radius: 999px;
+  background: var(--line);
+  overflow: hidden;
+}
+.meter > span {
+  display: block;
+  height: 100%;
+  background: var(--brand);
+}
 .topics-table td {
   vertical-align: top;
 }
-.topics-table td > span {
+.topic-cell {
+  border: 1px solid var(--surface);
+  line-height: 1.3;
+  white-space: nowrap;
+}
+.topic-cell > span {
   display: block;
 }
+.topic-cell-top {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+.topic-cell-top app-icon {
+  color: var(--danger);
+  display: inline-flex;
+}
+.topic-cell-count {
+  font-size: 12px;
+  color: var(--muted);
+}
+.band-low {
+  background: var(--danger-soft);
+}
+.band-mid {
+  background: var(--warning-soft);
+}
+.band-high {
+  background: var(--good-soft);
+}
+/* evidence too thin to judge has a dashed edge. */
+td.insufficient,
+.swatch.insufficient {
+  border: 1px dashed var(--muted);
+}
+.student-link {
+  display: inline-block;
+  max-width: 10em;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  vertical-align: bottom;
+  text-decoration: none;
+}
+.student-link:hover {
+  text-decoration: underline;
+}
+.topic-legend {
+  list-style: none;
+  margin: 16px 0 8px;
+  padding: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 20px;
+  font-size: 0.8rem;
+  color: var(--muted);
+}
+.topic-legend li {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.topic-legend app-icon {
+  color: var(--danger);
+  display: inline-flex;
+}
+.swatch {
+  flex: none;
+  width: 14px;
+  height: 14px;
+  border-radius: 3px;
+  border: 1px solid var(--line);
+}
+
+/* student home: to do on the left, everything else on the right from 1100px. */
+.home-grid,
+.home-side {
+  display: grid;
+  gap: 16px;
+  align-items: start;
+}
+.home-grid {
+  margin-top: 8px;
+}
+@media (min-width: 1100px) {
+  .home-grid {
+    grid-template-columns: minmax(0, 3fr) minmax(0, 2fr);
+    gap: 24px;
+  }
+}
+.todo-row {
+  flex-direction: row;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px 16px;
+}
+.todo-text {
+  display: grid;
+  gap: 4px;
+  justify-items: start;
+  min-width: 0;
+}
+.todo-text strong {
+  overflow-wrap: anywhere;
+}
+.record.compact-row {
+  padding: 12px 0;
+  gap: 4px 12px;
+  font-size: 0.875rem;
+}
+.compact-row strong {
+  font-size: 0.9375rem;
+  overflow-wrap: anywhere;
+}
+
+/* my results: one card per result, its questions as compact rows. */
+.results-list {
+  display: grid;
+  gap: 16px;
+}
+.results-list > .caption {
+  margin: 0;
+}
+.result-card {
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  padding: 20px;
+  min-width: 0;
+}
+.result-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 16px;
+  padding-bottom: 12px;
+  border-bottom: 1px solid var(--line);
+}
+.result-head h3 {
+  font-size: 17px;
+  font-weight: 600;
+  margin: 0;
+  flex: 1 1 240px;
+  overflow-wrap: anywhere;
+}
+.result-total {
+  font-variant-numeric: tabular-nums;
+  color: var(--muted);
+}
+.result-total strong {
+  color: var(--ink);
+  font-size: 1.125rem;
+}
+.result-questions {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.result-question {
+  display: grid;
+  grid-template-columns: 112px minmax(0, 1fr) auto;
+  gap: 4px 12px;
+  align-items: start;
+  padding: 12px 0;
+  border-bottom: 1px solid var(--line);
+  font-size: 0.9375rem;
+}
+.result-question:last-child {
+  border-bottom: 0;
+  padding-bottom: 0;
+}
+.result-question > .badge {
+  justify-self: start;
+  margin-top: 1px;
+}
+.result-question-text {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+.result-prompt {
+  color: var(--ink);
+  overflow-wrap: anywhere;
+}
+.result-marks {
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.result-block {
+  display: grid;
+  gap: 4px;
+  margin-top: 8px;
+}
+.result-block .answer-text {
+  margin: 0;
+}
+@media (max-width: 700px) {
+  .result-card {
+    padding: 16px;
+  }
+  .result-question {
+    grid-template-columns: minmax(0, 1fr) auto;
+  }
+  .result-question-text {
+    grid-column: 1 / -1;
+    grid-row: 2;
+  }
+}
+
 /* the profile page: the account's details, and deleting the account (adr 0011). */
 .profile-details {
   display: grid;
@@ -2582,9 +2993,6 @@ form .marking-bar-actions button {
   }
   .solo-card {
     padding: 24px 20px;
-  }
-  .inline-form {
-    display: block;
   }
   .learning-rail {
     font-size: 0.7rem;

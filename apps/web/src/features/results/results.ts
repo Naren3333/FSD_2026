@@ -73,6 +73,11 @@ export class ResultsComponent {
     if (evidence.correct) return 'Correct';
     return evidence.awarded > 0 ? 'Part marks' : 'Incorrect';
   }
+  /* the outcome chip's colour. */
+  outcomeTone(evidence: Pick<Evidence, 'correct' | 'awarded'>): string {
+    if (evidence.correct) return 'badge-good';
+    return evidence.awarded > 0 ? 'badge-warning' : 'badge-danger';
+  }
   finalizedOn(result: OwnResult): string {
     return result.finalized_at ? date(result.finalized_at) : '';
   }

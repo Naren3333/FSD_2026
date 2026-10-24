@@ -1,6 +1,8 @@
-<section class="ai-notice interpretation" aria-labelledby="interpretation-heading">
-  <span class="badge">AI draft for your review</span>
-  <h3 id="interpretation-heading">Interpret these results</h3>
+<section class="panel interpretation" aria-labelledby="interpretation-heading">
+  <div class="interpretation-head">
+    <h3 id="interpretation-heading">Interpret these results</h3>
+    <span class="badge ai-chip"><app-icon name="sparkles" [size]="14" />AI draft for your review</span>
+  </div>
   <p>
     An AI agent reads this student's finalized results, looks at the answers behind weak topics, and drafts
     observations, possible misconceptions and next steps. Every statement cites the questions it rests on, and
@@ -22,7 +24,7 @@
         @for (item of draft.observations; track $index) {
           <li>
             <p>{{ item.text }}</p>
-            <ul class="cited" aria-label="Evidence">
+            <ul class="cited caption" aria-label="Evidence">
               @for (e of cited(item.evidence_ids); track e.question_id) {
                 <li>{{ evidenceText(e) }}</li>
               }
@@ -36,7 +38,7 @@
           @for (item of draft.possible_misconceptions; track $index) {
             <li>
               <p>{{ item.text }}</p>
-              <ul class="cited" aria-label="Evidence">
+              <ul class="cited caption" aria-label="Evidence">
                 @for (e of cited(item.evidence_ids); track e.question_id) {
                   <li>{{ evidenceText(e) }}</li>
                 }

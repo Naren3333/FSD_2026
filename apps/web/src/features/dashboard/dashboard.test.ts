@@ -191,12 +191,12 @@ describe('class dashboard states', () => {
   it('renders every part from real data', async () => {
     const page = await render();
     await page.settle();
-    expect(page.stat('Needs grading')).toEqual({ value: '3', caption: '5 finalized · Open Grading review' });
+    expect(page.stat('Needs grading')).toEqual({ value: '3', caption: '5 finalized · Start marking →' });
     expect(page.stat('Students enrolled').value).toBe('2');
     expect(page.text()).toContain('Fractions quiz');
     expect(page.text()).toContain('1 of 2 students submitted');
     expect(page.text()).toContain('Adding fractions');
-    expect(page.text()).toContain('3 of 4 correct');
+    expect(page.text()).toContain('3 of 4');
     expect(page.text()).toContain('Ana Lim');
     expect(page.alerts()).toEqual([]);
   });
@@ -299,6 +299,82 @@ describe('class dashboard states', () => {
     const page = await render({ need: () => Promise.reject(new Error('Curriculum is unavailable.')) });
     await page.settle();
     expect(page.alerts()).toEqual([]);
-    expect(page.text()).toContain('3 of 4 correct');
+    expect(page.text()).toContain('3 of 4');
+  });
+
+  it('bands each topic cell by observed accuracy, with text that carries the value', async () => {
+    const metric = (topic_id: string, observed_accuracy: number, extra = {}) => ({
+      topic_id,
+      attempted: 10,
+      correct: Math.round(observed_accuracy * 10),
+      observed_accuracy,
+      evidence_status: 'available' as const,
+      weakness_indicator: false,
+      ...extra,
+    });
+    const page = await render({
+      performance: Promise.resolve({
+        ...performance,
+        students: [
+          {
+            student_id: 's1',
+            evidence_status: 'available',
+            topics: [
+              metric('k1', 0.3, { weakness_indicator: true }),
+              metric('k2', 0.6),
+              metric('k3', 0.9),
+              metric('k4', 0.5, { attempted: 2, correct: 1, evidence_status: 'insufficient_evidence' }),
+            ],
+          },
+          { student_id: 's2', evidence_status: 'no_finalized_evidence', topics: [] },
+        ],
+      }),
+    });
+    await page.settle();
+    const cells = [...page.root.querySelectorAll('.topics-table td')] as HTMLElement[];
+    const cell = (value: string) =>
+      cells.find((c) => c.querySelector('.cell-value')?.textContent?.trim() === value) as HTMLElement;
+    expect(cell('30%').classList).toContain('band-low');
+    expect(cell('30%').textContent).toContain('Needs practice');
+    expect(cell('60%').classList).toContain('band-mid');
+    expect(cell('90%').classList).toContain('band-high');
+    expect(cell('50%').classList).toContain('insufficient');
+    expect(cell('50%').querySelector('.visually-hidden')?.textContent).toBe('fewer than five questions');
+    const none = cells.filter((c) => c.textContent?.includes('No evidence'));
+    expect(none.length).toBe(4);
+    expect(none[0].className).not.toMatch(/band-/);
+  });
+
+  it('highlights Needs grading only when drafts are waiting', async () => {
+    const page = await render({ counts: Promise.resolve({ drafts: 0, finalized: 2, unreleased: 0 }) });
+    await page.settle();
+    expect(page.stat('Needs grading').caption).toBe('2 finalized · Open Grading review');
+    expect(page.root.querySelector('.stat-highlight')).toBeNull();
+    const busy = await render();
+    await busy.settle();
+    expect(busy.root.querySelector('.stat-highlight .stat-label')?.textContent).toBe('Needs grading');
+  });
+
+  it('sums up the class in the subtitle, leaving out a part that failed', async () => {
+    const page = await render();
+    await page.settle();
+    expect(page.root.querySelector('.page-header-subtitle')?.textContent).toBe(
+      '2 students · 1 published assessment',
+    );
+    const failed = await render({ progress: Promise.reject(new Error('Assessment is unavailable.')) });
+    await failed.settle();
+    expect(failed.root.querySelector('.page-header-subtitle')?.textContent).toBe('2 students');
+  });
+
+  it('links each assessment to its grading queue and offers a new one', async () => {
+    const page = await render();
+    await page.settle();
+    const link = [...page.root.querySelectorAll('a')].find((a) => a.textContent?.trim() === 'Fractions quiz');
+    expect(link?.getAttribute('href')).toBe('/review?assessment=a1');
+    const create = [...page.root.querySelectorAll('a')].find(
+      (a) => a.textContent?.trim() === 'New assessment',
+    );
+    expect(create?.getAttribute('href')).toBe('/assessments?edit=new');
+    expect(page.text()).toContain('No due date');
   });
 });

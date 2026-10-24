@@ -18,7 +18,7 @@
       (click)="newThread()"
       [disabled]="state.busy() || streaming() || !classroomId()"
     >
-      New conversation
+      <app-icon name="plus" />New conversation
     </button>
     <app-section-state [section]="threads" loading="Loading conversations…" />
     @if (threads.ready()) {
@@ -50,164 +50,184 @@
   </section>
   <section class="panel conversation-panel" aria-labelledby="conversation-heading">
     <h3 id="conversation-heading">{{ active()?.title || 'New conversation' }}</h3>
-    <app-section-state [section]="messages" loading="Loading messages…" />
-    @if (messages.ready()) {
-      <ol class="conversation" [attr.aria-busy]="streaming()">
-        @for (message of messages.value() ?? []; track message.id) {
-          <li class="turn" [class.answer]="message.role === 'assistant'">
-            <span class="speaker">{{ message.role === 'user' ? 'You' : 'Assistant' }}</span>
-            @if (message.role === 'user') {
-              <p class="turn-text">{{ message.content }}</p>
-            } @else {
-              @if (message.content || message.id === streamingId) {
-                <div class="turn-text">
-                  @for (block of blocks(message); track $index) {
-                    @switch (block.kind) {
-                      @case ('ul') {
-                        <ul>
-                          @for (item of block.items; track $index) {
-                            <li>
-                              <ng-container
-                                *ngTemplateOutlet="runs; context: { $implicit: item, message: message }"
-                              />
-                            </li>
-                          }
-                        </ul>
-                      }
-                      @case ('ol') {
-                        <ol>
-                          @for (item of block.items; track $index) {
-                            <li>
-                              <ng-container
-                                *ngTemplateOutlet="runs; context: { $implicit: item, message: message }"
-                              />
-                            </li>
-                          }
-                        </ol>
-                      }
-                      @case ('pre') {
-                        <pre><code>{{block.items[0][0].text}}</code></pre>
-                      }
-                      @case ('h') {
-                        <p class="answer-heading">
-                          <ng-container
-                            *ngTemplateOutlet="runs; context: { $implicit: block.items[0], message: message }"
-                          />
-                        </p>
-                      }
-                      @default {
-                        <p>
-                          <ng-container
-                            *ngTemplateOutlet="runs; context: { $implicit: block.items[0], message: message }"
-                          />
-                        </p>
+    <div
+      #scroller
+      class="message-scroll"
+      tabindex="0"
+      role="region"
+      aria-label="Messages"
+      (scroll)="onScroll()"
+    >
+      <app-section-state [section]="messages" loading="Loading messages…" />
+      @if (messages.ready()) {
+        <ol class="conversation" [attr.aria-busy]="streaming()">
+          @for (message of messages.value() ?? []; track message.id) {
+            <li class="turn" [class.answer]="message.role === 'assistant'">
+              <span class="speaker">{{ message.role === 'user' ? 'You' : 'Assistant' }}</span>
+              @if (message.role === 'user') {
+                <p class="turn-text">{{ message.content }}</p>
+              } @else {
+                @if (message.content || message.id === streamingId) {
+                  <div class="turn-text">
+                    @for (block of blocks(message); track $index) {
+                      @switch (block.kind) {
+                        @case ('ul') {
+                          <ul>
+                            @for (item of block.items; track $index) {
+                              <li>
+                                <ng-container
+                                  *ngTemplateOutlet="runs; context: { $implicit: item, message: message }"
+                                />
+                              </li>
+                            }
+                          </ul>
+                        }
+                        @case ('ol') {
+                          <ol>
+                            @for (item of block.items; track $index) {
+                              <li>
+                                <ng-container
+                                  *ngTemplateOutlet="runs; context: { $implicit: item, message: message }"
+                                />
+                              </li>
+                            }
+                          </ol>
+                        }
+                        @case ('pre') {
+                          <pre><code>{{block.items[0][0].text}}</code></pre>
+                        }
+                        @case ('h') {
+                          <p class="answer-heading">
+                            <ng-container
+                              *ngTemplateOutlet="
+                                runs;
+                                context: { $implicit: block.items[0], message: message }
+                              "
+                            />
+                          </p>
+                        }
+                        @default {
+                          <p>
+                            <ng-container
+                              *ngTemplateOutlet="
+                                runs;
+                                context: { $implicit: block.items[0], message: message }
+                              "
+                            />
+                          </p>
+                        }
                       }
                     }
-                  }
-                  @if (message.id === streamingId) {
-                    <span class="cursor" aria-hidden="true">▍</span>
-                  }
-                </div>
-              }
-              @if (message.outcome && notes[message.outcome]) {
-                <p class="outcome" [class.error]="message.outcome === 'error'">
-                  <span
-                    class="badge"
-                    [class.badge-danger]="message.outcome === 'error'"
-                    [class.badge-warning]="message.outcome === 'no_results'"
-                    [class.badge-plain]="message.outcome === 'interrupted'"
-                  >
-                    {{
-                      message.outcome === 'no_results'
-                        ? 'No matching material'
-                        : message.outcome === 'error'
-                          ? 'Failed'
-                          : 'Stopped'
-                    }}
-                  </span>
-                  @if (message.outcome === 'error' && failures()[message.id]; as reason) {
-                    {{ reason }}
-                  } @else {
-                    {{ notes[message.outcome] }}
-                  }
-                </p>
-              }
-              @if (message.citations?.length) {
-                <ol class="sources" [attr.aria-label]="'Sources for this answer'">
-                  @for (source of message.citations; track source.chunk_id; let n = $index) {
-                    <li [id]="sourceId(message, n + 1)" tabindex="-1">
-                      <details (toggle)="reveal($event, source)">
-                        <summary>
-                          <span class="source-number">{{ n + 1 }}</span>
-                          <span>
-                            <strong>{{ source.title }}</strong>
-                            <small>
-                              {{ pageText(source) }}
-                              @if (source.kind !== 'text') {
-                                <span>· {{ source.kind === 'table' ? 'Table' : 'Figure' }}</span>
-                              }
-                            </small>
-                          </span>
-                        </summary>
-                        @if (source.removed) {
-                          <p class="caption">
-                            The teacher deleted this material, so its passage is no longer shown.
-                          </p>
-                        } @else {
-                          @if (source.source === 'vision') {
-                            <p class="caption">This passage was written by a model from the page image.</p>
-                          }
-                          @if (
-                            (source.source === 'pdf' || source.source === 'vision') &&
-                            source.page_end > source.page_start
-                          ) {
+                    @if (message.id === streamingId) {
+                      <span class="cursor" aria-hidden="true">▍</span>
+                    }
+                  </div>
+                }
+                @if (message.outcome && notes[message.outcome]) {
+                  <p class="outcome" [class.error]="message.outcome === 'error'">
+                    <span
+                      class="badge"
+                      [class.badge-danger]="message.outcome === 'error'"
+                      [class.badge-warning]="message.outcome === 'no_results'"
+                      [class.badge-plain]="message.outcome === 'interrupted'"
+                    >
+                      {{
+                        message.outcome === 'no_results'
+                          ? 'No matching material'
+                          : message.outcome === 'error'
+                            ? 'Failed'
+                            : 'Stopped'
+                      }}
+                    </span>
+                    @if (message.outcome === 'error' && failures()[message.id]; as reason) {
+                      {{ reason }}
+                    } @else {
+                      {{ notes[message.outcome] }}
+                    }
+                  </p>
+                }
+                @if (message.citations?.length) {
+                  <ol class="sources" [attr.aria-label]="'Sources for this answer'">
+                    @for (source of message.citations; track source.chunk_id; let n = $index) {
+                      <li [id]="sourceId(message, n + 1)" tabindex="-1">
+                        <details (toggle)="reveal($event, source)">
+                          <summary>
+                            <span class="source-number">{{ n + 1 }}</span>
+                            <span>
+                              <strong>{{ source.title }}</strong>
+                              <small>
+                                {{ pageText(source) }}
+                                @if (source.kind !== 'text') {
+                                  <span>· {{ source.kind === 'table' ? 'Table' : 'Figure' }}</span>
+                                }
+                              </small>
+                            </span>
+                          </summary>
+                          @if (source.removed) {
                             <p class="caption">
-                              The assistant was given this whole passage from {{ pageText(source) }}; the
-                              cited point can be on any of these pages.
+                              The teacher deleted this material, so its passage is no longer shown.
                             </p>
-                          }
-                          <!-- one line: the passage keeps its own line breaks (pre-wrap), so no whitespace around it. -->
-                          <!-- prettier-ignore -->
-                          <div class="passage" tabindex="0" [attr.aria-label]="'Passage from ' + source.title + ', ' + pageText(source)">{{ source.content }}</div>
-                          <button type="button" class="secondary open-page" (click)="openPage(source)">
-                            @if (source.source === 'pdf' || source.source === 'vision') {
-                              Open the PDF at page {{ source.page_start }}
-                            } @else {
-                              Open original document
+                          } @else {
+                            @if (source.source === 'vision') {
+                              <p class="caption">This passage was written by a model from the page image.</p>
                             }
-                          </button>
-                          @if (source.image) {
-                            @if (figures()[source.chunk_id]; as url) {
-                              <img
-                                [src]="url"
-                                [alt]="'Figure from ' + source.title + ', ' + pageText(source)"
-                              />
-                            } @else {
+                            @if (
+                              (source.source === 'pdf' || source.source === 'vision') &&
+                              source.page_end > source.page_start
+                            ) {
                               <p class="caption">
-                                {{ figureErrors()[source.chunk_id] || 'Loading figure…' }}
+                                The assistant was given this whole passage from {{ pageText(source) }}; the
+                                cited point can be on any of these pages.
                               </p>
                             }
+                            <!-- one line: the passage keeps its own line breaks (pre-wrap), so no whitespace around it. -->
+                            <!-- prettier-ignore -->
+                            <div class="passage" tabindex="0" [attr.aria-label]="'Passage from ' + source.title + ', ' + pageText(source)">{{ source.content }}</div>
+                            <button type="button" class="secondary open-page" (click)="openPage(source)">
+                              @if (source.source === 'pdf' || source.source === 'vision') {
+                                Open the PDF at page {{ source.page_start }}
+                              } @else {
+                                Open original document
+                              }
+                            </button>
+                            @if (source.image) {
+                              @if (figures()[source.chunk_id]; as url) {
+                                <img
+                                  [src]="url"
+                                  [alt]="'Figure from ' + source.title + ', ' + pageText(source)"
+                                />
+                              } @else {
+                                <p class="caption">
+                                  {{ figureErrors()[source.chunk_id] || 'Loading figure…' }}
+                                </p>
+                              }
+                            }
                           }
-                        }
-                      </details>
-                    </li>
-                  }
-                </ol>
+                        </details>
+                      </li>
+                    }
+                  </ol>
+                }
               }
-            }
-          </li>
-        } @empty {
-          <li class="empty">
-            @if (classroomId()) {
-              Ask about the teaching materials in this classroom, for example a definition or a worked step.
-            } @else if (classroomsKnown()) {
-              Select a classroom first.
-            }
-          </li>
-        }
-      </ol>
+            </li>
+          } @empty {
+            <li class="empty">
+              @if (classroomId()) {
+                Ask about the teaching materials in this classroom, for example a definition or a worked step.
+              } @else if (classroomsKnown()) {
+                Select a classroom first.
+              }
+            </li>
+          }
+        </ol>
+      }
+    </div>
+    @if (behind()) {
+      <button type="button" class="quiet jump-latest" (click)="jumpToLatest()">
+        <app-icon name="chevron-down" />Jump to latest
+      </button>
     }
-    <form id="chat-form" novalidate [formGroup]="form" (ngSubmit)="send()">
+    <form id="chat-form" class="chat-form" novalidate [formGroup]="form" (ngSubmit)="send()">
       <app-field
         controlId="chat-question"
         label="Your question"

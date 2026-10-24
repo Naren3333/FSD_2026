@@ -42,13 +42,14 @@ async function render(
   });
   const fixture = TestBed.createComponent(ResultsComponent);
   fixture.detectChanges();
-  const text = () => (fixture.nativeElement as HTMLElement).textContent ?? '';
+  const root = fixture.nativeElement as HTMLElement;
+  const text = () => root.textContent ?? '';
   /* lets the page's pending reads finish, then renders what they left. */
   const settle = async () => {
     await new Promise((resolve) => setTimeout(resolve));
     fixture.detectChanges();
   };
-  return { text, settle };
+  return { text, settle, root };
 }
 
 describe('results list states', () => {
@@ -98,5 +99,46 @@ describe('results list states', () => {
     expect(page.text()).toContain('Fractions quiz');
     expect(page.text()).toContain('k9');
     expect(page.text()).not.toContain('Curriculum is unavailable.');
+  });
+});
+
+describe('result questions', () => {
+  it('colours each outcome chip and keeps the topic caption in one element', async () => {
+    const evidence = [
+      { question_id: 'q1', topic_id: 'k9', correct: true, awarded: 1, possible: 1 },
+      { question_id: 'q2', topic_id: 'k9', correct: false, awarded: 1, possible: 2 },
+      { question_id: 'q3', topic_id: 'k9', correct: false, awarded: 0, possible: 1 },
+    ];
+    const result: Evaluation = {
+      id: 'e1',
+      assessment_id: 'a1',
+      classroom_id: 'c1',
+      student_id: 'u1',
+      status: 'finalized',
+      evidence,
+      answers: {},
+      late: false,
+      finalized_at: '2026-10-16T00:00:00Z',
+      released_at: '2026-10-16T00:00:00Z',
+    };
+    const page = await render(
+      Promise.resolve([result]),
+      () => Promise.resolve(),
+      () => Promise.resolve({ id: 'a1', classroom_id: 'c1', title: 'Quiz', questions: [] }),
+    );
+    await page.settle();
+    const chips = [...page.root.querySelectorAll('.result-question > .badge')].map((b) => [
+      b.textContent?.trim(),
+      [...b.classList].filter((c) => c.startsWith('badge-')),
+    ]);
+    expect(chips).toEqual([
+      ['Correct', ['badge-good']],
+      ['Part marks', ['badge-warning']],
+      ['Incorrect', ['badge-danger']],
+    ]);
+    const topics = [...page.root.querySelectorAll('.result-question .caption')].map((c) =>
+      c.textContent?.replace(/\s+/g, ' ').trim(),
+    );
+    expect(topics).toEqual(['Topic: k9', 'Topic: k9', 'Topic: k9']);
   });
 });

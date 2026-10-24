@@ -4,6 +4,7 @@ import type { Interpretation, InterpretationEvidence, InterpretationStep } from 
 import { AiUsage } from '../../core/ai-usage';
 import { CurriculumNames } from '../../core/curriculum-names';
 import { Section } from '../../shared/section';
+import { IconComponent } from '../../shared/icon';
 import { SectionStateComponent } from '../../shared/section-state';
 
 /* the longest question prompt an evidence line shows. */
@@ -44,7 +45,7 @@ export function droppedText(dropped: Record<string, number>): string {
 @Component({
   selector: 'app-interpretation',
   standalone: true,
-  imports: [SectionStateComponent],
+  imports: [SectionStateComponent, IconComponent],
   templateUrl: './interpretation.html',
 })
 export class InterpretationComponent implements OnChanges {

@@ -107,6 +107,8 @@ test('teacher and student complete a real assessment through Kong', async ({ bro
   await student.getByRole('button', { name: 'Refresh home' }).click();
   await expect(todo.getByText(/All caught up/)).toBeVisible();
   await expect(student.getByText(/1 submission is waiting for your teacher's review/)).toBeVisible();
+  await expectNoHorizontalScroll(student, 'test-results/home-mobile.png');
+  await student.setViewportSize({ width: 1280, height: 720 });
   await teacher.getByRole('link', { name: 'Grading review', exact: true }).click();
   await expect(async () => {
     await teacher.getByRole('button', { name: 'Refresh grades' }).click();
@@ -158,7 +160,7 @@ test('teacher and student complete a real assessment through Kong', async ({ bro
   await expect(student.getByText('Topic: Browser topic ' + suffix, { exact: true })).toHaveCount(2);
   await student.getByRole('link', { name: 'My progress', exact: true }).click();
   await expect(async () => {
-    await student.getByRole('button', { name: 'View my performance' }).click();
+    await student.getByRole('button', { name: 'Refresh progress' }).click();
     await expect(student.getByRole('cell', { name: '100%' })).toBeVisible();
   }).toPass({ timeout: 30000 });
   await expect(student.getByRole('cell', { name: 'Insufficient evidence' })).toBeVisible();
@@ -177,6 +179,8 @@ test('teacher and student complete a real assessment through Kong', async ({ bro
   }).toPass({ timeout: 30000 });
   await expect(teacher.getByText('1 of 1 students submitted', { exact: true })).toBeVisible();
   await expect(topics.getByText('100%', { exact: true })).toBeVisible();
+  await expectNoHorizontalScroll(teacher, 'test-results/dashboard-mobile.png');
+  await teacher.setViewportSize({ width: 1280, height: 720 });
   await topics.getByRole('link', { name: 'Student Local', exact: true }).click();
   await expect(teacher).toHaveURL(/\/performance\?student=/);
   await expect(teacher.getByLabel('Student', { exact: true })).toHaveValue(/.+/);
