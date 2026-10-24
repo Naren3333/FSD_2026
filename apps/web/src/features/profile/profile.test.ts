@@ -13,6 +13,7 @@ import { UnsavedChanges } from '../../core/unsaved-changes';
 import { ConfirmDialogComponent } from '../../shared/confirm-dialog';
 import { StatusComponent } from '../../shared/status';
 import { ProfileComponent } from './profile';
+import { PageHeaderComponent } from '../../shared/page-header';
 
 const template = (path: string) => readFileSync(new URL(path, import.meta.url), 'utf8');
 
@@ -78,6 +79,9 @@ function render(
     ],
   });
   TestBed.overrideComponent(ProfileComponent, { set: { template: template('./profile.html') } });
+  TestBed.overrideComponent(PageHeaderComponent, {
+    set: { template: template('../../shared/page-header.html') },
+  });
   for (const [component, path] of [
     [StatusComponent, '../../shared/status.html'],
     [ConfirmDialogComponent, '../../shared/confirm-dialog.html'],

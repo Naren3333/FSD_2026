@@ -6,12 +6,13 @@ import { UnsavedChanges } from '../../core/unsaved-changes';
 import { ActionState } from '../../shared/action-state';
 import { ConfirmDialogComponent } from '../../shared/confirm-dialog';
 import { StatusComponent } from '../../shared/status';
+import { PageHeaderComponent } from '../../shared/page-header';
 
 /* the signed-in user's own account: who they are, and deleting the account for good (adr 0011). */
 @Component({
   selector: 'app-profile',
   standalone: true,
-  imports: [ConfirmDialogComponent, StatusComponent],
+  imports: [PageHeaderComponent, ConfirmDialogComponent, StatusComponent],
   templateUrl: './profile.html',
 })
 export class ProfileComponent {

@@ -14,6 +14,7 @@ import { PagerComponent } from '../../shared/pager';
 import { SectionStateComponent } from '../../shared/section-state';
 import { StatusComponent } from '../../shared/status';
 import { ClassroomsComponent } from './classrooms';
+import { PageHeaderComponent } from '../../shared/page-header';
 
 const template = (path: string) => readFileSync(new URL(path, import.meta.url), 'utf8');
 
@@ -58,6 +59,9 @@ function render(
     ],
   });
   TestBed.overrideComponent(ClassroomsComponent, { set: { template: template('./classrooms.html') } });
+  TestBed.overrideComponent(PageHeaderComponent, {
+    set: { template: template('../../shared/page-header.html') },
+  });
   for (const [component, path] of [
     [SectionStateComponent, '../../shared/section-state.html'],
     [FieldComponent, '../../shared/field.html'],
@@ -76,7 +80,9 @@ function render(
     fixture.detectChanges();
   };
   const button = (name: string) =>
-    [...root.querySelectorAll('button')].find((b) => b.textContent?.trim() === name) as HTMLButtonElement;
+    [...root.querySelectorAll('button')].find(
+      (b) => b.textContent?.trim() === name || b.getAttribute('aria-label') === name,
+    ) as HTMLButtonElement;
   return { root, panel, settle, button, component: fixture.componentInstance };
 }
 

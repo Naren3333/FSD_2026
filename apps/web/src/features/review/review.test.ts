@@ -14,6 +14,7 @@ import { PagerComponent } from '../../shared/pager';
 import { SectionStateComponent } from '../../shared/section-state';
 import { StatusComponent } from '../../shared/status';
 import { ReviewComponent } from './review';
+import { PageHeaderComponent } from '../../shared/page-header';
 
 const template = (path: string) => readFileSync(new URL(path, import.meta.url), 'utf8');
 
@@ -85,6 +86,9 @@ function render(grades: Promise<Evaluation[]>, grading: Record<string, unknown> 
     ],
   });
   TestBed.overrideComponent(ReviewComponent, { set: { template: template('./review.html') } });
+  TestBed.overrideComponent(PageHeaderComponent, {
+    set: { template: template('../../shared/page-header.html') },
+  });
   for (const [component, path] of [
     [SectionStateComponent, '../../shared/section-state.html'],
     [FieldComponent, '../../shared/field.html'],
@@ -109,7 +113,9 @@ function render(grades: Promise<Evaluation[]>, grading: Record<string, unknown> 
   const buttons = (within: Element | undefined) =>
     [...(within?.querySelectorAll('button') ?? [])].map((b) => b.textContent?.trim());
   const button = (name: string) =>
-    [...root.querySelectorAll('button')].find((b) => b.textContent?.trim() === name) as HTMLButtonElement;
+    [...root.querySelectorAll('button')].find(
+      (b) => b.textContent?.trim() === name || b.getAttribute('aria-label') === name,
+    ) as HTMLButtonElement;
   return {
     fixture,
     root,

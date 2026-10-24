@@ -27,6 +27,8 @@ import { dueState } from '../../shared/due';
 import { Section, rereadAfterDelete } from '../../shared/section';
 import { SectionStateComponent } from '../../shared/section-state';
 import { StatusComponent } from '../../shared/status';
+import { PageHeaderComponent } from '../../shared/page-header';
+import { RefreshButtonComponent } from '../../shared/refresh-button';
 import {
   MAX_ASSESSMENT_EXCERPTS,
   MAX_CRITERIA,
@@ -61,6 +63,8 @@ const LOCKED =
   selector: 'app-assessments',
   standalone: true,
   imports: [
+    PageHeaderComponent,
+    RefreshButtonComponent,
     ReactiveFormsModule,
     FieldComponent,
     FieldControlDirective,

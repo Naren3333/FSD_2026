@@ -13,7 +13,7 @@
     <span id="usage-text">{{ spentText(u) }} of {{ limitText(u) }}</span>
     @if (u.spent_usd >= u.limit_usd) {
       <small class="error">
-        Today’s allowance is used up. The assistant and PDF indexing resume at {{ resets(u) }}.
+        Today’s allowance is used up. The assistant and document indexing resume at {{ resets(u) }}.
       </small>
     } @else {
       <small>Resets at {{ resets(u) }}.</small>

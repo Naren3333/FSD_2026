@@ -1,13 +1,11 @@
-<div class="section-heading">
-  <div>
-    <p class="eyebrow">Give learning a structure</p>
-    <h2>Curriculum</h2>
-  </div>
-  <button class="secondary" (click)="load()" [disabled]="state.busy() || topics.loading()">
-    Refresh topics
-  </button>
-</div>
-<p>Questions and evidence are tagged with a topic. Add a topic to begin authoring an assessment.</p>
+<app-page-header title="Curriculum" subtitle="Questions and evidence are tagged with a topic.">
+  <app-refresh-button
+    label="Refresh topics"
+    [busy]="topics.loading()"
+    [disabled]="state.busy() || topics.loading()"
+    (refresh)="load()"
+  />
+</app-page-header>
 <div class="split">
   <section class="panel">
     <h3>Topics</h3>

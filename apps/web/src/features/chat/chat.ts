@@ -15,6 +15,8 @@ import { Section } from '../../shared/section';
 import { SectionStateComponent } from '../../shared/section-state';
 import { StatusComponent } from '../../shared/status';
 import { requiredText } from '../../shared/validators';
+import { PageHeaderComponent } from '../../shared/page-header';
+import { RefreshButtonComponent } from '../../shared/refresh-button';
 import { Block, Inline, markdown, pages } from './markdown';
 
 export const MAX_QUESTION = 1000;
@@ -28,6 +30,8 @@ const OUTCOME_NOTES: Record<string, string> = {
   selector: 'app-chat',
   standalone: true,
   imports: [
+    PageHeaderComponent,
+    RefreshButtonComponent,
     NoClassroomComponent,
     ReactiveFormsModule,
     FieldComponent,
@@ -55,6 +59,8 @@ export class ChatComponent {
   readonly streaming = signal(false);
   readonly announcement = signal('');
   readonly tried = signal(false);
+  /* why an answer failed, by message id, shown under that answer instead of the generic note. */
+  readonly failures = signal<Record<string, string>>({});
   readonly figures = signal<Record<string, string>>({});
   readonly figureErrors = signal<Record<string, string>>({});
   streamingId = '';
@@ -85,6 +91,7 @@ export class ChatComponent {
     Object.values(this.figures()).forEach((url) => URL.revokeObjectURL(url));
     this.figures.set({});
     this.figureErrors.set({});
+    this.failures.set({});
   }
   loadThreads(): void {
     const id = this.classroomId();
@@ -202,6 +209,7 @@ export class ChatComponent {
         // however the turn ended, it may have spent ai allowance.
         this.usage.refresh();
       }
+      if (failure) this.failures.update((all) => ({ ...all, [answer.id]: failure }));
       const done = this.messages.value()?.find((m) => m.id === answer.id);
       this.announcement.set(
         done?.outcome === 'answered'
@@ -210,11 +218,21 @@ export class ChatComponent {
             ? 'Answer stopped.'
             : done?.outcome === 'no_results'
               ? 'No matching material found.'
-              : '',
+              : failure
+                ? 'Answer failed.'
+                : '',
       );
       await this.sync(thread);
-      if (failure) throw new Error(failure);
+      if (failure) this.moveFailure(answer.id);
     });
+  }
+  /* once the saved conversation replaces the streamed answer, its failure moves to the saved answer. */
+  private moveFailure(localId: string): void {
+    const list = this.messages.value() ?? [];
+    if (list.some((m) => m.id === localId)) return;
+    const saved = [...list].reverse().find((m) => m.role === 'assistant');
+    if (!saved) return;
+    this.failures.update(({ [localId]: reason, ...rest }) => ({ ...rest, [saved.id]: reason }));
   }
   stop(): void {
     this.controller?.abort();

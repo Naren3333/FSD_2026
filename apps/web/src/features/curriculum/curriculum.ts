@@ -13,11 +13,15 @@ import { Section } from '../../shared/section';
 import { SectionStateComponent } from '../../shared/section-state';
 import { StatusComponent } from '../../shared/status';
 import { requiredText } from '../../shared/validators';
+import { PageHeaderComponent } from '../../shared/page-header';
+import { RefreshButtonComponent } from '../../shared/refresh-button';
 
 @Component({
   selector: 'app-curriculum',
   standalone: true,
   imports: [
+    PageHeaderComponent,
+    RefreshButtonComponent,
     ReactiveFormsModule,
     PagerComponent,
     FieldComponent,

@@ -25,6 +25,8 @@ export class ActionState {
   validate(form: FormGroup, formId: string): boolean {
     form.markAllAsTouched();
     if (form.invalid) {
+      // an earlier success no longer applies, so it is not shown beside the error.
+      this.message.set('');
       this.error.set('Check the highlighted fields before continuing.');
       setTimeout(() =>
         Array.from(

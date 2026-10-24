@@ -23,7 +23,7 @@ beforeAll(() => {
   };
 });
 
-function render() {
+function render(tone?: 'default' | 'danger') {
   TestBed.resetTestingModule();
   TestBed.overrideComponent(ConfirmDialogComponent, { set: { template: template('./confirm-dialog.html') } });
   TestBed.overrideComponent(StatusComponent, { set: { template: template('./status.html') } });
@@ -33,6 +33,7 @@ function render() {
   fixture.componentRef.setInput('heading', 'Remove this student?');
   fixture.componentRef.setInput('confirmLabel', 'Remove student');
   fixture.componentRef.setInput('state', state);
+  if (tone) fixture.componentRef.setInput('tone', tone);
   fixture.detectChanges();
   const root = fixture.nativeElement as HTMLElement;
   const dialog = root.querySelector('dialog') as HTMLDialogElement;
@@ -99,6 +100,26 @@ describe('confirmation dialog', () => {
     buttons[0].click();
     expect(dialog.open).toBe(false);
     expect(closed).toHaveBeenCalledTimes(1);
+  });
+
+  it('styles the action as danger only for a danger tone, keeping Cancel secondary', () => {
+    expect(render().buttons[1].classList).not.toContain('danger');
+    const { buttons } = render('danger');
+    expect(buttons[1].classList).toContain('danger');
+    expect(buttons[0].classList).toContain('secondary');
+    expect(buttons[0].hasAttribute('autofocus')).toBe(true);
+  });
+
+  it('keeps its live region empty and inactive while there is nothing to announce', () => {
+    const { fixture, state, dialog } = render();
+    fixture.componentInstance.show();
+    fixture.detectChanges();
+    // mounted before anything is announced, so screen readers hear the first change; it takes no space.
+    expect(dialog.querySelector('[role="status"]')?.textContent?.trim()).toBe('');
+    expect(dialog.querySelector('.feedback')?.classList).not.toContain('active');
+    state.busy.set(true);
+    fixture.detectChanges();
+    expect(dialog.querySelector('[role="status"]')?.textContent?.trim()).toBe('Working…');
   });
 
   it('shows the action’s failure inside the dialog', () => {

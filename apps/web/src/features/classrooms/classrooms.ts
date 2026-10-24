@@ -15,11 +15,15 @@ import { Section } from '../../shared/section';
 import { SectionStateComponent } from '../../shared/section-state';
 import { StatusComponent } from '../../shared/status';
 import { requiredText } from '../../shared/validators';
+import { PageHeaderComponent } from '../../shared/page-header';
+import { RefreshButtonComponent } from '../../shared/refresh-button';
 
 @Component({
   selector: 'app-classrooms',
   standalone: true,
   imports: [
+    PageHeaderComponent,
+    RefreshButtonComponent,
     ReactiveFormsModule,
     FieldComponent,
     FieldControlDirective,

@@ -1,16 +1,14 @@
-<div class="section-heading">
-  <div>
-    <p class="eyebrow">Reviewed by your teacher</p>
-    <h2>My results</h2>
-  </div>
-  <button class="secondary" (click)="load()" [disabled]="results.loading() || !classroomId()">
-    Refresh results
-  </button>
-</div>
-<p>
-  Your teacher reviews each submission before its grade is final. Results appear here once your teacher
-  finalizes and releases them; work still under review is not shown.
-</p>
+<app-page-header
+  title="My results"
+  subtitle="Results appear once your teacher finalizes and releases them; work under review is not shown."
+>
+  <app-refresh-button
+    label="Refresh results"
+    [busy]="results.loading()"
+    [disabled]="results.loading() || !classroomId()"
+    (refresh)="load()"
+  />
+</app-page-header>
 <section class="panel">
   <p class="caption">Up to 100 most recent results</p>
   <app-section-state [section]="results" loading="Loading results…" />

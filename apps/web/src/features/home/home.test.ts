@@ -12,6 +12,7 @@ import { CurriculumNames } from '../../core/curriculum-names';
 import { Session } from '../../core/session';
 import { SectionStateComponent } from '../../shared/section-state';
 import { HomeComponent } from './home';
+import { PageHeaderComponent } from '../../shared/page-header';
 
 const template = (path: string) => readFileSync(new URL(path, import.meta.url), 'utf8');
 
@@ -69,6 +70,9 @@ function render(
     ],
   });
   TestBed.overrideComponent(HomeComponent, { set: { template: template('./home.html') } });
+  TestBed.overrideComponent(PageHeaderComponent, {
+    set: { template: template('../../shared/page-header.html') },
+  });
   TestBed.overrideComponent(SectionStateComponent, {
     set: { template: template('../../shared/section-state.html') },
   });

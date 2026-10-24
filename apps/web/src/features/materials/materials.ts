@@ -12,11 +12,14 @@ import { ConfirmDialogComponent } from '../../shared/confirm-dialog';
 import { messageOf } from '../../shared/errors';
 import { FieldComponent, FieldControlDirective } from '../../shared/field';
 import { documentLimit, documentMime, isIndexable } from '../../shared/files';
+import { date } from '../../shared/format';
 import { NoClassroomComponent } from '../../shared/no-classroom';
 import { rereadAfterDelete } from '../../shared/section';
 import { SectionStateComponent } from '../../shared/section-state';
 import { StatusComponent } from '../../shared/status';
 import { requiredText } from '../../shared/validators';
+import { PageHeaderComponent } from '../../shared/page-header';
+import { RefreshButtonComponent } from '../../shared/refresh-button';
 
 const FAILURES: Record<FailureReason, string> = {
   NO_TEXT_LAYER: 'the PDF has no readable text layer',
@@ -32,6 +35,19 @@ export const DOC_TYPES: Record<DocType, string> = {
   rubric: 'Rubric',
   marking_scheme: 'Marking scheme',
 };
+
+const TYPE_NAMES: Partial<Record<string, string>> = {
+  'application/pdf': 'PDF',
+  'application/vnd.openxmlformats-officedocument.wordprocessingml.document': 'Word document',
+  'application/vnd.openxmlformats-officedocument.presentationml.presentation': 'PowerPoint',
+  'text/markdown': 'Markdown',
+  'text/plain': 'Text',
+};
+
+/* a reader's name for a document's format, such as "powerpoint", falling back to the format's own suffix. */
+export function typeName(doc: DocumentRecord): string {
+  return TYPE_NAMES[doc.mime_type] ?? (doc.mime_type.split('/').pop() ?? doc.mime_type).toUpperCase();
+}
 
 const count = (n: number | undefined, noun: string) => `${n ?? 0} ${noun}${n === 1 ? '' : 's'}`;
 
@@ -67,6 +83,8 @@ export function describe(doc: DocumentRecord): { label: string; detail: string }
   selector: 'app-materials',
   standalone: true,
   imports: [
+    PageHeaderComponent,
+    RefreshButtonComponent,
     NoClassroomComponent,
     PagerComponent,
     ReactiveFormsModule,
@@ -144,6 +162,10 @@ export class MaterialsComponent implements OnDestroy {
   }
   status(doc: DocumentRecord) {
     return describe(doc);
+  }
+  /* the format and, once indexed, the day it was indexed, such as "powerpoint · indexed 24 oct 2026"; documents carry no upload date. */
+  details(doc: DocumentRecord): string {
+    return doc.indexed_at ? `${typeName(doc)} · Indexed ${date(doc.indexed_at)}` : typeName(doc);
   }
   isPdf(doc: DocumentRecord): boolean {
     return doc.mime_type === 'application/pdf';

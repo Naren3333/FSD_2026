@@ -13,12 +13,22 @@ import { EvidenceNames } from '../../shared/names';
 import { NoClassroomComponent } from '../../shared/no-classroom';
 import { Section } from '../../shared/section';
 import { SectionStateComponent } from '../../shared/section-state';
+import { PageHeaderComponent } from '../../shared/page-header';
+import { RefreshButtonComponent } from '../../shared/refresh-button';
 
 /* a student's start page for the current classroom: what is still to do, what waits for the teacher, recent finalized results and the topics to practise. */
 @Component({
   selector: 'app-home',
   standalone: true,
-  imports: [NoClassroomComponent, RouterLink, PercentPipe, SectionStateComponent, MarksPipe],
+  imports: [
+    PageHeaderComponent,
+    RefreshButtonComponent,
+    NoClassroomComponent,
+    RouterLink,
+    PercentPipe,
+    SectionStateComponent,
+    MarksPipe,
+  ],
   templateUrl: './home.html',
 })
 export class HomeComponent {

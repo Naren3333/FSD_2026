@@ -17,6 +17,7 @@ import { SectionStateComponent } from '../../shared/section-state';
 import { StatusComponent } from '../../shared/status';
 import { InterpretationComponent } from './interpretation';
 import { PerformanceComponent } from './performance';
+import { PageHeaderComponent } from '../../shared/page-header';
 
 const template = (path: string) => readFileSync(new URL(path, import.meta.url), 'utf8');
 
@@ -64,6 +65,9 @@ function render(
     ],
   });
   TestBed.overrideComponent(PerformanceComponent, { set: { template: template('./performance.html') } });
+  TestBed.overrideComponent(PageHeaderComponent, {
+    set: { template: template('../../shared/page-header.html') },
+  });
   for (const [component, path] of [
     [InterpretationComponent, './interpretation.html'],
     [SectionStateComponent, '../../shared/section-state.html'],

@@ -1,20 +1,14 @@
-<div class="section-heading">
-  <div>
-    <p class="eyebrow">Grounded in your classroom’s documents</p>
-    <h2>Ask the materials</h2>
-  </div>
-  <button
-    class="secondary"
-    (click)="loadThreads()"
+<app-page-header
+  title="Ask the materials"
+  subtitle="Answers come only from this classroom’s indexed teaching materials and cite their sources by number. Check anything important against the original."
+>
+  <app-refresh-button
+    label="Refresh conversations"
+    [busy]="threads.loading()"
     [disabled]="state.busy() || streaming() || threads.loading() || !classroomId()"
-  >
-    Refresh conversations
-  </button>
-</div>
-<p>
-  Answers come only from this classroom’s indexed PDFs and cite their sources by number. Check anything
-  important against the original document.
-</p>
+    (refresh)="loadThreads()"
+  />
+</app-page-header>
 <div class="chat-layout">
   <section class="panel thread-panel" aria-labelledby="threads-heading">
     <h3 id="threads-heading">Your conversations</h3>
@@ -117,7 +111,12 @@
               }
               @if (message.outcome && notes[message.outcome]) {
                 <p class="outcome" [class.error]="message.outcome === 'error'">
-                  <span class="badge">
+                  <span
+                    class="badge"
+                    [class.badge-danger]="message.outcome === 'error'"
+                    [class.badge-warning]="message.outcome === 'no_results'"
+                    [class.badge-plain]="message.outcome === 'interrupted'"
+                  >
                     {{
                       message.outcome === 'no_results'
                         ? 'No matching material'
@@ -126,7 +125,11 @@
                           : 'Stopped'
                     }}
                   </span>
-                  {{ notes[message.outcome] }}
+                  @if (message.outcome === 'error' && failures()[message.id]; as reason) {
+                    {{ reason }}
+                  } @else {
+                    {{ notes[message.outcome] }}
+                  }
                 </p>
               }
               @if (message.citations?.length) {

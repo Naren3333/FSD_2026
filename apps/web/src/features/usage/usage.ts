@@ -3,7 +3,7 @@ import type { Usage } from '../../api/models';
 import { AiUsage } from '../../core/ai-usage';
 import { dollars, resetTime } from '../../shared/format';
 
-/* today's ai spend against the daily allowance: chat, search and (for teachers) indexing their pdfs. */
+/* today's ai spend against the daily allowance: chat, search and (for teachers) indexing their documents. */
 @Component({ selector: 'app-usage', standalone: true, templateUrl: './usage.html' })
 export class UsageComponent implements OnInit {
   private readonly meter = inject(AiUsage);

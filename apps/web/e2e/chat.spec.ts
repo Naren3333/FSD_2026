@@ -208,10 +208,11 @@ test('chat streams cited answers, loads figures and reports failures', async ({ 
   reply = sse([['error', { code: 'AI_UNAVAILABLE', message: 'The assistant is not available right now.' }]]);
   await page.getByLabel('Your question').fill('And then?');
   await page.getByLabel('Your question').press('Control+Enter');
-  await expect(
-    page.getByRole('alert').filter({ hasText: 'The assistant is not available right now.' }),
-  ).toBeVisible();
-  await expect(page.locator('.turn.answer').last().getByText('Failed', { exact: true })).toBeVisible();
+  // the reason shows once, under the failed answer, and is not repeated in the page status.
+  const failed = page.locator('.turn.answer').last();
+  await expect(failed.getByText('Failed', { exact: true })).toBeVisible();
+  await expect(page.getByText('The assistant is not available right now.')).toHaveCount(1);
+  await expect(failed.getByText('The assistant is not available right now.')).toBeVisible();
 
   await page.route(`**/api/chatbot/threads/${thread.id}/messages`, (route) =>
     route.fulfill({

@@ -13,7 +13,8 @@ import { ConfirmDialogComponent } from '../../shared/confirm-dialog';
 import { FieldComponent } from '../../shared/field';
 import { SectionStateComponent } from '../../shared/section-state';
 import { StatusComponent } from '../../shared/status';
-import { MaterialsComponent } from './materials';
+import { MaterialsComponent, typeName } from './materials';
+import { PageHeaderComponent } from '../../shared/page-header';
 
 const template = (path: string) => readFileSync(new URL(path, import.meta.url), 'utf8');
 
@@ -72,6 +73,9 @@ function render(
     ],
   });
   TestBed.overrideComponent(MaterialsComponent, { set: { template: template('./materials.html') } });
+  TestBed.overrideComponent(PageHeaderComponent, {
+    set: { template: template('../../shared/page-header.html') },
+  });
   for (const [component, path] of [
     [PagerComponent, '../../shared/pager.html'],
     [SectionStateComponent, '../../shared/section-state.html'],
@@ -178,8 +182,28 @@ describe('materials states', () => {
     await page.settle();
     expect(page.library()).toContain('3 slides, 5 passages. Available to the assistant.');
     expect(page.library()).not.toContain('3 pages');
+    const details = [...page.root.querySelectorAll('article.record > small:first-of-type')].map(
+      (s) => s.textContent,
+    );
+    expect(details).toEqual(['PowerPoint', 'Word document', 'Markdown']);
+    expect(page.library()).not.toContain('Revision');
+    expect(page.library()).not.toContain('application/');
     expect(page.root.querySelector<HTMLInputElement>('input[type=file]')?.accept).toContain('.pptx');
     expect(page.root.textContent).toContain('PPTX speaker notes are included');
+  });
+});
+
+describe('document details', () => {
+  it('names the format and the day it was indexed', () => {
+    expect(typeName(doc({}))).toBe('PDF');
+    expect(typeName(doc({ mime_type: 'text/plain' }))).toBe('Text');
+    expect(typeName(doc({ mime_type: 'application/epub' as DocumentRecord['mime_type'] }))).toBe('EPUB');
+    const page = render(Promise.resolve([doc({ indexed_at: '2026-10-24T04:00:00Z' })]));
+    return page.settle().then(() => {
+      expect(page.root.querySelector('article.record > small')?.textContent).toBe(
+        'PDF · Indexed 24 Oct 2026',
+      );
+    });
   });
 });
 

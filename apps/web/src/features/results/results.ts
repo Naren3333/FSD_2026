@@ -9,6 +9,8 @@ import { EvidenceNames, assessmentsOf } from '../../shared/names';
 import { NoClassroomComponent } from '../../shared/no-classroom';
 import { Section } from '../../shared/section';
 import { SectionStateComponent } from '../../shared/section-state';
+import { PageHeaderComponent } from '../../shared/page-header';
+import { RefreshButtonComponent } from '../../shared/refresh-button';
 
 /* a student's finalized results with the assessments they belong to. */
 interface Results {
@@ -20,7 +22,13 @@ interface Results {
 @Component({
   selector: 'app-results',
   standalone: true,
-  imports: [NoClassroomComponent, SectionStateComponent, MarksPipe],
+  imports: [
+    PageHeaderComponent,
+    RefreshButtonComponent,
+    NoClassroomComponent,
+    SectionStateComponent,
+    MarksPipe,
+  ],
   templateUrl: './results.html',
 })
 export class ResultsComponent {

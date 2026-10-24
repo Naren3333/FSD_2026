@@ -4,7 +4,7 @@ import { TestBed } from '@angular/core/testing';
 import { BrowserTestingModule, platformBrowserTesting } from '@angular/platform-browser/testing';
 import { beforeAll, describe, expect, it, vi } from 'vitest';
 import { ChatApi, ContentApi } from '../../api/clients';
-import type { Citation, StreamEvent, Thread } from '../../api/models';
+import type { ChatMessage, Citation, StreamEvent, Thread } from '../../api/models';
 import { AiUsage } from '../../core/ai-usage';
 import { ClassroomContext } from '../../core/classroom-context';
 import { resetTime } from '../../shared/format';
@@ -63,7 +63,7 @@ describe('chat placeholders', () => {
 });
 
 /* the chat page's logic (no template) whose answers stream as `ask` says, with a spy on the ai use meter. */
-async function setup(ask: (onEvent: (e: StreamEvent) => void) => Promise<void>) {
+async function setup(ask: (onEvent: (e: StreamEvent) => void) => Promise<void>, saved: ChatMessage[] = []) {
   const usage = { refresh: vi.fn() };
   TestBed.resetTestingModule();
   TestBed.configureTestingModule({
@@ -73,7 +73,7 @@ async function setup(ask: (onEvent: (e: StreamEvent) => void) => Promise<void>) 
         useValue: {
           threads: () => Promise.resolve({ threads: [thread] }),
           createThread: () => Promise.resolve(thread),
-          messages: () => Promise.resolve({ messages: [] }),
+          messages: () => Promise.resolve({ messages: saved }),
           ask: (_t: string, _c: string, _s: AbortSignal, onEvent: (e: StreamEvent) => void) => ask(onEvent),
         },
       },
@@ -129,7 +129,11 @@ describe('a chat answer that fails', () => {
     });
     usage.refresh.mockClear();
     await send('What is a fraction?');
-    expect(page.state.error()).toBe(`You've used today's AI allowance. It resets at ${resetTime(resets)}.`);
+    expect(Object.values(page.failures())).toEqual([
+      `You've used today's AI allowance. It resets at ${resetTime(resets)}.`,
+    ]);
+    // the reason shows under the answer only, not again in the page status.
+    expect(page.state.error()).toBe('');
     expect(usage.refresh).toHaveBeenCalled();
   });
 
@@ -142,7 +146,36 @@ describe('a chat answer that fails', () => {
       return Promise.resolve();
     });
     await send('What is a fraction?');
-    expect(page.state.error()).toBe('The assistant is not available.');
+    expect(Object.values(page.failures())).toEqual(['The assistant is not available.']);
+    expect(page.state.error()).toBe('');
+    // announced briefly, as the other outcomes are; the reason is read under the answer.
+    expect(page.announcement()).toBe('Answer failed.');
+  });
+
+  it('keeps the reason with the saved answer once the conversation is re-read', async () => {
+    const at = '2026-10-24T00:00:00Z';
+    const saved: ChatMessage[] = [
+      {
+        id: 'm1',
+        role: 'user',
+        content: 'What is a fraction?',
+        outcome: null,
+        citations: null,
+        created_at: at,
+      },
+      { id: 'm2', role: 'assistant', content: '', outcome: 'error', citations: null, created_at: at },
+    ];
+    const { page, send } = await setup((onEvent) => {
+      onEvent({
+        event: 'error',
+        data: { code: 'AI_UNAVAILABLE', message: 'The assistant is not available.' },
+      });
+      return Promise.resolve();
+    }, saved);
+    await send('What is a fraction?');
+    expect(page.failures()).toEqual({ m2: 'The assistant is not available.' });
+    page.newThread();
+    expect(page.failures()).toEqual({});
   });
 
   it('keeps the question for retry and refreshes the meter when the chatbot refuses it', async () => {

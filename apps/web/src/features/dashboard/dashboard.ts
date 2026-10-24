@@ -16,11 +16,21 @@ import { PagerComponent, pageCount } from '../../shared/pager';
 import { NoClassroomComponent } from '../../shared/no-classroom';
 import { Section } from '../../shared/section';
 import { SectionStateComponent } from '../../shared/section-state';
+import { PageHeaderComponent } from '../../shared/page-header';
+import { RefreshButtonComponent } from '../../shared/refresh-button';
 
 @Component({
   selector: 'app-dashboard',
   standalone: true,
-  imports: [NoClassroomComponent, RouterLink, PercentPipe, SectionStateComponent, PagerComponent],
+  imports: [
+    PageHeaderComponent,
+    RefreshButtonComponent,
+    NoClassroomComponent,
+    RouterLink,
+    PercentPipe,
+    SectionStateComponent,
+    PagerComponent,
+  ],
   templateUrl: './dashboard.html',
 })
 export class DashboardComponent {

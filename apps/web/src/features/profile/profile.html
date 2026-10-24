@@ -1,9 +1,4 @@
-<div class="section-heading">
-  <div>
-    <p class="eyebrow">Your account</p>
-    <h2>Profile</h2>
-  </div>
-</div>
+<app-page-header title="Profile" subtitle="Your account details and sign-in." />
 @if (profile(); as p) {
   <section class="panel" aria-labelledby="profile-details-title">
     <h3 id="profile-details-title">Your details</h3>
@@ -72,6 +67,7 @@
 <app-confirm-dialog
   #deleteDialog
   dialogId="delete-account"
+  tone="danger"
   heading="Delete your account?"
   confirmLabel="Delete my account"
   [state]="state"

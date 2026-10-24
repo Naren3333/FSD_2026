@@ -12,6 +12,7 @@ import { CurriculumNames } from '../../core/curriculum-names';
 import { PagerComponent } from '../../shared/pager';
 import { SectionStateComponent } from '../../shared/section-state';
 import { DashboardComponent } from './dashboard';
+import { PageHeaderComponent } from '../../shared/page-header';
 
 const template = (path: string) => readFileSync(new URL(path, import.meta.url), 'utf8');
 
@@ -122,6 +123,9 @@ async function render(parts: Parts = {}, classroomId = 'c1', rooms: Rooms = {}) 
     ],
   });
   TestBed.overrideComponent(DashboardComponent, { set: { template: template('./dashboard.html') } });
+  TestBed.overrideComponent(PageHeaderComponent, {
+    set: { template: template('../../shared/page-header.html') },
+  });
   TestBed.overrideComponent(SectionStateComponent, {
     set: { template: template('../../shared/section-state.html') },
   });
@@ -146,7 +150,9 @@ async function render(parts: Parts = {}, classroomId = 'c1', rooms: Rooms = {}) 
     };
   };
   const button = (name: string) =>
-    [...root.querySelectorAll('button')].find((b) => b.textContent?.trim() === name) as HTMLButtonElement;
+    [...root.querySelectorAll('button')].find(
+      (b) => b.textContent?.trim() === name || b.getAttribute('aria-label') === name,
+    ) as HTMLButtonElement;
   return { text, settle, alerts, stat, root, classPerformance, refresh, button, fixture };
 }
 

@@ -1,25 +1,18 @@
-<div class="section-heading">
-  <div>
-    <p class="eyebrow">From questions to evidence</p>
-    <h2>Assessments</h2>
-  </div>
-  <button
-    class="secondary"
-    (click)="load()"
+<app-page-header
+  title="Assessments"
+  [subtitle]="
+    session.isTeacher()
+      ? 'Build an assessment as a draft, then publish it when it is ready.'
+      : 'Open an assessment to answer it. Answers save as you type until you submit.'
+  "
+>
+  <app-refresh-button
+    label="Refresh assessments"
+    [busy]="assessments.loading()"
     [disabled]="state.busy() || assessments.loading() || !classroomId()"
-  >
-    Refresh assessments
-  </button>
-</div>
-<p>
-  @if (session.isTeacher()) {
-    Build an assessment as a draft, then publish it when it is ready. Students never see drafts. You can edit
-    or delete a published assessment until a student submits it; after that only its title, due date and late
-    policy can change. Each student can submit once.
-  } @else {
-    Open an assessment to answer it. Your answers are saved as you type until you submit; you can submit once.
-  }
-</p>
+    (refresh)="load()"
+  />
+</app-page-header>
 <div class="split">
   <section class="panel">
     <h3>Classroom assessments</h3>
@@ -483,6 +476,13 @@
           }
         </fieldset>
 
+        <p class="caption">
+          @if (editingPublished()) {
+            Once a student submits, only the title, due date and late policy can change.
+          } @else {
+            Students never see drafts. Each student can submit a published assessment once.
+          }
+        </p>
         <div class="button-row">
           <button [disabled]="state.busy() || !classroomId()">
             {{ editingPublished() ? 'Save changes' : editing() ? 'Save draft' : 'Create draft' }}
@@ -513,6 +513,7 @@
 <app-confirm-dialog
   #deleteDialog
   dialogId="delete-assessment"
+  tone="danger"
   [heading]="
     deletingSubmitted()
       ? 'Delete this assessment and its grades?'

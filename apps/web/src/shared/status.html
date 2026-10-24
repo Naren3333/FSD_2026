@@ -1,6 +1,20 @@
-<div class="feedback" [attr.aria-busy]="state.busy()">
-  <p role="status" aria-live="polite">{{ state.busy() ? 'Working…' : state.message() }}</p>
+<div
+  class="feedback"
+  [class.active]="state.busy() || state.message() || state.error()"
+  [attr.aria-busy]="state.busy()"
+>
+  <p
+    role="status"
+    aria-live="polite"
+    class="feedback-line"
+    [class.success]="!state.busy() && state.message()"
+  >
+    @if (!state.busy() && state.message()) {
+      <app-icon name="check" />
+    }
+    {{ state.busy() ? 'Working…' : state.message() }}
+  </p>
   @if (state.error()) {
-    <p role="alert" class="error">{{ state.error() }}</p>
+    <p role="alert" class="feedback-line error"><app-icon name="alert" />{{ state.error() }}</p>
   }
 </div>

@@ -1,10 +1,6 @@
-<div class="section-heading">
-  <div>
-    <p class="eyebrow">Your class at a glance</p>
-    <h2>{{ classroomName() || 'Class dashboard' }}</h2>
-  </div>
-  <button class="secondary" (click)="refresh()" [disabled]="!classroomId()">Refresh dashboard</button>
-</div>
+<app-page-header [title]="classroomName() || 'Class dashboard'" subtitle="Your class at a glance.">
+  <app-refresh-button label="Refresh dashboard" [disabled]="!classroomId()" (refresh)="refresh()" />
+</app-page-header>
 @if (!classroomId()) {
   <app-no-classroom>
     <p class="empty">

@@ -18,6 +18,8 @@ import { Section } from '../../shared/section';
 import { SectionStateComponent } from '../../shared/section-state';
 import { StatusComponent } from '../../shared/status';
 import { requiredText } from '../../shared/validators';
+import { PageHeaderComponent } from '../../shared/page-header';
+import { RefreshButtonComponent } from '../../shared/refresh-button';
 import {
   applySuggestion,
   flagText,
@@ -49,6 +51,8 @@ const SUGGESTION_POLL_MAX = 60000;
   selector: 'app-review',
   standalone: true,
   imports: [
+    PageHeaderComponent,
+    RefreshButtonComponent,
     ReactiveFormsModule,
     FieldComponent,
     FieldControlDirective,

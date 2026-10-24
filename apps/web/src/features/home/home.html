@@ -1,10 +1,6 @@
-<div class="section-heading">
-  <div>
-    <p class="eyebrow">Your work at a glance</p>
-    <h2>{{ classroomName() || 'Home' }}</h2>
-  </div>
-  <button class="secondary" (click)="refresh()" [disabled]="!classroomId()">Refresh home</button>
-</div>
+<app-page-header [title]="classroomName() || 'Home'" subtitle="Your work at a glance.">
+  <app-refresh-button label="Refresh home" [disabled]="!classroomId()" (refresh)="refresh()" />
+</app-page-header>
 @if (!classroomId()) {
   <app-no-classroom>
     <p class="empty">

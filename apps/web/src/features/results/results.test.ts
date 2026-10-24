@@ -10,6 +10,7 @@ import { ClassroomContext } from '../../core/classroom-context';
 import { CurriculumNames } from '../../core/curriculum-names';
 import { SectionStateComponent } from '../../shared/section-state';
 import { ResultsComponent } from './results';
+import { PageHeaderComponent } from '../../shared/page-header';
 
 const template = (path: string) => readFileSync(new URL(path, import.meta.url), 'utf8');
 
@@ -33,6 +34,9 @@ async function render(
     ],
   });
   TestBed.overrideComponent(ResultsComponent, { set: { template: template('./results.html') } });
+  TestBed.overrideComponent(PageHeaderComponent, {
+    set: { template: template('../../shared/page-header.html') },
+  });
   TestBed.overrideComponent(SectionStateComponent, {
     set: { template: template('../../shared/section-state.html') },
   });

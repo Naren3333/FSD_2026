@@ -1,10 +1,7 @@
-<div class="section-heading">
-  <div>
-    <p class="eyebrow">Evidence, before interpretation</p>
-    <h2>{{ session.isStudent() ? 'My progress' : 'Learning performance' }}</h2>
-  </div>
-</div>
-<p>Observed accuracy summarizes finalized question results. It is not a validated mastery probability.</p>
+<app-page-header
+  [title]="session.isStudent() ? 'My progress' : 'Learning performance'"
+  subtitle="Observed accuracy from finalized question results."
+/>
 <section class="panel">
   <form id="performance-form" class="inline-form" novalidate [formGroup]="form" (ngSubmit)="load()">
     @if (session.isTeacher()) {
@@ -90,6 +87,7 @@
           </table>
         </div>
         <p class="caption">
+          Observed accuracy summarizes finalized question results. It is not a validated mastery probability.
           Full marks counts questions answered for every mark; marks earned includes part marks on written
           answers. Fewer than five questions is reported as insufficient evidence. Needs practice marks a
           topic with five or more questions and under 60% correct. These are reporting thresholds, not a

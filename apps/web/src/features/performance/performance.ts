@@ -15,12 +15,14 @@ import { NoClassroomComponent } from '../../shared/no-classroom';
 import { Section } from '../../shared/section';
 import { SectionStateComponent } from '../../shared/section-state';
 import { StatusComponent } from '../../shared/status';
+import { PageHeaderComponent } from '../../shared/page-header';
 import { InterpretationComponent } from './interpretation';
 
 @Component({
   selector: 'app-performance',
   standalone: true,
   imports: [
+    PageHeaderComponent,
     NoClassroomComponent,
     ReactiveFormsModule,
     FieldComponent,

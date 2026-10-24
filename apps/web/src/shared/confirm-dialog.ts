@@ -14,6 +14,8 @@ export class ConfirmDialogComponent {
   @Input({ required: true }) dialogId = '';
   @Input({ required: true }) heading = '';
   @Input({ required: true }) confirmLabel = '';
+  /* danger gives the action the destructive style, for permanent deletes. */
+  @Input() tone: 'default' | 'danger' = 'default';
   /* the action's state: it disables the buttons while it runs and is announced inside the dialog. */
   @Input({ required: true }) state!: ActionState;
   @Output() readonly confirm = new EventEmitter<void>();

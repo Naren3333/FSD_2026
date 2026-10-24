@@ -38,4 +38,12 @@ describe('ActionState', () => {
     expect(document.activeElement?.id).toBe('mine');
     expect(form.controls.title.touched).toBe(true);
   });
+  it('clears an earlier success when a form is invalid', async () => {
+    const state = new ActionState();
+    await state.run(async () => {}, 'Document uploaded.');
+    const form = new FormGroup({ title: new FormControl('', Validators.required) });
+    expect(state.validate(form, 'missing')).toBe(false);
+    expect(state.message()).toBe('');
+    expect(state.error()).toBe('Check the highlighted fields before continuing.');
+  });
 });

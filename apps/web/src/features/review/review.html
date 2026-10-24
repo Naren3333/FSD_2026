@@ -1,21 +1,14 @@
-<div class="section-heading">
-  <div>
-    <p class="eyebrow">A teacher makes the final decision</p>
-    <h2>Grading review</h2>
-  </div>
-  <button
-    class="secondary"
-    (click)="refresh()"
+<app-page-header
+  title="Grading review"
+  subtitle="Automatic marks and AI suggestions are drafts until you review and finalize them."
+>
+  <app-refresh-button
+    label="Refresh grades"
+    [busy]="grades.loading()"
     [disabled]="state.busy() || grades.loading() || !classroomId()"
-  >
-    Refresh grades
-  </button>
-</div>
-<p>
-  Automatic marks and AI suggestions are drafts until you review and finalize them. Short answers that match
-  no accepted answer and written responses wait for you to mark. Only finalized evidence reaches the
-  performance dashboard.
-</p>
+    (refresh)="refresh()"
+  />
+</app-page-header>
 <section class="panel">
   <div class="filter-row">
     <app-field controlId="review-assessment" label="Assessment" hint="Choose one to see all of its grades.">
