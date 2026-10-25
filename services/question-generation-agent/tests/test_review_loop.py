@@ -15,6 +15,7 @@ import clients
 import main
 import pipeline
 import prompts
+from checks import LONG_KEY_NOTE
 from contracts import DraftQuestion, Generated, GenerateRequest, Review
 from review import Verdict
 
@@ -641,3 +642,26 @@ def test_the_reviewer_is_shown_a_draft_it_skipped_earlier(api, fakes: Fakes):
     ask(api, count=3)
     second = task(sent(fakes, GEN, REV, GEN, REV)[3])
     assert second["existing_questions"] == [STEMS[0], STEMS[2]]
+
+
+@pytest.mark.parametrize(
+    "review_reply",
+    [
+        rev(),  # the reviewer gives no verdict on it
+        httpx.Response(200, json={"output": "nope"}),  # the review cannot be read
+        httpx.Response(503, json={"error": {"code": "X", "message": "x"}}),  # the review call fails
+    ],
+)
+def test_a_long_key_is_flagged_when_the_review_does_not_judge_it(api, fakes: Fakes, review_reply):
+    """our own check does not depend on the reviewer: a key that gives itself away is flagged either way."""
+    configure(review_retries=0)
+    fakes.replies = [gen(long_key(0), mc(1)), review_reply]
+    resp = ask(api, count=2)
+    assert resp.status_code == 200, resp.text
+    reviews = [q["review"] for q in resp.json()["questions"]]
+    assert (reviews[0]["status"], reviews[0]["source"], reviews[0]["note"]) == (
+        "flagged",
+        "check",
+        LONG_KEY_NOTE,
+    )
+    assert reviews[1]["status"] == "not_reviewed"

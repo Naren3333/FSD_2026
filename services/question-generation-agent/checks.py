@@ -148,13 +148,13 @@ def evidenced_excerpts(evidence: str, sources: list[Passage]) -> list[Excerpt]:
     chosen = list(range(min(len(sources), MAX_SOURCES)))
     if holding[0] not in chosen:
         chosen = [holding[0], *chosen[:-1]]
+    try:
+        ids = {i: (UUID(sources[i].document_id), UUID(sources[i].chunk_id)) for i in chosen}
+    except ValueError:
+        # a passage without content's uuids cannot be stored as a source.
+        raise RuleBrokenError(UNKNOWN_SOURCE) from None
     return [
-        Excerpt(
-            document_id=UUID(sources[i].document_id),
-            chunk_id=UUID(sources[i].chunk_id),
-            page=sources[i].page,
-            text=texts[i][0],
-        )
+        Excerpt(document_id=ids[i][0], chunk_id=ids[i][1], page=sources[i].page, text=texts[i][0])
         for i in chosen
     ]
 

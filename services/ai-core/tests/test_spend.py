@@ -397,9 +397,22 @@ def test_embedding_batches_answered_before_a_failure_are_charged(
 class SlowLedger(MemoryLedger):
     """writes take a while, as over a network to postgres."""
 
-    def __init__(self, delay: float = 0.2) -> None:
+    def __init__(self, delay: float = 0.2, hold: int = 0) -> None:
         super().__init__()
         self.delay = delay
+        # the first `hold` provider reservations wait for each other, so no reply can grow a
+        # reservation to its real cost before those calls are all past the checks
+        self.hold = hold
+        self.reserved = 0
+        self.all_reserved = asyncio.Event()
+
+    async def reserve(self, reservation: str, billed: spend.Billed, amount: float, concurrency: int) -> None:
+        await super().reserve(reservation, billed, amount, concurrency)
+        if amount and self.reserved < self.hold:
+            self.reserved += 1
+            if self.reserved == self.hold:
+                self.all_reserved.set()
+            await asyncio.wait_for(self.all_reserved.wait(), timeout=5)
 
     async def record(self, billed: spend.Billed, charge: spend.Charge, correlation_id: str) -> None:
         await asyncio.sleep(self.delay)
@@ -445,10 +458,10 @@ def test_overshoot_is_bounded_by_the_calls_in_flight(
 
     from main import app
 
-    app.state.ledger = slow = SlowLedger()
+    in_flight = 3
+    app.state.ledger = slow = SlowLedger(hold=in_flight)
     a_dollar_an_embedding(monkeypatch, test_settings)
     slow.already["student-1"] = 4.5
-    in_flight = 3
     openai_fake.reply(json=embedding_response([[0.5]], prompt_tokens=1000), times=in_flight + 1)
 
     async def burst() -> list[int]:

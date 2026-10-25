@@ -241,6 +241,12 @@ def test_at_most_five_sources_each_cut_to_assessments_limit():
     assert len(sources) == 5 and all(len(s.text) <= 2000 for s in sources)
 
 
+def test_a_passage_without_uuids_is_an_unknown_source_not_a_crash():
+    odd = [Passage(1, "c-1", DOC, "Testing slides", 3, UNIT_TESTS)]
+    kept, dropped, _, _ = checks.questions(json.dumps({"questions": [choice()]}), request(), odd)
+    assert kept == [] and dropped == {"UNKNOWN_SOURCE": 1}
+
+
 def test_evidence_late_in_a_long_passage_is_stored_with_it():
     """the excerpt kept is the window around the evidence, so what the teacher sees holds the quote."""
     text = "Filler words. " * 300 + "\n" + UNIT_TESTS + " Trailing text." * 100

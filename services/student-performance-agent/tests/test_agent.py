@@ -1,6 +1,7 @@
 """the agent end to end against fakes: who may call it, what it reads with whose token, how the loop chooses tools and stops, who pays, and how the checks keep the report to the evidence."""
 
 import dataclasses
+import json
 from typing import Any
 
 import httpx
@@ -102,10 +103,11 @@ def test_the_last_turn_must_report(api, fakes: Fakes):
     )
     assert fakes.task(2)["instruction"] == "Write the report now; no more tools."
     comparison = fakes.task(2)["tool_history"][0]["output"]
+    # the student is left out of the class figure, so it is the rest of the class's alone.
     assert comparison == {
-        "students_compared": 2,
+        "students_compared": 1,
         "topics": [
-            {"topic": "T1", "student_accuracy": 0.5, "class_accuracy": 0.8333, "students_with_evidence": 2}
+            {"topic": "T1", "student_accuracy": 0.5, "class_accuracy": 1.0, "students_with_evidence": 1}
         ],
     }
 
@@ -327,3 +329,76 @@ def test_the_model_is_told_which_results_are_not_released(api, fakes: Fakes):
     main.app.state.settings = dataclasses.replace(SETTINGS, max_turns=1)
     assert api.post(PATH, json=BODY, headers=as_user()).status_code == 200
     assert fakes.task(1)["student"]["results"][0]["released"] is False
+
+
+def test_a_failed_tool_call_can_be_made_again(api, fakes: Fakes):
+    """only an answered call is refused as a repeat: one that failed is run again when the model asks."""
+    fakes.once = {f"/v1/topics/{LOOPS}/prerequisites": 503}
+    fakes.replies = [
+        reply(tools(call("prerequisites", topic="T1"))),
+        reply(tools(call("prerequisites", topic="T1"))),
+        reply(tools(call("prerequisites", topic="T1"))),
+        reply(done(possible_misconceptions=[])),
+    ]
+    resp = api.post(PATH, json=BODY, headers=as_user())
+    assert resp.status_code == 200, resp.text
+    assert [s["outcome"] for s in resp.json()["steps"]] == ["failed", "ok", "refused"]
+    assert len(fakes.calls(f"/v1/topics/{LOOPS}/prerequisites")) == 2
+
+
+def test_a_failed_class_read_is_read_again_by_a_later_call(api, fakes: Fakes):
+    fakes.once = {"/v1/performance": 503}
+    fakes.replies = [
+        reply(tools(call("class_comparison"))),
+        reply(tools(call("class_comparison", topic="T1"))),
+        reply(done(possible_misconceptions=[])),
+    ]
+    resp = api.post(PATH, json=BODY, headers=as_user())
+    assert resp.status_code == 200, resp.text
+    assert [s["outcome"] for s in resp.json()["steps"]] == ["failed", "ok"]
+    assert len(fakes.calls("/v1/performance")) == 2
+
+
+@pytest.mark.parametrize("students", [[None, "x"], [{"student_id": "student-2", "topics": [None]}]])
+def test_a_malformed_class_read_fails_the_tool_not_the_request(api, fakes: Fakes, students: list[Any]):
+    fakes.class_students = students
+    fakes.replies = [reply(tools(call("class_comparison"))), reply(done(possible_misconceptions=[]))]
+    resp = api.post(PATH, json=BODY, headers=as_user())
+    assert resp.status_code == 200, resp.text
+    assert [s["outcome"] for s in resp.json()["steps"]] == ["failed"]
+
+
+def test_results_already_shown_stay_readable_as_tools_add_topics(api, fakes: Fakes, monkeypatch):
+    """the opening is fitted once: topics a tool adds later never push a result the model has seen out of it."""
+    fakes.evaluations = [finalized(id=f"00000000-0000-4000-8000-{i:012d}") for i in range(3)]
+    fakes.prerequisites = {LOOPS: [{"id": f"00000000-0000-4000-8002-{i:012d}", "name": "P" * 150} for i in range(5)]}  # fmt: skip
+    fakes.replies = [
+        reply(tools(call("prerequisites", topic="T1"))),
+        reply(tools(call("read_answers", "R3"))),
+        reply(done(possible_misconceptions=[])),
+    ]
+    # a budget the three results just fit, so the prerequisites' topics would have pushed the oldest out.
+    ws = workspace.Workspace()
+    ws.add_results(fakes.evaluations, {QUIZ: fakes.assessments[QUIZ]})
+    ws.add_summary(fakes.summary)
+    ws.name_topics(fakes.topics)
+    monkeypatch.setattr(workspace, "OPENING_BUDGET", len(json.dumps(ws.opening(), ensure_ascii=False)) + 10)
+    resp = api.post(PATH, json=BODY, headers=as_user())
+    assert resp.status_code == 200, resp.text
+    assert len(fakes.task(2)["student"]["results"]) == 3
+    assert [s["outcome"] for s in resp.json()["steps"]] == ["ok", "ok"]
+
+
+def test_a_malformed_evaluation_is_an_upstream_failure(api, fakes: Fakes):
+    fakes.evaluations = [finalized(assessment_id=None)]
+    resp = api.post(PATH, json=BODY, headers=as_user())
+    assert resp.status_code == 503 and resp.json()["error"]["code"] == "AI_UNAVAILABLE"
+    assert fakes.calls("/v1/inference") == []
+
+
+def test_running_out_of_time_for_the_report_says_so(api, fakes: Fakes):
+    """a report the budget leaves no time for is not an outage: the teacher is told it took too long."""
+    main.app.state.settings = dataclasses.replace(SETTINGS, budget=agent.MIN_CALL - 1)
+    resp = api.post(PATH, json=BODY, headers=as_user())
+    assert resp.status_code == 503 and resp.json()["error"]["code"] == "OUT_OF_TIME"
+    assert fakes.calls("/v1/inference") == []

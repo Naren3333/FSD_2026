@@ -143,6 +143,8 @@ class Fakes:
         ]  # fmt: skip
         self.prerequisites = {LOOPS: [{"id": VARIABLES, "name": "Variables"}]}
         self.status: dict[str, int] = {}  # a service's path prefix → the status it fails with
+        self.once: dict[str, int] = {}  # an exact path → the status it fails with the next time only
+        self.class_students: list[Any] | None = None  # what the class read lists instead of the default
         self.replies: list[httpx.Response] = []
         self.requests: list[tuple[str, dict[str, Any], httpx.Request]] = []
 
@@ -152,6 +154,8 @@ class Fakes:
         body = json.loads(request.content) if request.method == "POST" and is_json else {}
         self.requests.append((path, body, request))
         token = request.headers.get("authorization")
+        if path in self.once:
+            return httpx.Response(self.once.pop(path), json={"error": {"code": "X", "message": "x"}})
         for prefix, status in self.status.items():
             if path.startswith(prefix):
                 return httpx.Response(status, json={"error": {"code": "X", "message": "x"}})
@@ -175,8 +179,11 @@ class Fakes:
                                              "evidence_status": "available", "interpretation": "x"})  # fmt: skip
         if path == "/v1/performance":
             other = {"student_id": "student-2", "topics": [{**self.summary[0], "attempted": 4, "correct": 4}]}
-            return httpx.Response(200, json={"classroom_id": ROOM, "total": 2, "offset": 0, "interpretation": "x",
-                                             "students": [{"student_id": STUDENT, "topics": self.summary}, other]})  # fmt: skip
+            students = self.class_students
+            if students is None:
+                students = [{"student_id": STUDENT, "topics": self.summary}, other]
+            return httpx.Response(200, json={"classroom_id": ROOM, "total": len(students), "offset": 0,
+                                             "interpretation": "x", "students": students})  # fmt: skip
         if path == "/v1/evaluations":
             assert request.url.params["student_id"] == STUDENT
             return httpx.Response(200, json={"evaluations": self.evaluations, "total": len(self.evaluations)})

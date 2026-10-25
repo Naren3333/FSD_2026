@@ -13,6 +13,7 @@ from typing import Any
 
 from fastapi.responses import StreamingResponse
 from learning_transport import UpstreamError, sse_event
+from learning_transport.agents import AI_CORE_CODES
 from starlette.types import Receive, Scope, Send
 
 import prompts
@@ -74,9 +75,9 @@ class SSEResponse(StreamingResponse):
 def error_of(e: UpstreamError) -> tuple[str, str]:
     """the `error` event for a failed upstream call: a code the browser can act on and a safe message."""
     if e.code == "AI_SPEND_LIMIT":
-        return "AI_SPEND_LIMIT", "You've used today's AI allowance."
-    if e.code == "AI_BUSY":
-        return "AI_BUSY", "You have too many AI requests running at once. Try again in a moment."
+        return "AI_SPEND_LIMIT", "You've used today's AI allowance."  # the event carries resets_at itself
+    if e.code in AI_CORE_CODES:
+        return e.code, AI_CORE_CODES[e.code][1]
     if e.service == "content":
         if e.status in (401, 403):
             return "FORBIDDEN", "You no longer have access to this classroom's materials."
@@ -396,7 +397,12 @@ class Turn:
                 bool(out["is_small_talk"]),
             )
         except UpstreamError as e:
-            if error_of(e)[0] in ("AI_UNAVAILABLE", "AI_SPEND_LIMIT", "AI_BUSY"):
+            if error_of(e)[0] in (
+                "AI_UNAVAILABLE",
+                "AI_SPEND_LIMIT",
+                "AI_BUSY",
+                "AI_PROVIDER_NOT_CONFIGURED",
+            ):
                 raise
             log.warning("query_rewrite_failed", extra={"thread_id": str(self.thread["id"]), "error": str(e)})
             return

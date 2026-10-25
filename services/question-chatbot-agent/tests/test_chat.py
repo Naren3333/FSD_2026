@@ -191,8 +191,9 @@ def test_ai_core_unavailable_fails_the_turn(api: TestClient, fakes: Fakes, store
         httpx.Response(503, json={"error": {"code": "AI_PROVIDER_NOT_CONFIGURED", "message": "x"}})
     )
     tid = thread(api)
-    assert post(api, tid, "q")[0] == ("error", {"code": "AI_UNAVAILABLE", "message": "The assistant is not "
-                                               "available right now."})  # fmt: skip
+    # ai-core's own code and words, as the other agents give them; the rewrite failing this way ends the turn.
+    assert post(api, tid, "q") == [("error", {"code": "AI_PROVIDER_NOT_CONFIGURED",
+                                              "message": "AI is not set up on this server."})]  # fmt: skip
     assert fakes.calls("/v1/search") == [] and saved(store, tid)["outcome"] == "error"
 
 
@@ -413,6 +414,25 @@ def test_too_many_running_calls_during_search(api: TestClient, fakes: Fakes) -> 
     fakes.search_error = BUSY
     events = post(api, thread(api), "q")
     assert events[-1][0] == "error" and events[-1][1]["code"] == "AI_BUSY"
+
+
+@pytest.mark.parametrize(
+    ("status", "code", "message"),
+    [
+        (503, "AI_PROVIDER_NOT_CONFIGURED", "AI is not set up on this server."),
+        (502, "AI_OUTPUT_REJECTED", "The model did not return a usable reply. Try again."),
+    ],
+)
+def test_ai_cores_own_refusals_reach_the_user_in_its_words(
+    api: TestClient, fakes: Fakes, store: MemoryStore, status: int, code: str, message: str
+) -> None:
+    """the answer call refused: the same codes and words the other agents give, from learning_transport's shared table."""
+    fakes.results = RESULTS
+    fakes.replies.append(rewrite("q"))
+    fakes.replies.append(httpx.Response(status, json={"error": {"code": code, "message": "x"}}))
+    tid = thread(api)
+    assert post(api, tid, "q")[-1] == ("error", {"code": code, "message": message})
+    assert saved(store, tid)["outcome"] == "error"
 
 
 def test_usage(api: TestClient, fakes: Fakes) -> None:

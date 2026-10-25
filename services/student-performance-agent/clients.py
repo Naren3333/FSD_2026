@@ -66,7 +66,12 @@ class Services(AgentClients):
         evaluations = data.get("evaluations") if isinstance(data, dict) else None
         if not isinstance(evaluations, list):
             raise UpstreamError("grading", 502)
-        return [e for e in evaluations if isinstance(e, dict) and e.get("status") == "finalized"]
+        finalized = [e for e in evaluations if isinstance(e, dict) and e.get("status") == "finalized"]
+        if not all(
+            isinstance(e.get("id"), str) and isinstance(e.get("assessment_id"), str) for e in finalized
+        ):
+            raise UpstreamError("grading", 502)
+        return finalized
 
     async def assessments(self, authorization: str, ids: list[str], correlation: str) -> dict[str, Any]:
         """the teacher's view of each assessment by id; one deleted since it was graded is left out."""
@@ -159,7 +164,7 @@ class Services(AgentClients):
                 limit=CLASS_PAGE,
             )
             batch = data.get("students") if isinstance(data, dict) else None
-            if not isinstance(batch, list):
+            if not isinstance(batch, list) or not all(isinstance(s, dict) for s in batch):
                 raise UpstreamError("analytics", 502)
             return batch, int(data.get("total") or 0)
 

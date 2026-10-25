@@ -15,7 +15,7 @@ Teachers see each student's topic accuracy under Learning performance, but turni
 - Then up to five model turns (`PERFORMANCE_MAX_TURNS`). Each is one structured ai-core `generate` call as the `student-performance-agent` service account, billed to the teacher (ADR 0003). A turn either calls up to three tools or reports; the last turn, or any turn after two minutes (`PERFORMANCE_DEADLINE`), may only report. Every call ends within four minutes of the request (`PERFORMANCE_BUDGET`), a tool turn and its tools a minute before that, so the report always has time inside Kong's five. A turn's tools run side by side. The tools are read-only:
   - `read_answers` shows one result's questions (lost marks first, at most eight) with the prompt, expected answer, the student's answer, the rubric scores and the teacher's feedback.
   - `prerequisites` reads a topic's prerequisites from Curriculum with the student's evidence on each.
-  - `class_comparison` pools the class's released topic accuracy from Analytics (its first 200 students) next to the student's.
+  - `class_comparison` pools the rest of the class's released topic accuracy from Analytics (its first 200 students, the student left out) next to the student's.
 - The model refers to results, questions and topics by short references (`R1`, `E1`, `T1`) the agent assigns; it never sees or writes ids. A refused tool call (an unknown reference, a repeat, an unknown tool) or a failed one is told to the model and shown to the teacher, and the loop goes on.
 - The agent does not search Content or call the chatbot: it reads only assessment, grading, analytics and curriculum data. Linking an observation to teaching material is left for later, once the retrieval work settles.
 

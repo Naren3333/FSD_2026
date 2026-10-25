@@ -20,6 +20,8 @@ from workspace import MAX_RESULTS, Topic, Workspace
 log = logging.getLogger("student-performance-agent.agent")
 
 Outcome = Literal["ok", "refused", "failed"]
+# a model call the budget stopped or kept from starting.
+OUT_OF_TIME = "OUT_OF_TIME"
 TURN_TOKENS = 1500
 REPORT_TOKENS = 3000
 # time kept back for the report: a tool turn and its tools end this long before the budget runs out.
@@ -33,6 +35,10 @@ def refused(e: UpstreamError) -> HTTPException:
     """a failed upstream call as an error the page can act on, with a safe message."""
     if (known := ai_core_refusal(e)) is not None:
         return known
+    if e.code == OUT_OF_TIME:
+        return failure(
+            503, OUT_OF_TIME, "Interpreting these results took too long. Try again, or try again later."
+        )
     if e.service != "ai-core" and e.status in (401, 403):
         return failure(403, "FORBIDDEN", "You no longer have access to this student's results.")
     if e.service != "ai-core" or e.status in (0, 503):
@@ -56,9 +62,10 @@ class Agent:
         self.authorization = request.headers["authorization"]
         self.correlation: str = request.state.correlation_id
         self.workspace = Workspace()
+        self.student = ""  # set by interpret
         self.steps: list[Step] = []
         self.history: list[dict[str, Any]] = []
-        self.done: set[tuple[str, str | None, str | None]] = set()
+        self.done: set[tuple[str, str | None, str | None]] = set()  # calls that answered, not to repeat
         self.unreadable = 0
         self.started = time.monotonic()
         self.until = self.started + settings.budget  # no call runs past this
@@ -66,6 +73,7 @@ class Agent:
 
     async def interpret(self, body: RequestContract) -> ResponseContract:
         classroom, student = str(body.classroom_id), body.student_id
+        self.student = student
         # the caller must teach the classroom and the student must be enrolled in it.
         await require_relation(
             self.services.identity,
@@ -141,6 +149,7 @@ class Agent:
         except (KeyError, TypeError, ValueError, AttributeError):
             raise UpstreamError("grading", 502) from None
         self.workspace.name_topics(names)
+        self.workspace.fit()
 
     async def _turn(self, turn: int, turns: int, final: bool) -> dict[str, Any] | None:
         """one model turn's reply, or none when it was unreadable (the loop moves on)."""
@@ -149,7 +158,7 @@ class Agent:
         left = self.until - time.monotonic() - (0 if final else REPORT_RESERVE)
         try:
             if left < MIN_CALL:
-                raise UpstreamError("ai-core", 0, "OUT_OF_TIME")
+                raise UpstreamError("ai-core", 0, OUT_OF_TIME)
             output = await self.services.generate(
                 messages,
                 REPORT_TOKENS if final else TURN_TOKENS,
@@ -161,6 +170,9 @@ class Agent:
             )
         except UpstreamError as e:
             log.warning("interpretation_failed", extra={"error": str(e), "turn": turn})
+            # an unanswered call that ran until the budget was cut off by it, not by ai-core.
+            if e.status == 0 and time.monotonic() >= self.until - MIN_CALL:
+                e = UpstreamError("ai-core", 0, OUT_OF_TIME)
             raise refused(e) from None
         try:
             return checks.parse(output)
@@ -173,20 +185,24 @@ class Agent:
     async def _run_tools(self, classroom: str, calls: list[Any], until: float) -> None:
         """the turn's calls side by side, each cut off at `until`; recorded in the order the model asked."""
         planned = []
+        asked = set(self.done)  # a call made twice in one turn runs once
         for call in calls:
             if not isinstance(call, dict):
                 continue
             tool, reason = str(call.get("tool") or ""), " ".join(str(call.get("reason") or "").split())[:200]
             result_ref, topic_ref = _ref(call.get("result")), _ref(call.get("topic"))
             key = (tool, result_ref, topic_ref)
-            planned.append((tool, reason, result_ref, topic_ref, key in self.done))
-            self.done.add(key)
+            planned.append((key, reason, key in asked))
+            asked.add(key)
         outcomes = await asyncio.gather(
-            *(self._timed(classroom, tool, r, t, repeat, until) for tool, _, r, t, repeat in planned)
+            *(self._timed(classroom, *key, repeat, until) for key, _, repeat in planned)
         )
-        for (tool, reason, result_ref, topic_ref, _), (target, outcome, output) in zip(
+        for ((tool, result_ref, topic_ref), reason, _), (target, outcome, output) in zip(
             planned, outcomes, strict=True
         ):
+            # only an answered call is refused as a repeat; a failed or timed-out one may be tried again.
+            if outcome == "ok":
+                self.done.add((tool, result_ref, topic_ref))
             made = {"tool": tool, "result": result_ref, "topic": topic_ref}
             self.history.append({"call": made, "output": output})
             self.steps.append(
@@ -257,12 +273,17 @@ class Agent:
             self.class_read = asyncio.ensure_future(
                 self.services.class_performance(self.authorization, classroom, self.correlation)
             )
+        unread = ToolError(target, "failed", "The class's results could not be read just now.")
         try:
             # shielded: one call running out of time does not cancel the read the others share.
             students = await asyncio.shield(self.class_read)
-            return target, "ok", self.workspace.class_comparison(students, topic)
-        except (UpstreamError, KeyError, TypeError, ValueError):
-            raise ToolError(target, "failed", "The class's results could not be read just now.") from None
+        except UpstreamError:
+            self.class_read = None  # a later call reads the class again
+            raise unread from None
+        try:
+            return target, "ok", self.workspace.class_comparison(students, topic, self.student)
+        except (KeyError, TypeError, ValueError, AttributeError):
+            raise unread from None
 
     def _finish(self, report: dict[str, Any], turn: int, classroom: str, student: str) -> ResponseContract:
         try:

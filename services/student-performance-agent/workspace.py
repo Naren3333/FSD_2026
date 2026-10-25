@@ -83,6 +83,7 @@ class Workspace:
     # ---- building it
 
     def topic(self, topic_id: str, name: str = "") -> Topic:
+        name = clip(name, 160)
         if topic_id not in self.topics:
             self.topics[topic_id] = Topic(f"T{len(self.topics) + 1}", topic_id, name)
         elif name and not self.topics[topic_id].name:
@@ -161,13 +162,16 @@ class Workspace:
 
     # ---- what the model sees
 
-    def opening(self) -> dict[str, Any]:
-        """the student's topic summary and results, without any answers; the oldest results are left out when they would not fit, and a result left out cannot be read."""
-        while True:
-            opening = self._overview()
-            if len(json.dumps(opening, ensure_ascii=False)) <= OPENING_BUDGET or len(self.results) <= 1:
-                return opening
+    def fit(self) -> None:
+        """leaves out the oldest results until the opening fits; a result left out cannot be read. run once, before the first turn, so a result the model has seen never disappears as tools add topics."""
+        while (
+            len(self.results) > 1 and len(json.dumps(self._overview(), ensure_ascii=False)) > OPENING_BUDGET
+        ):
             self.results.pop()
+
+    def opening(self) -> dict[str, Any]:
+        """the student's topic summary and results, without any answers."""
+        return self._overview()
 
     def _overview(self) -> dict[str, Any]:
         return {
@@ -264,8 +268,11 @@ class Workspace:
             )
         return {"topic": topic.ref, "prerequisites": rows}
 
-    def class_comparison(self, students: list[dict[str, Any]], topic: Topic | None) -> dict[str, Any]:
-        """the class's pooled accuracy on each of the student's topics, next to the student's own."""
+    def class_comparison(
+        self, students: list[dict[str, Any]], topic: Topic | None, student_id: str
+    ) -> dict[str, Any]:
+        """the rest of the class's pooled accuracy on each of the student's topics, next to the student's own; the student is left out so their own marks do not pull the class figure toward theirs."""
+        students = [s for s in students if s.get("student_id") != student_id]
         wanted = [t for t in self.summary if topic is None or t["topic_id"] == topic.topic_id]
         rows = []
         for t in wanted:

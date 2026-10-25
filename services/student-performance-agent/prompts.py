@@ -16,7 +16,7 @@ TOOLS = {
     "(give result; topic optional to narrow it). Questions that lost marks come first, at most 8.",
     "prerequisites": "List the prerequisite topics of one topic (give topic), with the student's own evidence on "
     "each.",
-    "class_comparison": "Compare the student's accuracy with the whole class on each of their topics, or on one "
+    "class_comparison": "Compare the student's accuracy with the rest of the class on each of their topics, or on one "
     "(topic optional).",
 }
 
@@ -74,28 +74,32 @@ def messages(
     opening: dict[str, Any], history: list[dict[str, Any]], turn: int, turns: int, final: bool
 ) -> list[dict[str, str]]:
     """the fixed instructions and one task document holding everything gathered so far."""
-    task = {
+    task: dict[str, Any] = {
         "student": opening,
         "tools": TOOLS,
-        "tool_history": fitting(history),
+        "tool_history": [],
         "turn": turn,
         "turns_left": turns - turn,
         "instruction": "Write the report now; no more tools."
         if final
         else f"Call up to {MAX_CALLS} tools, or report if you have enough.",
     }
+    # the history gets what the rest leaves of ai-core's message, so the cut below never splits the json; the
+    # opening can grow past its budget as tools add topics.
+    room = MAX_MESSAGE - len(json.dumps(task, ensure_ascii=False)) - 2 * len(history)
+    task["tool_history"] = fitting(history, min(HISTORY_BUDGET, room))
     return [
         {"role": "system", "content": INSTRUCTIONS},
         {"role": "user", "content": json.dumps(task, ensure_ascii=False)[:MAX_MESSAGE]},
     ]
 
 
-def fitting(history: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    """the tool history, its oldest results trimmed until the rest fits the budget; the calls themselves stay."""
+def fitting(history: list[dict[str, Any]], budget: int = HISTORY_BUDGET) -> list[dict[str, Any]]:
+    """the tool history, its oldest results trimmed until the rest fits `budget`; the calls themselves stay."""
     kept = list(history)
     size = sum(len(json.dumps(h, ensure_ascii=False)) for h in kept)
     for i, h in enumerate(kept):
-        if size <= HISTORY_BUDGET:
+        if size <= budget:
             break
         trimmed = {**h, "output": "(trimmed to save space)"}
         size -= len(json.dumps(h, ensure_ascii=False)) - len(json.dumps(trimmed, ensure_ascii=False))

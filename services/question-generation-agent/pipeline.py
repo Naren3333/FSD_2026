@@ -104,10 +104,11 @@ def not_run(n: int) -> Review:
     return Review(status="not_reviewed", note="The review could not run.", round=n)
 
 
-def flag_long_key(draft: Generated) -> Generated:
-    """a draft whose key gives itself away, flagged by our own check rather than the reviewer."""
-    flagged = Review(status="flagged", note=checks.LONG_KEY_NOTE, source="check")
-    return draft.model_copy(update={"review": flagged})
+def held(draft: Generated, review: Review) -> Generated:
+    """a draft kept without a passing review, marked `review`; one whose key gives itself away is flagged by our own check instead, whether or not a reviewer saw it."""
+    if checks.long_key(draft.question):
+        review = Review(status="flagged", note=checks.LONG_KEY_NOTE, round=review.round, source="check")
+    return draft.model_copy(update={"review": review})
 
 
 def omitted(n: int) -> Review:
@@ -168,7 +169,7 @@ class Run:
             if verdict.reason == review.NOT_REVIEWED:
                 # no verdict is not a failure: the draft is kept, and a usable draft is not paid to be replaced.
                 counts[review.NOT_REVIEWED] += 1
-                self.unreviewed.append(draft.model_copy(update={"review": omitted(n)}))
+                self.unreviewed.append(held(draft, omitted(n)))
                 continue
             long_key = verdict.passed and checks.long_key(draft.question)
             if verdict.passed and not long_key:
@@ -309,14 +310,14 @@ class Pipeline:
                 run.rounds.append(_round(generated, kept, counts, sent_back, 0))
                 continue
             if not with_review:
-                run.unreviewed += [flag_long_key(g) if checks.long_key(g.question) else g for g in kept]
+                run.unreviewed += [held(g, g.review) for g in kept]
                 run.rounds.append(_round(generated, kept, counts, sent_back, len(kept)))
                 continue
             try:
                 verdicts = await self._review(topic, body, kept, passages, run, deadline)
             except (UpstreamError, checks.UnreadableOutputError) as e:
                 log.warning("review_failed", extra={"error": str(e), "round": n})
-                run.unreviewed += [g.model_copy(update={"review": not_run(n)}) for g in kept]
+                run.unreviewed += [held(g, not_run(n)) for g in kept]
                 run.rounds.append(_round(generated, kept, counts, sent_back, len(kept)))
                 run.stop_error = e if isinstance(e, UpstreamError) and e.code != OUT_OF_TIME else None
                 break
