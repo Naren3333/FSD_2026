@@ -7,9 +7,11 @@ from typing import Any
 import httpx
 import pytest
 from conftest import CHUNK_1, CHUNK_2, DOC, SETTINGS, Fakes, as_user, reply
+from learning_transport import UpstreamError
 from test_api import BODY, GENERATE
 from test_checks import choice, short
 
+import clients
 import main
 import pipeline
 import prompts
@@ -438,6 +440,44 @@ def test_a_retry_runs_when_it_fits_inside_the_deadline(api, fakes: Fakes, monkey
     data = ask(api, count=2).json()
     sent(fakes, GEN, REV, GEN, REV)
     assert data["returned"] == 2 and len(data["rounds"]) == 2
+
+
+def test_a_retry_the_deadline_cuts_off_is_not_reported_as_unavailable(
+    api, fakes: Fakes, monkeypatch: pytest.MonkeyPatch
+):
+    """a retry that runs out of time ends the rounds: with nothing accepted, the answer is the checks' 422, not a 503."""
+    configure(review_deadline=240)
+    clock = Clock()
+    monkeypatch.setattr(pipeline, "time", clock)
+    generate = clients.Services.generate
+
+    async def deadline_stops_the_third(self: Any, *args: Any) -> str:
+        if len(fakes.calls("/v1/inference")) == 2:
+            clock.now = 240.0  # the retry's call ran until the deadline cut it off
+            raise UpstreamError("ai-core", 0)
+        return await generate(self, *args)
+
+    monkeypatch.setattr(clients.Services, "generate", deadline_stops_the_third)
+    fakes.replies = [gen(mc(0)), rev(WRONG_KEY)]
+    resp = ask(api, count=1)
+    assert resp.status_code == 422 and resp.json()["error"]["code"] == "GENERATION_REJECTED"
+
+
+def test_a_retry_that_loses_ai_core_before_the_deadline_is_still_unavailable(
+    api, fakes: Fakes, monkeypatch: pytest.MonkeyPatch
+):
+    configure(review_deadline=240)
+    generate = clients.Services.generate
+
+    async def unreachable_third(self: Any, *args: Any) -> str:
+        if len(fakes.calls("/v1/inference")) == 2:
+            raise UpstreamError("ai-core", 0)
+        return await generate(self, *args)
+
+    monkeypatch.setattr(clients.Services, "generate", unreachable_third)
+    fakes.replies = [gen(mc(0)), rev(WRONG_KEY)]
+    resp = ask(api, count=1)
+    assert resp.status_code == 503 and resp.json()["error"]["code"] == "AI_UNAVAILABLE"
 
 
 def test_a_short_reply_with_nothing_rejected_is_written_again(api, fakes: Fakes):

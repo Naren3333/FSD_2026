@@ -36,6 +36,8 @@ GUIDANCE_TOKENS = 2000
 REVIEW_TOKENS = 3000
 # a call with less time than this left before the deadline is not started.
 MIN_CALL = 5.0
+# a call the deadline stopped or kept from starting; not a failure to report, only the end of the retries.
+OUT_OF_TIME = "OUT_OF_TIME"
 WEAK_DISTRACTORS = "WEAK_DISTRACTORS"
 UNREADABLE_REPLY = "UNREADABLE_REPLY"
 NOT_TEACHER = ("FORBIDDEN", "Only the classroom's teacher can generate questions or marking guidance.")
@@ -253,10 +255,16 @@ class Pipeline:
         if deadline is not None:
             timeout = deadline - time.monotonic()
             if timeout < MIN_CALL:
-                raise UpstreamError("ai-core", 0, "OUT_OF_TIME")
-        return await self.services.generate(
-            messages, tokens, schema, name, self.correlation, billed(self.claims), timeout
-        )
+                raise UpstreamError("ai-core", 0, OUT_OF_TIME)
+        try:
+            return await self.services.generate(
+                messages, tokens, schema, name, self.correlation, billed(self.claims), timeout
+            )
+        except UpstreamError as e:
+            # an unanswered call that ran until the deadline was cut off by it, not by ai-core.
+            if deadline is not None and e.status == 0 and time.monotonic() >= deadline - MIN_CALL:
+                raise UpstreamError("ai-core", 0, OUT_OF_TIME) from None
+            raise
 
     async def _rounds(
         self, topic: str, body: GenerateRequest, passages: list[Passage], started: float, review: bool
@@ -287,7 +295,7 @@ class Pipeline:
                 log.warning("generation_failed", extra={"error": str(e), "round": n})
                 if n == 0:
                     raise refused(e) from None
-                run.stop_error = e
+                run.stop_error = None if e.code == OUT_OF_TIME else e
                 break
             run.calls += 1
             try:
@@ -341,7 +349,7 @@ class Pipeline:
                         sent_back=sent_back,
                     )
                 )
-                run.stop_error = e if isinstance(e, UpstreamError) else None
+                run.stop_error = e if isinstance(e, UpstreamError) and e.code != OUT_OF_TIME else None
                 break
             passed = run.judged(n, kept, verdicts, counts, sent_back)
             run.rounds.append(
