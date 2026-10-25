@@ -16,7 +16,7 @@ const (
 	room         = "7a2d6e3f-9b5c-4d4e-8f3a-2b3c4d5e6f70"
 )
 
-// memorystore holds one draft evaluation; finalize fails with the error it is given.
+// memoryStore holds one draft evaluation; finalize fails with the error it is given.
 type memoryStore struct {
 	finalizeErr error
 	finalized   []string // reasons
@@ -48,7 +48,7 @@ func (m *memoryStore) findEvaluation(_ context.Context, _, id string) (Evaluatio
 	return draft, nil
 }
 
-// listreleased answers for student-1 only, so a test sees whose results were asked for.
+// listReleased answers for student-1 only, so a test sees whose results were asked for.
 func (m *memoryStore) listReleased(_ context.Context, _, _, student string) ([]Evaluation, error) {
 	if student != "student-1" {
 		return []Evaluation{}, nil

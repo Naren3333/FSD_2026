@@ -245,7 +245,7 @@ func TestTooManyQuotesAreRefused(t *testing.T) {
 	}
 }
 
-// fakeai is ai-core and the token endpoint: it keeps the last inference body and answers it with answer.
+// fakeAI is ai-core and the token endpoint: it keeps the last inference body and answers it with answer.
 type fakeAI struct {
 	*httptest.Server
 	body map[string]any

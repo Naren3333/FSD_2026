@@ -45,7 +45,7 @@ THREAD_GONE = ("NOT_FOUND", "This conversation was deleted.")
 MAX_DOCUMENTS_CHARS = 55000  # ai-core takes messages of up to 60000 characters
 PASSAGE_OVERHEAD = 200  # characters each passage adds to the prompt besides its content: tag, title, pages
 MAX_SUB_QUERIES = 3
-MERGED_TOP_K = 12  # passages a split message is answered from (one search gives search_top_k)
+MERGED_TOP_K = 12  # passages a split message is answered from (one search gives SEARCH_TOP_K)
 PER_DOCUMENT = 5  # of those, at most this many from one document
 
 
@@ -462,7 +462,7 @@ class Turn:
 
 
 def topics(value: Any, query: str) -> list[str]:
-    """the rewrite's sub_queries, cleaned: distinct, not the whole query, at most max_sub_queries."""
+    """the rewrite's sub_queries, cleaned: distinct, not the whole query, at most MAX_SUB_QUERIES."""
     if not isinstance(value, list):
         return []
     seen = {query.casefold()}

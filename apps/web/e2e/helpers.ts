@@ -163,7 +163,7 @@ export async function deleteTestClassroom(id: string): Promise<void> {
   }
 }
 
-/* classrooms (by id) and topics (by name) the running test created, deleted after it whether it passed or failed (see deletetestdataaftereach). */
+/* classrooms (by id) and topics (by name) the running test created, deleted after it whether it passed or failed (see deleteTestDataAfterEach). */
 const createdClassrooms: string[] = [];
 const createdTopics: string[] = [];
 

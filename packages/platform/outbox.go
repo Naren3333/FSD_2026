@@ -18,7 +18,7 @@ const (
 	OutboxMaxAttempts = 300
 )
 
-// outboxretention is how long a published event stays in the outbox, the same as kafka keeps the topics
+// OutboxRetention is how long a published event stays in the outbox, the same as kafka keeps the topics
 // that carry students' answers and grades (docker-compose.yml).
 const OutboxRetention = 7 * 24 * time.Hour
 
@@ -30,7 +30,7 @@ type outboxRow struct {
 // outbox publishes the events services emit into their outbox table.
 type Outbox struct{ DB *pgxpool.Pool }
 
-// messagewriter is the part of *kafka.writer the outbox uses.
+// messageWriter is the part of *kafka.Writer the outbox uses.
 type messageWriter interface {
 	WriteMessages(ctx context.Context, msgs ...kafka.Message) error
 }
@@ -66,7 +66,7 @@ func (o Outbox) Run(ctx context.Context) {
 	}
 }
 
-// publishbatch sends up to outboxbatch due rows and records, per row, whether kafka took it.
+// publishBatch sends up to OutboxBatch due rows and records, per row, whether kafka took it.
 func (o Outbox) publishBatch(ctx context.Context, writer messageWriter) (int, error) {
 	batchCtx, cancel := context.WithTimeout(ctx, 20*time.Second)
 	defer cancel()
@@ -107,7 +107,7 @@ func (o Outbox) publishBatch(ctx context.Context, writer messageWriter) (int, er
 	return len(batch), nil
 }
 
-// duerows locks up to outboxbatch unpublished rows whose next attempt is due, oldest first.
+// dueRows locks up to OutboxBatch unpublished rows whose next attempt is due, oldest first.
 func dueRows(ctx context.Context, tx pgx.Tx) ([]outboxRow, error) {
 	rows, err := tx.Query(ctx, `SELECT id,topic,partition_key,body FROM outbox o WHERE published_at IS NULL AND attempts<$1 AND next_attempt<=now()
 		AND NOT EXISTS(SELECT 1 FROM outbox p WHERE p.topic=o.topic AND p.partition_key=o.partition_key AND p.published_at IS NULL AND p.attempts<$1 AND (p.created_at,p.id)<(o.created_at,o.id))
@@ -135,7 +135,7 @@ func markPublished(ctx context.Context, tx pgx.Tx, ids []string) error {
 	return err
 }
 
-// scheduleretries counts a failed attempt for each row and backs it off, logging the rows that ran out of
+// scheduleRetries counts a failed attempt for each row and backs it off, logging the rows that ran out of
 // attempts.
 func scheduleRetries(ctx context.Context, tx pgx.Tx, ids []string) error {
 	if len(ids) == 0 {
@@ -154,7 +154,7 @@ func scheduleRetries(ctx context.Context, tx pgx.Tx, ids []string) error {
 	return nil
 }
 
-// deliveryfailures maps writemessages' error to the messages it concerns: kafka.writeerrors names each
+// deliveryFailures maps WriteMessages' error to the messages it concerns: kafka.WriteErrors names each
 // message, any other error fails them all.
 func deliveryFailures(err error, n int) []bool {
 	failed := make([]bool, n)
@@ -174,7 +174,7 @@ func deliveryFailures(err error, n int) []bool {
 	return failed
 }
 
-// reportoutbox logs, as an error, events waiting more than five minutes and events that ran out of
+// reportOutbox logs, as an error, events waiting more than five minutes and events that ran out of
 // attempts, so a broker outage or a stuck event is visible instead of silent.
 func (o Outbox) reportOutbox(ctx context.Context) {
 	reportCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
@@ -190,7 +190,7 @@ func (o Outbox) reportOutbox(ctx context.Context) {
 	}
 }
 
-// prune deletes published events older than outboxretention, a batch at a time so a large first prune never
+// prune deletes published events older than OutboxRetention, a batch at a time so a large first prune never
 // holds a long lock.
 func (o Outbox) prune(ctx context.Context) {
 	pruneCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
@@ -200,7 +200,7 @@ func (o Outbox) prune(ctx context.Context) {
 	}
 }
 
-// pruneoutbox deletes up to 1000 rows published more than retention ago and reports how many it deleted.
+// pruneOutbox deletes up to 1000 rows published more than retention ago and reports how many it deleted.
 func pruneOutbox(ctx context.Context, db *pgxpool.Pool, retention time.Duration) (int64, error) {
 	tag, err := db.Exec(ctx, "DELETE FROM outbox WHERE id IN (SELECT id FROM outbox WHERE published_at<now()-make_interval(secs=>$1) LIMIT 1000)", retention.Seconds())
 	return tag.RowsAffected(), err

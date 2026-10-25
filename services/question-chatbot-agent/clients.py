@@ -87,5 +87,5 @@ class Services(AgentClients):
         try:
             data = resp.json()
             return Usage.model_validate({k: data[k] for k in ("spent_usd", "limit_usd", "resets_at")})
-        except (ValueError, KeyError, TypeError):  # validationerror is a valueerror
+        except (ValueError, KeyError, TypeError):  # ValidationError is a ValueError
             raise UpstreamError("ai-core", 502) from None

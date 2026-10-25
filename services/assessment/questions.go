@@ -32,7 +32,7 @@ const (
 	defaultMaxLength = 5000
 	maxFreeResponse  = 20000
 	// marking-scheme passages: per question, per passage and per assessment, which keeps the submission event
-	// within maxsubmittedevent.
+	// within maxSubmittedEvent.
 	maxExcerpts           = 5
 	maxExcerptText        = 2000
 	maxExcerptPage        = 100000
@@ -41,7 +41,7 @@ const (
 	maxSources = 5
 )
 
-// questionkind holds one question type's rules: when a question of that type is well formed, and which
+// questionKind holds one question type's rules: when a question of that type is well formed, and which
 // answers a student may submit to it.
 type questionKind interface {
 	validate(q Question) error
@@ -67,7 +67,7 @@ func objective(q Question) error {
 	return nil
 }
 
-// multiplechoice: 2–8 distinct options, and the answer key is one of them.
+// multipleChoice: 2–8 distinct options, and the answer key is one of them.
 type multipleChoice struct{}
 
 func (multipleChoice) validate(q Question) error {
@@ -116,7 +116,7 @@ func (numerical) accepts(_ Question, answer string) bool { return decimal.MatchS
 
 func (numerical) limit(Question) int { return maxAnswer }
 
-// shortanswer: a list of accepted answers, matched after normalizeshort (and case-insensitively unless the
+// shortAnswer: a list of accepted answers, matched after normalizeShort (and case-insensitively unless the
 // teacher says case matters).
 type shortAnswer struct{}
 
@@ -144,7 +144,7 @@ func (shortAnswer) accepts(_ Question, answer string) bool {
 
 func (shortAnswer) limit(Question) int { return maxAnswer }
 
-// normalizeshort trims an answer and collapses its inner whitespace, and lowercases it unless case matters.
+// normalizeShort trims an answer and collapses its inner whitespace, and lowercases it unless case matters.
 func normalizeShort(answer string, caseSensitive bool) string {
 	answer = strings.Join(strings.Fields(answer), " ")
 	if !caseSensitive {
@@ -153,7 +153,7 @@ func normalizeShort(answer string, caseSensitive bool) string {
 	return answer
 }
 
-// freeresponse: written work marked against a rubric of criteria, each with 2–6 levels.
+// freeResponse: written work marked against a rubric of criteria, each with 2–6 levels.
 type freeResponse struct{}
 
 func (freeResponse) validate(q Question) error {
@@ -177,13 +177,13 @@ func (freeResponse) validate(q Question) error {
 	return validateScheme(q.MarkingScheme)
 }
 
-// validatescheme checks a question's marking-scheme passages: up to maxexcerpts, each with text, and a
+// validateScheme checks a question's marking-scheme passages: up to maxExcerpts, each with text, and a
 // chunk only with the document it came from.
 func validateScheme(excerpts []Excerpt) error {
 	return validateExcerpts(excerpts, maxExcerpts, "marking-scheme passage")
 }
 
-// validatesources checks a generated question's source passages, which have the same shape.
+// validateSources checks a generated question's source passages, which have the same shape.
 func validateSources(sources []Excerpt) error {
 	return validateExcerpts(sources, maxSources, "source passage")
 }

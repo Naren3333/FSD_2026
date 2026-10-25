@@ -240,7 +240,7 @@ def test_a_short_chunk_alone_on_its_page_is_kept() -> None:
 def test_a_header_wider_than_a_chunk_keeps_every_row() -> None:
     from ingest.tables import Table
 
-    # the header alone is over max_tokens; one row is very long, and gets cut into windows
+    # the header alone is over MAX_TOKENS; one row is very long, and gets cut into windows
     header = tuple(f"Assessment criterion {i} with a long descriptive heading" for i in range(80))
     rows = (*((f"row {r}", *("x",) * 79) for r in range(5)), ("long " * 400, *("y",) * 79))
     table = Table((0, 0, 100, 100), header, rows)

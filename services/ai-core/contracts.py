@@ -100,7 +100,7 @@ class IngestFigure(Contract):
 
 
 class IngestResponse(Contract):
-    """`failed` is the document's own problem (encrypted, corrupt, no_text_layer, too_large) and retrying will not help."""
+    """`failed` is the document's own problem (encrypted, corrupt, NO_TEXT_LAYER, TOO_LARGE) and retrying will not help."""
 
     outcome: Literal["indexed", "failed"]
     failure_reason: Literal["NO_TEXT_LAYER", "ENCRYPTED", "CORRUPT", "TOO_LARGE"] | None = None

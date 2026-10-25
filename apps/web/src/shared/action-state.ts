@@ -21,7 +21,7 @@ export class ActionState {
       this.busy.set(false);
     }
   }
-  /* shows the form's errors and, when it is invalid, focuses its first invalid control: the one inside the element with id `formid`, never another form on the page. */
+  /* shows the form's errors and, when it is invalid, focuses its first invalid control: the one inside the element with id `formId`, never another form on the page. */
   validate(form: FormGroup, formId: string): boolean {
     form.markAllAsTouched();
     if (form.invalid) {

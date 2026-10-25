@@ -50,7 +50,7 @@ class UpstreamError(Exception):
 
 
 def upstream_error(service: str, resp: httpx.Response) -> UpstreamError:
-    """a refused call as an upstreamerror: the service's error code and, for ai_spend_limit, when the allowance resets."""
+    """a refused call as an UpstreamError: the service's error code and, for AI_SPEND_LIMIT, when the allowance resets."""
     try:
         error = resp.json()["error"]
         code, resets_at = str(error.get("code") or ""), error.get("resets_at")

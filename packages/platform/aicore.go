@@ -19,7 +19,7 @@ type AICore struct {
 	Client *http.Client // no overall timeout: each call's context bounds it
 }
 
-// newaicore reads ai_core_url and the service account's ai_token_url, ai_client_id and ai_client_secret.
+// NewAICore reads AI_CORE_URL and the service account's AI_TOKEN_URL, AI_CLIENT_ID and AI_CLIENT_SECRET.
 func NewAICore() AICore {
 	return AICore{
 		Base:   strings.TrimRight(Required("AI_CORE_URL"), "/"),
@@ -28,7 +28,7 @@ func NewAICore() AICore {
 	}
 }
 
-// maxairesponse bounds a successful ai-core answer.
+// maxAIResponse bounds a successful ai-core answer.
 const maxAIResponse = 64 << 20
 
 // billed is whose daily ai allowance pays for a call (adr 0003).

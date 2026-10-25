@@ -11,10 +11,10 @@ type Topic struct {
 	Name string `json:"name"`
 }
 
-// maxname is the longest topic name, in characters.
+// maxName is the longest topic name, in characters.
 const maxName = 160
 
-// validname reports whether the name, trimmed as it is stored, has 1–maxname characters.
+// validName reports whether the name, trimmed as it is stored, has 1–maxName characters.
 func validName(name string) bool {
 	name = strings.TrimSpace(name)
 	return name != "" && utf8.RuneCountInString(name) <= maxName

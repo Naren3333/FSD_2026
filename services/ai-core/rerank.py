@@ -16,7 +16,7 @@ _client: httpx2.AsyncClient | None = None
 
 
 class RerankNotConfiguredError(Exception):
-    """voyage_api_key is unset."""
+    """VOYAGE_API_KEY is unset."""
 
 
 class RerankError(Exception):

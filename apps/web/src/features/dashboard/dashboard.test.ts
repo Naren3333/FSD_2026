@@ -68,7 +68,7 @@ const performance: ClassPerformance = {
   ],
 };
 
-/* the class dashboard for classroom `classroomid`, each part answering as `parts` says (by default, a class with data in every part). */
+/* the class dashboard for classroom `classroomId`, each part answering as `parts` says (by default, a class with data in every part). */
 async function render(parts: Parts = {}, classroomId = 'c1', rooms: Rooms = {}) {
   const classPerformance = vi.fn(
     (_classroomId: string, _offset: number, _limit: number) =>

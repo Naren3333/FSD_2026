@@ -16,7 +16,7 @@ import (
 	"github.com/google/uuid"
 )
 
-// submittedschema is the published contract of the submission event.
+// submittedSchema is the published contract of the submission event.
 func submittedSchema(t *testing.T) map[string]any {
 	t.Helper()
 	return eventSchema(t, topicSubmitted)
@@ -131,7 +131,7 @@ func jsonType(value any, kind string) bool {
 	return false
 }
 
-// asjson is value as decoded json, as a consumer reads it.
+// asJSON is value as decoded json, as a consumer reads it.
 func asJSON(t *testing.T, value any) any {
 	t.Helper()
 	data, err := json.Marshal(value)

@@ -1,5 +1,7 @@
 -- the curriculum has one level, topics: each stored question names its topic in topic_id instead of
 -- skill_id.
+-- only the key is renamed, keeping its value, every other field and the questions' order; saved answers,
+-- submissions and rows already in the outbox are unchanged.
 UPDATE assessments a
 SET questions = (
     SELECT coalesce(jsonb_agg(

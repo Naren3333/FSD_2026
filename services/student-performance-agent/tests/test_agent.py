@@ -26,7 +26,9 @@ from conftest import (
 )
 from fastapi.testclient import TestClient
 
+import agent
 import main
+import workspace
 
 PATH = "/v1/performance_interpretation"
 BODY = {"classroom_id": ROOM, "student_id": STUDENT}
@@ -276,3 +278,52 @@ def test_the_spend_limit_says_when_it_resets(api, fakes: Fakes):
 
 def test_ready(api):
     assert api.get("/health/ready").json() == {"status": "ready"}
+
+
+def test_tools_in_a_turn_share_one_read_of_the_class(api, fakes: Fakes):
+    fakes.replies = [
+        reply(tools(call("class_comparison"), call("class_comparison", topic="T1"))),
+        reply(done(possible_misconceptions=[])),
+    ]
+    resp = api.post(PATH, json=BODY, headers=as_user())
+    assert resp.status_code == 200, resp.text
+    assert [s["outcome"] for s in resp.json()["steps"]] == ["ok", "ok"]
+    assert len(fakes.calls("/v1/performance")) == 1
+
+
+def test_every_call_is_cut_off_inside_the_budget(api, fakes: Fakes):
+    """a tool turn keeps the report its reserve; with too little time left the turn must report."""
+    main.app.state.settings = dataclasses.replace(SETTINGS, budget=100.0)
+    fakes.replies = [reply(done(possible_misconceptions=[]))]
+    assert api.post(PATH, json=BODY, headers=as_user()).status_code == 200
+    timeout = fakes.requests[[p for p, _, _ in fakes.requests].index("/v1/inference")][2].extensions[
+        "timeout"
+    ]
+    assert timeout["read"] <= 100.0 - agent.REPORT_RESERVE
+    main.app.state.settings = dataclasses.replace(SETTINGS, budget=agent.REPORT_RESERVE)
+    fakes.replies = [reply(report(possible_misconceptions=[]))]
+    resp = api.post(PATH, json=BODY, headers=as_user())
+    assert resp.status_code == 200 and fakes.calls("/v1/inference")[-1]["schema_name"] == "performance.report"
+
+
+def test_a_malformed_topic_summary_is_an_upstream_failure(api, fakes: Fakes):
+    fakes.summary = [{"topic_id": LOOPS, "attempted": 2}]
+    resp = api.post(PATH, json=BODY, headers=as_user())
+    assert resp.status_code == 503 and resp.json()["error"]["code"] == "AI_UNAVAILABLE"
+    assert fakes.calls("/v1/inference") == []
+
+
+def test_only_the_newest_results_assessments_are_read(api, fakes: Fakes):
+    fakes.evaluations = [finalized(id=f"00000000-0000-4000-8000-{i:012d}", assessment_id=f"00000000-0000-4000-8001-{i:012d}") for i in range(30)]  # fmt: skip
+    fakes.replies = [reply(report(possible_misconceptions=[]))]
+    main.app.state.settings = dataclasses.replace(SETTINGS, max_turns=1)
+    api.post(PATH, json=BODY, headers=as_user())
+    assert len(fakes.calls("/v1/assessments/batch")[0]["ids"]) == workspace.MAX_RESULTS
+
+
+def test_the_model_is_told_which_results_are_not_released(api, fakes: Fakes):
+    fakes.evaluations = [finalized(released_at=None)]
+    fakes.replies = [reply(report(possible_misconceptions=[]))]
+    main.app.state.settings = dataclasses.replace(SETTINGS, max_turns=1)
+    assert api.post(PATH, json=BODY, headers=as_user()).status_code == 200
+    assert fakes.task(1)["student"]["results"][0]["released"] is False

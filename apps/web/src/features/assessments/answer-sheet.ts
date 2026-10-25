@@ -97,7 +97,7 @@ export class AnswerSheetComponent {
   private edits = 0;
   private savedEdits = 0;
   answers = new FormGroup<Record<string, FormControl<string>>>({});
-  /* the time the due state is judged at: now, moved on every due_check while the page is open. */
+  /* the time the due state is judged at: now, moved on every DUE_CHECK while the page is open. */
   private readonly now = signal(new Date());
   /* where the open assessment stands with its due date. */
   readonly due = computed<DueState>(() => {

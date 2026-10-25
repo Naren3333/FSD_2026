@@ -42,7 +42,7 @@ RECORD = "INSERT INTO schema_migrations(version) VALUES(%s) ON CONFLICT DO NOTHI
 
 @dataclass(frozen=True)
 class Migration:
-    """one numbered sql file, nnn_name.sql, applied once and recorded in schema_migrations."""
+    """one numbered sql file, NNN_name.sql, applied once and recorded in schema_migrations."""
 
     version: int
     name: str
@@ -50,7 +50,7 @@ class Migration:
 
 
 def migrations(directory: Path) -> list[Migration]:
-    """the nnn_name.sql files in directory in version order."""
+    """the NNN_name.sql files in directory in version order."""
     found = []
     for path in directory.glob("*.sql"):
         match = MIGRATION_NAME.match(path.name)

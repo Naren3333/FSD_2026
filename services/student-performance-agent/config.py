@@ -7,6 +7,8 @@ from learning_transport.agents import AGENT_ENV, AgentSettings, read_settings
 MAX_TURNS = 5
 # after this many seconds the next turn must report, so the teacher is not kept waiting.
 DEADLINE = 120.0
+# every call is cut off this many seconds after the request starts, inside kong's 300 s read timeout.
+BUDGET = 240.0
 
 
 @dataclass(frozen=True)
@@ -17,6 +19,7 @@ class Settings(AgentSettings):
     curriculum_url: str
     max_turns: int = MAX_TURNS
     deadline: float = DEADLINE
+    budget: float = BUDGET
 
 
 # this agent never searches content, so it needs no content url (adr 0014).
@@ -35,4 +38,5 @@ def load() -> Settings:
         content_url="",
         max_turns=int(os.environ.get("PERFORMANCE_MAX_TURNS", MAX_TURNS)),
         deadline=float(os.environ.get("PERFORMANCE_DEADLINE", DEADLINE)),
+        budget=min(float(os.environ.get("PERFORMANCE_BUDGET", BUDGET)), BUDGET),
     )

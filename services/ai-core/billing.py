@@ -30,7 +30,7 @@ def ledger_unavailable() -> HTTPException:
 
 
 def busy() -> HTTPException:
-    """429 when the user already has as many paid calls running as ai_user_concurrency allows."""
+    """429 when the user already has as many paid calls running as AI_USER_CONCURRENCY allows."""
     return failure(429, "AI_BUSY", "Too many AI requests are running for you at once. Try again in a moment.")
 
 

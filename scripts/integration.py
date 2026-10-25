@@ -106,7 +106,7 @@ def ai_core_status(token: str) -> int:
 
 
 def request(client: httpx.Client, method: str, path: str, status: int = 200, **kwargs: Any) -> Any:
-    """sends a request through the gateway, checks its status, and validates the json response against the service's committed openapi contract."""
+    """sends a request through the gateway, checks its status, and validates the json response against the service's committed OpenAPI contract."""
     response = client.request(method, path, **kwargs)
     if response.status_code == 429 and status != 429 and "API rate limit exceeded" in response.text:
         # kong allows each signed-in session (bearer token) 120 requests a minute; a step that makes many
@@ -328,7 +328,7 @@ def documents(u: Users, room_id: str) -> None:
     assert left == "0 1", f"jobs and deleted events after the delete: {left}"
     request(u.teacher, "DELETE", pdf_path, 404)
 
-    # pdfs may be up to 50 mib through the gateway; text stays at 5 mib, refused by content itself.
+    # pdfs may be up to 50 MiB through the gateway; text stays at 5 MiB, refused by content itself.
     request(u.teacher, "POST", f"{documents}&title=Big", 413, content=b"a" * (7 << 20), headers=TEXT)
 
 
@@ -346,7 +346,7 @@ def search(u: Users, room_id: str) -> None:
 
 
 def chat(u: Users, room_id: str) -> None:
-    """a thread needs classroom access; each turn searches with the user's own token and streams an answer from ai-core (an ai_unavailable error event without provider keys, never a made-up answer)."""
+    """a thread needs classroom access; each turn searches with the user's own token and streams an answer from ai-core (an AI_UNAVAILABLE error event without provider keys, never a made-up answer)."""
     assert httpx.post(BASE + "/chatbot/threads", json={"classroom_id": room_id}).status_code == 401
     request(u.other, "POST", "/chatbot/threads", 403, json={"classroom_id": room_id})
     thread = request(u.student, "POST", "/chatbot/threads", 201, json={"classroom_id": room_id})

@@ -60,7 +60,7 @@ def test_every_consumed_topic_has_its_dead_letter_topic():
 
 
 def test_emit_only_topics_are_only_named_by_content():
-    """a service that starts consuming one of content's events needs its dead-letter topic: move it out of emit_only."""
+    """a service that starts consuming one of content's events needs its dead-letter topic: move it out of EMIT_ONLY."""
     named = named_topics()
     elsewhere = {
         t: files

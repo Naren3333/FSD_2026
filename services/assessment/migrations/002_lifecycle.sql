@@ -1,4 +1,5 @@
 -- drafts, scheduling, due dates, release and ai-marking settings.
+-- additive only: existing assessments stay published and open, with today's policies.
 ALTER TABLE assessments ADD COLUMN IF NOT EXISTS status text NOT NULL DEFAULT 'published' CHECK(status IN ('draft','published'));
 ALTER TABLE assessments ADD COLUMN IF NOT EXISTS opens_at timestamptz;
 ALTER TABLE assessments ADD COLUMN IF NOT EXISTS due_at timestamptz;

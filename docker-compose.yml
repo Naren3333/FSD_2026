@@ -30,7 +30,7 @@ services:
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Run scripts/setup.py or scripts/upgrade_local.py}
     volumes:
     - postgres-data:/var/lib/postgresql/data
-    # the test stack (scripts/stack_tests.py) reads its own first-start files from local_config_dir.
+    # the test stack (scripts/stack_tests.py) reads its own first-start files from LOCAL_CONFIG_DIR.
     - ${LOCAL_CONFIG_DIR:-./.local}/postgres-init.sql:/docker-entrypoint-initdb.d/01-services.sql:ro
     healthcheck:
       test:
@@ -217,8 +217,9 @@ services:
       KONG_PROXY_ACCESS_LOG: 'off'
       KONG_PROXY_ERROR_LOG: /dev/stderr
       KONG_DNS_VALID_TTL: '5'  # re-resolve services every 5 s, so a recreated container is found without restarting kong
-      KONG_DNS_STALE_TTL: '0'  # never route to a cached address after it expires; a restarted container's old ip may now belong to another
-# service
+      # never route to a cached address after it expires; a restarted container's old ip may now belong to another
+      # service.
+      KONG_DNS_STALE_TTL: '0'
     ports:
     - 127.0.0.1:${KONG_PORT:-8000}:8000
     volumes:

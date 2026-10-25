@@ -15,13 +15,17 @@ import prompts
 from clients import Services, billed
 from config import Settings
 from contracts import Evidence, Observation, RequestContract, ResponseContract, Step
-from workspace import Topic, Workspace
+from workspace import MAX_RESULTS, Topic, Workspace
 
 log = logging.getLogger("student-performance-agent.agent")
 
 Outcome = Literal["ok", "refused", "failed"]
 TURN_TOKENS = 1500
 REPORT_TOKENS = 3000
+# time kept back for the report: a tool turn and its tools end this long before the budget runs out.
+REPORT_RESERVE = 60.0
+# a call with less time than this left is not started.
+MIN_CALL = 5.0
 NOT_TEACHER = ("FORBIDDEN", "Only the classroom's teacher can interpret a student's results.")
 
 # errors whose code alone says what the teacher should hear.
@@ -79,6 +83,9 @@ class Agent:
         self.history: list[dict[str, Any]] = []
         self.done: set[tuple[str, str | None, str | None]] = set()
         self.unreadable = 0
+        self.started = time.monotonic()
+        self.until = self.started + settings.budget  # no call runs past this
+        self.class_read: asyncio.Future[list[Any]] | None = None  # the class's summaries, read once
 
     async def interpret(self, body: RequestContract) -> ResponseContract:
         classroom, student = str(body.classroom_id), body.student_id
@@ -102,10 +109,14 @@ class Agent:
                 "NO_EVIDENCE",
                 "This student has no finalized results in this classroom yet, so there is nothing to interpret.",
             )
-        started = time.monotonic()
         turns = self.settings.max_turns
         for turn in range(1, turns + 1):
-            final = turn == turns or time.monotonic() - started > self.settings.deadline
+            now = time.monotonic()
+            final = (
+                turn == turns
+                or now - self.started > self.settings.deadline
+                or self.until - REPORT_RESERVE - now < MIN_CALL
+            )
             reply = await self._turn(turn, turns, final)
             if reply is None:
                 continue
@@ -118,7 +129,7 @@ class Agent:
                 # nothing to look up and no report: the next turn must report.
                 turns = turn + 1
                 continue
-            await self._run_tools(classroom, calls[: prompts.MAX_CALLS])
+            await self._run_tools(classroom, calls[: prompts.MAX_CALLS], self.until - REPORT_RESERVE)
         raise failure(502, "AI_OUTPUT_REJECTED", "The model did not return a usable reply. Try again.")
 
     async def _open(self, classroom: str, student: str) -> None:
@@ -127,11 +138,16 @@ class Agent:
             self.services.performance(self.authorization, classroom, student, self.correlation),
             self.services.results(self.authorization, classroom, student, self.correlation),
         )
+        # only the newest results reach the workspace, so only their assessments are read.
+        evaluations = evaluations[:MAX_RESULTS]
         assessments = await self.services.assessments(
             self.authorization, list(dict.fromkeys(e["assessment_id"] for e in evaluations)), self.correlation
         )
         try:
             self.workspace.add_summary(list(summary.get("topics") or []))
+        except (KeyError, TypeError, ValueError, AttributeError):
+            raise UpstreamError("analytics", 502) from None
+        try:
             self.workspace.add_results(evaluations, assessments)
         except (KeyError, TypeError, ValueError, AttributeError):
             raise UpstreamError("grading", 502) from None
@@ -143,7 +159,11 @@ class Agent:
     async def _turn(self, turn: int, turns: int, final: bool) -> dict[str, Any] | None:
         """one model turn's reply, or none when it was unreadable (the loop moves on)."""
         messages = prompts.messages(self.workspace.opening(), self.history, turn, turns, final)
+        # a tool turn leaves the report its reserve; the report may use what is left.
+        left = self.until - time.monotonic() - (0 if final else REPORT_RESERVE)
         try:
+            if left < MIN_CALL:
+                raise UpstreamError("ai-core", 0, "OUT_OF_TIME")
             output = await self.services.generate(
                 messages,
                 REPORT_TOKENS if final else TURN_TOKENS,
@@ -151,6 +171,7 @@ class Agent:
                 "performance.report" if final else "performance.turn",
                 self.correlation,
                 billed(self.claims),
+                left,
             )
         except UpstreamError as e:
             log.warning("interpretation_failed", extra={"error": str(e), "turn": turn})
@@ -165,31 +186,57 @@ class Agent:
                 ) from None
             return None
 
-    async def _run_tools(self, classroom: str, calls: list[Any]) -> None:
+    async def _run_tools(self, classroom: str, calls: list[Any], until: float) -> None:
+        """the turn's calls side by side, each cut off at `until`; recorded in the order the model asked."""
+        planned = []
         for call in calls:
             if not isinstance(call, dict):
                 continue
             tool, reason = str(call.get("tool") or ""), " ".join(str(call.get("reason") or "").split())[:200]
-            result_ref, topic_ref = call.get("result"), call.get("topic")
+            result_ref, topic_ref = _ref(call.get("result")), _ref(call.get("topic"))
             key = (tool, result_ref, topic_ref)
-            entry: dict[str, Any] = {"call": {"tool": tool, "result": result_ref, "topic": topic_ref}}
-            target, outcome, output = await self._tool(classroom, tool, result_ref, topic_ref, key)
+            planned.append((tool, reason, result_ref, topic_ref, key in self.done))
             self.done.add(key)
-            entry["output"] = output
-            self.history.append(entry)
+        outcomes = await asyncio.gather(
+            *(self._timed(classroom, tool, r, t, repeat, until) for tool, _, r, t, repeat in planned)
+        )
+        for (tool, reason, result_ref, topic_ref, _), (target, outcome, output) in zip(
+            planned, outcomes, strict=True
+        ):
+            made = {"tool": tool, "result": result_ref, "topic": topic_ref}
+            self.history.append({"call": made, "output": output})
             self.steps.append(
                 Step(tool=tool, reason=reason or "No reason given.", target=target, outcome=outcome)
             )
 
+    async def _timed(
+        self,
+        classroom: str,
+        tool: str,
+        result_ref: str | None,
+        topic_ref: str | None,
+        repeat: bool,
+        until: float,
+    ) -> tuple[str, Outcome, Any]:
+        """one tool call, failed when it is still running at `until`."""
+        try:
+            return await asyncio.wait_for(
+                self._tool(classroom, tool, result_ref, topic_ref, repeat),
+                max(until - time.monotonic(), 0.01),
+            )
+        except TimeoutError:
+            log.info("tool_failed", extra={"tool": tool, "reason": "out_of_time"})
+            return "out of time", "failed", {"error": "There was no time left to read this."}
+
     async def _tool(
-        self, classroom: str, tool: str, result_ref: object, topic_ref: object, key: tuple[Any, ...]
+        self, classroom: str, tool: str, result_ref: str | None, topic_ref: str | None, repeat: bool
     ) -> tuple[str, Outcome, Any]:
         """what the tool looked at in words, its outcome, and what the model is shown."""
         try:
             topic = self.workspace.topic_by_ref(topic_ref) if topic_ref else None
             if topic_ref and topic is None:
                 raise ToolError("unknown topic", "refused", f"There is no topic {topic_ref}.")
-            if key in self.done:
+            if repeat:
                 raise ToolError("repeat", "refused", "You already made this call; its result is above.")
             if tool == "read_answers":
                 return self._read_answers(result_ref, topic)
@@ -203,7 +250,7 @@ class Agent:
                 log.info("tool_failed", extra={"tool": tool})
             return e.target, e.outcome, {"error": e.message}
 
-    def _read_answers(self, result_ref: object, topic: Topic | None) -> tuple[str, Outcome, Any]:
+    def _read_answers(self, result_ref: str | None, topic: Topic | None) -> tuple[str, Outcome, Any]:
         result = self.workspace.result(result_ref)
         if result is None:
             raise ToolError("unknown result", "refused", "Give a result reference from the results list.")
@@ -222,11 +269,16 @@ class Agent:
 
     async def _class_comparison(self, classroom: str, topic: Topic | None) -> tuple[str, Outcome, Any]:
         target = topic.name if topic and topic.name else "whole class"
+        if self.class_read is None:
+            self.class_read = asyncio.ensure_future(
+                self.services.class_performance(self.authorization, classroom, self.correlation)
+            )
         try:
-            students = await self.services.class_performance(self.authorization, classroom, self.correlation)
-        except UpstreamError:
+            # shielded: one call running out of time does not cancel the read the others share.
+            students = await asyncio.shield(self.class_read)
+            return target, "ok", self.workspace.class_comparison(students, topic)
+        except (UpstreamError, KeyError, TypeError, ValueError):
             raise ToolError(target, "failed", "The class's results could not be read just now.") from None
-        return target, "ok", self.workspace.class_comparison(students, topic)
 
     def _finish(self, report: dict[str, Any], turn: int, classroom: str, student: str) -> ResponseContract:
         try:
@@ -274,6 +326,11 @@ class Agent:
             model_turns=turn,
             dropped=dict(dropped),
         )
+
+
+def _ref(value: object) -> str | None:
+    """a reference the model gave, or none when it is not a non-empty string."""
+    return value if isinstance(value, str) and value else None
 
 
 def _observation(f: checks.Finding) -> Observation:

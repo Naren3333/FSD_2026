@@ -20,7 +20,7 @@ beforeEach(() => {
 
 afterEach(() => vi.unstubAllGlobals());
 
-/* the apierror a request fails with when the api answers status and body. */
+/* the ApiError a request fails with when the api answers status and body. */
 async function failure(status: number, body: string): Promise<ApiError> {
   vi.stubGlobal('fetch', () => Promise.resolve(new Response(body, { status })));
   const error = await TestBed.inject(Gateway)

@@ -82,7 +82,7 @@ type Question struct {
 	Topic           string    `json:"topic_id"`
 }
 
-// criterionscore is the level a rubric criterion was given.
+// CriterionScore is the level a rubric criterion was given.
 type CriterionScore struct {
 	Criterion string `json:"criterion_id"`
 	Points    int    `json:"points"`
@@ -99,11 +99,11 @@ type Suggestion struct {
 	Model      string               `json:"model,omitempty"`
 	// reason says why a suggestion failed or is still waiting (for the teacher's daily ai allowance, say).
 	Reason string `json:"reason,omitempty"`
-	// schemepassages is how many of the question's marking-scheme passages the model was given.
+	// SchemePassages is how many of the question's marking-scheme passages the model was given.
 	SchemePassages int `json:"scheme_passages,omitempty"`
 }
 
-// suggestedcriterion is the level suggested for one criterion, with the student's own words that justify
+// SuggestedCriterion is the level suggested for one criterion, with the student's own words that justify
 // it.
 type SuggestedCriterion struct {
 	Criterion string   `json:"criterion_id"`
@@ -149,7 +149,7 @@ type Evaluation struct {
 	ReleasedAt    *time.Time        `json:"released_at"`
 }
 
-// ownevidence is a question's result as its student sees it: marks and feedback, never rubric details or ai
+// OwnEvidence is a question's result as its student sees it: marks and feedback, never rubric details or ai
 // suggestions.
 type OwnEvidence struct {
 	Question string `json:"question_id"`
@@ -160,7 +160,7 @@ type OwnEvidence struct {
 	Feedback string `json:"feedback,omitempty"`
 }
 
-// ownresult is a student's own released result.
+// OwnResult is a student's own released result.
 type OwnResult struct {
 	ID          string            `json:"id"`
 	Assessment  string            `json:"assessment_id"`
@@ -182,7 +182,7 @@ func (v Evaluation) own() OwnResult {
 	return OwnResult{v.ID, v.Assessment, v.Classroom, v.Student, v.Status, evidence, v.Answers, v.Late, v.FinalizedAt, v.ReleasedAt}
 }
 
-// finalevidence is a question's finalized marks as grading.finalized.v3 carries them to analytics.
+// FinalEvidence is a question's finalized marks as grading.finalized.v3 carries them to analytics.
 type FinalEvidence struct {
 	Question string `json:"question_id"`
 	Topic    string `json:"topic_id"`
@@ -207,7 +207,7 @@ type Mark struct {
 	Feedback *string        `json:"feedback,omitempty"`
 }
 
-// overridesasmarks turns finalize's older overrides (points by question) into marks.
+// overridesAsMarks turns finalize's older overrides (points by question) into marks.
 func overridesAsMarks(overrides map[string]int, marks map[string]Mark) map[string]Mark {
 	out := map[string]Mark{}
 	for id, m := range marks {
@@ -221,7 +221,7 @@ func overridesAsMarks(overrides map[string]int, marks map[string]Mark) map[strin
 	return out
 }
 
-// applymarks updates evidence in place with the teacher's marks, checking each against its question.
+// applyMarks updates evidence in place with the teacher's marks, checking each against its question.
 func applyMarks(evidence []Evidence, questions []Question, marks map[string]Mark) error {
 	applied := 0
 	for i := range evidence {
@@ -244,7 +244,7 @@ func applyMarks(evidence []Evidence, questions []Question, marks map[string]Mark
 	return nil
 }
 
-// applymark marks one question. q is nil for an evaluation stored before grading kept its questions; such a
+// applyMark marks one question. q is nil for an evaluation stored before grading kept its questions; such a
 // question can only take points.
 func applyMark(e *Evidence, q *Question, m Mark) error {
 	if m.Feedback != nil {
@@ -283,7 +283,7 @@ func applyMark(e *Evidence, q *Question, m Mark) error {
 	return nil
 }
 
-// rubricscores checks that given names one of each criterion's levels, and nothing else, and returns the
+// rubricScores checks that given names one of each criterion's levels, and nothing else, and returns the
 // scores in the rubric's order with their total.
 func rubricScores(r Rubric, given map[string]int) ([]CriterionScore, int, error) {
 	if len(given) != len(r.Criteria) {

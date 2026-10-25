@@ -11,7 +11,7 @@ from pathlib import Path
 # the day.
 SPEND_LIMIT_STUDENT_USD, SPEND_LIMIT_TEACHER_USD, SPEND_TIMEZONE = 5.0, 10.0, "Asia/Singapore"
 USER_CONCURRENCY = 10
-# the largest pdf ingest takes, in pages and in chunks: past either it fails too_large.
+# the largest pdf ingest takes, in pages and in chunks: past either it fails TOO_LARGE.
 INGEST_MAX_PAGES, INGEST_MAX_CHUNKS = 500, 5000
 
 
@@ -50,7 +50,7 @@ class Settings:
     user_concurrency: int = USER_CONCURRENCY
     ingest_max_pages: int = INGEST_MAX_PAGES
     ingest_max_chunks: int = INGEST_MAX_CHUNKS
-    # usd per million tokens (input, cached input, output) that override or add to spend.default_prices.
+    # usd per million tokens (input, cached input, output) that override or add to spend.DEFAULT_PRICES.
     model_prices: dict[str, tuple[float, float, float]] = field(default_factory=dict)
     selective_vision: bool = True
     chunk_tokens: int = 600
@@ -74,7 +74,7 @@ class Settings:
 
 
 def _prices(raw: str) -> dict[str, tuple[float, float, float]]:
-    """model_prices: a json object of model name to [input, cached input, output] usd per million tokens."""
+    """MODEL_PRICES: a json object of model name to [input, cached input, output] usd per million tokens."""
     if not raw.strip():
         return {}
     return {model: (float(a), float(b), float(c)) for model, (a, b, c) in json.loads(raw).items()}

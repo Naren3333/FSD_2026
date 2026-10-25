@@ -1,4 +1,4 @@
-"""bearer-token verification and the caller's identity."""
+"""bearer-token verification and the caller's identity. identity comes only from a verified token, never from headers or request bodies."""
 
 import logging
 import os
@@ -23,7 +23,7 @@ log = logging.getLogger("learning_transport.auth")
 
 
 class KeySet:
-    """the identity provider's signing keys (its jwks), cached for `lifespan` seconds."""
+    """the identity provider's signing keys (its JWKS), cached for `lifespan` seconds. an unknown key id refetches at most once per REFETCH_INTERVAL, so made-up key ids cannot hammer the provider while a rotated key is still picked up; a failed fetch keeps the keys already held."""
 
     def __init__(
         self,
@@ -70,7 +70,7 @@ class KeySet:
             keys = jwt.PyJWKSet.from_dict(data).keys
         except (httpx.HTTPError, ValueError, jwt.PyJWTError) as error:
             log.warning("key_set_fetch_failed", extra={"error": str(error)})
-            # try again after refetch_interval, not on every request meanwhile.
+            # try again after REFETCH_INTERVAL, not on every request meanwhile.
             self._fetched = now - self._lifespan + REFETCH_INTERVAL
             return
         self._keys = {k.key_id: k for k in keys if k.key_id and k.public_key_use in ("sig", None)}
@@ -129,7 +129,7 @@ class Claims:
 
     @property
     def person_role(self) -> str | None:
-        """the person's role, teacher or student (an account never holds both; see caller); none for a service account."""
+        """the person's role, teacher or student (an account never holds both; see caller); None for a service account."""
         if self.has(TEACHER):
             return TEACHER
         if self.has(STUDENT):
@@ -138,7 +138,7 @@ class Claims:
 
 
 def caller(claims: dict[str, Any] = Depends(actor)) -> Claims:
-    """fastapi dependency: the verified caller."""
+    """fastapi dependency: the verified caller. an account is a teacher or a student, never both: a token holding both roles is refused with 403."""
     verified = Claims.from_token(claims)
     if verified.has(TEACHER) and verified.has(STUDENT):
         raise failure(403, "ROLE_CONFLICT", "An account must be either a teacher or a student, not both.")

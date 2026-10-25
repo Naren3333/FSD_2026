@@ -18,7 +18,7 @@ export type Service =
 
 export interface RequestOptions {
   method?: 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE';
-  /* json, or a file sent as is with `contenttype`. */
+  /* json, or a file sent as is with `contentType`. */
   body?: unknown;
   contentType?: string;
   /* bounds the whole call, upload included. */

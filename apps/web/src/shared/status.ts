@@ -2,7 +2,7 @@ import { Component, Input } from '@angular/core';
 import { ActionState } from './action-state';
 import { IconComponent } from './icon';
 
-/* announces an actionstate: "working…", its success message, or its error. */
+/* announces an ActionState: "working…", its success message, or its error. */
 @Component({
   selector: 'app-status',
   standalone: true,

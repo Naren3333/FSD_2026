@@ -63,7 +63,7 @@ func TestRoles(t *testing.T) {
 	}
 }
 
-// identitystub answers every access check with the given status and body.
+// identityStub answers every access check with the given status and body.
 func identityStub(t *testing.T, status int, body string) *Identity {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(status)
@@ -139,7 +139,7 @@ func TestRosterReadsTheEnrolledStudents(t *testing.T) {
 	}
 }
 
-// a roster over maxroster is refused like an unreadable one, and the log says it was the size, for which
+// a roster over maxRoster is refused like an unreadable one, and the log says it was the size, for which
 // classroom.
 func TestAnOversizedRosterIsLoggedAsOverTheLimit(t *testing.T) {
 	var logged bytes.Buffer

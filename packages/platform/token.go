@@ -14,10 +14,10 @@ import (
 	"golang.org/x/sync/singleflight"
 )
 
-// fetchtimeout bounds one token fetch, which runs apart from its callers' contexts (see get).
+// fetchTimeout bounds one token fetch, which runs apart from its callers' contexts (see get).
 const fetchTimeout = 10 * time.Second
 
-// servicetoken is a service account's client-credentials access token, cached until shortly before it
+// ServiceToken is a service account's client-credentials access token, cached until shortly before it
 // expires.
 type ServiceToken struct {
 	URL, ID, Secret string

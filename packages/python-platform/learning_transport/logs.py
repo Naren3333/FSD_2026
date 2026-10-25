@@ -4,7 +4,7 @@ import json
 import logging
 from typing import Any
 
-# attributes every logrecord has; anything else on a record came from `extra=`.
+# attributes every LogRecord has; anything else on a record came from `extra=`.
 _STANDARD = set(logging.makeLogRecord({}).__dict__) | {"message", "asctime", "taskName"}
 
 

@@ -137,7 +137,7 @@ def cited(item: dict[str, Any], passages: list[Passage]) -> list[Passage]:
 
 
 def evidenced_excerpts(evidence: str, sources: list[Passage]) -> list[Excerpt]:
-    """the cited passages as the question stores them, at most max_sources of max_excerpt_text characters each."""
+    """the cited passages as the question stores them, at most MAX_SOURCES of MAX_EXCERPT_TEXT characters each."""
     quote = normalize(evidence)
     if len(quote) < MIN_EVIDENCE:
         raise RuleBrokenError(EVIDENCE_NOT_FOUND)
@@ -160,7 +160,7 @@ def evidenced_excerpts(evidence: str, sources: list[Passage]) -> list[Excerpt]:
 
 
 def _excerpt_text(text: str, quote: str) -> tuple[str, bool]:
-    """at most max_excerpt_text characters of `text`, and whether they hold the normalized `quote`: the whole text when it fits, else the window centred on the quote, else (no quote in it) its start."""
+    """at most MAX_EXCERPT_TEXT characters of `text`, and whether they hold the normalized `quote`: the whole text when it fits, else the window centred on the quote, else (no quote in it) its start."""
     if len(text) <= MAX_EXCERPT_TEXT:
         return text, quote in normalize(text)
     folded, positions = _normalized_positions(text)
@@ -275,7 +275,7 @@ def long_key(draft: DraftQuestion) -> bool:
 
 
 def question(item: Any, request: GenerateRequest, passages: list[Passage], seen: list[str]) -> Generated:
-    """one question of the reply, checked; raises rulebrokenerror with the first rule it breaks."""
+    """one question of the reply, checked; raises RuleBrokenError with the first rule it breaks."""
     if not isinstance(item, dict):
         raise RuleBrokenError(INVALID_PROMPT)
     prompt, kind = _text(item, "prompt"), item.get("type")
@@ -352,7 +352,7 @@ def questions(
 
 
 def guidance(output: str, request: GuidanceRequest, passages: list[Passage]) -> Guidance:
-    """the drafted guidance, checked like a generated question; raises rulebrokenerror with the first rule it breaks."""
+    """the drafted guidance, checked like a generated question; raises RuleBrokenError with the first rule it breaks."""
     item = read_reply(output)
     sources = cited(item, passages)
     evidence = _text(item, "evidence")

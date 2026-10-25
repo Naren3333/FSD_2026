@@ -30,10 +30,10 @@ type App struct {
 	slow         map[string]time.Duration
 }
 
-// requesttimeout bounds every request except the routes given a longer deadline with slow.
+// requestTimeout bounds every request except the routes given a longer deadline with slow.
 const requestTimeout = 15 * time.Second
 
-// new opens database_url with the service's migrations (see opendb), sets up token verification from the
+// new opens DATABASE_URL with the service's migrations (see OpenDB), sets up token verification from the
 // oidc_* settings and registers the health routes.
 func New(name string, migrations fs.FS, bootstrap string) (*App, error) {
 	slog.SetDefault(slog.New(slog.NewJSONHandler(os.Stdout, nil)).With("service", name))
@@ -69,7 +69,7 @@ func (a *App) ready(w http.ResponseWriter, r *http.Request) {
 	JSON(w, http.StatusOK, map[string]string{"status": "ready"})
 }
 
-// identity returns classroomaccess backed by the identity service at identity_url.
+// identity returns ClassroomAccess backed by the identity service at IDENTITY_URL.
 func (a *App) Identity() *Identity { return NewIdentity(Required("IDENTITY_URL"), a.Client) }
 
 // extend request and connection deadlines for one exact route.
@@ -106,7 +106,7 @@ func (a *App) Handler() http.Handler {
 		timeout := requestTimeout
 		if deadline, ok := a.slow[r.Method+" "+r.URL.Path]; ok {
 			timeout = deadline
-			// not every responsewriter supports deadlines (test recorders don't); then only the context is extended.
+			// not every ResponseWriter supports deadlines (test recorders don't); then only the context is extended.
 			controller := http.NewResponseController(w)
 			_ = controller.SetReadDeadline(start.Add(deadline))
 			_ = controller.SetWriteDeadline(start.Add(deadline))

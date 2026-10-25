@@ -17,11 +17,11 @@ import (
 type Consumer struct {
 	DB    *pgxpool.Pool
 	Group string // the kafka consumer group, one per service
-	// timeout bounds one attempt at an event, its transaction included; zero means defaulteventtimeout.
+	// timeout bounds one attempt at an event, its transaction included; zero means defaultEventTimeout.
 	Timeout time.Duration
 }
 
-// defaulteventtimeout is how long one attempt at an event may take unless the consumer sets its own
+// defaultEventTimeout is how long one attempt at an event may take unless the consumer sets its own
 // timeout.
 const defaultEventTimeout = 10 * time.Second
 
@@ -59,7 +59,7 @@ func (c Consumer) Consume(ctx context.Context, topic string, handler Handler, he
 	}
 }
 
-// consumesession reads until ctx ends or an event cannot be completed, and reports whether it committed
+// consumeSession reads until ctx ends or an event cannot be completed, and reports whether it committed
 // anything.
 func (c Consumer) consumeSession(ctx context.Context, topic string, handler Handler) bool {
 	reader := kafka.NewReader(kafka.ReaderConfig{Brokers: strings.Split(Required("KAFKA_BROKERS"), ","), Topic: topic, GroupID: c.Group, MinBytes: 1, MaxBytes: 2 << 20, CommitInterval: 0})
@@ -105,7 +105,7 @@ func (c Consumer) settle(ctx context.Context, topic string, msg kafka.Message, h
 	return err == nil
 }
 
-// decodeevent reads an event envelope and reports whether it is a well-formed event of this topic.
+// decodeEvent reads an event envelope and reports whether it is a well-formed event of this topic.
 func decodeEvent(value []byte, topic string) (Event, bool) {
 	var event Event
 	if json.Unmarshal(value, &event) != nil {
@@ -135,7 +135,7 @@ func (c Consumer) handle(ctx context.Context, event Event, handler Handler) (com
 	return false, false
 }
 
-// handleonce records the event in the inbox and runs the handler in the same transaction; a duplicate is a
+// handleOnce records the event in the inbox and runs the handler in the same transaction; a duplicate is a
 // no-op.
 func (c Consumer) handleOnce(ctx context.Context, event Event, handler Handler) error {
 	workCtx, cancel := context.WithTimeout(context.WithValue(ctx, correlationKey, event.Correlation), c.eventTimeout())

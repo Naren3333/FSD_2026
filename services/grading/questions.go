@@ -18,7 +18,7 @@ const (
 	typeFreeResponse   = "free_response"
 )
 
-// questionkind marks answers to one question type.
+// questionKind marks answers to one question type.
 type questionKind interface {
 	// mark reports whether the answer earns the question's points, or that only the teacher can decide.
 	mark(q Question, answer string) (correct, needsTeacher bool, err error)
@@ -31,7 +31,7 @@ var questionKinds = map[string]questionKind{
 	typeFreeResponse:   freeResponse{},
 }
 
-// multiplechoice: the chosen option must be the answer key.
+// multipleChoice: the chosen option must be the answer key.
 type multipleChoice struct{}
 
 func (multipleChoice) mark(q Question, answer string) (bool, bool, error) {
@@ -60,7 +60,7 @@ func (numerical) mark(q Question, answer string) (bool, bool, error) {
 	return new(big.Rat).Abs(new(big.Rat).Sub(a, key)).Cmp(tolerance) <= 0, false, nil
 }
 
-// shortanswer: an answer matching an accepted answer (after normalizeshort) earns the points.
+// shortAnswer: an answer matching an accepted answer (after normalizeShort) earns the points.
 type shortAnswer struct{}
 
 func (shortAnswer) mark(q Question, answer string) (bool, bool, error) {
@@ -72,7 +72,7 @@ func (shortAnswer) mark(q Question, answer string) (bool, bool, error) {
 	return matched, !matched, nil
 }
 
-// normalizeshort is assessment's rule: trimmed, inner whitespace collapsed, and lowercased unless case
+// normalizeShort is assessment's rule: trimmed, inner whitespace collapsed, and lowercased unless case
 // matters.
 func normalizeShort(answer string, caseSensitive bool) string {
 	answer = strings.Join(strings.Fields(answer), " ")
@@ -82,7 +82,7 @@ func normalizeShort(answer string, caseSensitive bool) string {
 	return answer
 }
 
-// freeresponse: always marked by the teacher against its rubric.
+// freeResponse: always marked by the teacher against its rubric.
 type freeResponse struct{}
 
 func (freeResponse) mark(q Question, _ string) (bool, bool, error) {

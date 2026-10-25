@@ -14,7 +14,7 @@ type Authenticator struct {
 	verifier *oidc.IDTokenVerifier
 }
 
-// newauthenticator reads oidc_issuer, oidc_jwks_url and oidc_audience.
+// NewAuthenticator reads OIDC_ISSUER, OIDC_JWKS_URL and OIDC_AUDIENCE.
 func NewAuthenticator(client *http.Client) *Authenticator {
 	ctx := oidc.ClientContext(context.Background(), client)
 	keys := oidc.NewRemoteKeySet(ctx, Required("OIDC_JWKS_URL"))
@@ -49,7 +49,7 @@ func (a *Authenticator) Wrap(next http.Handler) http.Handler {
 	})
 }
 
-// roleconflict answers 403 role_conflict: an account holds both the teacher and the student role, which no
+// RoleConflict answers 403 ROLE_CONFLICT: an account holds both the teacher and the student role, which no
 // service accepts.
 func RoleConflict(w http.ResponseWriter) {
 	Error(w, http.StatusForbidden, "ROLE_CONFLICT", "An account must be either a teacher or a student, not both.")

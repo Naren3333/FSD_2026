@@ -26,7 +26,7 @@ func (s server) routes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /v1/evaluations/{id}/finalize", s.finalize)
 }
 
-// maxpage is the most evaluations one page of a teacher's list holds; each carries its student's answers.
+// maxPage is the most evaluations one page of a teacher's list holds; each carries its student's answers.
 const maxPage = 100
 
 // list authorized evaluations with pagination and submission ordering.
@@ -124,9 +124,9 @@ func (s server) mine(w http.ResponseWriter, r *http.Request) {
 	platform.JSON(w, http.StatusOK, own)
 }
 
-// teacherofevaluation checks the caller is the teacher of the classroom of the evaluation the path names.
+// teacherOfEvaluation checks the caller is the teacher of the classroom of the evaluation the path names.
 func (s server) teacherOfEvaluation(w http.ResponseWriter, r *http.Request) bool {
-	// the role check comes first so a student is refused before any lookup; teacherof decides below.
+	// the role check comes first so a student is refused before any lookup; TeacherOf decides below.
 	if !platform.Teacher(w, r) {
 		return false
 	}
@@ -182,7 +182,7 @@ func (s server) finalize(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-// writemarkingerror writes the response for a failed marking or finalization and reports whether err was
+// writeMarkingError writes the response for a failed marking or finalization and reports whether err was
 // nil.
 func writeMarkingError(w http.ResponseWriter, err error) bool {
 	switch {

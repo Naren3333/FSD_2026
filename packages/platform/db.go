@@ -11,7 +11,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
-// execall runs the statements in order inside tx, each with the same arguments, and stops at the first that
+// ExecAll runs the statements in order inside tx, each with the same arguments, and stops at the first that
 // fails.
 func ExecAll(ctx context.Context, tx pgx.Tx, statements []string, args ...any) error {
 	for _, sql := range statements {

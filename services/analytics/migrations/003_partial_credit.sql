@@ -1,4 +1,5 @@
 -- grading.finalized.v2: a question is worth 1–100 points and may earn part of them (adr 0004).
+-- additive: the checks only widen, so every stored row still satisfies them.
 ALTER TABLE evidence DROP CONSTRAINT IF EXISTS evidence_awarded_check;
 ALTER TABLE evidence DROP CONSTRAINT IF EXISTS evidence_possible_check;
 ALTER TABLE evidence ADD CONSTRAINT evidence_possible_check CHECK(possible BETWEEN 1 AND 100);

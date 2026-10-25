@@ -170,7 +170,7 @@ async def post_message(
     thread, relation = await accessible_thread(request, claims, thread_id)
     # the relation now decides the prompt, so a thread from before the caller's relation changed follows it.
     thread = {**thread, "role": relation}
-    # one answer at a time per user: each holds several of their ai-core slots (ai_user_concurrency) while
+    # one answer at a time per user: each holds several of their ai-core slots (AI_USER_CONCURRENCY) while
     # it searches, so questions from several tabs at once would fail as busy midway instead.
     if not await store.claim_turn(str(thread_id)):
         raise failure(

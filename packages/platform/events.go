@@ -11,7 +11,7 @@ import (
 	"github.com/segmentio/kafka-go"
 )
 
-// eventmigration creates the outbox and inbox tables; services that publish or consume events pass it to
+// EventMigration creates the outbox and inbox tables; services that publish or consume events pass it to
 // new.
 const EventMigration = `
 CREATE TABLE IF NOT EXISTS outbox (id uuid PRIMARY KEY, topic text NOT NULL, partition_key text NOT NULL, body jsonb NOT NULL, created_at timestamptz NOT NULL DEFAULT clock_timestamp(), published_at timestamptz, attempts integer NOT NULL DEFAULT 0, next_attempt timestamptz NOT NULL DEFAULT now());
@@ -51,7 +51,7 @@ func Writer() *kafka.Writer {
 	return &kafka.Writer{Addr: kafka.TCP(strings.Split(Required("KAFKA_BROKERS"), ",")...), Balancer: &kafka.Hash{}, RequiredAcks: kafka.RequireAll, MaxAttempts: 3, BatchTimeout: 10 * time.Millisecond, ReadTimeout: 5 * time.Second, WriteTimeout: 5 * time.Second}
 }
 
-// kafkaready is a readiness check: the first broker answers a metadata request.
+// KafkaReady is a readiness check: the first broker answers a metadata request.
 func KafkaReady(ctx context.Context) error {
 	dialer := &kafka.Dialer{Timeout: 2 * time.Second}
 	conn, err := dialer.DialContext(ctx, "tcp", strings.Split(Required("KAFKA_BROKERS"), ",")[0])
@@ -66,7 +66,7 @@ func KafkaReady(ctx context.Context) error {
 	return err
 }
 
-// invalidevent is a handler's verdict that an event can never be processed: it is dead-lettered, not
+// InvalidEvent is a handler's verdict that an event can never be processed: it is dead-lettered, not
 // retried.
 type InvalidEvent struct{ Reason string }
 

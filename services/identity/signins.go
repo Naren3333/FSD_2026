@@ -15,10 +15,10 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
-// signinevery is how often identity looks for deleted accounts whose sign-in account is still in keycloak.
+// signinEvery is how often identity looks for deleted accounts whose sign-in account is still in keycloak.
 const signinEvery = 15 * time.Second
 
-// keycloakusers removes sign-in accounts from keycloak's admin api, as the identity-accounts service
+// keycloakUsers removes sign-in accounts from keycloak's admin api, as the identity-accounts service
 // account, whose only role is realm-management's manage-users.
 type keycloakUsers struct {
 	admin  string // the realm's admin api, such as http://keycloak:8080/admin/realms/learning
@@ -61,12 +61,12 @@ func (k keycloakUsers) remove(ctx context.Context, user string) error {
 	return fmt.Errorf("keycloak answered %d", res.StatusCode)
 }
 
-// signinremover is what signincleanup needs from keycloak.
+// signinRemover is what signInCleanup needs from keycloak.
 type signinRemover interface {
 	remove(ctx context.Context, user string) error
 }
 
-// signincleanup removes the sign-in account of every deleted account (deleteaccount) from keycloak, so its
+// signInCleanup removes the sign-in account of every deleted account (deleteAccount) from keycloak, so its
 // user cannot sign in again.
 type signInCleanup struct {
 	db       *pgxpool.Pool
@@ -90,16 +90,16 @@ func (s signInCleanup) run(ctx context.Context) {
 	}
 }
 
-// maxsigninbackoff is the longest a failing sign-in removal waits before it is tried again.
+// maxSigninBackoff is the longest a failing sign-in removal waits before it is tried again.
 const maxSigninBackoff = time.Hour
 
-// signinbackoff is the wait after the nth failed removal of one account: 30 s, 1, 2, 4 minutes and so on,
-// at most maxsigninbackoff.
+// signinBackoff is the wait after the nth failed removal of one account: 30 s, 1, 2, 4 minutes and so on,
+// at most maxSigninBackoff.
 func signinBackoff(failures int) time.Duration {
 	return min(signinEvery<<max(1, min(failures, 10)), maxSigninBackoff)
 }
 
-// removepending removes up to 20 sign-in accounts that are due and marks each one removed, reporting how
+// removePending removes up to 20 sign-in accounts that are due and marks each one removed, reporting how
 // many it removed.
 func (s signInCleanup) removePending(ctx context.Context) (int, error) {
 	rows, err := s.db.Query(ctx, `SELECT id,signin_attempts FROM users WHERE deleted_at IS NOT NULL AND signin_removed_at IS NULL

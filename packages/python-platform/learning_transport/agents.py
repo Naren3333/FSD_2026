@@ -82,7 +82,7 @@ class AgentClients:
 
     # ---- ai-core, as the agent
 
-    async def generate(
+    async def generate(  # noqa: PLR0913 - one call's schema, payer and optional cut-off
         self,
         messages: list[dict[str, str]],
         max_tokens: int,
@@ -90,8 +90,9 @@ class AgentClients:
         name: str,
         correlation: str,
         payer: dict[str, str],
+        timeout: float | None = None,
     ) -> str:
-        """one structured reply: the model's output as text, matching `schema`, billed to `payer` (billed_to())."""
+        """one structured reply: the model's output as text, matching `schema`, billed to `payer` (billed_to()); `timeout` can only shorten the client's own."""
         body = {
             "operation": "generate",
             "messages": messages,
@@ -100,7 +101,8 @@ class AgentClients:
             "schema_name": name,
             "billed_to": payer,
         }
-        resp = await self.ai_core("POST", "/v1/inference", correlation, self.generate_timeout, json=body)
+        limit = self.generate_timeout if timeout is None else min(timeout, self.generate_timeout)
+        resp = await self.ai_core("POST", "/v1/inference", correlation, limit, json=body)
         try:
             output = resp.json().get("output")
         except (ValueError, AttributeError):
@@ -112,7 +114,7 @@ class AgentClients:
     async def ai_core(
         self, method: str, path: str, correlation: str, timeout: float, **request: Any
     ) -> httpx.Response:
-        """a 200 response from ai-core, or its error as upstreamerror."""
+        """a 200 response from ai-core, or its error as UpstreamError."""
         headers = await self.ai_core_headers(correlation)
         try:
             resp = await self.http.request(

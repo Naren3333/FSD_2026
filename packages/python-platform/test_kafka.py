@@ -142,7 +142,7 @@ def test_a_handler_that_recovers_is_committed_once(monkeypatch: Any) -> None:
 def test_a_message_failing_permanently_is_dead_lettered_then_committed(
     monkeypatch: Any, error: Exception
 ) -> None:
-    """a constraint the message breaks on every attempt would block its partition forever: after process_attempts it goes to the dead-letter topic, and is committed only once the broker confirmed it there."""
+    """a constraint the message breaks on every attempt would block its partition forever: after PROCESS_ATTEMPTS it goes to the dead-letter topic, and is committed only once the broker confirmed it there."""
     calls: list[bytes | None] = []
 
     def handle(_: str, value: bytes | None) -> bool:

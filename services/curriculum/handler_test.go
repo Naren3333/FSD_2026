@@ -18,7 +18,7 @@ const (
 	topicB = "8b3e7f40-ac6d-4e5f-9a4b-3c4d5e6f7081"
 )
 
-// memorystore keeps topics by id and prerequisite edges; it answers a cycle when the reverse edge exists.
+// memoryStore keeps topics by id and prerequisite edges; it answers a cycle when the reverse edge exists.
 type memoryStore struct {
 	topics   map[string]Topic
 	archived map[string]Topic

@@ -1,6 +1,6 @@
 import { Component, EventEmitter, Input, Output } from '@angular/core';
 
-/* how many pages `total` items fill, `pagesize` at a time; always at least one. */
+/* how many pages `total` items fill, `pageSize` at a time; always at least one. */
 export function pageCount(total: number, pageSize: number): number {
   return Math.max(1, Math.ceil(total / pageSize));
 }

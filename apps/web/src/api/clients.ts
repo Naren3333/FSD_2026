@@ -151,7 +151,7 @@ export class CurriculumApi {
   }
 }
 
-/* long enough for a 50 mib pdf at about 1.5 mbit/s; other calls keep the default timeout. */
+/* long enough for a 50 MiB pdf at about 1.5 mbit/s; other calls keep the default timeout. */
 const UPLOAD_TIMEOUT = 5 * 60 * 1000;
 
 @Injectable({ providedIn: 'root' })
@@ -243,7 +243,7 @@ export class AssessmentApi {
   private async flushReads(): Promise<void> {
     const entries = [...this.queued];
     this.queued.clear();
-    // bound request count as well as each batch's size; no unbounded promise.all fan-out.
+    // bound request count as well as each batch's size; no unbounded Promise.all fan-out.
     for (let start = 0; start < entries.length; start += 50) {
       const batch = entries.slice(start, start + 50);
       try {
@@ -409,7 +409,7 @@ export class ChatApi {
   messages(threadId: string): Promise<{ messages: ChatMessage[] }> {
     return this.gateway.request('chatbot', `/threads/${id(threadId)}/messages`);
   }
-  /* sends a question and passes each event of the streamed answer to `onevent`. */
+  /* sends a question and passes each event of the streamed answer to `onEvent`. */
   ask(
     threadId: string,
     content: string,

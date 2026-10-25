@@ -11,7 +11,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
-// errnotdraft is what a store returns when a change only a draft allows is asked of a published assessment.
+// errNotDraft is what a store returns when a change only a draft allows is asked of a published assessment.
 var errNotDraft = errors.New("assessment is not a draft")
 
 // reject changes that require an assessment with no submissions.
@@ -20,14 +20,14 @@ var errHasSubmissions = errors.New("assessment has submissions")
 // reject stale questions or marking settings when another edit has already landed.
 var errAssessmentChanged = errors.New("assessment changed")
 
-// errclosed is insertsubmission's answer when the assessment, as it is when the submission commits, is past
+// errClosed is insertSubmission's answer when the assessment, as it is when the submission commits, is past
 // its due date and refuses late work: the teacher may have just changed either.
 var errClosed = errors.New("assessment closed")
 
-// erralreadysubmitted is what saveanswers returns once the student has submitted: their work is final.
+// errAlreadySubmitted is what saveAnswers returns once the student has submitted: their work is final.
 var errAlreadySubmitted = errors.New("already submitted")
 
-// errclassroompurged is insertassessment's answer for a classroom that has been deleted and purged.
+// errClassroomPurged is insertAssessment's answer for a classroom that has been deleted and purged.
 var errClassroomPurged = errors.New("the classroom was deleted")
 
 // store is a classroom's assessments and its students' submissions and saved work.
@@ -39,16 +39,16 @@ type store interface {
 	// replace an unchanged, unsubmitted assessment without reverting publication.
 	updateAssessment(ctx context.Context, org string, before, v Assessment) error
 	publishDraft(ctx context.Context, org, id string, at time.Time) error
-	// updatedetails changes the title, due date and late policy at any time.
+	// updateDetails changes the title, due date and late policy at any time.
 	updateDetails(ctx context.Context, org, id string, d Details) error
-	// deleteassessment deletes an assessment with any work students saved on it.
+	// deleteAssessment deletes an assessment with any work students saved on it.
 	deleteAssessment(ctx context.Context, org, id string, submissions bool) error
 	// list authorized assessments with enrolled-student submission counts.
 	listAssessments(ctx context.Context, org, classroomID, student string, all bool, enrolled []string, now time.Time, paging ...platform.ListWindow) ([]Summary, error)
 	listProgress(ctx context.Context, org, classroomID string, enrolled []string, paging ...platform.ListWindow) ([]Progress, error)
 	// reject stale or closed submissions and report whether an accepted submission is late.
 	insertSubmission(ctx context.Context, v Assessment, sub Submission) (inserted, late bool, err error)
-	// findsubmission is the student's own submission of the assessment; platform.errnotfound when they have
+	// findSubmission is the student's own submission of the assessment; platform.ErrNotFound when they have
 	// not submitted it.
 	findSubmission(ctx context.Context, assessment, student string) (OwnSubmission, error)
 	findSaved(ctx context.Context, assessment, student string) (SavedAnswers, error)
@@ -63,7 +63,7 @@ func (p pgStore) findAssessments(ctx context.Context, org string, ids []string) 
 	return pgx.CollectRows(rows, func(row pgx.CollectableRow) (Assessment, error) { return scanAssessment(row) })
 }
 
-// pgstore is the store in the service's own postgres database.
+// pgStore is the store in the service's own postgres database.
 type pgStore struct{ db *pgxpool.Pool }
 
 const assessmentColumns = "id,classroom_id,title,questions,status,opens_at,due_at,late_policy,release_policy,ai_marking,published_at,coalesce(created_by,'')"
@@ -78,7 +78,7 @@ func scanAssessment(row pgx.Row) (Assessment, error) {
 	return v, err
 }
 
-// decodequestions reads stored questions.
+// decodeQuestions reads stored questions.
 func decodeQuestions(data []byte) ([]Question, error) {
 	var questions []Question
 	if err := json.Unmarshal(data, &questions); err != nil {
@@ -125,13 +125,13 @@ func (p pgStore) insertAssessment(ctx context.Context, org string, v Assessment)
 	return tx.Commit(ctx)
 }
 
-// lockedassessment is what a change under changelocked knows of the assessment it locked.
+// lockedAssessment is what a change under changeLocked knows of the assessment it locked.
 type lockedAssessment struct {
 	status, classroom string
 }
 
-// changelocked runs change on the assessment, locked, in one transaction: once nobody has submitted it
-// (errhassubmissions otherwise), unless allowsubmitted.
+// changeLocked runs change on the assessment, locked, in one transaction: once nobody has submitted it
+// (errHasSubmissions otherwise), unless allowSubmitted.
 func (p pgStore) changeLocked(ctx context.Context, org, id string, allowSubmitted bool, change func(tx pgx.Tx, a lockedAssessment) error) error {
 	tx, err := p.db.Begin(ctx)
 	if err != nil {
@@ -140,7 +140,7 @@ func (p pgStore) changeLocked(ctx context.Context, org, id string, allowSubmitte
 	defer tx.Rollback(ctx)
 	var a lockedAssessment
 	if err = tx.QueryRow(ctx, "SELECT status,classroom_id FROM assessments WHERE id=$1 AND org_id=$2 FOR UPDATE", id, org).Scan(&a.status, &a.classroom); err != nil {
-		return err // platform.errnotfound when it is gone
+		return err // platform.ErrNotFound when it is gone
 	}
 	if !allowSubmitted {
 		var submitted bool
@@ -195,8 +195,8 @@ func (p pgStore) publishDraft(ctx context.Context, org, id string, at time.Time)
 	return errNotDraft
 }
 
-// updatedetails changes the details under the assessment's lock, so a submission either commits first and
-// is judged late again here, or judges itself against the new due date (insertsubmission).
+// updateDetails changes the details under the assessment's lock, so a submission either commits first and
+// is judged late again here, or judges itself against the new due date (insertSubmission).
 func (p pgStore) updateDetails(ctx context.Context, org, id string, d Details) error {
 	return p.changeLocked(ctx, org, id, true, func(tx pgx.Tx, a lockedAssessment) error {
 		var changed bool
@@ -219,7 +219,7 @@ func (p pgStore) updateDetails(ctx context.Context, org, id string, d Details) e
 	})
 }
 
-// emitduechanged announces a published assessment's new due date (nil once removed), so grading's late
+// emitDueChanged announces a published assessment's new due date (nil once removed), so grading's late
 // flags follow.
 func emitDueChanged(ctx context.Context, tx pgx.Tx, org, id, classroom string, due *time.Time) error {
 	return platform.Emit(ctx, tx, topicDueChanged, id, map[string]any{"assessment_id": id, "classroom_id": classroom, "org_id": org, "due_at": due})
@@ -247,7 +247,7 @@ func (p pgStore) deleteAssessment(ctx context.Context, org, id string, submissio
 	})
 }
 
-// listprogress is the classroom's 100 newest assessments with how many of the enrolled students submitted
+// listProgress is the classroom's 100 newest assessments with how many of the enrolled students submitted
 // each.
 func (p pgStore) listProgress(ctx context.Context, org, classroomID string, enrolled []string, paging ...platform.ListWindow) ([]Progress, error) {
 	window := platform.Window(paging, 100)
@@ -262,7 +262,7 @@ func (p pgStore) listProgress(ctx context.Context, org, classroomID string, enro
 	})
 }
 
-// listassessments is the classroom's 100 newest assessments, each with whether student has submitted it.
+// listAssessments is the classroom's 100 newest assessments, each with whether student has submitted it.
 func (p pgStore) listAssessments(ctx context.Context, org, classroomID, student string, all bool, enrolled []string, now time.Time, paging ...platform.ListWindow) ([]Summary, error) {
 	window := platform.Window(paging, 100)
 	rows, err := p.db.Query(ctx, `SELECT a.id,a.title,EXISTS(SELECT 1 FROM submissions s WHERE s.assessment_id=a.id AND s.student_id=$3),
@@ -282,7 +282,7 @@ func (p pgStore) listAssessments(ctx context.Context, org, classroomID, student 
 	})
 }
 
-// insertsubmission stores the submission, removes the student's saved work and emits the outbox event in
+// insertSubmission stores the submission, removes the student's saved work and emits the outbox event in
 // one transaction.
 func (p pgStore) insertSubmission(ctx context.Context, v Assessment, sub Submission) (inserted, late bool, err error) {
 	answers, err := json.Marshal(sub.Answers)
@@ -297,7 +297,7 @@ func (p pgStore) insertSubmission(ctx context.Context, v Assessment, sub Submiss
 	if err = lockStudentWork(ctx, tx, v.ID, sub.Student); err != nil {
 		return false, false, err
 	}
-	// shared with other submissions, exclusive against a teacher's change (changelocked): the answers are kept
+	// shared with other submissions, exclusive against a teacher's change (changeLocked): the answers are kept
 	// only if they are to the questions as they are now.
 	current, err := scanAssessment(tx.QueryRow(ctx, "SELECT "+assessmentColumns+" FROM assessments WHERE id=$1 FOR SHARE", v.ID))
 	if err != nil {
@@ -341,7 +341,7 @@ func (p pgStore) findSubmission(ctx context.Context, assessment, student string)
 	return v, err
 }
 
-// findsaved is the student's saved work, or no answers when they have saved nothing.
+// findSaved is the student's saved work, or no answers when they have saved nothing.
 func (p pgStore) findSaved(ctx context.Context, assessment, student string) (SavedAnswers, error) {
 	saved := SavedAnswers{Answers: map[string]string{}}
 	var data []byte
@@ -357,11 +357,11 @@ func (p pgStore) findSaved(ctx context.Context, assessment, student string) (Sav
 	return saved, err
 }
 
-// erraccountdeleted is the answer to a submission or save by a student whose account deletion is being
+// errAccountDeleted is the answer to a submission or save by a student whose account deletion is being
 // purged.
 var errAccountDeleted = errors.New("the account was deleted")
 
-// lockstudentwork serializes one student's saving and submitting of one assessment until tx ends, so saved
+// lockStudentWork serializes one student's saving and submitting of one assessment until tx ends, so saved
 // work cannot be written after the submission that deletes it.
 func lockStudentWork(ctx context.Context, tx pgx.Tx, assessment, student string) error {
 	if err := platform.Lock(ctx, tx, platform.LockStudentWork, assessment+"/"+student); err != nil {
@@ -380,8 +380,8 @@ func lockStudentWork(ctx context.Context, tx pgx.Tx, assessment, student string)
 	return nil
 }
 
-// saveanswers replaces the student's saved work, unless they have already submitted (erralreadysubmitted)
-// or the assessment is gone (platform.errnotfound).
+// saveAnswers replaces the student's saved work, unless they have already submitted (errAlreadySubmitted)
+// or the assessment is gone (platform.ErrNotFound).
 func (p pgStore) saveAnswers(ctx context.Context, assessment, student string, answers map[string]string) (time.Time, error) {
 	data, err := json.Marshal(answers)
 	if err != nil {
@@ -399,7 +399,7 @@ func (p pgStore) saveAnswers(ctx context.Context, assessment, student string, an
 	// it gone.
 	var exists int
 	if err = tx.QueryRow(ctx, "SELECT 1 FROM assessments WHERE id=$1 FOR SHARE", assessment).Scan(&exists); err != nil {
-		return time.Time{}, err // platform.errnotfound when it is gone
+		return time.Time{}, err // platform.ErrNotFound when it is gone
 	}
 	var at time.Time
 	err = tx.QueryRow(ctx, `INSERT INTO saved_answers(assessment_id,student_id,answers) SELECT $1,$2,$3

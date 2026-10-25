@@ -1,4 +1,4 @@
-"""fakes for the agent's tests: identity, curriculum, content, ai-core and keycloak's token endpoint behind one httpx mocktransport."""
+"""fakes for the agent's tests: identity, curriculum, content, ai-core and keycloak's token endpoint behind one httpx MockTransport."""
 
 import json
 from collections.abc import Iterator

@@ -191,7 +191,7 @@ func (s server) enroll(w http.ResponseWriter, r *http.Request) {
 	platform.JSON(w, http.StatusOK, map[string]string{"student_id": student, "classroom_id": id})
 }
 
-// findstudent resolves exactly one of an account id or a username to a student in the caller's
+// findStudent resolves exactly one of an account id or a username to a student in the caller's
 // organization. problem explains a refusal.
 func (s server) findStudent(r *http.Request, id, username string) (student, problem string, err error) {
 	org := platform.Actor(r).Org
@@ -253,10 +253,10 @@ func (s server) roster(w http.ResponseWriter, r *http.Request) {
 	platform.JSON(w, http.StatusOK, map[string]any{"students": students, "total": total})
 }
 
-// maxrosterpage is the most students one page of a classroom's named roster holds.
+// maxRosterPage is the most students one page of a classroom's named roster holds.
 const maxRosterPage = 500
 
-// rosterids lists the ids of every student enrolled in the classroom, for its teacher.
+// rosterIDs lists the ids of every student enrolled in the classroom, for its teacher.
 func (s server) rosterIDs(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
 	if !s.owner(w, r, id, "see the roster") {
@@ -270,7 +270,7 @@ func (s server) rosterIDs(w http.ResponseWriter, r *http.Request) {
 	platform.JSON(w, http.StatusOK, ids)
 }
 
-// maxpage is the most students one page of the school's list holds.
+// maxPage is the most students one page of the school's list holds.
 const maxPage = 50
 
 // search and page signed-in students available for enrollment in the teacher's organization.
@@ -295,7 +295,7 @@ func (s server) students(w http.ResponseWriter, r *http.Request) {
 	platform.JSON(w, http.StatusOK, map[string]any{"students": students, "total": total})
 }
 
-// deleteaccount deletes the caller's own account (adr 0011): it can never sign in or register again, and
+// deleteAccount deletes the caller's own account (adr 0011): it can never sign in or register again, and
 // every service deletes the user's data.
 func (s server) deleteAccount(w http.ResponseWriter, r *http.Request) {
 	c := platform.Actor(r)

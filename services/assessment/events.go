@@ -5,26 +5,26 @@ import (
 	"time"
 )
 
-// maxsubmittedevent is the largest submission event assessment publishes, in bytes: below kafka's default 1
+// maxSubmittedEvent is the largest submission event assessment publishes, in bytes: below kafka's default 1
 // mb message limit with room for the event envelope.
 const maxSubmittedEvent = 900_000
 
 // publish submitted questions, answer keys and marking guidance for grading.
 const topicSubmitted = "assessment.submitted.v4"
 
-// topicsubmittedall matches every submission version's topic, for removing a deleted assessment's events
+// topicSubmittedAll matches every submission version's topic, for removing a deleted assessment's events
 // from the outbox whichever version they were written as.
 const topicSubmittedAll = "assessment.submitted.%"
 
 // announce deleted assessments so grading and analytics purge their copies.
 const topicDeleted = "assessment.deleted.v1"
 
-// topicduechanged announces a published assessment's new due date, or its removal (null)
+// topicDueChanged announces a published assessment's new due date, or its removal (null)
 // (contracts/events/assessment.due_changed.v1.schema.json): grading sets its evaluations' late flags
 // against it.
 const topicDueChanged = "assessment.due_changed.v1"
 
-// submittedeventtoolarge reports whether the submission's event would be over maxsubmittedevent.
+// submittedEventTooLarge reports whether the submission's event would be over maxSubmittedEvent.
 func submittedEventTooLarge(v Assessment, sub Submission) bool {
 	body, err := json.Marshal(submittedEvent(v, sub))
 	return err != nil || len(body) > maxSubmittedEvent
@@ -47,7 +47,7 @@ func submittedEvent(v Assessment, sub Submission) map[string]any {
 	}
 }
 
-// eventquestions are the questions as grading gets them: without where a generated question came from,
+// eventQuestions are the questions as grading gets them: without where a generated question came from,
 // which only the teacher's editor uses (adr 0006) and the v4 contract does not carry.
 func eventQuestions(questions []Question) []Question {
 	out := make([]Question, len(questions))

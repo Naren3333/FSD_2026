@@ -92,7 +92,7 @@ def scale(replicas: int) -> None:
         running = containers(service)
         if len(running) != replicas:
             raise SystemExit(f"{service} runs {len(running)} replicas, not {replicas}")
-    # kong re-resolves service names every 5 s (kong_dns_valid_ttl), so it sees the new replicas after that.
+    # kong re-resolves service names every 5 s (KONG_DNS_VALID_TTL), so it sees the new replicas after that.
     time.sleep(6)
 
 

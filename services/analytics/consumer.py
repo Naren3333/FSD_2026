@@ -22,7 +22,7 @@ from psycopg_pool import ConnectionPool
 from domain import FINALIZED, AssessmentDeletedEvent, Event
 
 ASSESSMENT_DELETED = "assessment.deleted.v1"
-DEFAULT_GROUP = "analytics-v1"  # kafka_group overrides it, e.g. to rebuild from the start of the topics
+DEFAULT_GROUP = "analytics-v1"  # KAFKA_GROUP overrides it, e.g. to rebuild from the start of the topics
 
 
 def process(pool: ConnectionPool[Any], event: Event) -> None:

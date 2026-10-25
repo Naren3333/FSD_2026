@@ -322,5 +322,5 @@ async def test_a_stream_is_not_reopened_once_a_whole_attempt_no_longer_fits(
     openai_fake.replies.append(clock.slow(20, 503))
     with pytest.raises(openai.InternalServerError):
         await collect()
-    # 20 s gone leaves 25 s of stream_open_budget: less than one more 30 s attempt.
+    # 20 s gone leaves 25 s of STREAM_OPEN_BUDGET: less than one more 30 s attempt.
     assert len(openai_fake.requests) == 1 and openai_fake.sleeps == []

@@ -43,7 +43,7 @@ def published_port(name: str, default: str) -> str:
 
 
 # the published ports, as docker-compose.yml reads them: the development stack's unless the environment or
-# .env names others (scripts/stack_tests.py sets test_ports for the test stack).
+# .env names others (scripts/stack_tests.py sets TEST_PORTS for the test stack).
 KONG_PORT = published_port("KONG_PORT", "8000")
 KEYCLOAK_PORT = published_port("KEYCLOAK_PORT", "8081")
 BASE = f"http://127.0.0.1:{KONG_PORT}/api"
@@ -64,7 +64,7 @@ def env() -> dict[str, str]:
 
 
 def project() -> str:
-    """the compose project that `docker compose` acts on here: compose_project_name, which compose itself reads first, or else the development stack."""
+    """the compose project that `docker compose` acts on here: COMPOSE_PROJECT_NAME, which compose itself reads first, or else the development stack."""
     return os.environ.get("COMPOSE_PROJECT_NAME") or DEV_PROJECT
 
 

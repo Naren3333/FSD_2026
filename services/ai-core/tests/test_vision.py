@@ -115,7 +115,7 @@ RATE_LIMITED = {"error": {"message": "Rate limit reached", "code": "rate_limit_e
 
 
 def test_a_rate_limited_call_is_retried_without_nesting(tmp_path: Path, openai_fake: FakeOpenAI) -> None:
-    """rate_retries attempts in all (not the shared client's retries for each of them), each wait slept outside the vision slots."""
+    """RATE_RETRIES attempts in all (not the shared client's retries for each of them), each wait slept outside the vision slots."""
     openai_fake.reply(429, json=RATE_LIMITED, times=vision_calls.RATE_RETRIES)
     assert see(pdf(tmp_path), tmp_path / "cache") == [None]
     assert len(openai_fake.requests) == vision_calls.RATE_RETRIES

@@ -9,8 +9,8 @@ import (
 	"github.com/jackc/pgx/v5"
 )
 
-// removestudent records that a teacher removed a student from a classroom
-// (platform.topicenrollmentremoved), at the time identity removed them.
+// removeStudent records that a teacher removed a student from a classroom
+// (platform.TopicEnrollmentRemoved), at the time identity removed them.
 func removeStudent(ctx context.Context, tx pgx.Tx, event platform.Event) error {
 	v, err := platform.DecodeEnrollmentRemoved(event)
 	if err != nil {
@@ -22,11 +22,11 @@ func removeStudent(ctx context.Context, tx pgx.Tx, event platform.Event) error {
 	return err
 }
 
-// topicduechanged is assessment's event for a published assessment whose due date its teacher changed
+// topicDueChanged is assessment's event for a published assessment whose due date its teacher changed
 // (contracts/events/assessment.due_changed.v1.schema.json).
 const topicDueChanged = "assessment.due_changed.v1"
 
-// duechanged is the topicduechanged event's data; dueat is nil when the due date was removed.
+// DueChanged is the topicDueChanged event's data; DueAt is nil when the due date was removed.
 type DueChanged struct {
 	Assessment string     `json:"assessment_id"`
 	Classroom  string     `json:"classroom_id"`
@@ -34,7 +34,7 @@ type DueChanged struct {
 	DueAt      *time.Time `json:"due_at"`
 }
 
-// changedue keeps the assessment's latest due date and sets each of its evaluations' late flag against it:
+// changeDue keeps the assessment's latest due date and sets each of its evaluations' late flag against it:
 // late only when submitted after it, never when there is none.
 func changeDue(ctx context.Context, tx pgx.Tx, event platform.Event) error {
 	var v DueChanged

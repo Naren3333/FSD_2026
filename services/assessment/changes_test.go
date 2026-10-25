@@ -11,7 +11,7 @@ import (
 	"time"
 )
 
-// racingstore is a memorystore where the teacher's change lands between the handler's read of the
+// racingStore is a memoryStore where the teacher's change lands between the handler's read of the
 // assessment and the student's (or the other editor's) write: meanwhile runs first.
 type racingStore struct {
 	*memoryStore
@@ -50,7 +50,7 @@ func changeIt(m *memoryStore, v Assessment) {
 	m.assessments[v.ID] = v
 }
 
-// pastdue moves the due date an hour back, with the given late policy, as a teacher's details change would.
+// pastDue moves the due date an hour back, with the given late policy, as a teacher's details change would.
 func pastDue(policy string) func(*memoryStore, Assessment) {
 	return func(m *memoryStore, v Assessment) {
 		due := time.Now().Add(-time.Hour)

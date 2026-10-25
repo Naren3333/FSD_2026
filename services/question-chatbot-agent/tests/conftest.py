@@ -1,4 +1,4 @@
-"""fakes for the chatbot's tests: an in-memory store, and identity, content, ai-core and keycloak's token endpoint behind one httpx mocktransport."""
+"""fakes for the chatbot's tests: an in-memory store, and identity, content, ai-core and keycloak's token endpoint behind one httpx MockTransport."""
 
 import json
 from collections.abc import Iterator

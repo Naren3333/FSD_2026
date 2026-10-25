@@ -34,6 +34,8 @@ GUIDANCE_PASSAGES = 6
 GENERATION_TOKENS = 6000
 GUIDANCE_TOKENS = 2000
 REVIEW_TOKENS = 3000
+# a call with less time than this left before the deadline is not started.
+MIN_CALL = 5.0
 WEAK_DISTRACTORS = "WEAK_DISTRACTORS"
 UNREADABLE_REPLY = "UNREADABLE_REPLY"
 NOT_TEACHER = ("FORBIDDEN", "Only the classroom's teacher can generate questions or marking guidance.")
@@ -68,7 +70,7 @@ def refused(e: UpstreamError) -> HTTPException:
 
 
 def _local_time(iso: str | None) -> str:
-    """ai-core's reset time in its own zone (spend_timezone), with the zone's offset, e.g. \"00:00 on 19 oct (utc+08:00)\": the teacher's browser may be elsewhere."""
+    """ai-core's reset time in its own zone (SPEND_TIMEZONE), with the zone's offset, e.g. \"00:00 on 19 oct (utc+08:00)\": the teacher's browser may be elsewhere."""
     try:
         at = datetime.fromisoformat(iso) if iso else None
     except ValueError:
@@ -139,6 +141,7 @@ class Run:
     def next_request(self, body: GenerateRequest, shortfall: dict[str, int]) -> GenerateRequest:
         """the next round's request: the shortfall, with the drafts held as existing; weak and rejected drafts go back only as previous_attempts, so a corrected rewrite is not a duplicate."""
         held = [g.question.prompt for g in self.accepted + self.unreviewed]
+        # may pass max_existing: the checks compare against all of them, and the prompts keep the newest that fit.
         return body.model_copy(
             update={"counts": shortfall, "existing_prompts": [*body.existing_prompts, *held]}
         )
@@ -238,17 +241,29 @@ class Pipeline:
         return await self._rounds(topic.name, body, passages, started, review)
 
     async def _ask(
-        self, messages: list[dict[str, str]], tokens: int, schema: dict[str, Any], name: str
+        self,
+        messages: list[dict[str, str]],
+        tokens: int,
+        schema: dict[str, Any],
+        name: str,
+        deadline: float | None = None,
     ) -> str:
+        """one model call; with a deadline it is cut off then, so the request ends before the gateway gives up."""
+        timeout = None
+        if deadline is not None:
+            timeout = deadline - time.monotonic()
+            if timeout < MIN_CALL:
+                raise UpstreamError("ai-core", 0, "OUT_OF_TIME")
         return await self.services.generate(
-            messages, tokens, schema, name, self.correlation, billed(self.claims)
+            messages, tokens, schema, name, self.correlation, billed(self.claims), timeout
         )
 
     async def _rounds(
         self, topic: str, body: GenerateRequest, passages: list[Passage], started: float, review: bool
     ) -> GenerateResponse:
-        """generate, review and retry the shortfall (adr 0006); without a review, one round of checks only. a retry needs 1.5 times the longest round to fit in review_deadline; one very slow round can still pass the gateway timeout."""
+        """generate, review and retry the shortfall (adr 0006); without a review, one round of checks only. a retry needs 1.5 times the longest round to fit in review_deadline, and every call after the first generation is cut off at it."""
         run = Run()
+        deadline = started + self.settings.review_deadline
         round_started, longest = started, 0.0
         for n in range(self.settings.review_retries + 1 if review else 1):
             now = time.monotonic()
@@ -266,6 +281,7 @@ class Pipeline:
                     GENERATION_TOKENS,
                     prompts.generation_schema(request.question_types),
                     "questions.generated",
+                    deadline if n > 0 else None,
                 )
             except UpstreamError as e:
                 log.warning("generation_failed", extra={"error": str(e), "round": n})
@@ -312,7 +328,7 @@ class Pipeline:
                 )
                 continue
             try:
-                verdicts = await self._review(topic, body, kept, passages, run)
+                verdicts = await self._review(topic, body, kept, passages, run, deadline)
             except (UpstreamError, checks.UnreadableOutputError) as e:
                 log.warning("review_failed", extra={"error": str(e), "round": n})
                 run.unreviewed += [g.model_copy(update={"review": not_run(n)}) for g in kept]
@@ -375,7 +391,13 @@ class Pipeline:
         )
 
     async def _review(
-        self, topic: str, body: GenerateRequest, kept: list[Generated], passages: list[Passage], run: "Run"
+        self,
+        topic: str,
+        body: GenerateRequest,
+        kept: list[Generated],
+        passages: list[Passage],
+        run: "Run",
+        deadline: float,
     ) -> list[review.Verdict]:
         """one reviewer call over the drafts that passed the checks; it sees the editor's questions and those held so far."""
         output = await self._ask(
@@ -389,6 +411,7 @@ class Pipeline:
             REVIEW_TOKENS,
             prompts.review_schema(),
             "questions.reviewed",
+            deadline,
         )
         run.calls += 1
         return review.verdicts(output, len(kept))

@@ -25,7 +25,7 @@ DEFAULT_SUITES = ["integration", "db", "e2e"]
 SCALE_FILE = "docker-compose.scale.yml"
 READY_TIMEOUT = 600  # seconds: a fresh stack imports the realm and runs every migration before it answers
 # the test stack's postgresql init script and realm import, beside the development stack's in .local
-# (relative to the repository, as docker-compose.yml's local_config_dir reads it).
+# (relative to the repository, as docker-compose.yml's LOCAL_CONFIG_DIR reads it).
 TEST_LOCAL_CONFIG_DIR = ".local/test-stack"
 # isolate compose commands, ports and first-start files from the development stack.
 TEST_ENV = {
@@ -42,7 +42,7 @@ def compose(*args: str, check: bool = True) -> subprocess.CompletedProcess[str]:
 
 
 def refresh_local_files() -> None:
-    """writes the test stack's postgresql init script and realm import from .env, as scripts/setup.py writes the development stack's, into test_local_config_dir."""
+    """writes the test stack's postgresql init script and realm import from .env, as scripts/setup.py writes the development stack's, into TEST_LOCAL_CONFIG_DIR."""
     try:
         values = env()
         sql, import_ = postgres_init(values), realm(values, TEST_WEB_ORIGIN)
@@ -57,7 +57,7 @@ def refresh_local_files() -> None:
 
 
 def with_scale_file() -> None:
-    """adds docker-compose.scale.yml to the compose files every command of this run uses, after any compose_file already names (compose separates them with the platform's path separator)."""
+    """adds docker-compose.scale.yml to the compose files every command of this run uses, after any COMPOSE_FILE already names (compose separates them with the platform's path separator)."""
     files = TEST_ENV.get("COMPOSE_FILE") or "docker-compose.yml"
     TEST_ENV["COMPOSE_FILE"] = os.pathsep.join([files, SCALE_FILE])
 

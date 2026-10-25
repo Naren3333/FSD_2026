@@ -15,7 +15,7 @@ import (
 	"github.com/jackc/pgx/v5"
 )
 
-// these tests run pgstore against real postgresql in a throwaway schema.
+// these tests run pgStore against real postgresql in a throwaway schema.
 
 func testStore(t *testing.T) pgStore {
 	return pgStore{platformtest.DB(t, "ASSESSMENT_TEST_DATABASE_URL", migrations)}

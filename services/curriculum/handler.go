@@ -146,7 +146,7 @@ func (s server) restore(w http.ResponseWriter, r *http.Request) {
 	platform.JSON(w, http.StatusOK, v)
 }
 
-// topicid reports whether the path's topic id is a uuid, answering 404 like a missing topic when it is not.
+// topicID reports whether the path's topic id is a uuid, answering 404 like a missing topic when it is not.
 func topicID(w http.ResponseWriter, r *http.Request) bool {
 	if !platform.ID(r.PathValue("id")) {
 		platform.NotFound(w, "Topic not found.")
@@ -203,7 +203,7 @@ func (s server) prerequisites(w http.ResponseWriter, r *http.Request) {
 	platform.JSON(w, http.StatusOK, result)
 }
 
-// removeprerequisite deletes one prerequisite link, archived topics' included, for a teacher.
+// removePrerequisite deletes one prerequisite link, archived topics' included, for a teacher.
 func (s server) removePrerequisite(w http.ResponseWriter, r *http.Request) {
 	if !platform.Teacher(w, r) || !topicID(w, r) {
 		return

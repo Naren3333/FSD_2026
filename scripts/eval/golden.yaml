@@ -1,4 +1,4 @@
-# golden retrieval queries, ported from fsd_test's knowledge/eval/golden.yaml (its rag_plan.md has the
+# golden retrieval queries, ported from fsd_test's knowledge/eval/golden.yaml (its RAG_PLAN.md has the
 # history).
 
 # unless tagged `group: prose`, queries are about the slide decks (group "default" = slides). --- s1:

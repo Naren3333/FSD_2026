@@ -31,11 +31,11 @@ func purge(ctx context.Context, tx pgx.Tx, event platform.Event) error {
 	return platform.DiscardPending(ctx, tx, v)
 }
 
-// topicassessmentdeleted is assessment's event for a published assessment its teacher deleted with its
+// topicAssessmentDeleted is assessment's event for a published assessment its teacher deleted with its
 // submissions (adr 0008).
 const topicAssessmentDeleted = "assessment.deleted.v1"
 
-// assessmentdeleted is the topicassessmentdeleted event's data.
+// AssessmentDeleted is the topicAssessmentDeleted event's data.
 type AssessmentDeleted struct {
 	Assessment string `json:"assessment_id"`
 	Classroom  string `json:"classroom_id"`

@@ -144,12 +144,23 @@ def test_still_failing_every_round_stops_after_three_rounds(api, fakes: Fakes):
     assert len(data["rounds"]) == 3
 
 
-def test_no_retry_starts_after_the_deadline(api, fakes: Fakes):
+def test_no_call_starts_after_the_deadline(api, fakes: Fakes):
+    """past the deadline the review is not started: the drafts come back not reviewed, with no retry."""
     configure(review_deadline=0)
-    fakes.replies = [gen(mc(0), mc(1)), rev("pass", WRONG_KEY)]
+    fakes.replies = [gen(mc(0), mc(1))]
     data = ask(api, count=2).json()
-    sent(fakes, GEN, REV)
-    assert data["returned"] == 1 and data["model_calls"] == 2 and len(data["rounds"]) == 1
+    sent(fakes, GEN)
+    assert statuses(data) == [("not_reviewed", 0)] * 2
+    assert data["model_calls"] == 1 and len(data["rounds"]) == 1
+
+
+def test_calls_after_the_first_generation_are_cut_off_at_the_deadline(api, fakes: Fakes):
+    configure(review_deadline=100)
+    fakes.replies = [gen(mc(0), mc(1)), rev("pass", WRONG_KEY), gen(mc(2)), rev("pass")]
+    assert ask(api, count=2).status_code == 200
+    timeouts = [r.extensions["timeout"]["read"] for p, _, r in fakes.requests if p == "/v1/inference"]
+    assert timeouts[0] == 135.0
+    assert len(timeouts) == 4 and all(t <= 100 for t in timeouts[1:])
 
 
 def test_an_unreadable_review_leaves_the_drafts_not_reviewed(api, fakes: Fakes):

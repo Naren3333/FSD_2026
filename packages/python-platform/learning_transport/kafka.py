@@ -17,8 +17,8 @@ from learning_transport.errors import Contract
 RESTART_FIRST, RESTART_MAX = 5.0, 60.0  # seconds a stopped consumer waits before its next session
 PROCESS_ATTEMPTS = 5  # tries to process a message before the session stops uncommitted
 DEAD_LETTER_TIMEOUT = 12  # seconds to wait for the broker to confirm a dead-lettered message
-# database errors that retrying the same message cannot fix: a value the schema refuses (dataerror) or a
-# broken constraint (integrityerror, checkviolation among them).
+# database errors that retrying the same message cannot fix: a value the schema refuses (DataError) or a
+# broken constraint (IntegrityError, CheckViolation among them).
 PERMANENT_ERRORS: tuple[type[Exception], ...] = (DataError, IntegrityError)
 
 # handle(topic, value) processes one message durably.

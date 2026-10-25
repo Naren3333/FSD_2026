@@ -27,7 +27,7 @@ func Lock(ctx context.Context, tx pgx.Tx, scope, key string) error {
 	return err
 }
 
-// lockshared takes the advisory lock on (scope, key) shared until tx ends: shared holders run together, and
+// LockShared takes the advisory lock on (scope, key) shared until tx ends: shared holders run together, and
 // lock waits for all of them.
 func LockShared(ctx context.Context, tx pgx.Tx, scope, key string) error {
 	_, err := tx.Exec(ctx, sharedLockSQL, scope, key)

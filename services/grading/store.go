@@ -15,11 +15,11 @@ var errAlreadyFinalized = errors.New("evaluation already finalized")
 
 // store is a classroom's draft and finalized evaluations, with their audit trail.
 type store interface {
-	// listevaluations is one page of the classroom's evaluations of the given students, or of one assessment's
+	// listEvaluations is one page of the classroom's evaluations of the given students, or of one assessment's
 	// when assessment is set, with how many there are in all.
 	listEvaluations(ctx context.Context, org, classroom, assessment string, students []string, offset, limit int) ([]Evaluation, int, error)
 	listReleased(ctx context.Context, org, classroom, student string) ([]Evaluation, error)
-	// countevaluations counts the classroom's evaluations of the given students, or one assessment's when
+	// countEvaluations counts the classroom's evaluations of the given students, or one assessment's when
 	// assessment is set.
 	countEvaluations(ctx context.Context, org, classroom, assessment string, students []string) (Counts, error)
 	findEvaluation(ctx context.Context, org, id string) (Evaluation, error)
@@ -31,7 +31,7 @@ type store interface {
 	release(ctx context.Context, org, assessment, actor string, students []string) (int, error)
 }
 
-// pgstore is the store in the service's own postgres database.
+// pgStore is the store in the service's own postgres database.
 type pgStore struct{ db *pgxpool.Pool }
 
 // counts is how many of a classroom's evaluations are drafts waiting for its teacher, how many are
@@ -56,7 +56,7 @@ func optional(assessment string) *string {
 	return &assessment
 }
 
-// insertevaluation runs inside the event consumer's transaction.
+// insertEvaluation runs inside the event consumer's transaction.
 func insertEvaluation(ctx context.Context, tx pgx.Tx, v Submitted, evidence []Evidence, queued []string) error {
 	data, err := json.Marshal(evidence)
 	if err != nil {
@@ -74,15 +74,15 @@ func insertEvaluation(ctx context.Context, tx pgx.Tx, v Submitted, evidence []Ev
 	if v.marking() {
 		teacher = &v.Teacher
 	}
-	// shared with other submissions to the assessment, exclusive against its purge (purgeassessment), and
-	// likewise with the student's other work against the purge of their deleted account (purgeuser).
+	// shared with other submissions to the assessment, exclusive against its purge (purgeAssessment), and
+	// likewise with the student's other work against the purge of their deleted account (purgeUser).
 	if err = platform.LockShared(ctx, tx, platform.LockAssessment, v.Assessment); err != nil {
 		return err
 	}
 	if err = platform.LockShared(ctx, tx, platform.LockUser, v.Student); err != nil {
 		return err
 	}
-	// a due date changed since the student submitted (changedue) decides whether the work is late.
+	// a due date changed since the student submitted (changeDue) decides whether the work is late.
 	result, err := tx.Exec(ctx, `INSERT INTO evaluations(id,assessment_id,classroom_id,org_id,student_id,evidence,questions,answers,late,submitted_at,release_policy,teacher_id)
 		SELECT $1::uuid,$2::uuid,$3::uuid,$4::text,$5::text,$6::jsonb,$7::jsonb,$8::jsonb,
 			CASE WHEN d.assessment_id IS NULL OR $10::timestamptz IS NULL THEN $9::boolean ELSE coalesce($10::timestamptz>d.due_at,false) END,
@@ -103,10 +103,10 @@ func insertEvaluation(ctx context.Context, tx pgx.Tx, v Submitted, evidence []Ev
 	return nil
 }
 
-// evaluationcolumns are the columns scanevaluation reads first.
+// evaluationColumns are the columns scanEvaluation reads first.
 const evaluationColumns = "id,assessment_id,classroom_id,student_id,status,evidence,coalesce(answers,'{}'::jsonb),late,submitted_at,release_policy,finalized_at,released_at"
 
-// scanevaluation reads evaluationcolumns, then any extra columns into more, and decodes the evidence.
+// scanEvaluation reads evaluationColumns, then any extra columns into more, and decodes the evidence.
 func scanEvaluation(row pgx.Row, more ...any) (Evaluation, []byte, error) {
 	var v Evaluation
 	var data, answers []byte
@@ -131,7 +131,7 @@ func (p pgStore) collect(rows pgx.Rows, err error) ([]Evaluation, error) {
 	})
 }
 
-// listevaluations is one page of the classroom's evaluations of the given students, newest first, or of one
+// listEvaluations is one page of the classroom's evaluations of the given students, newest first, or of one
 // assessment's, oldest first, with how many there are in all.
 func (p pgStore) listEvaluations(ctx context.Context, org, classroom, assessment string, students []string, offset, limit int) ([]Evaluation, int, error) {
 	const match = " FROM evaluations WHERE classroom_id=$1 AND org_id=$2 AND student_id=ANY($3::text[]) AND ($4::uuid IS NULL OR assessment_id=$4::uuid)"
@@ -147,13 +147,13 @@ func (p pgStore) listEvaluations(ctx context.Context, org, classroom, assessment
 	return list, total, err
 }
 
-// findevaluation is one evaluation with its students' answers; platform.errnotfound when there is none.
+// findEvaluation is one evaluation with its students' answers; platform.ErrNotFound when there is none.
 func (p pgStore) findEvaluation(ctx context.Context, org, id string) (Evaluation, error) {
 	v, _, err := scanEvaluation(p.db.QueryRow(ctx, "SELECT "+evaluationColumns+" FROM evaluations WHERE id=$1 AND org_id=$2", id, org))
 	return v, err
 }
 
-// listreleased is one student's released results in a classroom, newest first.
+// listReleased is one student's released results in a classroom, newest first.
 func (p pgStore) listReleased(ctx context.Context, org, classroom, student string) ([]Evaluation, error) {
 	return p.collect(p.db.Query(ctx, "SELECT "+evaluationColumns+" FROM evaluations WHERE classroom_id=$1 AND org_id=$2 AND student_id=$3 AND status='finalized' AND released_at IS NOT NULL ORDER BY released_at DESC LIMIT 100", classroom, org, student))
 }
@@ -164,7 +164,7 @@ func (p pgStore) findClassroom(ctx context.Context, org, id string) (string, err
 	return classroom, err
 }
 
-// assessmentclassroom is the classroom of an assessment that has evaluations; platform.errnotfound when
+// assessmentClassroom is the classroom of an assessment that has evaluations; platform.ErrNotFound when
 // none.
 func (p pgStore) assessmentClassroom(ctx context.Context, org, assessment string) (string, error) {
 	var classroom string
@@ -172,7 +172,7 @@ func (p pgStore) assessmentClassroom(ctx context.Context, org, assessment string
 	return classroom, err
 }
 
-// lockdraft locks a draft evaluation with its questions for a change.
+// lockDraft locks a draft evaluation with its questions for a change.
 func lockDraft(ctx context.Context, tx pgx.Tx, org, id string) (Evaluation, []Question, []byte, error) {
 	var data []byte
 	v, before, err := scanEvaluation(tx.QueryRow(ctx, "SELECT "+evaluationColumns+",coalesce(questions,'[]'::jsonb) FROM evaluations WHERE id=$1 AND org_id=$2 FOR UPDATE", id, org), &data)
@@ -186,7 +186,7 @@ func lockDraft(ctx context.Context, tx pgx.Tx, org, id string) (Evaluation, []Qu
 	return v, questions, before, json.Unmarshal(data, &questions)
 }
 
-// savemarks records the teacher's marks on a draft without finalizing it, with an audit entry.
+// saveMarks records the teacher's marks on a draft without finalizing it, with an audit entry.
 func (p pgStore) saveMarks(ctx context.Context, org, id, actor string, marks map[string]Mark) (Evaluation, error) {
 	tx, err := p.db.Begin(ctx)
 	if err != nil {

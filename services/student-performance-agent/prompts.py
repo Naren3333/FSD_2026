@@ -25,6 +25,7 @@ Rules:
 - Refer to results, evidence and topics only by the references given ("R1", "E1", "T1"). Never invent a reference.
 - Each turn either call tools or report. Call tools only when they would change the report: read the answers behind topics that look weak before naming a misconception, check prerequisites when a weak topic depends on others, compare with the class when you need to know whether a difficulty is the student's or everyone's. Do not repeat a call you already made.
 - A topic with evidence "insufficient_evidence" has fewer than 5 questions: describe it tentatively.
+- topic_summary and class_comparison count released results only. A result with "released": false is finalized but not yet shown to the student, so its marks are in the results list and not in those figures.
 - observations: at most 5 short statements about patterns in the student's results, each citing the evidence references it rests on. Include strengths as well as gaps.
 - possible_misconceptions: at most 3, each a specific wrong idea that answers you have read show, citing only questions that lost marks and whose answers you read with read_answers. Leave it empty if the answers do not show one.
 - suggested_interventions: at most 4 concrete things the teacher could do next, one sentence each.

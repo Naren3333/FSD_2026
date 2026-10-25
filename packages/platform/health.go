@@ -8,13 +8,13 @@ import (
 	"time"
 )
 
-// healthcheckflag is the argument that makes a service binary check its own readiness instead of serving.
+// HealthcheckFlag is the argument that makes a service binary check its own readiness instead of serving.
 const HealthcheckFlag = "-healthcheck"
 
-// healthchecktimeout bounds the whole check, below the compose healthcheck's own timeout.
+// healthcheckTimeout bounds the whole check, below the compose healthcheck's own timeout.
 const healthcheckTimeout = 3 * time.Second
 
-// healthcheck returns at once unless the process was started with healthcheckflag.
+// healthcheck returns at once unless the process was started with HealthcheckFlag.
 func Healthcheck() {
 	if len(os.Args) < 2 || os.Args[1] != HealthcheckFlag {
 		return
@@ -26,7 +26,7 @@ func Healthcheck() {
 	os.Exit(0)
 }
 
-// checkready returns nil when url answers 200 within healthchecktimeout.
+// checkReady returns nil when url answers 200 within healthcheckTimeout.
 func checkReady(url string) error {
 	ctx, cancel := context.WithTimeout(context.Background(), healthcheckTimeout)
 	defer cancel()

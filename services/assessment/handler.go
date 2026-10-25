@@ -17,7 +17,7 @@ type server struct {
 	access platform.ClassroomAccess
 	roster platform.ClassroomRoster
 	topics topics
-	clock  func() time.Time // time.now unless a test sets it
+	clock  func() time.Time // time.Now unless a test sets it
 }
 
 func (s server) now() time.Time {
@@ -137,7 +137,7 @@ func (s server) prepare(w http.ResponseWriter, r *http.Request, v *Assessment, b
 }
 
 func (s server) create(w http.ResponseWriter, r *http.Request) {
-	// the role check comes first so a student is refused before validation; teacherof decides below.
+	// the role check comes first so a student is refused before validation; TeacherOf decides below.
 	if !platform.Teacher(w, r) {
 		return
 	}
@@ -288,7 +288,7 @@ func (s server) remove(w http.ResponseWriter, r *http.Request) {
 	platform.JSON(w, http.StatusOK, map[string]string{"id": v.ID})
 }
 
-// draftresult writes the response for a failed draft change: 409 once published (a race with another tab,
+// draftResult writes the response for a failed draft change: 409 once published (a race with another tab,
 // say), 404 when it is gone.
 func (s server) draftResult(w http.ResponseWriter, err error) bool {
 	if errors.Is(err, errNotDraft) {
@@ -298,7 +298,7 @@ func (s server) draftResult(w http.ResponseWriter, err error) bool {
 	return platform.Found(w, err, "Assessment not found.")
 }
 
-// changeresult writes the response for a failed replacement: 409 once a student has submitted it, once
+// changeResult writes the response for a failed replacement: 409 once a student has submitted it, once
 // published (when it would unpublish it) or when another change landed first, 404 when it is gone.
 func (s server) changeResult(w http.ResponseWriter, err error) bool {
 	if errors.Is(err, errAssessmentChanged) {
@@ -395,7 +395,7 @@ func (s server) progress(w http.ResponseWriter, r *http.Request) {
 	platform.JSON(w, http.StatusOK, result)
 }
 
-// findassessment looks up the assessment the path names in the caller's organization.
+// findAssessment looks up the assessment the path names in the caller's organization.
 func (s server) findAssessment(w http.ResponseWriter, r *http.Request) (Assessment, bool) {
 	id := r.PathValue("id")
 	if !platform.ID(id) {
@@ -426,7 +426,7 @@ func (s server) get(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-// forstudent finds the assessment for an enrolled student who may answer it: published and open.
+// forStudent finds the assessment for an enrolled student who may answer it: published and open.
 func (s server) forStudent(w http.ResponseWriter, r *http.Request) (Assessment, bool) {
 	c := platform.Actor(r)
 	if !c.Has("student") || c.Has("teacher") {

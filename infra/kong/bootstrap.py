@@ -20,7 +20,7 @@ def business_service(name: str) -> dict[str, Any]:
     timeout = CONTENT_TIMEOUT_MS if name == "content" else TIMEOUT_MS
     route: dict[str, Any] = {"name": name, "paths": [f"/api/{name}"], "strip_path": True}
     if name == "content":
-        # pdfs may be up to 50 mib (in megabytes, so 51 leaves room for the request around the file).
+        # pdfs may be up to 50 MiB (in megabytes, so 51 leaves room for the request around the file).
         route["plugins"] = [{"name": "request-size-limiting", "config": {"allowed_payload_size": 51}}]
     return {
         "name": name,

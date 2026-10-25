@@ -72,7 +72,7 @@ type Question struct {
 	CaseSensitive   bool     `json:"case_sensitive,omitempty"`
 	Rubric          *Rubric  `json:"rubric,omitempty"`
 	MaxLength       int      `json:"max_length,omitempty"`
-	// markingscheme is for short answers and free responses only.
+	// MarkingScheme is for short answers and free responses only.
 	MarkingScheme []Excerpt `json:"marking_scheme,omitempty"`
 	Points        int       `json:"points"`
 	Topic         string    `json:"topic_id"`
@@ -82,7 +82,7 @@ type Question struct {
 	Origin  string    `json:"origin,omitempty"`
 }
 
-// origingenerated marks a question the teacher kept from ai question generation; a question without an
+// originGenerated marks a question the teacher kept from ai question generation; a question without an
 // origin was written by the teacher.
 const originGenerated = "generated"
 
@@ -99,7 +99,7 @@ type Assessment struct {
 	ReleasePolicy string     `json:"release_policy"`
 	AIMarking     bool       `json:"ai_marking"`
 	PublishedAt   *time.Time `json:"published_at"`
-	// createdby is the teacher who created it; their daily ai allowance pays for its ai marking (adr 0003).
+	// CreatedBy is the teacher who created it; their daily ai allowance pays for its ai marking (adr 0003).
 	CreatedBy string `json:"-"`
 }
 
@@ -144,7 +144,7 @@ type Submission struct {
 	SubmittedAt      time.Time
 }
 
-// ownsubmission is a student's submitted answers, as they see them again: only what they wrote, never the
+// OwnSubmission is a student's submitted answers, as they see them again: only what they wrote, never the
 // answer keys.
 type OwnSubmission struct {
 	Answers     map[string]string `json:"answers"`
@@ -152,7 +152,7 @@ type OwnSubmission struct {
 	Late        bool              `json:"late"`
 }
 
-// savedanswers is a student's unsubmitted work on an assessment.
+// SavedAnswers is a student's unsubmitted work on an assessment.
 type SavedAnswers struct {
 	Answers map[string]string `json:"answers"`
 	SavedAt *time.Time        `json:"saved_at"`
@@ -232,7 +232,7 @@ func (v Assessment) Validate() error {
 	return nil
 }
 
-// validatesettings checks the status, policies and dates.
+// validateSettings checks the status, policies and dates.
 func (v Assessment) validateSettings() error {
 	switch {
 	case v.Status != statusDraft && v.Status != statusPublished:
@@ -281,7 +281,7 @@ func (q Question) validate() error {
 	return nil
 }
 
-// validatedetails checks new details for v: a title, a known late policy, and a due date after the opening
+// validateDetails checks new details for v: a title, a known late policy, and a due date after the opening
 // date and, when the due date changes on a published assessment, not already past.
 func (v Assessment) validateDetails(d Details, now time.Time) error {
 	changed := v
@@ -302,7 +302,7 @@ func sameTime(a, b *time.Time) bool {
 	return (a == nil) == (b == nil) && (a == nil || a.Equal(*b))
 }
 
-// samemarking reports whether a and b have the same questions and marking settings: whether answers to one
+// sameMarking reports whether a and b have the same questions and marking settings: whether answers to one
 // are graded as answers to the other.
 func sameMarking(a, b Assessment) bool {
 	return a.Status == b.Status && a.ReleasePolicy == b.ReleasePolicy && a.AIMarking == b.AIMarking && sameJSON(a.Questions, b.Questions)
@@ -323,7 +323,7 @@ func (v *Assessment) keepQuestionIDs(before []Question) {
 	}
 }
 
-// samejson compares questions as stored, so an empty list and a missing one are alike where the json omits
+// sameJSON compares questions as stored, so an empty list and a missing one are alike where the json omits
 // both.
 func sameJSON(a, b any) bool {
 	x, err1 := json.Marshal(a)
@@ -331,14 +331,14 @@ func sameJSON(a, b any) bool {
 	return err1 == nil && err2 == nil && string(x) == string(y)
 }
 
-// teachermarked reports whether any question can need a teacher (or an ai suggestion) to mark it.
+// teacherMarked reports whether any question can need a teacher (or an ai suggestion) to mark it.
 func (v Assessment) teacherMarked() bool {
 	return slices.ContainsFunc(v.Questions, func(q Question) bool {
 		return q.Type == typeShortAnswer || q.Type == typeFreeResponse
 	})
 }
 
-// topicids are the distinct topics the questions assess.
+// topicIDs are the distinct topics the questions assess.
 func (v Assessment) topicIDs() []string {
 	var ids []string
 	for _, q := range v.Questions {
@@ -349,7 +349,7 @@ func (v Assessment) topicIDs() []string {
 	return ids
 }
 
-// visibletostudents reports whether students may see and answer it: published, and open.
+// visibleToStudents reports whether students may see and answer it: published, and open.
 func (v Assessment) visibleToStudents(now time.Time) bool {
 	return v.Status == statusPublished && (v.OpensAt == nil || !v.OpensAt.After(now))
 }
@@ -369,7 +369,7 @@ func (v Assessment) Public() PublicAssessment {
 	return p
 }
 
-// validateanswers reports whether answers has exactly one acceptable answer for every question.
+// validateAnswers reports whether answers has exactly one acceptable answer for every question.
 func validateAnswers(v Assessment, answers map[string]string) bool {
 	if len(answers) != len(v.Questions) {
 		return false
@@ -384,7 +384,7 @@ func validateAnswers(v Assessment, answers map[string]string) bool {
 	return true
 }
 
-// answerscurrent reports whether every answer is to one of v's questions.
+// answersCurrent reports whether every answer is to one of v's questions.
 func answersCurrent(v Assessment, answers map[string]string) bool {
 	for id := range answers {
 		if !slices.ContainsFunc(v.Questions, func(q Question) bool { return q.ID == id }) {
@@ -394,7 +394,7 @@ func answersCurrent(v Assessment, answers map[string]string) bool {
 	return true
 }
 
-// validatesaved reports whether saved work fits the assessment: only its questions, each within its length
+// validateSaved reports whether saved work fits the assessment: only its questions, each within its length
 // limit.
 func validateSaved(v Assessment, answers map[string]string) bool {
 	for id, answer := range answers {

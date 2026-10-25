@@ -1,4 +1,4 @@
-"""the one asyncopenai client per process, with our own retries: embeddings, chat (plain, streamed or structured) and the ingest's vision calls."""
+"""the one AsyncOpenAI client per process, with our own retries: embeddings, chat (plain, streamed or structured) and the ingest's vision calls."""
 
 import asyncio
 import functools
@@ -34,7 +34,7 @@ _client: AsyncOpenAI | None = None
 
 
 class NotConfiguredError(Exception):
-    """openai_api_key is unset."""
+    """OPENAI_API_KEY is unset."""
 
 
 class StructuredOutputError(Exception):
@@ -260,7 +260,7 @@ async def call[T](
 
 
 def default_delay(exc: openai.OpenAIError, attempt: int) -> float | None:
-    """this module's policy: max_attempts attempts at retryable errors, after openai's retry-after when it sends one (up to max_delay) and otherwise exponential backoff with full jitter."""
+    """this module's policy: MAX_ATTEMPTS attempts at retryable errors, after openai's retry-after when it sends one (up to MAX_DELAY) and otherwise exponential backoff with full jitter."""
     if attempt >= MAX_ATTEMPTS or not retryable(exc):
         return None
     after = retry_after(exc)

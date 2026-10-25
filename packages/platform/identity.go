@@ -15,10 +15,10 @@ const (
 	RelationStudent = "student"
 )
 
-// classroomaccess answers how the caller may access a classroom.
+// ClassroomAccess answers how the caller may access a classroom.
 type ClassroomAccess interface {
 	// relation reports how the caller may access the classroom (optionally on behalf of a student): as its
-	// teacher (relationteacher) or as an enrolled student (relationstudent).
+	// teacher (RelationTeacher) or as an enrolled student (RelationStudent).
 	Relation(w http.ResponseWriter, r *http.Request, classroom, student string) (string, bool)
 }
 
@@ -28,7 +28,7 @@ func Access(a ClassroomAccess, w http.ResponseWriter, r *http.Request, classroom
 	return ok
 }
 
-// teacherof allows only the classroom's own teacher.
+// TeacherOf allows only the classroom's own teacher.
 func TeacherOf(a ClassroomAccess, w http.ResponseWriter, r *http.Request, classroom string) bool {
 	if !Teacher(w, r) {
 		return false
@@ -51,7 +51,7 @@ type Identity struct {
 	client *http.Client
 }
 
-// newidentity returns a classroomaccess backed by the identity service at base (identity_url).
+// NewIdentity returns a ClassroomAccess backed by the identity service at base (IDENTITY_URL).
 func NewIdentity(base string, client *http.Client) *Identity {
 	return &Identity{base: base, client: client}
 }
@@ -98,10 +98,10 @@ func (i *Identity) Relation(w http.ResponseWriter, r *http.Request, classroom, s
 	return answer.Relation, true
 }
 
-// maxroster is the most of identity's id-only roster read, in bytes: about 100,000 account ids.
+// maxRoster is the most of identity's id-only roster read, in bytes: about 100,000 account ids.
 const maxRoster = 4 << 20
 
-// classroomroster lists the students enrolled in a classroom, for its teacher.
+// ClassroomRoster lists the students enrolled in a classroom, for its teacher.
 type ClassroomRoster interface {
 	// roster is the ids of every student enrolled in the classroom.
 	Roster(w http.ResponseWriter, r *http.Request, classroom string) ([]string, bool)
@@ -139,7 +139,7 @@ func (i *Identity) Roster(w http.ResponseWriter, r *http.Request, classroom stri
 	var ids []string
 	body := &countingReader{r: io.LimitReader(res.Body, maxRoster)}
 	if err = json.NewDecoder(body).Decode(&ids); err != nil || ids == nil || slices.Contains(ids, "") {
-		// a roster larger than maxroster is cut off and fails to decode; say so, since its answer is a 503 like
+		// a roster larger than maxRoster is cut off and fails to decode; say so, since its answer is a 503 like
 		// any other unreadable roster.
 		cause := "unreadable"
 		if body.n >= maxRoster {
@@ -152,7 +152,7 @@ func (i *Identity) Roster(w http.ResponseWriter, r *http.Request, classroom stri
 	return ids, true
 }
 
-// countingreader counts the bytes read through it.
+// countingReader counts the bytes read through it.
 type countingReader struct {
 	r io.Reader
 	n int64

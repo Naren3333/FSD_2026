@@ -1,4 +1,4 @@
-"""postgresstore against a real postgresql."""
+"""PostgresStore against a real postgresql."""
 
 import asyncio
 import json

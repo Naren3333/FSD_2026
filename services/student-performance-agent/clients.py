@@ -48,7 +48,7 @@ class Services(AgentClients):
             raise UpstreamError(service, 502) from None
 
     async def performance(self, authorization: str, classroom: str, student: str, correlation: str) -> Any:
-        """analytics' topic summary of the student's released grades."""
+        """analytics' topic summary of the student's released grades (finalized ones not yet released are not in it)."""
         url = f"{self.settings.analytics_url}/v1/performance/{student}"
         return await self._get("analytics", url, authorization, correlation, classroom_id=classroom)
 

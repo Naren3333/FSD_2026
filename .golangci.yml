@@ -3,7 +3,7 @@ version: "2"
 linters:
   enable:
     - bodyclose      # http response bodies are closed
-    - errorlint      # errors are compared with errors.is / errors.as, so wrapped errors still match
+    - errorlint      # errors are compared with errors.Is / errors.As, so wrapped errors still match
     - gocritic       # common style and correctness checks
     - gocyclo        # function complexity
     - misspell

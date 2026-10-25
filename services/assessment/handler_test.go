@@ -39,7 +39,7 @@ func (m *memoryStore) insertAssessment(_ context.Context, _ string, v Assessment
 	return nil
 }
 
-// change applies a change allowed until a student submits, as pgstore.changeunsubmitted decides.
+// change applies a change allowed until a student submits, as pgStore.changeUnsubmitted decides.
 func (m *memoryStore) change(id string, apply func(v Assessment) error) error {
 	v, ok := m.assessments[id]
 	if !ok {
@@ -352,7 +352,7 @@ func TestADraftIsTheTeachersUntilPublished(t *testing.T) {
 	)
 }
 
-// twoquestions is a published assessment of two questions, as a teacher would send it again with changes.
+// twoQuestions is a published assessment of two questions, as a teacher would send it again with changes.
 const twoQuestions = `{"classroom_id":"` + room + `","title":"Fractions","status":"published","questions":[` +
 	`{"prompt":"1/2 + 1/2?","type":"numerical","options":[],"answer":"1","tolerance":"0","topic_id":"` + topic + `"},` +
 	`{"prompt":"1/4 + 1/4?","type":"numerical","options":[],"answer":"0.5","tolerance":"0","topic_id":"` + topic + `"}]}`
@@ -639,7 +639,7 @@ func TestASubmissionTooLargeToPublishIsRefused(t *testing.T) {
 	}
 }
 
-// alltypes has one question of each type, a manual release and ai marking.
+// allTypes has one question of each type, a manual release and ai marking.
 const allTypes = `{"classroom_id":"` + room + `","title":"Mixed","release_policy":"manual","ai_marking":true,"questions":[
 	{"prompt":"Pick the sum","type":"multiple_choice","options":["half","whole"],"answer":"whole","tolerance":"","topic_id":"` + topic + `","origin":"generated","sources":[{"document_id":"` + room + `","chunk_id":"` + topic + `","page":2,"text":"Two halves make one whole."}]},
 	{"prompt":"1/2 + 1/2?","type":"numerical","options":[],"answer":"1.00","tolerance":"0.01","points":2,"topic_id":"` + topic + `"},
@@ -657,7 +657,7 @@ func post(t *testing.T, s server, body string) Assessment {
 	return v
 }
 
-// mixedanswers answers every question of alltypes.
+// mixedAnswers answers every question of allTypes.
 func mixedAnswers(v Assessment) string {
 	answers := map[string]string{}
 	for _, q := range v.Questions {

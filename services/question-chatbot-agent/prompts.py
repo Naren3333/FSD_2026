@@ -10,7 +10,7 @@ TEACHER = "teacher.v2"  # v2: links topics
 QUERY_REWRITE = "query_rewrite.v3"  # v3: concise retrieval wording without guessing a named subject
 SMALL_TALK = "small_talk.v1"
 
-# the fixed reply when nothing relevant was found or the message is off-topic: no model call (assistant_plan
+# the fixed reply when nothing relevant was found or the message is off-topic: no model call (ASSISTANT_PLAN
 # a3, d17).
 REFUSALS = {
     "student": "I couldn't find that in your class materials. Try asking your teacher, or rephrase your question.",

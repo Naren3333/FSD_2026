@@ -307,7 +307,7 @@ func TestADeletedAccountIsClearedAnnouncedAndNeverReturns(t *testing.T) {
 	}
 }
 
-// fakekeycloak records the sign-in accounts removed, failing for those in fail.
+// fakeKeycloak records the sign-in accounts removed, failing for those in fail.
 type fakeKeycloak struct {
 	removed []string
 	fail    map[string]bool
@@ -358,7 +358,7 @@ func TestDeletedAccountsLoseTheirSignInOnce(t *testing.T) {
 	}
 }
 
-// duenow makes the users' put-off sign-in removals due, as if their wait had passed.
+// dueNow makes the users' put-off sign-in removals due, as if their wait had passed.
 func dueNow(t *testing.T, s pgStore, ids ...string) {
 	t.Helper()
 	if _, err := s.db.Exec(context.Background(), "UPDATE users SET signin_next_attempt=now()-interval '1 second' WHERE id=ANY($1)", ids); err != nil {

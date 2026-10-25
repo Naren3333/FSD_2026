@@ -38,7 +38,7 @@ const correlationKey contextKey = "correlation"
 // actor returns the verified claims of the request's caller.
 func Actor(r *http.Request) Claims { c, _ := r.Context().Value(claimsKey).(Claims); return c }
 
-// withclaims returns ctx carrying verified claims.
+// WithClaims returns ctx carrying verified claims.
 func WithClaims(ctx context.Context, c Claims) context.Context {
 	return context.WithValue(ctx, claimsKey, c)
 }
@@ -64,7 +64,7 @@ func Error(w http.ResponseWriter, status int, code, message string) {
 	JSON(w, status, map[string]any{"error": map[string]string{"code": code, "message": message}})
 }
 
-// errorwith writes the error envelope with extra fields beside code and message, such as when a limit
+// ErrorWith writes the error envelope with extra fields beside code and message, such as when a limit
 // resets.
 func ErrorWith(w http.ResponseWriter, status int, code, message string, extra map[string]any) {
 	body := map[string]any{"code": code, "message": message}
@@ -74,12 +74,12 @@ func ErrorWith(w http.ResponseWriter, status int, code, message string, extra ma
 	JSON(w, status, map[string]any{"error": body})
 }
 
-// notfound answers 404 not_found.
+// NotFound answers 404 NOT_FOUND.
 func NotFound(w http.ResponseWriter, message string) {
 	Error(w, http.StatusNotFound, "NOT_FOUND", message)
 }
 
-// invalid answers 422 validation_error: the request does not meet the contract.
+// invalid answers 422 VALIDATION_ERROR: the request does not meet the contract.
 func Invalid(w http.ResponseWriter, message string) {
 	Error(w, http.StatusUnprocessableEntity, "VALIDATION_ERROR", message)
 }
@@ -89,7 +89,7 @@ func Forbidden(w http.ResponseWriter, message string) {
 	Error(w, http.StatusForbidden, "FORBIDDEN", message)
 }
 
-// unavailable answers 503 dependency_unavailable: another service or store this one needs is down.
+// unavailable answers 503 DEPENDENCY_UNAVAILABLE: another service or store this one needs is down.
 func Unavailable(w http.ResponseWriter, message string) {
 	Error(w, http.StatusServiceUnavailable, "DEPENDENCY_UNAVAILABLE", message)
 }
@@ -99,7 +99,7 @@ func Unauthenticated(w http.ResponseWriter, message string) {
 	Error(w, http.StatusUnauthorized, "UNAUTHENTICATED", message)
 }
 
-// decode reads one json value of at most 2 mib into target, rejecting unknown fields.
+// decode reads one json value of at most 2 MiB into target, rejecting unknown fields.
 func Decode(w http.ResponseWriter, r *http.Request, target any) bool {
 	r.Body = http.MaxBytesReader(w, r.Body, 2<<20)
 	d := json.NewDecoder(r.Body)
@@ -164,7 +164,7 @@ func Fail(w http.ResponseWriter, err error) {
 	Error(w, http.StatusInternalServerError, "INTERNAL_ERROR", "The operation could not be completed.")
 }
 
-// errnotfound is what a store returns when the row asked for is absent.
+// ErrNotFound is what a store returns when the row asked for is absent.
 var ErrNotFound = pgx.ErrNoRows
 
 // found reports whether a lookup succeeded.

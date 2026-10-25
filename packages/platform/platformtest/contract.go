@@ -28,7 +28,7 @@ func HTTPSchema(t testing.TB, service, name string) Schema {
 	return Schema{node, doc}
 }
 
-// eventdata is the schema of the data of contracts/events/<topic>.schema.json.
+// EventData is the schema of the data of contracts/events/<topic>.schema.json.
 func EventData(t testing.TB, topic string) Schema {
 	t.Helper()
 	doc := readContract(t, filepath.Join("contracts", "events", topic+".schema.json"))
@@ -51,7 +51,7 @@ func (s Schema) Property(t testing.TB, name string) Schema {
 	return Schema{node, s.doc}
 }
 
-// matchesschema checks that the json fields of value's struct type are the schema's properties, and that
+// MatchesSchema checks that the json fields of value's struct type are the schema's properties, and that
 // the ones the struct always writes (no omitempty) are the ones the schema requires.
 func MatchesSchema(t testing.TB, schema Schema, value any) {
 	t.Helper()
@@ -142,7 +142,7 @@ type jsonField struct {
 	typ    reflect.Type
 }
 
-// jsonfields are the fields encoding/json writes for a struct type, embedded structs' included.
+// jsonFields are the fields encoding/json writes for a struct type, embedded structs' included.
 func jsonFields(typ reflect.Type) []jsonField {
 	var fields []jsonField
 	for i := range typ.NumField() {
@@ -164,7 +164,7 @@ func jsonFields(typ reflect.Type) []jsonField {
 	return fields
 }
 
-// structtype is the struct a field holds, directly or through pointers, slices and maps; nil for anything
+// structType is the struct a field holds, directly or through pointers, slices and maps; nil for anything
 // else.
 func structType(typ reflect.Type) reflect.Type {
 	for typ.Kind() == reflect.Pointer || typ.Kind() == reflect.Slice || typ.Kind() == reflect.Map {

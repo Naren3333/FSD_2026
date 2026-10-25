@@ -12,7 +12,7 @@ import (
 	"github.com/jackc/pgx/v5"
 )
 
-// migration is one numbered sql file, nnn_name.sql, applied once and recorded in schema_migrations.
+// migration is one numbered sql file, NNN_name.sql, applied once and recorded in schema_migrations.
 type Migration struct {
 	Version int
 	Name    string

@@ -14,7 +14,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
-// these tests run the store and the marker against a real postgresql (grading_test_database_url); without
+// these tests run the store and the marker against a real postgresql (GRADING_TEST_DATABASE_URL); without
 // it they are skipped. scripts/db_tests.py runs them against the compose stack.
 
 const (
@@ -28,7 +28,7 @@ func testDB(t *testing.T) *pgxpool.Pool {
 	return platformtest.DB(t, "GRADING_TEST_DATABASE_URL", migrations)
 }
 
-// submit consumes a v4 submission, the free response of submittedevent with ai marking unless change says
+// submit consumes a v4 submission, the free response of submittedEvent with ai marking unless change says
 // otherwise.
 func submit(t *testing.T, db *pgxpool.Pool, id, student string, change map[string]any) {
 	t.Helper()
@@ -51,7 +51,7 @@ func submit(t *testing.T, db *pgxpool.Pool, id, student string, change map[strin
 	}
 }
 
-// automarked is a submission change: one numerical question worth 2, answered correctly, released by hand.
+// autoMarked is a submission change: one numerical question worth 2, answered correctly, released by hand.
 var autoMarked = map[string]any{
 	"questions":  []map[string]any{{"id": questionID, "prompt": "1+1?", "type": "numerical", "options": nil, "answer": "2", "tolerance": "0", "points": 2, "topic_id": topicID}},
 	"answers":    map[string]string{questionID: "2"},
@@ -165,7 +165,7 @@ func TestTheFinalizedEventAndStoredGradeNameTheTopic(t *testing.T) {
 	}
 }
 
-// testtopicmigrationrenamesstoredskillids stores grades as 003 left them, then checks 004 renames only the
+// TestTopicMigrationRenamesStoredSkillIDs stores grades as 003 left them, then checks 004 renames only the
 // key.
 func TestTopicMigrationRenamesStoredSkillIDs(t *testing.T) {
 	db := platformtest.DB(t, "GRADING_TEST_DATABASE_URL", nil)
@@ -315,7 +315,7 @@ func TestFinalizeChecksItsRulesInTheStore(t *testing.T) {
 	}
 }
 
-// fakesuggester answers every marking call the same way; during runs before it answers.
+// fakeSuggester answers every marking call the same way; during runs before it answers.
 type fakeSuggester struct {
 	output string
 	err    error
@@ -333,7 +333,7 @@ func (f *fakeSuggester) generate(_ context.Context, _ []message, _ map[string]an
 	return f.output, "model-1", f.err
 }
 
-// markonce leases the only marking job and works it.
+// markOnce leases the only marking job and works it.
 func markOnce(t *testing.T, m marker) job {
 	t.Helper()
 	j, found, err := m.lease(t.Context())
@@ -673,7 +673,7 @@ func TestARemovedStudentsWorkIsKeptButNotMarked(t *testing.T) {
 	}
 }
 
-// duechange is assessment.due_changed.v1 for the test submissions' assessment, made at the given time.
+// dueChange is assessment.due_changed.v1 for the test submissions' assessment, made at the given time.
 func dueChange(t *testing.T, due *time.Time, at time.Time) platform.Event {
 	t.Helper()
 	data, err := json.Marshal(DueChanged{Assessment: submissionID, Classroom: submissionID, Org: "org", DueAt: due})

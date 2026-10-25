@@ -911,7 +911,7 @@
           "outcome"
         ],
         "title": "IngestResponse",
-        "description": "`failed` is the document's own problem (encrypted, corrupt, no_text_layer, too_large) and retrying will not help."
+        "description": "`failed` is the document's own problem (encrypted, corrupt, NO_TEXT_LAYER, TOO_LARGE) and retrying will not help."
       },
       "Message": {
         "properties": {

@@ -14,7 +14,7 @@ import (
 
 const room = "6f1c5d2e-8a4b-4c3d-9e2f-1a2b3c4d5e6f"
 
-// memorystore is an in-memory store: one organization's users, classrooms and enrollments.
+// memoryStore is an in-memory store: one organization's users, classrooms and enrollments.
 type memoryStore struct {
 	roles      map[string]string   // user -> role
 	usernames  map[string]string   // user -> username

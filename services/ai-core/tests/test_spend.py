@@ -281,7 +281,7 @@ SCHEMA = {
 def test_a_rejected_structured_reply_is_still_charged(
     api: TestClient, openai_fake: FakeOpenAI, ledger: MemoryLedger, reply: dict
 ) -> None:
-    """openai bills it like any other reply; the error code stays ai_output_rejected (grading doesn't retry it)."""
+    """openai bills it like any other reply; the error code stays AI_OUTPUT_REJECTED (grading doesn't retry it)."""
     openai_fake.reply(json=reply)
     resp = api.post("/v1/inference", json={**GENERATE, "response_schema": SCHEMA})
     assert (resp.status_code, resp.json()["error"]["code"]) == (502, "AI_OUTPUT_REJECTED")
@@ -320,7 +320,7 @@ def test_rerank_without_usage_is_charged_an_estimate(
 def test_a_stream_the_caller_leaves_before_it_starts_is_charged_and_closed(
     openai_fake: FakeOpenAI, ledger: MemoryLedger
 ) -> None:
-    """starlette never starts the events generator when the caller is gone first: closingstream still bills the reply and closes the provider's stream."""
+    """starlette never starts the events generator when the caller is gone first: ClosingStream still bills the reply and closes the provider's stream."""
     import main
 
     openai_fake.replies.append(chat_stream(["Hel", "lo"]))
@@ -490,7 +490,7 @@ def test_a_users_running_calls_are_capped(monkeypatch: pytest.MonkeyPatch) -> No
 def test_calls_beyond_the_cap_are_busy_until_one_ends(
     openai_fake: FakeOpenAI, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """a call holds its slot until its charge is written, so a burst runs at most ai_user_concurrency calls."""
+    """a call holds its slot until its charge is written, so a burst runs at most AI_USER_CONCURRENCY calls."""
     from conftest import SERVICE_CLAIMS
     from learning_transport.testing import as_caller
 

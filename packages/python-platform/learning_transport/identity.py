@@ -17,7 +17,7 @@ class IdentityClient:
     async def relation(
         self, authorization: str, classroom_id: str, correlation: str, student_id: str | None = None
     ) -> str | None:
-        """how the caller may access the classroom (optionally on behalf of a student): relation_teacher for its own teacher, relation_student for an enrolled student, none when access is denied."""
+        """how the caller may access the classroom (optionally on behalf of a student): RELATION_TEACHER for its own teacher, RELATION_STUDENT for an enrolled student, none when access is denied."""
         try:
             resp = await self.http.get(
                 f"{self.base_url}/v1/classrooms/{classroom_id}/access",

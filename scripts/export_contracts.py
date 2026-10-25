@@ -490,7 +490,7 @@ def operation(method, path, body, response, code=200, query=()):
             },
             **errors(
                 [401, 403, 404, 409]
-                + ([413] if body is not None else [])  # platform.decode's 2 mib limit
+                + ([413] if body is not None else [])  # platform.Decode's 2 MiB limit
                 + [422, 500, 503]
             ),
         },
@@ -511,7 +511,7 @@ COUNT = {"type": "integer", "minimum": 0}
 
 
 def paged(op, most, fallback):
-    """the operation with the ?offset= and ?limit= of a list the server pages (platform.page)."""
+    """the operation with the ?offset= and ?limit= of a list the server pages (platform.Page)."""
     op[2]["parameters"] += [
         {
             "name": "offset",
@@ -577,7 +577,7 @@ operations = {
             50,
         ),
         # every enrolled student's id, in the same order and not paged, for the services that keep removed
-        # students' work out of the teacher's lists (platform.identity.roster).
+        # students' work out of the teacher's lists (platform.Identity.Roster).
         operation("GET", "/v1/classrooms/{id}/student-ids", None, {"type": "array", "items": TEXT}),
         school_students,
     ],

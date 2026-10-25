@@ -182,7 +182,7 @@ def _size(value: Any) -> int:
 
 
 def fitting(passages: list[Passage]) -> list[Passage]:
-    """the passages, best first, that fit in passages_budget characters of the task document; always the best one (content's passages are at most 20,000 characters)."""
+    """the passages, best first, that fit in PASSAGES_BUDGET characters of the task document; always the best one (content's passages are at most 20,000 characters)."""
     kept: list[Passage] = []
     size = 0
     for p in passages:

@@ -5,7 +5,7 @@ import { DestroyRef, Injectable, inject } from '@angular/core';
 export class UnsavedChanges {
   private readonly sources = new Set<() => boolean>();
 
-  /* registers `isunsaved` until the calling component is destroyed. */
+  /* registers `isUnsaved` until the calling component is destroyed. */
   track(isUnsaved: () => boolean): void {
     this.sources.add(isUnsaved);
     inject(DestroyRef).onDestroy(() => this.sources.delete(isUnsaved));

@@ -472,7 +472,7 @@ def chat_stream(
 
 @pytest.fixture
 def reranker_fake(monkeypatch: pytest.MonkeyPatch) -> FakeReranker:
-    """rerank's client sends to a fakereranker (down until a test gives it a handler)."""
+    """rerank's client sends to a FakeReranker (down until a test gives it a handler)."""
     fake = FakeReranker()
     client = httpx2.AsyncClient(base_url="https://voyage.test/v1", transport=httpx2.MockTransport(fake))
     monkeypatch.setattr(rerank, "_client", client)

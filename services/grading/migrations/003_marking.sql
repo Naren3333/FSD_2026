@@ -1,4 +1,6 @@
 -- points, teacher marking, release and ai-suggested marking.
+-- additive only. evaluations stored before this have no questions or answers; their finalized grades count
+-- as released when they were finalized, as students saw them then.
 ALTER TABLE evaluations ADD COLUMN IF NOT EXISTS questions jsonb;
 ALTER TABLE evaluations ADD COLUMN IF NOT EXISTS answers jsonb;
 ALTER TABLE evaluations ADD COLUMN IF NOT EXISTS late boolean NOT NULL DEFAULT false;

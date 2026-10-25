@@ -20,6 +20,20 @@ def clip(text: object, limit: int = MAX_FIELD) -> str:
     return value if len(value) <= limit else value[: limit - 1] + "…"
 
 
+def _metrics_row(t: dict[str, Any]) -> dict[str, Any]:
+    """one analytics topic row, checked: the fields the overview and the tools read, with their types."""
+    return {
+        "topic_id": str(t["topic_id"]),
+        "attempted": int(t["attempted"]),
+        "correct": int(t["correct"]),
+        "marks_awarded": int(t["marks_awarded"]),
+        "marks_possible": int(t["marks_possible"]),
+        "observed_accuracy": float(t["observed_accuracy"]),
+        "evidence_status": str(t["evidence_status"]),
+        "weakness_indicator": bool(t["weakness_indicator"]),
+    }
+
+
 @dataclass
 class Question:
     ref: str  # "E1", "E2"…
@@ -48,6 +62,7 @@ class Result:
     title: str
     finalized_at: str
     late: bool
+    released: bool  # the student can see it; analytics' figures count released results only
     questions: list[Question]
 
 
@@ -111,13 +126,15 @@ class Workspace:
                     clip(assessment.get("title") or "Deleted assessment", 160),
                     str(v.get("finalized_at") or "")[:10],
                     bool(v.get("late")),
+                    bool(v.get("released_at")),
                     questions,
                 )
             )
 
     def add_summary(self, topics: list[dict[str, Any]]) -> None:
-        self.summary = topics
-        for t in topics:
+        """analytics' topic rows, with every field the overview shows; keyerror, typeerror or valueerror when one is missing."""
+        self.summary = [_metrics_row(t) for t in topics]
+        for t in self.summary:
             self.topic(t["topic_id"])
 
     def name_topics(self, names: dict[str, str]) -> None:
@@ -161,6 +178,7 @@ class Workspace:
                     "assessment": r.title,
                     "finalized": r.finalized_at,
                     "late": r.late,
+                    "released": r.released,
                     "questions": [
                         {
                             "evidence": q.ref,
@@ -256,8 +274,8 @@ class Workspace:
                 for m in s.get("topics") or []:
                     if m.get("topic_id") == t["topic_id"]:
                         attempted, correct, learners = (
-                            attempted + m["attempted"],
-                            correct + m["correct"],
+                            attempted + int(m["attempted"]),
+                            correct + int(m["correct"]),
                             learners + 1,
                         )
             rows.append(

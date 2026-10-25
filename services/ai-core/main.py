@@ -493,7 +493,7 @@ async def unless_disconnected[T](
 
 
 async def receive(request: Request, path: Path, max_bytes: int | None = None) -> None:
-    """stream the body to disk, refusing more than max_pdf_bytes without reading it all into memory."""
+    """stream the body to disk, refusing more than MAX_PDF_BYTES without reading it all into memory."""
     size = 0
     with path.open("wb") as out:
         async for part in request.stream():

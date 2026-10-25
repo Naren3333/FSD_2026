@@ -125,9 +125,9 @@ export type GeneratableType = Generation['DraftQuestion']['type'];
 export type Difficulty = GenerateRequest['difficulty'];
 /* a drafted question, with the quote from its sources that supports its key. */
 export type GeneratedQuestion = Generation['Generated'];
-/* a drafted question as the agent sends it, with null for what it leaves out; see draftquestion. */
+/* a drafted question as the agent sends it, with null for what it leaves out; see draftQuestion. */
 export type DraftQuestion = Generation['DraftQuestion'];
-/* a passage as the agent sends it, with null for a document, chunk or page it doesn't name; see fromagent. */
+/* a passage as the agent sends it, with null for a document, chunk or page it doesn't name; see fromAgent. */
 export type AgentExcerpt = Generation['Excerpt'];
 export type GenerateResult = Generation['GenerateResponse'];
 /* what the reviewer made of a draft, and one round of writing and reviewing. */

@@ -12,7 +12,7 @@ import (
 	"github.com/segmentio/kafka-go"
 )
 
-// testschema is a pool on an empty throwaway schema of platform_test_database_url, dropped when the test
+// testSchema is a pool on an empty throwaway schema of PLATFORM_TEST_DATABASE_URL, dropped when the test
 // ends; without the variable the test is skipped.
 func testSchema(t *testing.T) *pgxpool.Pool {
 	t.Helper()
@@ -47,7 +47,7 @@ func testSchema(t *testing.T) *pgxpool.Pool {
 	return db
 }
 
-// eventdb is testschema with the outbox and inbox tables.
+// eventDB is testSchema with the outbox and inbox tables.
 func eventDB(t *testing.T) *pgxpool.Pool {
 	t.Helper()
 	db := testSchema(t)
@@ -57,7 +57,7 @@ func eventDB(t *testing.T) *pgxpool.Pool {
 	return db
 }
 
-// fakewriter stands in for kafka: it fails the messages fail picks, answering with kafka.writeerrors as the
+// fakeWriter stands in for kafka: it fails the messages fail picks, answering with kafka.WriteErrors as the
 // real writer does, and records every message it was given and every one it took.
 type fakeWriter struct {
 	mu          sync.Mutex

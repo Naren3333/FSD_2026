@@ -47,14 +47,14 @@ func (v Submitted) valid() bool {
 		len(v.Questions) > 0 && len(v.Questions) <= 50 && len(v.Answers) == len(v.Questions)
 }
 
-// validscheme reports whether a question's marking-scheme passages are within assessment's limits.
+// validScheme reports whether a question's marking-scheme passages are within assessment's limits.
 func validScheme(excerpts []Excerpt) bool {
 	return len(excerpts) <= maxExcerpts && !slices.ContainsFunc(excerpts, func(e Excerpt) bool {
 		return strings.TrimSpace(e.Text) == "" || utf8.RuneCountInString(e.Text) > maxExcerptText
 	})
 }
 
-// decodesubmitted reads a submission event.
+// decodeSubmitted reads a submission event.
 func decodeSubmitted(event platform.Event) (Submitted, bool) {
 	var v Submitted
 	if json.Unmarshal(event.Data, &v) != nil || event.Resource != v.Submission {
@@ -64,7 +64,7 @@ func decodeSubmitted(event platform.Event) (Submitted, bool) {
 }
 
 // score evaluates each answer against its question; a question without exactly one answer is an
-// invalidevent.
+// InvalidEvent.
 func (v Submitted) score() ([]Evidence, error) {
 	evidence := make([]Evidence, 0, len(v.Questions))
 	seen := map[string]bool{}

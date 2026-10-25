@@ -1,9 +1,9 @@
 package platform
 
-// listwindow bounds a list query.
+// ListWindow bounds a list query.
 type ListWindow struct{ Offset, Limit int }
 
-// listpage is the common transport envelope for a bounded list and its filtered total.
+// ListPage is the common transport envelope for a bounded list and its filtered total.
 type ListPage[T any] struct {
 	Items []T `json:"items"`
 	Total int `json:"total"`

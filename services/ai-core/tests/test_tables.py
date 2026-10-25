@@ -118,7 +118,7 @@ def test_a_page_holding_only_a_table_has_text(tmp_path: Path) -> None:
     data, _ = make_table_pdf(HEADER, RUBRIC)
     path = tmp_path / "t.pdf"
     path.write_bytes(data)
-    doc = read_pages(path)  # would be no_text_layer if table text didn't count
+    doc = read_pages(path)  # would be NO_TEXT_LAYER if table text didn't count
     assert doc.pages == [[]] and len(doc.tables[0]) == 1
 
 
