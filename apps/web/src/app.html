@@ -36,7 +36,6 @@
             <app-refresh-button
               label="Refresh classrooms"
               [busy]="state.busy()"
-              [disabled]="state.busy()"
               (refresh)="refreshClassrooms()"
             />
           }

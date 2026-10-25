@@ -210,7 +210,7 @@ describe('finalizing', () => {
   it('shows an override left invalid, so finalizing can focus it', async () => {
     const page = render(Promise.resolve([grade('s1', 'draft')]));
     await page.settle();
-    page.component.review(page.component.grades.value()?.grades[0] as Evaluation);
+    page.component.show(page.component.grades.value()?.grades[0] as Evaluation);
     page.fixture.detectChanges();
     page.button('Override').click();
     page.component.marks.controls['q1'].controls.awarded.setValue(5);
@@ -240,7 +240,7 @@ describe('finalizing', () => {
     page.component.assessmentId.set('a1');
     page.component.load();
     await page.settle();
-    page.component.view(page.component.grades.value()?.grades[0] as Evaluation);
+    page.component.show(page.component.grades.value()?.grades[0] as Evaluation);
     page.fixture.detectChanges();
     expect(page.panel()?.textContent).toContain('Not released');
     page.component.release();
@@ -260,7 +260,7 @@ describe('finalizing', () => {
       },
     });
     await page.settle();
-    page.component.review(list[0]);
+    page.component.show(list[0]);
     page.component.form.controls.reason.setValue('Checked');
     page.component.finalize();
     await page.settle();
@@ -295,7 +295,7 @@ describe('the status filter', () => {
   it('keeps the open grade and its unsaved marks', async () => {
     const page = render(Promise.resolve([grade('s1', 'draft'), grade('s2', 'finalized')]));
     await page.settle();
-    page.component.review(page.component.grades.value()?.grades[0] as Evaluation);
+    page.component.show(page.component.grades.value()?.grades[0] as Evaluation);
     page.fixture.detectChanges();
     page.component.marks.markAsDirty();
     page.button('Finalized (1)').click();
@@ -318,7 +318,7 @@ describe('next to mark', () => {
   it('skips finalized grades and wraps to earlier drafts', async () => {
     const page = render(Promise.resolve(list()));
     await page.settle();
-    page.component.review(page.component.grades.value()?.grades[0] as Evaluation);
+    page.component.show(page.component.grades.value()?.grades[0] as Evaluation);
     page.fixture.detectChanges();
     page.button('Next to mark').click();
     expect(page.component.selected()?.id).toBe('e-s3');
@@ -330,7 +330,7 @@ describe('next to mark', () => {
   it('is disabled with nothing else to mark', async () => {
     const page = render(Promise.resolve([grade('s1', 'draft'), grade('s2', 'finalized')]));
     await page.settle();
-    page.component.review(page.component.grades.value()?.grades[0] as Evaluation);
+    page.component.show(page.component.grades.value()?.grades[0] as Evaluation);
     page.fixture.detectChanges();
     expect(page.button('Next to mark').disabled).toBe(true);
     expect(page.panel()?.textContent).toContain('Nothing left to mark here');
@@ -347,7 +347,7 @@ describe('next to mark', () => {
     );
     const page = render(Promise.resolve([]), { evaluations });
     await page.settle();
-    page.component.review(page.component.grades.value()?.grades[0] as Evaluation);
+    page.component.show(page.component.grades.value()?.grades[0] as Evaluation);
     page.fixture.detectChanges();
     expect(page.panel()?.textContent).toContain('Continues on the next page');
     page.button('Next to mark').click();
@@ -368,7 +368,7 @@ describe('next to mark', () => {
     );
     const page = render(Promise.resolve([]), { evaluations });
     await page.settle();
-    page.component.review(page.component.grades.value()?.grades[0] as Evaluation);
+    page.component.show(page.component.grades.value()?.grades[0] as Evaluation);
     page.fixture.detectChanges();
     failing = true;
     page.button('Next to mark').click();
@@ -384,7 +384,7 @@ describe('next to mark', () => {
   it('refuses while marks are unsaved and keeps the grade', async () => {
     const page = render(Promise.resolve(list()));
     await page.settle();
-    page.component.review(page.component.grades.value()?.grades[0] as Evaluation);
+    page.component.show(page.component.grades.value()?.grades[0] as Evaluation);
     page.fixture.detectChanges();
     page.component.marks.markAsDirty();
     page.button('Next to mark').click();
@@ -396,7 +396,7 @@ describe('next to mark', () => {
   it('moves Previous grade along the queue as shown', async () => {
     const page = render(Promise.resolve(list()));
     await page.settle();
-    page.component.review(page.component.grades.value()?.grades[2] as Evaluation);
+    page.component.show(page.component.grades.value()?.grades[2] as Evaluation);
     page.fixture.detectChanges();
     page.button('Previous grade').click();
     expect(page.component.viewing()?.id).toBe('e-s2');
@@ -410,7 +410,7 @@ describe('next to mark', () => {
   it('keeps unsaved marks on All grades, while Close discards them', async () => {
     const page = render(Promise.resolve(list()));
     await page.settle();
-    page.component.review(page.component.grades.value()?.grades[0] as Evaluation);
+    page.component.show(page.component.grades.value()?.grades[0] as Evaluation);
     page.fixture.detectChanges();
     page.component.marks.markAsDirty();
     const scrolled = vi.fn();
@@ -437,7 +437,7 @@ describe('the address', () => {
     await router.navigateByUrl('/review?grade=e-s2');
     await page.settle();
     expect(page.component.viewing()?.id).toBe('e-s2');
-    page.component.review(page.component.grades.value()?.grades[0] as Evaluation);
+    page.component.show(page.component.grades.value()?.grades[0] as Evaluation);
     await page.settle();
     expect(router.url).toBe('/review?grade=e-s1');
     await router.navigateByUrl('/review?grade=e-s2');
@@ -591,7 +591,7 @@ describe('a change whose re-read fails', () => {
       finalize: () => Promise.resolve(grade('s1', 'finalized')),
     });
     await page.settle();
-    page.component.review(page.component.grades.value()?.grades[0] as Evaluation);
+    page.component.show(page.component.grades.value()?.grades[0] as Evaluation);
     page.component.form.controls.reason.setValue('Checked');
     failing = true;
     page.component.finalize();
@@ -650,7 +650,7 @@ describe('coming back to grading review', () => {
 
   it('leaves a grade open for marking alone', async () => {
     const page = await leave(() => [grade('s1', 'draft')]);
-    page.component.review(page.component.grades.value()?.grades[0] as Evaluation);
+    page.component.show(page.component.grades.value()?.grades[0] as Evaluation);
     const calls = (TestBed.inject(GradingApi).evaluations as ReturnType<typeof vi.fn>).mock.calls.length;
     vi.setSystemTime(Date.now() + 21_000);
     await page.router.navigateByUrl('/review');

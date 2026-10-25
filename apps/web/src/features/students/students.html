@@ -3,7 +3,7 @@
     <app-refresh-button
       label="Refresh students"
       [busy]="roster.loading()"
-      [disabled]="rosterState.busy() || roster.loading() || !classroomId()"
+      [disabled]="rosterState.busy() || !classroomId()"
       (refresh)="loadRoster()"
     />
   }

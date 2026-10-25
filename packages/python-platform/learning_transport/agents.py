@@ -2,13 +2,15 @@
 
 import os
 from dataclasses import dataclass
+from datetime import datetime
 from typing import Any
 
 import httpx
+from fastapi import HTTPException
 
 from learning_transport.app import require_env
 from learning_transport.auth import Claims
-from learning_transport.errors import UpstreamError, upstream_error
+from learning_transport.errors import UpstreamError, failure, upstream_error
 from learning_transport.identity import IdentityClient
 from learning_transport.tokens import ServiceToken
 
@@ -42,6 +44,53 @@ def read_settings(required: dict[str, str]) -> dict[str, str]:
 def billed_to(claims: Claims, role: str) -> dict[str, str]:
     """ai-core's `billed_to`: the signed-in user, at the daily allowance of `role`."""
     return {"user_id": claims.subject, "org_id": claims.org, "role": role}
+
+
+# ai-core errors whose code alone says what the user should hear.
+AI_CORE_CODES = {
+    "AI_BUSY": (429, "You have too many AI requests running at once. Try again in a moment."),
+    "AI_PROVIDER_NOT_CONFIGURED": (503, "AI is not set up on this server."),
+    "AI_OUTPUT_REJECTED": (502, "The model did not return a usable reply. Try again."),
+}
+
+
+def ai_core_refusal(e: UpstreamError) -> HTTPException | None:
+    """ai-core's own refusals (spend limit, busy, not configured, unusable output) with a safe message; None for anything else."""
+    if e.code == "AI_SPEND_LIMIT":
+        when = _local_time(e.resets_at)
+        message = "You've used today's AI allowance." + (f" It resets at {when}." if when else "")
+        return failure(429, "AI_SPEND_LIMIT", message)
+    if e.code in AI_CORE_CODES:
+        status, message = AI_CORE_CODES[e.code]
+        return failure(status, e.code, message)
+    return None
+
+
+def unusable_reply() -> HTTPException:
+    """the model's reply could not be read or used."""
+    return failure(502, "AI_OUTPUT_REJECTED", AI_CORE_CODES["AI_OUTPUT_REJECTED"][1])
+
+
+def strict_object(properties: dict[str, Any]) -> dict[str, Any]:
+    """an object whose every property is required and nothing else allowed, as strict structured output needs."""
+    return {
+        "type": "object",
+        "properties": properties,
+        "required": list(properties),
+        "additionalProperties": False,
+    }
+
+
+def _local_time(iso: str | None) -> str:
+    """ai-core's reset time in its own zone (SPEND_TIMEZONE), with the zone's offset, e.g. \"00:00 on 19 oct (utc+08:00)\": the user's browser may be elsewhere."""
+    try:
+        at = datetime.fromisoformat(iso) if iso else None
+    except ValueError:
+        return ""
+    if at is None:
+        return ""
+    zone = at.strftime(" (%Z)") if at.tzinfo is not None else ""
+    return at.strftime("%H:%M on %d %b") + zone
 
 
 class AgentClients:

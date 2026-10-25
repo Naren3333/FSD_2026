@@ -29,6 +29,7 @@ import { dateTime, time } from '../../shared/format';
 import type { Section } from '../../shared/section';
 import { requiredText } from '../../shared/validators';
 import { marksText } from './editor';
+import { focusLater } from '../../shared/focus';
 
 /* how long a student's typing rests before their work is saved. */
 const SAVE_DELAY = 1500;
@@ -375,7 +376,7 @@ export class AnswerSheetComponent {
           .catch((error: unknown) => {
             if (!changedError(error)) throw error;
             this.changed.set(true);
-            this.focusLater('reopen-assessment');
+            focusLater('reopen-assessment');
             throw new Error(CHANGED);
           });
         late = submission.late;
@@ -394,7 +395,7 @@ export class AnswerSheetComponent {
         });
         this.saveNote.set('');
         // submit is disabled now, so focus goes back to the top of the submitted answers.
-        this.focusLater('assessment-view-title');
+        focusLater('assessment-view-title');
         const list = this.assessments.value();
         if (list)
           this.assessments.set(list.map((a) => (a.id === assessment.id ? { ...a, submitted: true } : a)));
@@ -408,10 +409,6 @@ export class AnswerSheetComponent {
   /* the shell's classroom lock reads whether the answers are unsaved, which is not a signal, so it looks again once they no longer are. */
   private released(): void {
     this.changes.markForCheck();
-  }
-
-  private focusLater(id: string): void {
-    setTimeout(() => document.getElementById(id)?.focus());
   }
 
   points(question: Question): string {

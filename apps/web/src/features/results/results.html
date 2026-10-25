@@ -5,7 +5,7 @@
   <app-refresh-button
     label="Refresh results"
     [busy]="results.loading()"
-    [disabled]="results.loading() || !classroomId()"
+    [disabled]="!classroomId()"
     (refresh)="load()"
   />
 </app-page-header>

@@ -2,12 +2,7 @@
   title="Classrooms"
   subtitle="Each classroom keeps its own materials, assessments and grades."
 >
-  <app-refresh-button
-    label="Refresh classrooms"
-    [busy]="state.busy()"
-    [disabled]="state.busy()"
-    (refresh)="refresh()"
-  />
+  <app-refresh-button label="Refresh classrooms" [busy]="state.busy()" (refresh)="refresh()" />
 </app-page-header>
 @if (session.isTeacher()) {
   <section class="panel create-classroom" aria-labelledby="create-title">

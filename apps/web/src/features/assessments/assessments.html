@@ -8,7 +8,7 @@
       <app-refresh-button
         label="Refresh assessments"
         [busy]="assessments.loading()"
-        [disabled]="state.busy() || assessments.loading() || !classroomId()"
+        [disabled]="state.busy() || !classroomId()"
         (refresh)="load()"
       />
       <button type="button" id="new-assessment" (click)="newAssessment()" [disabled]="!classroomId()">
@@ -754,7 +754,7 @@
     <app-refresh-button
       label="Refresh assessments"
       [busy]="assessments.loading()"
-      [disabled]="state.busy() || assessments.loading() || !classroomId()"
+      [disabled]="state.busy() || !classroomId()"
       (refresh)="load()"
     />
   </app-page-header>

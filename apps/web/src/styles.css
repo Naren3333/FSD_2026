@@ -153,16 +153,6 @@ small,
   font-size: 0.8rem;
   color: var(--muted);
 }
-.eyebrow {
-  font-size: 0.7rem;
-  font-weight: 600;
-  text-transform: uppercase;
-  letter-spacing: 0.12em;
-}
-.eyebrow {
-  color: var(--brand);
-  margin-bottom: 10px;
-}
 /* something the teacher should look at, not a failure. */
 .warning {
   color: var(--warning);

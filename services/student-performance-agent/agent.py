@@ -4,11 +4,11 @@ import asyncio
 import logging
 import time
 from collections import Counter
-from datetime import datetime
 from typing import Any, Literal
 
 from fastapi import HTTPException, Request
 from learning_transport import RELATION_TEACHER, Claims, UpstreamError, failure, require_relation
+from learning_transport.agents import ai_core_refusal, unusable_reply
 
 import checks
 import prompts
@@ -28,22 +28,11 @@ REPORT_RESERVE = 60.0
 MIN_CALL = 5.0
 NOT_TEACHER = ("FORBIDDEN", "Only the classroom's teacher can interpret a student's results.")
 
-# errors whose code alone says what the teacher should hear.
-BY_CODE = {
-    "AI_BUSY": (429, "You have too many AI requests running at once. Try again in a moment."),
-    "AI_PROVIDER_NOT_CONFIGURED": (503, "AI is not set up on this server."),
-    "AI_OUTPUT_REJECTED": (502, "The model did not return a usable reply. Try again."),
-}
-
 
 def refused(e: UpstreamError) -> HTTPException:
     """a failed upstream call as an error the page can act on, with a safe message."""
-    if e.code == "AI_SPEND_LIMIT":
-        when = _local_time(e.resets_at)
-        message = "You've used today's AI allowance." + (f" It resets at {when}." if when else "")
-        return failure(429, "AI_SPEND_LIMIT", message)
-    if e.code in BY_CODE:
-        return failure(BY_CODE[e.code][0], e.code, BY_CODE[e.code][1])
+    if (known := ai_core_refusal(e)) is not None:
+        return known
     if e.service != "ai-core" and e.status in (401, 403):
         return failure(403, "FORBIDDEN", "You no longer have access to this student's results.")
     if e.service != "ai-core" or e.status in (0, 503):
@@ -51,18 +40,6 @@ def refused(e: UpstreamError) -> HTTPException:
             503, "AI_UNAVAILABLE", "Interpreting results is not available right now. Try again later."
         )
     return failure(502, "AI_PROVIDER_FAILED", "The model could not answer. Try again.")
-
-
-def _local_time(iso: str | None) -> str:
-    """ai-core's reset time in its own zone, with the zone's offset, e.g. \"00:00 on 19 oct (utc+08:00)\"."""
-    try:
-        at = datetime.fromisoformat(iso) if iso else None
-    except ValueError:
-        return ""
-    if at is None:
-        return ""
-    zone = at.strftime(" (%Z)") if at.tzinfo is not None else ""
-    return at.strftime("%H:%M on %d %b") + zone
 
 
 class ToolError(Exception):
@@ -130,7 +107,7 @@ class Agent:
                 turns = turn + 1
                 continue
             await self._run_tools(classroom, calls[: prompts.MAX_CALLS], self.until - REPORT_RESERVE)
-        raise failure(502, "AI_OUTPUT_REJECTED", "The model did not return a usable reply. Try again.")
+        raise unusable_reply()
 
     async def _open(self, classroom: str, student: str) -> None:
         """the student's released topic summary and finalized results, and the names of their topics."""
@@ -140,20 +117,29 @@ class Agent:
         )
         # only the newest results reach the workspace, so only their assessments are read.
         evaluations = evaluations[:MAX_RESULTS]
-        assessments = await self.services.assessments(
-            self.authorization, list(dict.fromkeys(e["assessment_id"] for e in evaluations)), self.correlation
-        )
         try:
             self.workspace.add_summary(list(summary.get("topics") or []))
         except (KeyError, TypeError, ValueError, AttributeError):
             raise UpstreamError("analytics", 502) from None
+        # every topic is in the summary or the evidence, so names are read alongside the assessments.
+        topics = list(self.workspace.topics) + [
+            e["topic_id"]
+            for v in evaluations
+            for e in v.get("evidence") or []
+            if isinstance(e, dict) and isinstance(e.get("topic_id"), str)
+        ]
+        assessments, names = await asyncio.gather(
+            self.services.assessments(
+                self.authorization,
+                list(dict.fromkeys(e["assessment_id"] for e in evaluations)),
+                self.correlation,
+            ),
+            self.services.topic_names(self.authorization, list(dict.fromkeys(topics)), self.correlation),
+        )
         try:
             self.workspace.add_results(evaluations, assessments)
         except (KeyError, TypeError, ValueError, AttributeError):
             raise UpstreamError("grading", 502) from None
-        names = await self.services.topic_names(
-            self.authorization, list(self.workspace.topics), self.correlation
-        )
         self.workspace.name_topics(names)
 
     async def _turn(self, turn: int, turns: int, final: bool) -> dict[str, Any] | None:
@@ -181,9 +167,7 @@ class Agent:
         except checks.UnreadableOutputError:
             self.unreadable += 1
             if final:
-                raise failure(
-                    502, "AI_OUTPUT_REJECTED", "The model did not return a usable reply. Try again."
-                ) from None
+                raise unusable_reply() from None
             return None
 
     async def _run_tools(self, classroom: str, calls: list[Any], until: float) -> None:
@@ -284,9 +268,7 @@ class Agent:
         try:
             checked = checks.report(report, self.workspace)
         except checks.UnreadableOutputError:
-            raise failure(
-                502, "AI_OUTPUT_REJECTED", "The model did not return a usable reply. Try again."
-            ) from None
+            raise unusable_reply() from None
         except checks.RejectedError:
             log.info("interpretation_rejected", extra={"turns": turn})
             raise failure(

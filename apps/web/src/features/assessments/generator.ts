@@ -28,6 +28,7 @@ import { IconComponent } from '../../shared/icon';
 import { Section } from '../../shared/section';
 import { SectionStateComponent } from '../../shared/section-state';
 import { MAX_PROMPT, clipText, draftQuestion, excerptLabel, fromAgent, marksText } from './editor';
+import { focusLater } from '../../shared/focus';
 
 /* the agent's limits (adr 0006). */
 export const MAX_SOURCE_DOCUMENTS = 10;
@@ -279,7 +280,7 @@ export class QuestionGeneratorComponent implements OnChanges {
     const target = !next
       ? 'generate-button'
       : `generated-${next.position}-${this.room && !this.disabled ? 'add' : 'discard'}`;
-    setTimeout(() => document.getElementById(target)?.focus());
+    focusLater(target);
   }
 
   typeName(type: string): string {

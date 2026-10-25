@@ -27,6 +27,7 @@ import { requiredText } from '../../shared/validators';
 import { PageHeaderComponent } from '../../shared/page-header';
 import { RefreshButtonComponent } from '../../shared/refresh-button';
 import { Block, Inline, markdown, pages } from './markdown';
+import { focusLater } from '../../shared/focus';
 
 export const MAX_QUESTION = 1000;
 const OUTCOME_NOTES: Record<string, string> = {
@@ -160,7 +161,7 @@ export class ChatComponent {
   newThread(): void {
     this.reset();
     this.announcement.set('');
-    setTimeout(() => document.getElementById('chat-question')?.focus());
+    focusLater('chat-question');
   }
   open(thread: Thread): void {
     this.reset();

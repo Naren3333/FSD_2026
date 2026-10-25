@@ -5,6 +5,8 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import Any, Protocol
 
+from learning_transport.agents import strict_object
+
 from contracts import Generatable, Generated, GenerateRequest, TeacherMarked
 
 MAX_MESSAGE = 60000  # ai-core's longest message, in characters
@@ -76,20 +78,13 @@ STRS: dict[str, Any] = {"type": "array", "items": STR}
 INT: dict[str, Any] = {"type": "integer"}
 
 
-def _strict(properties: dict[str, Any]) -> dict[str, Any]:
-    """an object whose every property is required and nothing else allowed, as strict structured output needs."""
-    return {
-        "type": "object",
-        "properties": properties,
-        "required": list(properties),
-        "additionalProperties": False,
-    }
-
-
 CRITERIA: dict[str, Any] = {
     "type": "array",
-    "items": _strict(
-        {"title": STR, "levels": {"type": "array", "items": _strict({"points": INT, "descriptor": STR})}}
+    "items": strict_object(
+        {
+            "title": STR,
+            "levels": {"type": "array", "items": strict_object({"points": INT, "descriptor": STR})},
+        }
     ),
 }
 COMMON: dict[str, Any] = {
@@ -103,7 +98,7 @@ COMMON: dict[str, Any] = {
 
 
 def generation_schema(types: list[Generatable]) -> dict[str, Any]:
-    question = _strict(
+    question = strict_object(
         {
             "type": {"type": "string", "enum": list(types)},
             "prompt": STR,
@@ -114,7 +109,7 @@ def generation_schema(types: list[Generatable]) -> dict[str, Any]:
             "explanation": STR,
         }
     )
-    return _strict({"questions": {"type": "array", "items": question}})
+    return strict_object({"questions": {"type": "array", "items": question}})
 
 
 REVIEW_REASONS = [
@@ -147,7 +142,7 @@ PROBLEMS = {
 
 
 def review_schema() -> dict[str, Any]:
-    review = _strict(
+    review = strict_object(
         {
             "question": INT,
             "own_answer": STR,
@@ -156,11 +151,11 @@ def review_schema() -> dict[str, Any]:
             "note": STR,
         }
     )
-    return _strict({"reviews": {"type": "array", "items": review}})
+    return strict_object({"reviews": {"type": "array", "items": review}})
 
 
 def guidance_schema() -> dict[str, Any]:
-    return _strict(COMMON)
+    return strict_object(COMMON)
 
 
 def _passages(passages: list[Passage]) -> list[dict[str, Any]]:

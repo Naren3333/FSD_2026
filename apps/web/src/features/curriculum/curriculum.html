@@ -2,7 +2,7 @@
   <app-refresh-button
     label="Refresh topics"
     [busy]="topics.loading()"
-    [disabled]="state.busy() || topics.loading()"
+    [disabled]="state.busy()"
     (refresh)="load()"
   />
 </app-page-header>

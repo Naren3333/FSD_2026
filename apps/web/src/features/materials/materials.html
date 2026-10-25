@@ -9,7 +9,7 @@
   <app-refresh-button
     label="Refresh materials"
     [busy]="documents.loading()"
-    [disabled]="state.busy() || documents.loading() || !classroomId()"
+    [disabled]="state.busy() || !classroomId()"
     (refresh)="load()"
   />
 </app-page-header>

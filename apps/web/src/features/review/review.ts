@@ -33,6 +33,8 @@ import {
   suggestionReason,
   type MarkingForm,
 } from './marking';
+import { focusLater } from '../../shared/focus';
+import { readPage } from '../../shared/paged-section';
 
 /* load evaluations, display names, totals and unreleased grade counts. */
 interface Grades {
@@ -123,6 +125,12 @@ export class ReviewComponent {
     { id: 'draft', label: 'Drafts', empty: 'No draft grades on this page.' },
     { id: 'finalized', label: 'Finalized', empty: 'No finalized grades on this page.' },
   ];
+  /* how many of the page's grades each filter keeps. */
+  readonly counts = computed(() => {
+    const grades = this.grades.value()?.grades ?? [];
+    const count = (kept: GradeFilter) => grades.filter((g) => this.matches(g, kept)).length;
+    return { all: grades.length, mark: count('mark'), draft: count('draft'), finalized: count('finalized') };
+  });
   /* the page's grades the filter keeps, in queue order. */
   readonly shown = computed(() => {
     const kept = this.gradeFilter();
@@ -299,12 +307,12 @@ export class ReviewComponent {
 
   /* the page of evaluations asked for with the names of their students, assessments, questions and topics. */
   private async read(classroomId: string, assessmentId: string, current: () => boolean): Promise<Grades> {
-    let page = this.page();
-    let result = await this.grading.evaluations(classroomId, assessmentId, page * PAGE_SIZE, PAGE_SIZE);
-    if (!result.evaluations.length && result.total && page > 0) {
-      page = Math.ceil(result.total / PAGE_SIZE) - 1;
-      result = await this.grading.evaluations(classroomId, assessmentId, page * PAGE_SIZE, PAGE_SIZE);
-    }
+    const { result, page } = await readPage(
+      this.page(),
+      PAGE_SIZE,
+      (offset, limit) => this.grading.evaluations(classroomId, assessmentId, offset, limit),
+      (r) => !r.evaluations.length,
+    );
     const grades = result.evaluations;
     const [students, assessments, unreleased] = await Promise.all([
       this.studentNames(classroomId),
@@ -399,7 +407,7 @@ export class ReviewComponent {
       if (first) {
         this.openGrade(first);
         this.putAddress();
-      } else setTimeout(() => document.getElementById('grade-queue-heading')?.focus());
+      } else focusLater('grade-queue-heading');
       return;
     }
     const id = this.requestedGrade;
@@ -479,33 +487,15 @@ export class ReviewComponent {
     if (kept === 'finalized') return grade.status === 'finalized';
     return true;
   }
-  /* how many of the page's grades a filter keeps. */
-  filterCount(kept: GradeFilter): number {
-    return (this.grades.value()?.grades ?? []).filter((g) => this.matches(g, kept)).length;
-  }
   filterEmpty(): string {
     return this.filters.find((f) => f.id === this.gradeFilter())?.empty ?? '';
-  }
-  /* drafts on the page waiting to be finalized. */
-  drafts(): number {
-    return this.filterCount('draft');
   }
 
   // --- the grade panel
   // ---------------------------------------------------------------------------------------------
 
-  /* opens a draft for marking. */
-  review(grade: Evaluation): void {
-    this.show(grade);
-  }
-
-  /* opens a finalized grade read-only. */
-  view(grade: Evaluation): void {
-    this.show(grade);
-  }
-
-  /* opens a grade by a button, unless that would lose marks not saved yet. */
-  private show(grade: Evaluation): void {
+  /* opens a grade by a button (a draft for marking, a finalized one read-only), unless that would lose marks not saved yet. */
+  show(grade: Evaluation): void {
     if (this.open()?.id === grade.id) {
       this.focusHeading(grade);
       return;
@@ -549,7 +539,7 @@ export class ReviewComponent {
   }
 
   private focusHeading(grade: Evaluation): void {
-    setTimeout(() => document.getElementById(`marking-${grade.id}`)?.focus());
+    focusLater(`marking-${grade.id}`);
   }
 
   /* closes the open grade, discarding marks not saved yet; `focusRow` gives focus back to its row's button. */
@@ -557,7 +547,7 @@ export class ReviewComponent {
     const id = this.open()?.id;
     this.stopMarking();
     this.opening++;
-    if (focusRow && id) setTimeout(() => document.getElementById(`open-${id}`)?.focus());
+    if (focusRow && id) focusLater(`open-${id}`);
   }
 
   /* the panel's close, the explicit way out: marks not saved yet are discarded. */
@@ -624,7 +614,7 @@ export class ReviewComponent {
   // --- marking
   // ---------------------------------------------------------------------------------------------
 
-  useSuggestion(grade: Evaluation, evidence: Evidence): void {
+  useSuggestion(evidence: Evidence): void {
     const marks = this.marks.controls[evidence.question_id];
     if (marks && evidence.suggestion?.status === 'ready') applySuggestion(marks, evidence.suggestion);
   }
@@ -744,7 +734,7 @@ export class ReviewComponent {
     if (this.open()) return;
     const next = draftAfter(this.grades.value()?.grades ?? [], id);
     if (next) this.openGrade(next);
-    else setTimeout(() => document.getElementById('grade-queue-heading')?.focus());
+    else focusLater('grade-queue-heading');
     this.putAddress(true);
   }
 

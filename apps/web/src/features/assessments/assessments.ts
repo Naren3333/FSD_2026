@@ -63,6 +63,7 @@ import { AnswerSheetComponent, schedule } from './answer-sheet';
 import { QuestionGeneratorComponent } from './generator';
 import { MarkingGuidanceComponent } from './guidance';
 import { MarkingPointsComponent } from './marking-points';
+import { focusLater } from '../../shared/focus';
 
 /* why a published assessment's replacement was refused, after which the editor keeps only its details. */
 const LOCKED =
@@ -263,7 +264,7 @@ export class AssessmentsComponent {
         });
         return;
       }
-      if (!open) this.focusLater('open-' + current);
+      if (!open) this.revealAndFocus('open-' + current);
     }
     this.requested = open ? { id: open, edit: false } : null;
     this.openRequested();
@@ -387,7 +388,7 @@ export class AssessmentsComponent {
   }
 
   newAssessment(): void {
-    void this.showEditor('new').then(() => this.focusLater('assessment-title'));
+    void this.showEditor('new').then(() => this.revealAndFocus('assessment-title'));
   }
 
   editFromList(item: AssessmentSummary): void {
@@ -402,14 +403,14 @@ export class AssessmentsComponent {
   previewClosed(id: string): void {
     void this.router
       .navigate([], { relativeTo: this.route, queryParams: {} })
-      .then(() => this.focusLater('preview-' + id));
+      .then(() => this.revealAndFocus('preview-' + id));
   }
 
   /* back to the list after the editor is done with (`replaceUrl` after a save, so back does not reopen a cleared form). */
   private leaveEditor(replaceUrl: boolean): void {
     void this.router
       .navigate([], { relativeTo: this.route, queryParams: {}, replaceUrl })
-      .then(() => this.focusLater('new-assessment'));
+      .then(() => this.revealAndFocus('new-assessment'));
   }
 
   stopEditing(): void {
@@ -434,7 +435,7 @@ export class AssessmentsComponent {
     q.controls.topic_id.setValue(this.archivedTopic(topic) ? '' : topic);
     this.questions.push(q);
     this.form.markAsDirty();
-    this.focusLater(`question-${this.questions.length - 1}-prompt`);
+    this.revealAndFocus(`question-${this.questions.length - 1}-prompt`);
   }
 
   /* adds a generated draft the teacher kept, in place of the editor's one question if the teacher has not started it. */
@@ -479,14 +480,14 @@ export class AssessmentsComponent {
     if (this.questions.length <= 1) return;
     this.questions.removeAt(index);
     this.form.markAsDirty();
-    this.focusLater(`question-${Math.min(index, this.questions.length - 1)}-prompt`);
+    this.revealAndFocus(`question-${Math.min(index, this.questions.length - 1)}-prompt`);
   }
 
   addCriterion(question: QuestionForm, index: number): void {
     if (question.controls.criteria.length >= MAX_CRITERIA) return;
     question.controls.criteria.push(criterionForm());
     this.form.markAsDirty();
-    this.focusLater(`question-${index}-criterion-${question.controls.criteria.length - 1}-title`);
+    this.revealAndFocus(`question-${index}-criterion-${question.controls.criteria.length - 1}-title`);
   }
 
   removeCriterion(question: QuestionForm, index: number): void {
@@ -539,7 +540,7 @@ export class AssessmentsComponent {
 
   /* a question's topic name, archived ones included, or ''. */
   topicName(topicId: string): string {
-    return this.topics().find((t) => t.id === topicId)?.name ?? this.archivedTopic(topicId);
+    return this.curriculum.topicName(topicId);
   }
 
   /* whether the teacher has touched a control of the question that is invalid, for the outline's error dot. */
@@ -597,22 +598,22 @@ export class AssessmentsComponent {
       return;
     }
     this.generatorOpen.set(true);
-    this.focusLater('generator-heading');
+    this.revealAndFocus('generator-heading');
   }
 
   closeGenerator(): void {
     this.generatorOpen.set(false);
-    this.focusLater('generator-toggle');
+    this.revealAndFocus('generator-toggle');
   }
 
-  private focusLater(id: string): void {
+  private revealAndFocus(id: string): void {
     // a question focused this way is opened first.
     const question = /^question-(\d+)-/.exec(id);
     if (question) {
       const q = this.questions.at(Number(question[1]));
       if (q) this.expand([q]);
     }
-    setTimeout(() => document.getElementById(id)?.focus());
+    focusLater(id);
   }
 
   /* saves the editor as a draft (new or existing), publishes it, or saves the changes to a published assessment (only its details once students have submitted it). */
@@ -642,11 +643,7 @@ export class AssessmentsComponent {
         // the new draft's own address, in place of the new assessment's.
         if (!editing) void this.showEditor(saved.id, true);
       }
-      await this.assessments.reload(() =>
-        this.assessments.readPage((offset, limit) =>
-          this.assessmentApi.assessmentPage(classroomId, offset, limit),
-        ),
-      );
+      await this.assessments.reload(() => this.readList(classroomId));
     }, message);
   }
 
@@ -660,24 +657,14 @@ export class AssessmentsComponent {
         else await this.assessmentApi.update(editing.id, toAssessment(this.form, classroomId, 'published'));
       } catch (error) {
         const refused = hasSubmissions(error);
-        await this.assessments
-          .reload(() =>
-            this.assessments.readPage((offset, limit) =>
-              this.assessmentApi.assessmentPage(classroomId, offset, limit),
-            ),
-          )
-          .catch(() => undefined);
+        await this.assessments.reload(() => this.readList(classroomId)).catch(() => undefined);
         const now = this.assessments.value()?.find((a) => a.id === editing.id);
         if (this.editing()?.id === editing.id && (refused || (now && submittedBy(now)))) this.lockTo(true);
         throw refused ? new Error(LOCKED) : error;
       }
       this.cancelEdit();
       this.leaveEditor(true);
-      await this.assessments.reload(() =>
-        this.assessments.readPage((offset, limit) =>
-          this.assessmentApi.assessmentPage(classroomId, offset, limit),
-        ),
-      );
+      await this.assessments.reload(() => this.readList(classroomId));
     }, `${this.form.controls.title.value} saved.`);
   }
 
@@ -706,7 +693,7 @@ export class AssessmentsComponent {
       this.editing.set(assessment);
       this.typesChanged();
       this.lockTo(submittedBy(item));
-      this.focusLater('assessment-title');
+      this.revealAndFocus('assessment-title');
     });
   }
 
@@ -732,11 +719,7 @@ export class AssessmentsComponent {
     void this.state.run(async () => {
       await this.assessmentApi.publish(item.id);
       if (this.editing()?.id === item.id) this.cancelEdit();
-      await this.assessments.reload(() =>
-        this.assessments.readPage((offset, limit) =>
-          this.assessmentApi.assessmentPage(classroomId, offset, limit),
-        ),
-      );
+      await this.assessments.reload(() => this.readList(classroomId));
     }, `${item.title} published.`);
   }
 
@@ -762,11 +745,7 @@ export class AssessmentsComponent {
         // takes.
         const refused = hasSubmissions(error);
         const reread = await this.assessments
-          .reload(() =>
-            this.assessments.readPage((offset, limit) =>
-              this.assessmentApi.assessmentPage(classroomId, offset, limit),
-            ),
-          )
+          .reload(() => this.readList(classroomId))
           .then(
             () => true,
             () => false,
@@ -787,12 +766,7 @@ export class AssessmentsComponent {
       await rereadAfterDelete(
         this.assessments,
         item.id,
-        () =>
-          this.assessments.reload(() =>
-            this.assessments.readPage((offset, limit) =>
-              this.assessmentApi.assessmentPage(classroomId, offset, limit),
-            ),
-          ),
+        () => this.assessments.reload(() => this.readList(classroomId)),
         () => this.classroomId() === classroomId,
         this.state,
         { list: 'list', refresh: 'Refresh assessments' },

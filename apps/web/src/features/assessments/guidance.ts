@@ -19,6 +19,7 @@ import {
   type QuestionForm,
 } from './editor';
 import { MAX_SOURCE_DOCUMENTS, sourceDocuments } from './generator';
+import { focusLater } from '../../shared/focus';
 
 /* the accepted answers with the suggested ones added after them, without repeats, up to assessment's limit. */
 export function mergeAccepted(current: string, suggested: readonly string[]): string {
@@ -120,7 +121,7 @@ export class MarkingGuidanceComponent {
     this.question.markAsDirty();
     this.used.set(true);
     // the button goes away, so the keyboard continues from the note that replaces it.
-    setTimeout(() => document.getElementById(`question-${this.index}-guidance-used`)?.focus());
+    focusLater(`question-${this.index}-guidance-used`);
   }
 
   /* whether the question or the assessment has no room for another marking point. */

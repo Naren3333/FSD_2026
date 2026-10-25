@@ -5,7 +5,7 @@
   <app-refresh-button
     label="Refresh conversations"
     [busy]="threads.loading()"
-    [disabled]="state.busy() || streaming() || threads.loading() || !classroomId()"
+    [disabled]="state.busy() || streaming() || !classroomId()"
     (refresh)="loadThreads()"
   />
 </app-page-header>

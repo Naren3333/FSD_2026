@@ -4,11 +4,11 @@ import logging
 import time
 from collections import Counter
 from dataclasses import dataclass, field
-from datetime import datetime
 from typing import Any
 
 from fastapi import HTTPException, Request
 from learning_transport import RELATION_TEACHER, Claims, UpstreamError, failure, require_relation
+from learning_transport.agents import ai_core_refusal, unusable_reply
 
 import checks
 import prompts
@@ -43,23 +43,14 @@ UNREADABLE_REPLY = "UNREADABLE_REPLY"
 NOT_TEACHER = ("FORBIDDEN", "Only the classroom's teacher can generate questions or marking guidance.")
 
 
-# errors whose code alone says what the teacher should hear.
-BY_CODE = {
-    "AI_BUSY": (429, "You have too many AI requests running at once. Try again in a moment."),
-    "AI_PROVIDER_NOT_CONFIGURED": (503, "AI is not set up on this server."),
-    "AI_OUTPUT_REJECTED": (502, "The model did not return a usable reply. Try again."),
-    "RERANK_UNAVAILABLE": (503, "Ranking the class materials is not available right now. Try again later."),
-}
-
-
 def refused(e: UpstreamError) -> HTTPException:
     """a failed upstream call as an error the editor can act on, with a safe message."""
-    if e.code == "AI_SPEND_LIMIT":
-        when = _local_time(e.resets_at)
-        message = "You've used today's AI allowance." + (f" It resets at {when}." if when else "")
-        return failure(429, "AI_SPEND_LIMIT", message)
-    if e.code in BY_CODE:
-        return failure(BY_CODE[e.code][0], e.code, BY_CODE[e.code][1])
+    if (known := ai_core_refusal(e)) is not None:
+        return known
+    if e.code == "RERANK_UNAVAILABLE":
+        return failure(
+            503, e.code, "Ranking the class materials is not available right now. Try again later."
+        )
     if e.service == "content":
         if e.status in (401, 403):
             return failure(403, "FORBIDDEN", "You no longer have access to this classroom's materials.")
@@ -71,16 +62,22 @@ def refused(e: UpstreamError) -> HTTPException:
     return failure(502, "AI_PROVIDER_FAILED", "The model could not answer. Try again.")
 
 
-def _local_time(iso: str | None) -> str:
-    """ai-core's reset time in its own zone (SPEND_TIMEZONE), with the zone's offset, e.g. \"00:00 on 19 oct (utc+08:00)\": the teacher's browser may be elsewhere."""
-    try:
-        at = datetime.fromisoformat(iso) if iso else None
-    except ValueError:
-        return ""
-    if at is None:
-        return ""
-    zone = at.strftime(" (%Z)") if at.tzinfo is not None else ""
-    return at.strftime("%H:%M on %d %b") + zone
+def _round(
+    generated: int,
+    kept: list[Generated],
+    counts: Counter[str],
+    sent_back: Counter[str],
+    passed_review: int,
+    reviewed: bool = False,
+) -> Round:
+    return Round(
+        generated=generated,
+        passed_checks=len(kept),
+        passed_review=passed_review,
+        rejected=dict(counts),
+        sent_back=dict(sent_back),
+        reviewed=reviewed,
+    )
 
 
 def passages_of(results: list[dict[str, Any]], floor: float) -> list[Passage]:
@@ -149,30 +146,28 @@ class Run:
         )
 
     def checked(
-        self, rejected: list[checks.Rejected], dropped: Counter[str], sent_back: dict[str, int]
-    ) -> dict[str, int]:
+        self, rejected: list[checks.Rejected], dropped: Counter[str], sent_back: Counter[str]
+    ) -> None:
         """the checks' refusals: counted, and fed back (and counted in `sent_back`) unless writing them again would not help."""
         self.dropped.update(dropped)
         fed = [r for r in rejected if r.reason not in (checks.DUPLICATE, checks.WRONG_TYPE)]
         self.attempts += fed
-        for r in fed:
-            sent_back[r.reason] = sent_back.get(r.reason, 0) + 1
-        return dropped
+        sent_back.update(r.reason for r in fed)
 
     def judged(
         self,
         n: int,
         kept: list[Generated],
         verdicts: list[review.Verdict],
-        counts: dict[str, int],
-        sent_back: dict[str, int],
+        counts: Counter[str],
+        sent_back: Counter[str],
     ) -> int:
         """sorts the round's drafts by verdict, adds the reviewer's reasons to `counts` and returns how many passed."""
         passed = 0
         for draft, verdict in zip(kept, verdicts, strict=True):
             if verdict.reason == review.NOT_REVIEWED:
                 # no verdict is not a failure: the draft is kept, and a usable draft is not paid to be replaced.
-                counts[review.NOT_REVIEWED] = counts.get(review.NOT_REVIEWED, 0) + 1
+                counts[review.NOT_REVIEWED] += 1
                 self.unreviewed.append(draft.model_copy(update={"review": omitted(n)}))
                 continue
             long_key = verdict.passed and checks.long_key(draft.question)
@@ -183,9 +178,9 @@ class Run:
             reason, note = (
                 (checks.LONG_KEY, checks.LONG_KEY_NOTE) if long_key else (verdict.reason, verdict.note)
             )
-            counts[reason] = counts.get(reason, 0) + 1
+            counts[reason] += 1
             self.attempts.append(checks.Rejected(draft.question.prompt, draft.question.type, reason))
-            sent_back[reason] = sent_back.get(reason, 0) + 1
+            sent_back[reason] += 1
             if reason in (WEAK_DISTRACTORS, checks.LONG_KEY):
                 flagged = Review(
                     status="flagged", note=note, round=n, source="check" if long_key else "reviewer"
@@ -239,8 +234,8 @@ class Pipeline:
         except UpstreamError as e:
             log.warning("generation_failed", extra={"error": str(e)})
             raise refused(e) from None
-        review = self.settings.review and body.review
-        return await self._rounds(topic.name, body, passages, started, review)
+        with_review = self.settings.review and body.review
+        return await self._rounds(topic.name, body, passages, started, with_review)
 
     async def _ask(
         self,
@@ -267,13 +262,13 @@ class Pipeline:
             raise
 
     async def _rounds(
-        self, topic: str, body: GenerateRequest, passages: list[Passage], started: float, review: bool
+        self, topic: str, body: GenerateRequest, passages: list[Passage], started: float, with_review: bool
     ) -> GenerateResponse:
         """generate, review and retry the shortfall (adr 0006); without a review, one round of checks only. a retry needs 1.5 times the longest round to fit in review_deadline, and every call after the first generation is cut off at it."""
         run = Run()
         deadline = started + self.settings.review_deadline
         round_started, longest = started, 0.0
-        for n in range(self.settings.review_retries + 1 if review else 1):
+        for n in range(self.settings.review_retries + 1 if with_review else 1):
             now = time.monotonic()
             shortfall = run.shortfall(body)
             if n > 0:
@@ -302,66 +297,31 @@ class Pipeline:
                 kept, dropped, rejected, generated = checks.questions(output, request, passages)
             except checks.UnreadableOutputError:
                 if n == 0:
-                    raise failure(
-                        502, "AI_OUTPUT_REJECTED", "The model did not return a usable reply. Try again."
-                    ) from None
+                    raise unusable_reply() from None
                 run.rounds.append(
                     Round(generated=0, passed_checks=0, passed_review=0, rejected={UNREADABLE_REPLY: 1})
                 )
                 run.unreadable_retry = True
                 break
-            sent_back: dict[str, int] = {}
-            counts = run.checked(rejected, dropped, sent_back)
+            counts, sent_back = dropped, Counter[str]()
+            run.checked(rejected, dropped, sent_back)
             if not kept:
-                run.rounds.append(
-                    Round(
-                        generated=generated,
-                        passed_checks=0,
-                        passed_review=0,
-                        rejected=counts,
-                        sent_back=sent_back,
-                    )
-                )
+                run.rounds.append(_round(generated, kept, counts, sent_back, 0))
                 continue
-            if not review:
+            if not with_review:
                 run.unreviewed += [flag_long_key(g) if checks.long_key(g.question) else g for g in kept]
-                run.rounds.append(
-                    Round(
-                        generated=generated,
-                        passed_checks=len(kept),
-                        passed_review=len(kept),
-                        rejected=counts,
-                        sent_back=sent_back,
-                    )
-                )
+                run.rounds.append(_round(generated, kept, counts, sent_back, len(kept)))
                 continue
             try:
                 verdicts = await self._review(topic, body, kept, passages, run, deadline)
             except (UpstreamError, checks.UnreadableOutputError) as e:
                 log.warning("review_failed", extra={"error": str(e), "round": n})
                 run.unreviewed += [g.model_copy(update={"review": not_run(n)}) for g in kept]
-                run.rounds.append(
-                    Round(
-                        generated=generated,
-                        passed_checks=len(kept),
-                        passed_review=len(kept),
-                        rejected=counts,
-                        sent_back=sent_back,
-                    )
-                )
+                run.rounds.append(_round(generated, kept, counts, sent_back, len(kept)))
                 run.stop_error = e if isinstance(e, UpstreamError) and e.code != OUT_OF_TIME else None
                 break
             passed = run.judged(n, kept, verdicts, counts, sent_back)
-            run.rounds.append(
-                Round(
-                    generated=generated,
-                    passed_checks=len(kept),
-                    passed_review=passed,
-                    rejected=counts,
-                    sent_back=sent_back,
-                    reviewed=True,
-                )
-            )
+            run.rounds.append(_round(generated, kept, counts, sent_back, passed, reviewed=True))
         return self._response(body, run)
 
     def _response(self, body: GenerateRequest, run: Run) -> GenerateResponse:
@@ -380,9 +340,7 @@ class Pipeline:
             if run.stop_error is not None:
                 raise refused(run.stop_error)
             if run.unreadable_retry:
-                raise failure(
-                    502, "AI_OUTPUT_REJECTED", "The model did not return a usable reply. Try again."
-                )
+                raise unusable_reply()
             raise failure(
                 422,
                 "GENERATION_REJECTED",
@@ -404,7 +362,7 @@ class Pipeline:
         body: GenerateRequest,
         kept: list[Generated],
         passages: list[Passage],
-        run: "Run",
+        run: Run,
         deadline: float,
     ) -> list[review.Verdict]:
         """one reviewer call over the drafts that passed the checks; it sees the editor's questions and those held so far."""
@@ -445,9 +403,7 @@ class Pipeline:
         try:
             return checks.guidance(output, body, passages)
         except checks.UnreadableOutputError:
-            raise failure(
-                502, "AI_OUTPUT_REJECTED", "The model did not return a usable reply. Try again."
-            ) from None
+            raise unusable_reply() from None
         except checks.RuleBrokenError as d:
             log.info("guidance rejected", extra={"reason": d.reason})
             raise failure(

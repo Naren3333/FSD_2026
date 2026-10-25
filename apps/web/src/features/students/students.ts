@@ -11,6 +11,7 @@ import { IconComponent } from '../../shared/icon';
 import { NoClassroomComponent } from '../../shared/no-classroom';
 import { studentName } from '../../shared/names';
 import { PageHeaderComponent } from '../../shared/page-header';
+import { readPage } from '../../shared/paged-section';
 import { PagerComponent } from '../../shared/pager';
 import { RefreshButtonComponent } from '../../shared/refresh-button';
 import { Section } from '../../shared/section';
@@ -105,12 +106,13 @@ export class StudentsComponent {
   /* fetches the page on show; a page past the end, after students leave, falls back to the last one. */
   private async readEveryone(current: () => boolean): Promise<StudentPage> {
     const search = this.search().trim();
-    let result = await this.identity.students(search, this.page() * this.pageSize, this.pageSize);
-    if (!result.students.length && result.total && this.page() > 0) {
-      const last = Math.ceil(result.total / this.pageSize) - 1;
-      result = await this.identity.students(search, last * this.pageSize, this.pageSize);
-      if (current()) this.page.set(last);
-    }
+    const { result, page } = await readPage(
+      this.page(),
+      this.pageSize,
+      (offset, limit) => this.identity.students(search, offset, limit),
+      (r) => !r.students.length,
+    );
+    if (current()) this.page.set(page);
     return result;
   }
 
@@ -145,13 +147,13 @@ export class StudentsComponent {
 
   /* the roster page on show; a page past the end, after students leave, falls back to the last one. */
   private async readRoster(classroomId: string, current: () => boolean): Promise<StudentPage> {
-    const size = this.rosterPageSize;
-    let result = await this.identity.rosterPage(classroomId, this.rosterPage() * size, size);
-    if (!result.students.length && result.total && this.rosterPage() > 0) {
-      const last = Math.ceil(result.total / size) - 1;
-      result = await this.identity.rosterPage(classroomId, last * size, size);
-      if (current()) this.rosterPage.set(last);
-    }
+    const { result, page } = await readPage(
+      this.rosterPage(),
+      this.rosterPageSize,
+      (offset, limit) => this.identity.rosterPage(classroomId, offset, limit),
+      (r) => !r.students.length,
+    );
+    if (current()) this.rosterPage.set(page);
     return result;
   }
 

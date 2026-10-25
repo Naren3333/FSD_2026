@@ -5,7 +5,7 @@
   <app-refresh-button
     label="Refresh grades"
     [busy]="grades.loading()"
-    [disabled]="state.busy() || grades.loading() || !classroomId()"
+    [disabled]="state.busy() || !classroomId()"
     (refresh)="refresh()"
   />
 </app-page-header>
@@ -23,7 +23,7 @@
       <div class="filter-chips" role="group" aria-label="Show">
         @for (f of filters; track f.id) {
           <button type="button" [attr.aria-pressed]="gradeFilter() === f.id" (click)="gradeFilter.set(f.id)">
-            {{ f.label }} ({{ filterCount(f.id) }})
+            {{ f.label }} ({{ counts()[f.id] }})
           </button>
         }
       </div>
@@ -109,7 +109,7 @@
                 class="secondary"
                 [id]="'open-' + grade.id"
                 [attr.aria-describedby]="'grade-name-' + grade.id"
-                (click)="review(grade)"
+                (click)="show(grade)"
                 [disabled]="state.busy()"
               >
                 Review grade
@@ -120,7 +120,7 @@
                 class="secondary"
                 [id]="'open-' + grade.id"
                 [attr.aria-describedby]="'grade-name-' + grade.id"
-                (click)="view(grade)"
+                (click)="show(grade)"
                 [disabled]="state.busy()"
               >
                 View grade
@@ -318,7 +318,7 @@
                             <button
                               type="button"
                               class="secondary"
-                              (click)="useSuggestion(current, evidence)"
+                              (click)="useSuggestion(evidence)"
                               [disabled]="state.busy()"
                             >
                               Use suggestion for question {{ n + 1 }}
@@ -476,7 +476,8 @@
           <p><strong>Choose a grade to review</strong></p>
           @if (grades.value()) {
             <p class="caption">
-              {{ drafts() }} {{ drafts() === 1 ? 'draft is' : 'drafts are' }} waiting on this page.
+              {{ counts().draft }} {{ counts().draft === 1 ? 'draft is' : 'drafts are' }} waiting on this
+              page.
             </p>
           }
         </div>

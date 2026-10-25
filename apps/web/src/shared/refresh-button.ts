@@ -1,7 +1,7 @@
 import { Component, EventEmitter, Input, Output } from '@angular/core';
 import { IconComponent } from './icon';
 
-/* an icon-only refresh button named by its label, such as "refresh assessments"; the icon spins while busy. */
+/* an icon-only refresh button named by its label, such as "refresh assessments"; the icon spins, and the button is disabled, while busy. */
 @Component({
   selector: 'app-refresh-button',
   standalone: true,
@@ -13,7 +13,7 @@ import { IconComponent } from './icon';
       [class.busy]="busy"
       [attr.aria-label]="label"
       [title]="label"
-      [disabled]="disabled"
+      [disabled]="disabled || busy"
       (click)="refresh.emit()"
     >
       <app-icon name="refresh" />

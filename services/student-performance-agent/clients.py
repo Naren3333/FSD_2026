@@ -13,7 +13,7 @@ READ_TIMEOUT = 10.0
 # allow a bounded model turn, allowance checks and usage accounting.
 GENERATE_TIMEOUT = 60.0
 # grading's largest page; a student rarely has more finalized assessments in one classroom.
-MAX_RESULTS = 100
+EVALUATION_LIMIT = 100
 # assessment's batch read takes at most 50 ids.
 BATCH = 50
 CLASS_PAGE = 50
@@ -61,7 +61,7 @@ class Services(AgentClients):
             correlation,
             classroom_id=classroom,
             student_id=student,
-            limit=MAX_RESULTS,
+            limit=EVALUATION_LIMIT,
         )
         evaluations = data.get("evaluations") if isinstance(data, dict) else None
         if not isinstance(evaluations, list):
@@ -147,21 +147,27 @@ class Services(AgentClients):
 
     async def class_performance(self, authorization: str, classroom: str, correlation: str) -> list[Any]:
         """the topic summaries of the classroom's students, its first 200 in roster order."""
-        students: list[Any] = []
-        for page in range(CLASS_PAGES):
+
+        async def page(n: int) -> tuple[list[Any], int]:
             data = await self._get(
                 "analytics",
                 f"{self.settings.analytics_url}/v1/performance",
                 authorization,
                 correlation,
                 classroom_id=classroom,
-                offset=page * CLASS_PAGE,
+                offset=n * CLASS_PAGE,
                 limit=CLASS_PAGE,
             )
             batch = data.get("students") if isinstance(data, dict) else None
             if not isinstance(batch, list):
                 raise UpstreamError("analytics", 502)
+            return batch, int(data.get("total") or 0)
+
+        # the first page gives the total; the rest are read side by side.
+        students, total = await page(0)
+        if not students:
+            return students
+        pages = min(CLASS_PAGES, -(-total // CLASS_PAGE))
+        for batch, _ in await asyncio.gather(*(page(n) for n in range(1, pages))):
             students += batch
-            if len(students) >= int(data.get("total") or 0) or not batch:
-                break
         return students

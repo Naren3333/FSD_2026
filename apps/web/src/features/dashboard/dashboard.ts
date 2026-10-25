@@ -198,13 +198,7 @@ export class DashboardComponent {
     return this.metrics().get(studentId)?.get(topicId);
   }
 
-  /* "12 of 20 students submitted", or just the count when former students' submissions exceed the roster. */
-  submitted(progress: AssessmentProgress): string {
-    const parts = this.submittedParts(progress);
-    return parts.count + parts.rest;
-  }
-
-  /* the submitted text split into what shows ("12 of 20") and the rest, with the share for the bar. */
+  /* "12 of 20 students submitted" split into what shows ("12 of 20") and the rest, with the share for the bar; just the count when former students' submissions exceed the roster. */
   submittedParts(progress: AssessmentProgress): { count: string; rest: string; share: number | null } {
     const enrolled = this.enrolledTotal();
     if (enrolled !== undefined && progress.submissions <= enrolled)

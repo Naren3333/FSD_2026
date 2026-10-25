@@ -3,6 +3,8 @@
 import json
 from typing import Any
 
+from learning_transport.agents import strict_object
+
 MAX_MESSAGE = 60000  # ai-core's longest message, in characters
 # tool results beyond this are trimmed, oldest first, so the task fits one message.
 HISTORY_BUDGET = 40000
@@ -37,18 +39,8 @@ STRS: dict[str, Any] = {"type": "array", "items": STR}
 NULLABLE_STR: dict[str, Any] = {"type": ["string", "null"]}
 
 
-def _strict(properties: dict[str, Any]) -> dict[str, Any]:
-    """an object whose every property is required and nothing else allowed, as strict structured output needs."""
-    return {
-        "type": "object",
-        "properties": properties,
-        "required": list(properties),
-        "additionalProperties": False,
-    }
-
-
-FINDING = _strict({"text": STR, "evidence": STRS})
-REPORT = _strict(
+FINDING = strict_object({"text": STR, "evidence": STRS})
+REPORT = strict_object(
     {
         "observations": {"type": "array", "items": FINDING},
         "possible_misconceptions": {"type": "array", "items": FINDING},
@@ -56,7 +48,7 @@ REPORT = _strict(
         "recommended_topics": STRS,
     }
 )
-CALL = _strict(
+CALL = strict_object(
     {
         "tool": {"type": "string", "enum": list(TOOLS)},
         "result": NULLABLE_STR,
@@ -64,7 +56,7 @@ CALL = _strict(
         "reason": STR,
     }
 )
-TURN = _strict(
+TURN = strict_object(
     {
         "action": {"type": "string", "enum": ["call_tools", "report"]},
         "tool_calls": {"type": "array", "items": CALL},

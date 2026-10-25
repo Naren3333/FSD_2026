@@ -22,6 +22,7 @@ import { StatusComponent } from '../../shared/status';
 import { requiredText } from '../../shared/validators';
 import { PageHeaderComponent } from '../../shared/page-header';
 import { RefreshButtonComponent } from '../../shared/refresh-button';
+import { focusLater } from '../../shared/focus';
 
 const FAILURES: Record<FailureReason, string> = {
   NO_TEXT_LAYER: 'the PDF has no readable text layer',
@@ -287,7 +288,7 @@ export class MaterialsComponent implements OnDestroy {
       this.closeDelete();
       this.state.error.set('');
       this.state.message.set(`${doc.title} deleted.`);
-      setTimeout(() => document.getElementById('library-title')?.focus());
+      focusLater('library-title');
       // the dialog is closed, so a failure is reported on the page, without the deleted document.
       await rereadAfterDelete(
         this.documents,

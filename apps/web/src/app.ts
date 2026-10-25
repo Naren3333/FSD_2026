@@ -18,6 +18,7 @@ import { GradingApi } from './api/clients';
 import { navigation } from './app.routes';
 import { AiUsage } from './core/ai-usage';
 import { ClassroomContext } from './core/classroom-context';
+import { sectionOf } from './core/section-shown';
 import { Session } from './core/session';
 import { UnsavedChanges } from './core/unsaved-changes';
 import { UsageComponent } from './features/usage/usage';
@@ -67,18 +68,23 @@ export class AppComponent implements OnInit {
   @ViewChild('menuButton') private menuButton?: ElementRef<HTMLElement>;
 
   constructor() {
+    let section: string | null = null;
     this.router.events
       .pipe(
-        filter((event) => event instanceof NavigationEnd),
+        filter((event): event is NavigationEnd => event instanceof NavigationEnd),
         takeUntilDestroyed(),
       )
-      .subscribe(() => {
+      .subscribe((event) => {
         if (!this.session.profile()) return;
+        if (this.menuOpen()) this.closeMenu();
+        // a page changing only its own address (opening a grade) has not left the section.
+        const now = sectionOf(event.urlAfterRedirects);
+        if (now === section) return;
+        section = now;
         // a section may have spent ai allowance (indexing, chat) since the meter last loaded.
         this.usage.refresh();
         // grading review may have changed the drafts.
         this.loadDrafts();
-        if (this.menuOpen()) this.closeMenu();
       });
     effect(() => {
       this.context.classroomId();
