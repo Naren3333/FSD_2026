@@ -1,12 +1,23 @@
 import asyncio
 import json
+import time
 from typing import Any
 
 import httpx
 import pytest
 
 from learning_transport import Claims, UpstreamError
-from learning_transport.agents import AGENT_ENV, AgentClients, AgentSettings, billed_to, read_settings
+from learning_transport.agents import (
+    AGENT_ENV,
+    MIN_CALL,
+    OUT_OF_TIME,
+    REPLY_MARGIN,
+    AgentClients,
+    AgentSettings,
+    billed_to,
+    gather_all,
+    read_settings,
+)
 from learning_transport.testing import token_claims
 
 SETTINGS = AgentSettings(
@@ -126,3 +137,63 @@ def test_read_settings_strips_trailing_slashes_and_requires_every_value(
     monkeypatch.delenv("AI_CLIENT_SECRET")
     with pytest.raises(RuntimeError, match="AI_CLIENT_SECRET"):
         read_settings(AGENT_ENV)
+
+
+def test_generate_tells_ai_core_to_give_up_before_the_agent_does() -> None:
+    fakes = Fakes()
+    fakes.inference = [httpx.Response(200, json={"output": "ok"})]
+    generate(fakes.clients())
+    body = json.loads(fakes.requests[-1].content)
+    assert body["timeout"] == AgentClients.generate_timeout - REPLY_MARGIN
+
+
+def test_a_call_the_deadline_cut_off_is_out_of_time() -> None:
+    fakes = Fakes()
+    clients = fakes.clients()
+    fakes.inference = [httpx.Response(504, json={"error": {"code": "AI_TIMEOUT", "message": "x"}})]
+    billed = {"user_id": "u1", "org_id": "o1", "role": "teacher"}
+    deadline = time.monotonic() + 20
+
+    def ask(until: float) -> str:
+        return asyncio.run(
+            clients.generate([{"role": "user", "content": "q"}], 50, {}, "x", "c", billed, until)
+        )
+
+    with pytest.raises(UpstreamError) as failed:
+        ask(deadline)
+    assert failed.value.code == OUT_OF_TIME
+    assert json.loads(fakes.requests[-1].content)["timeout"] <= 20 - REPLY_MARGIN
+    calls = len(fakes.requests)
+    with pytest.raises(UpstreamError) as failed:
+        ask(time.monotonic() + MIN_CALL - 1)  # too little time left: not started
+    assert failed.value.code == OUT_OF_TIME and len(fakes.requests) == calls
+
+
+def test_an_ai_core_timeout_without_a_deadline_stays_a_timeout() -> None:
+    fakes = Fakes()
+    fakes.inference = [httpx.Response(504, json={"error": {"code": "AI_TIMEOUT", "message": "x"}})]
+    with pytest.raises(UpstreamError) as failed:
+        generate(fakes.clients())
+    assert failed.value.code == "AI_TIMEOUT"
+
+
+def test_gather_all_cancels_the_rest_when_one_fails() -> None:
+    cancelled = []
+
+    async def slow() -> None:
+        try:
+            await asyncio.sleep(10)
+        except asyncio.CancelledError:
+            cancelled.append(True)
+            raise
+
+    async def fails() -> None:
+        raise UpstreamError("grading", 503)
+
+    async def ok() -> int:
+        return 1
+
+    with pytest.raises(UpstreamError):
+        asyncio.run(gather_all(slow(), fails()))
+    assert cancelled == [True]
+    assert asyncio.run(gather_all(ok(), ok())) == [1, 1]

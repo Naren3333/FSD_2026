@@ -1,17 +1,20 @@
 """the teacher-token reads the agent's tools make, and inference through ai-core as the agent."""
 
 import asyncio
+from collections.abc import Awaitable, Callable
 from typing import Any
 
 import httpx
 from learning_transport import Claims, UpstreamError, upstream_error
-from learning_transport.agents import AgentClients, billed_to
+from learning_transport.agents import AgentClients, billed_to, gather_all
 
 from config import Settings
 
 READ_TIMEOUT = 10.0
-# allow a bounded model turn, allowance checks and usage accounting.
-GENERATE_TIMEOUT = 60.0
+# ai-core's budget for the 3000-token report (70 s), plus its allowance checks and usage accounting.
+GENERATE_TIMEOUT = 75.0
+# reads of one topic or assessment each that run at once.
+FAN_OUT = 8
 # grading's largest page, and how many pages are read at most looking for finalized results among drafts.
 EVALUATION_LIMIT = 100
 EVALUATION_PAGES = 5
@@ -99,11 +102,8 @@ class Services(AgentClients):
                 if e.status != 404:
                     raise
                 # the batch refuses all of them when one is gone, so read them one by one.
-                items = [
-                    a
-                    for a in await asyncio.gather(*(self._one(authorization, i, correlation) for i in chunk))
-                    if a
-                ]
+                read = await bounded(lambda i: self._one(authorization, i, correlation), chunk)
+                items = [a for a in read if a]
             found.update({a["id"]: a for a in items if isinstance(a, dict) and isinstance(a.get("id"), str)})
         return found
 
@@ -150,7 +150,7 @@ class Services(AgentClients):
             value = data.get("name") if isinstance(data, dict) else None
             return topic, value if isinstance(value, str) and value else None
 
-        pairs = await asyncio.gather(*(name(t) for t in ids))
+        pairs = await bounded(name, ids)
         return {topic: value for topic, value in pairs if value}
 
     async def prerequisites(self, authorization: str, topic: str, correlation: str) -> list[dict[str, str]]:
@@ -188,6 +188,17 @@ class Services(AgentClients):
         if not students:
             return students
         pages = min(CLASS_PAGES, -(-total // CLASS_PAGE))
-        for batch, _ in await asyncio.gather(*(page(n) for n in range(1, pages))):
+        for batch, _ in await gather_all(*(page(n) for n in range(1, pages))):
             students += batch
         return students
+
+
+async def bounded[T, R](read: Callable[[T], Awaitable[R]], items: list[T]) -> list[R]:
+    """`read` of every item, at most FAN_OUT at once; the first failure cancels the rest."""
+    slots = asyncio.Semaphore(FAN_OUT)
+
+    async def one(item: T) -> R:
+        async with slots:
+            return await read(item)
+
+    return await gather_all(*(one(i) for i in items))

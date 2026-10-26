@@ -295,6 +295,18 @@ async def test_a_long_reply_gets_its_whole_budget(
     assert openai_fake.timeouts == [pytest.approx(120)]
 
 
+async def test_the_callers_timeout_shortens_the_budget(
+    openai_fake: FakeOpenAI, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """a caller that waits 40 s gets a reply or a timeout inside 40 s, never one it has stopped waiting for."""
+    Clock(openai_fake, monkeypatch)
+    openai_fake.reply(json=chat_response(REWRITE))
+    openai_fake.reply(json=chat_response(REWRITE))
+    await openai_client.generate(HELLO, 6000, SCHEMA, name="questions.generated", timeout=40)
+    await openai_client.generate(HELLO, 300, SCHEMA, name="query.rewrite", timeout=100)  # longer: no change
+    assert openai_fake.timeouts == [pytest.approx(40), pytest.approx(openai_client.TIMEOUT)]
+
+
 async def test_a_retry_gets_what_is_left_of_the_budget(
     openai_fake: FakeOpenAI, monkeypatch: pytest.MonkeyPatch
 ) -> None:

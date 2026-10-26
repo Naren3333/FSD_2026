@@ -1,6 +1,9 @@
 """the calls an ai agent makes to identity, content and ai-core, and the settings they need."""
 
+import asyncio
 import os
+import time
+from collections.abc import Awaitable
 from dataclasses import dataclass
 from datetime import datetime
 from typing import Any
@@ -51,7 +54,14 @@ AI_CORE_CODES = {
     "AI_BUSY": (429, "You have too many AI requests running at once. Try again in a moment."),
     "AI_PROVIDER_NOT_CONFIGURED": (503, "AI is not set up on this server."),
     "AI_OUTPUT_REJECTED": (502, "The model did not return a usable reply. Try again."),
+    "AI_TIMEOUT": (504, "The model took too long to answer. Try again."),
 }
+# a model call the caller's deadline stopped or kept from starting.
+OUT_OF_TIME = "OUT_OF_TIME"
+# a call with less time than this left before its deadline is not started.
+MIN_CALL = 5.0
+# ai-core gives up this long before the agent does, leaving time for its allowance checks and accounting.
+REPLY_MARGIN = 5.0
 
 
 def ai_core_refusal(e: UpstreamError) -> HTTPException | None:
@@ -79,6 +89,21 @@ def strict_object(properties: dict[str, Any]) -> dict[str, Any]:
         "required": list(properties),
         "additionalProperties": False,
     }
+
+
+async def gather_all(*calls: Awaitable[Any]) -> list[Any]:
+    """every call's result, in order; the first failure cancels the others and is raised as itself."""
+    tasks: list[asyncio.Task[Any]] = []
+    try:
+        async with asyncio.TaskGroup() as group:
+            tasks = [group.create_task(_awaited(c)) for c in calls]
+    except BaseExceptionGroup as failed:
+        raise failed.exceptions[0] from None
+    return [t.result() for t in tasks]
+
+
+async def _awaited(call: Awaitable[Any]) -> Any:
+    return await call
 
 
 def _local_time(iso: str | None) -> str:
@@ -139,9 +164,15 @@ class AgentClients:
         name: str,
         correlation: str,
         payer: dict[str, str],
-        timeout: float | None = None,
+        deadline: float | None = None,
     ) -> str:
-        """one structured reply: the model's output as text, matching `schema`, billed to `payer` (billed_to()); `timeout` can only shorten the client's own."""
+        """one structured reply: the model's output as text, matching `schema`, billed to `payer` (billed_to()). with a `deadline` (time.monotonic()) the call is cut off then, and one it stopped or kept from starting raises OUT_OF_TIME."""
+        limit = self.generate_timeout
+        if deadline is not None:
+            left = deadline - time.monotonic()
+            if left < MIN_CALL:
+                raise UpstreamError("ai-core", 0, OUT_OF_TIME)
+            limit = min(left, limit)
         body = {
             "operation": "generate",
             "messages": messages,
@@ -149,9 +180,16 @@ class AgentClients:
             "response_schema": schema,
             "schema_name": name,
             "billed_to": payer,
+            # ai-core stops first, so a reply is never finished and billed after the agent has stopped waiting.
+            "timeout": max(limit - REPLY_MARGIN, 1.0),
         }
-        limit = self.generate_timeout if timeout is None else min(timeout, self.generate_timeout)
-        resp = await self.ai_core("POST", "/v1/inference", correlation, limit, json=body)
+        try:
+            resp = await self.ai_core("POST", "/v1/inference", correlation, limit, json=body)
+        except UpstreamError as e:
+            timed_out = e.status == 0 or e.code == "AI_TIMEOUT"
+            if timed_out and limit < self.generate_timeout:
+                raise UpstreamError("ai-core", 0, OUT_OF_TIME) from None
+            raise
         try:
             output = resp.json().get("output")
         except (ValueError, AttributeError):

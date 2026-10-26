@@ -8,7 +8,7 @@ from typing import Any
 
 from fastapi import HTTPException, Request
 from learning_transport import RELATION_TEACHER, Claims, UpstreamError, failure, require_relation
-from learning_transport.agents import ai_core_refusal, unusable_reply
+from learning_transport.agents import OUT_OF_TIME, ai_core_refusal, unusable_reply
 
 import checks
 import prompts
@@ -34,10 +34,6 @@ GUIDANCE_PASSAGES = 6
 GENERATION_TOKENS = 6000
 GUIDANCE_TOKENS = 2000
 REVIEW_TOKENS = 3000
-# a call with less time than this left before the deadline is not started.
-MIN_CALL = 5.0
-# a call the deadline stopped or kept from starting; not a failure to report, only the end of the retries.
-OUT_OF_TIME = "OUT_OF_TIME"
 WEAK_DISTRACTORS = "WEAK_DISTRACTORS"
 UNREADABLE_REPLY = "UNREADABLE_REPLY"
 NOT_TEACHER = ("FORBIDDEN", "Only the classroom's teacher can generate questions or marking guidance.")
@@ -81,9 +77,8 @@ def _round(
 
 
 def passages_of(results: list[dict[str, Any]], floor: float) -> list[Passage]:
-    """the reranked search results as numbered passages; none when the best is below the relevance floor, since then the documents say too little about the request."""
-    if not results or float(results[0].get("score", 0)) < floor:
-        return []
+    """the reranked search results at or above the relevance floor, as numbered passages; none when the best is below it, since then the documents say too little about the request. a weaker passage is left out so no draft rests on it."""
+    results = [r for r in results if float(r.get("score", 0)) >= floor and r["content"].strip()]
     return [
         Passage(
             i,
@@ -96,7 +91,6 @@ def passages_of(results: list[dict[str, Any]], floor: float) -> list[Passage]:
             r.get("source", "pdf"),
         )
         for i, r in enumerate(results, start=1)
-        if r["content"].strip()
     ]
 
 
@@ -246,21 +240,10 @@ class Pipeline:
         name: str,
         deadline: float | None = None,
     ) -> str:
-        """one model call; with a deadline it is cut off then, so the request ends before the gateway gives up."""
-        timeout = None
-        if deadline is not None:
-            timeout = deadline - time.monotonic()
-            if timeout < MIN_CALL:
-                raise UpstreamError("ai-core", 0, OUT_OF_TIME)
-        try:
-            return await self.services.generate(
-                messages, tokens, schema, name, self.correlation, billed(self.claims), timeout
-            )
-        except UpstreamError as e:
-            # an unanswered call that ran until the deadline was cut off by it, not by ai-core.
-            if deadline is not None and e.status == 0 and time.monotonic() >= deadline - MIN_CALL:
-                raise UpstreamError("ai-core", 0, OUT_OF_TIME) from None
-            raise
+        """one model call; with a deadline it is cut off then (OUT_OF_TIME, not a failure to report, only the end of the retries), so the request ends before the gateway gives up."""
+        return await self.services.generate(
+            messages, tokens, schema, name, self.correlation, billed(self.claims), deadline
+        )
 
     async def _rounds(
         self, topic: str, body: GenerateRequest, passages: list[Passage], started: float, with_review: bool

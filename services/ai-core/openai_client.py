@@ -176,9 +176,14 @@ class Completion:
 
 
 async def generate(
-    messages: list[Any], max_tokens: int, schema: dict | None = None, *, name: str = ""
+    messages: list[Any],
+    max_tokens: int,
+    schema: dict | None = None,
+    *,
+    name: str = "",
+    timeout: float | None = None,
 ) -> Completion:
-    """one reply."""
+    """one reply, given up after `timeout` seconds when that is shorter than its own budget."""
     client, settings = get_client(), get_settings()
     extra: dict[str, Any] = {}
     if schema is not None:
@@ -186,7 +191,8 @@ async def generate(
             "type": "json_schema",
             "json_schema": {"name": (name or "reply").replace(".", "_"), "strict": True, "schema": schema},
         }
-    deadline = _now() + generation_budget(max_tokens)
+    budget_seconds = generation_budget(max_tokens)
+    deadline = _now() + (budget_seconds if timeout is None else min(timeout, budget_seconds))
     result = await call(
         lambda: budget.guarded(
             lambda: client.chat.completions.create(

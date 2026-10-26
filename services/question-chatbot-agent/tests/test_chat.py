@@ -136,6 +136,30 @@ def test_top_score_below_the_floor_is_refused_without_a_model_call(
     assert len(fakes.calls("/v1/inference")) == 1  # the rewrite only
 
 
+def test_passages_far_below_the_best_are_not_offered_as_evidence(
+    api: TestClient, fakes: Fakes, store: MemoryStore
+) -> None:
+    fakes.results = [
+        result(C1, "Chlorophyll absorbs light.", 3),
+        result(C2, "Stomata let CO2 in.", 5, score=0.1),
+    ]
+    fakes.replies += [rewrite("q"), chat_stream(["Light [S1]."])]
+    tid = thread(api)
+    post(api, tid, "q")
+    assert saved(store, tid)["retrieved_chunk_ids"] == [C1]
+    assert "Stomata" not in fakes.calls("/v1/inference")[1]["messages"][-1]["content"]
+
+
+def test_a_malformed_stream_event_is_a_provider_failure(
+    api: TestClient, fakes: Fakes, store: MemoryStore
+) -> None:
+    fakes.results = RESULTS
+    fakes.replies += [rewrite("q"), sse_event("delta", {"refusal": "no"})]
+    tid = thread(api)
+    events = post(api, tid, "q")
+    assert events[-1][0] == "error" and events[-1][1]["code"] == "AI_PROVIDER_FAILED"
+
+
 def test_rerank_fallback_fails_the_turn(api: TestClient, fakes: Fakes, store: MemoryStore) -> None:
     """rrf scores can't be checked against the floor, so a fallback search is not answered."""
     fakes.results, fakes.fallback = [result(C1, "Chlorophyll absorbs light.", 3, score=0.03)], True
@@ -747,6 +771,13 @@ def test_a_topic_search_has_the_lower_topic_floor() -> None:
     whole, narrow = topic(2, str(uuid4()), 0.56, "Whole"), topic(2, str(uuid4()), 0.56, "Narrow")
     strong = topic(2, str(uuid4()), 0.9, "Strong")
     assert {r["title"] for r, _ in merge([whole, strong, narrow], 0.61, 0.5)} == {"Strong", "Narrow"}
+
+
+def test_merge_leaves_out_passages_under_the_topic_floor() -> None:
+    from chat import merge
+
+    strong = [*topic(1, str(uuid4()), 0.9, "Strong"), *topic(1, str(uuid4()), 0.2, "Weak")]
+    assert [r["title"] for r, _ in merge([strong], 0.61, 0.5)] == ["Strong"]
 
 
 def test_the_turn_log_says_where_the_time_went(

@@ -6,8 +6,8 @@ from typing import Any
 
 import httpx
 import pytest
-from conftest import CHUNK_1, CHUNK_2, DOC, SETTINGS, Fakes, as_user, reply
-from learning_transport import UpstreamError
+from conftest import CHUNK_1, CHUNK_2, DOC, SETTINGS, Fakes, as_user, hit, reply
+from learning_transport import UpstreamError, agents
 from test_api import BODY, GENERATE
 from test_checks import choice, short
 
@@ -420,6 +420,7 @@ def tick(monkeypatch: pytest.MonkeyPatch, seconds_per_call: float) -> None:
         return await ask_model(self, *args)
 
     monkeypatch.setattr(pipeline, "time", clock)
+    monkeypatch.setattr(agents, "time", clock)  # where a model call's deadline is checked
     monkeypatch.setattr(pipeline.Pipeline, "_ask", slow)
 
 
@@ -450,12 +451,13 @@ def test_a_retry_the_deadline_cuts_off_is_not_reported_as_unavailable(
     configure(review_deadline=240)
     clock = Clock()
     monkeypatch.setattr(pipeline, "time", clock)
+    monkeypatch.setattr(agents, "time", clock)
     generate = clients.Services.generate
 
     async def deadline_stops_the_third(self: Any, *args: Any) -> str:
         if len(fakes.calls("/v1/inference")) == 2:
             clock.now = 240.0  # the retry's call ran until the deadline cut it off
-            raise UpstreamError("ai-core", 0)
+            raise UpstreamError("ai-core", 0, agents.OUT_OF_TIME)
         return await generate(self, *args)
 
     monkeypatch.setattr(clients.Services, "generate", deadline_stops_the_third)
@@ -665,3 +667,14 @@ def test_a_long_key_is_flagged_when_the_review_does_not_judge_it(api, fakes: Fak
         LONG_KEY_NOTE,
     )
     assert reviews[1]["status"] == "not_reviewed"
+
+
+def test_passages_under_the_floor_are_left_out_and_the_rest_numbered_in_order() -> None:
+    results = [
+        hit(CHUNK_1, "Strong passage.", 0.9),
+        hit("weak", "Weak passage.", 0.2),
+        hit(CHUNK_2, "Also strong.", 0.6),
+    ]
+    passages = pipeline.passages_of(results, 0.5)
+    assert [(p.number, p.chunk_id) for p in passages] == [(1, CHUNK_1), (2, CHUNK_2)]
+    assert pipeline.passages_of([hit(CHUNK_1, "Weak.", 0.4)], 0.5) == []

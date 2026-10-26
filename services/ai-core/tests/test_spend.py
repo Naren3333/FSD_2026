@@ -140,7 +140,9 @@ def test_a_timed_out_reply_is_charged_its_prompt_and_whole_output(
     """openai may still run, and bill, a reply nobody waited for: it is charged as if it used all of max_tokens."""
     openai_fake.replies.append(hang)
     resp = api.post("/v1/inference", json={**GENERATE, "max_tokens": 6000, "stream": stream})
-    assert (resp.status_code, resp.json()["error"]["code"]) == (502, "AI_PROVIDER_FAILED")
+    # a structured reply that timed out says so; a stream that never opened is a provider failure.
+    expected = (502, "AI_PROVIDER_FAILED") if stream else (504, "AI_TIMEOUT")
+    assert (resp.status_code, resp.json()["error"]["code"]) == expected
     settle(ledger, 1)
     billed, charge = ledger.charges[0]
     assert billed.user_id == "student-1" and charge.estimated

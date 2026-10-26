@@ -8,7 +8,7 @@ from typing import Any, Literal
 
 from fastapi import HTTPException, Request
 from learning_transport import RELATION_TEACHER, Claims, UpstreamError, failure, require_relation
-from learning_transport.agents import ai_core_refusal, unusable_reply
+from learning_transport.agents import MIN_CALL, OUT_OF_TIME, ai_core_refusal, gather_all, unusable_reply
 
 import checks
 import prompts
@@ -20,14 +20,12 @@ from workspace import MAX_RESULTS, Topic, Workspace
 log = logging.getLogger("student-performance-agent.agent")
 
 Outcome = Literal["ok", "refused", "failed"]
-# a model call the budget stopped or kept from starting.
-OUT_OF_TIME = "OUT_OF_TIME"
 TURN_TOKENS = 1500
 REPORT_TOKENS = 3000
 # time kept back for the report: a tool turn and its tools end this long before the budget runs out.
 REPORT_RESERVE = 60.0
-# a call with less time than this left is not started.
-MIN_CALL = 5.0
+# a tool turn that fails with one of these goes straight to the report, which can still use what was gathered.
+RECOVERABLE = {OUT_OF_TIME, "AI_TIMEOUT", "AI_OUTPUT_REJECTED", "AI_PROVIDER_FAILED"}
 NOT_TEACHER = ("FORBIDDEN", "Only the classroom's teacher can interpret a student's results.")
 
 
@@ -67,11 +65,24 @@ class Agent:
         self.history: list[dict[str, Any]] = []
         self.done: set[tuple[str, str | None, str | None]] = set()  # calls that answered, not to repeat
         self.unreadable = 0
+        self.failed_turns = 0
         self.started = time.monotonic()
         self.until = self.started + settings.budget  # no call runs past this
         self.class_read: asyncio.Future[list[Any]] | None = None  # the class's summaries, read once
 
     async def interpret(self, body: RequestContract) -> ResponseContract:
+        try:
+            return await self._interpret(body)
+        finally:
+            # a class read a timed-out tool left running does not outlive the request.
+            if self.class_read is not None:
+                if self.class_read.done():
+                    if not self.class_read.cancelled():
+                        self.class_read.exception()  # retrieved, so a failure is not logged as unhandled
+                else:
+                    self.class_read.cancel()
+
+    async def _interpret(self, body: RequestContract) -> ResponseContract:
         classroom, student = str(body.classroom_id), body.student_id
         self.student = student
         # the caller must teach the classroom and the student must be enrolled in it.
@@ -104,6 +115,8 @@ class Agent:
             )
             reply = await self._turn(turn, turns, final)
             if reply is None:
+                # an unreadable or failed tool turn: asking again the same way would likely fail the same way.
+                turns = turn + 1
                 continue
             if final:
                 return self._finish(reply, turn, classroom, student)
@@ -119,7 +132,7 @@ class Agent:
 
     async def _open(self, classroom: str, student: str) -> None:
         """the student's released topic summary and finalized results, and the names of their topics."""
-        summary, evaluations = await asyncio.gather(
+        summary, evaluations = await gather_all(
             self.services.performance(self.authorization, classroom, student, self.correlation),
             self.services.results(self.authorization, classroom, student, self.correlation, MAX_RESULTS),
         )
@@ -135,7 +148,7 @@ class Agent:
             for e in v.get("evidence") or []
             if isinstance(e, dict) and isinstance(e.get("topic_id"), str)
         ]
-        assessments, names = await asyncio.gather(
+        assessments, names = await gather_all(
             self.services.assessments(
                 self.authorization,
                 list(dict.fromkeys(e["assessment_id"] for e in evaluations)),
@@ -151,13 +164,9 @@ class Agent:
         self.workspace.fit()
 
     async def _turn(self, turn: int, turns: int, final: bool) -> dict[str, Any] | None:
-        """one model turn's reply, or none when it was unreadable (the loop moves on)."""
+        """one model turn's reply, or none when a tool turn was unreadable or failed recoverably (the next turn reports)."""
         messages = prompts.messages(self.workspace.opening(), self.history, turn, turns, final)
-        # a tool turn leaves the report its reserve; the report may use what is left.
-        left = self.until - time.monotonic() - (0 if final else REPORT_RESERVE)
         try:
-            if left < MIN_CALL:
-                raise UpstreamError("ai-core", 0, OUT_OF_TIME)
             output = await self.services.generate(
                 messages,
                 REPORT_TOKENS if final else TURN_TOKENS,
@@ -165,13 +174,14 @@ class Agent:
                 "performance.report" if final else "performance.turn",
                 self.correlation,
                 billed(self.claims),
-                left,
+                # a tool turn leaves the report its reserve; the report may use what is left.
+                self.until - (0 if final else REPORT_RESERVE),
             )
         except UpstreamError as e:
             log.warning("interpretation_failed", extra={"error": str(e), "turn": turn})
-            # an unanswered call that ran until the budget was cut off by it, not by ai-core.
-            if e.status == 0 and time.monotonic() >= self.until - MIN_CALL:
-                e = UpstreamError("ai-core", 0, OUT_OF_TIME)
+            if not final and e.code in RECOVERABLE:
+                self.failed_turns += 1
+                return None
             raise refused(e) from None
         try:
             return checks.parse(output)
@@ -299,6 +309,8 @@ class Agent:
         dropped: Counter[str] = checked.dropped
         if self.unreadable:
             dropped["UNREADABLE_TURN"] += self.unreadable
+        if self.failed_turns:
+            dropped["FAILED_TURN"] += self.failed_turns
         cited = {q.ref: q for f in checked.observations + checked.misconceptions for q in f.evidence}
         log.info(
             "interpreted",
