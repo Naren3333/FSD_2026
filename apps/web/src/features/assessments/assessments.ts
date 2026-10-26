@@ -64,6 +64,7 @@ import { QuestionGeneratorComponent } from './generator';
 import { MarkingGuidanceComponent } from './guidance';
 import { MarkingPointsComponent } from './marking-points';
 import { focusLater } from '../../shared/focus';
+import { dateTime } from '../../shared/format';
 
 /* why a published assessment's replacement was refused, after which the editor keeps only its details. */
 const LOCKED =
@@ -435,6 +436,7 @@ export class AssessmentsComponent {
     q.controls.topic_id.setValue(this.archivedTopic(topic) ? '' : topic);
     this.questions.push(q);
     this.form.markAsDirty();
+    this.focusOn(q);
     this.revealAndFocus(`question-${this.questions.length - 1}-prompt`);
   }
 
@@ -499,6 +501,17 @@ export class AssessmentsComponent {
   /* a criterion's levels as the editor reads them, or null when a line cannot be read. */
   readonly parseLevels = parseLevels;
 
+  /* the due date for the save bar, so it can be checked before publishing without scrolling to it. */
+  private readonly dueValue = toSignal(this.form.controls.due_at.valueChanges, {
+    initialValue: this.form.controls.due_at.value,
+  });
+  readonly dueLine = computed(() => {
+    const due = this.dueValue();
+    // a value the browser could not read as a date counts as none, rather than breaking the bar.
+    const when = due ? new Date(due) : null;
+    return when && !Number.isNaN(when.getTime()) ? `Due ${dateTime(when.toISOString())}` : 'No due date';
+  });
+
   /* the editor's heading, which the page header shows. */
   readonly editorTitle = computed(() => {
     const current = this.editing();
@@ -561,6 +574,13 @@ export class AssessmentsComponent {
     this.collapsed.set(next);
   }
 
+  /* opens one question and folds the others, except any with an error, so a long assessment stays one screen per question. */
+  private focusOn(question: QuestionForm): void {
+    this.collapsed.set(
+      new Set(this.questions.controls.filter((q) => q !== question && !invalidControl(q, false))),
+    );
+  }
+
   private expand(questions: readonly QuestionForm[]): void {
     const next = new Set(this.collapsed());
     for (const q of questions) next.delete(q);
@@ -571,7 +591,7 @@ export class AssessmentsComponent {
   goToQuestion(index: number): void {
     const question = this.questions.at(index);
     if (!question) return;
-    this.expand([question]);
+    this.focusOn(question);
     setTimeout(() => {
       document.getElementById(`question-${index}`)?.scrollIntoView({ block: 'start' });
       document.getElementById(`question-${index}-prompt`)?.focus({ preventScroll: true });
@@ -691,6 +711,8 @@ export class AssessmentsComponent {
         if (topic.invalid) topic.markAsTouched();
       }
       this.editing.set(assessment);
+      const firstQuestion = this.questions.at(0);
+      if (firstQuestion) this.focusOn(firstQuestion);
       this.typesChanged();
       this.lockTo(submittedBy(item));
       this.revealAndFocus('assessment-title');

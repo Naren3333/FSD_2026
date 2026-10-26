@@ -67,14 +67,14 @@ export class ClassroomsComponent {
   }
 
   /* whether a form here or elsewhere holds unsaved work, which keeps the classroom from changing. */
-  hasUnsaved(): boolean {
-    return this.unsaved.any();
+  classroomLocked(): boolean {
+    return this.unsaved.locksClassroom();
   }
 
   /* opens a classroom's dashboard, choosing it first when it isn't the current one. */
   open(classroom: Classroom): void {
     if (classroom.id !== this.classroomId()) {
-      if (this.hasUnsaved()) return;
+      if (this.classroomLocked()) return;
       this.context.select(classroom.id);
     }
     void this.router.navigateByUrl('/dashboard');

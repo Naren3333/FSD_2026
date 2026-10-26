@@ -132,13 +132,36 @@ export class ChatComponent {
     this.behind.set(false);
   }
 
+  /* an unsent question per classroom, so a draft neither blocks a classroom change nor is asked in the wrong one. */
+  private readonly drafts = new Map<string, string>();
+  private draftRoom = this.classroomId();
+
   constructor() {
-    inject(UnsavedChanges).track(() => this.form.dirty || this.streaming());
-    onClassroomChange(() => {
+    const unsaved = inject(UnsavedChanges);
+    unsaved.track(() => this.streaming());
+    // drafts kept for other classrooms count too, so leaving the page still warns about them.
+    unsaved.track(() => this.form.dirty || this.drafts.size > 0, { locksClassroom: false });
+    onClassroomChange((id) => {
+      this.swapDraft(id);
       this.controller?.abort();
       this.reset();
       this.loadThreads();
     });
+  }
+  private swapDraft(classroomId: string): void {
+    const question = this.form.controls.question.value;
+    if (this.form.dirty && question.trim()) this.drafts.set(this.draftRoom, question);
+    else this.drafts.delete(this.draftRoom);
+    this.draftRoom = classroomId;
+    // the current classroom's draft lives in the form, so the map holds only other classrooms'.
+    const kept = this.drafts.get(classroomId) ?? '';
+    this.drafts.delete(classroomId);
+    this.form.reset();
+    this.tried.set(false);
+    if (kept) {
+      this.form.controls.question.setValue(kept);
+      this.form.markAsDirty();
+    }
   }
   /* whether either list is loading; sending waits for both. */
   loading(): boolean {
@@ -184,9 +207,12 @@ export class ChatComponent {
     // the question moves into the conversation at once; it comes back only if it was never asked.
     this.form.reset();
     this.tried.set(false);
-    // a restored question is unsaved work again, so the shell keeps the classroom until it is sent or
-    // cleared.
+    // a restored question is unsaved work again, kept with the classroom it was asked in.
     const restore = () => {
+      if (this.classroomId() !== classroom) {
+        if (!this.drafts.has(classroom)) this.drafts.set(classroom, question);
+        return;
+      }
       if (this.form.controls.question.value) return;
       this.form.controls.question.setValue(question);
       this.form.markAsDirty();

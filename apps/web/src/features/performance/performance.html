@@ -97,13 +97,16 @@
             </tbody>
           </table>
         </div>
-        <p class="caption">
-          Observed accuracy summarizes finalized question results. It is not a validated mastery probability.
-          Full marks counts questions answered for every mark; marks earned includes part marks on written
-          answers. Fewer than five questions is reported as insufficient evidence. Needs practice marks a
-          topic with five or more questions and under 60% correct. These are reporting thresholds, not a
-          statistical validation.
-        </p>
+        <p class="caption">Observed accuracy from finalized results, not a mastery measure.</p>
+        <details class="method-note">
+          <summary>How this is measured</summary>
+          <p class="caption">
+            Full marks counts questions answered for every mark; marks earned includes part marks on written
+            answers. Fewer than five questions is reported as insufficient evidence. Needs practice marks a
+            topic with five or more questions and under 60% correct. These are reporting thresholds, not a
+            statistical validation.
+          </p>
+        </details>
       } @else if (session.isStudent()) {
         <p class="empty">
           No finalized results yet. After your teacher finalizes an assessment, your topics appear here.

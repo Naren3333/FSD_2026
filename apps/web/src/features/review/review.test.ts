@@ -268,7 +268,7 @@ describe('finalizing', () => {
     expect(page.component.selected()?.id).toBe('e-s2');
     const status = page.root.querySelector('[role="status"]');
     expect(status?.textContent?.trim()).toBe(
-      'Grade finalized. Performance will update after event processing.',
+      'Grade finalized. Learning performance will update in a moment.',
     );
   });
 });

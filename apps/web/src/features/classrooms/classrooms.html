@@ -31,7 +31,7 @@
     <h3 id="classrooms-title">Your classrooms</h3>
     <p class="caption">20 classrooms per page</p>
   </div>
-  @if (hasUnsaved() && classrooms().length > 1) {
+  @if (classroomLocked() && classrooms().length > 1) {
     <p id="classroom-open-lock" class="unsaved-notice">
       Finish or clear your current form before changing classrooms.
     </p>
@@ -55,9 +55,9 @@
               type="button"
               class="secondary"
               (click)="open(item)"
-              [disabled]="item.id !== classroomId() && hasUnsaved()"
+              [disabled]="item.id !== classroomId() && classroomLocked()"
               [attr.aria-describedby]="
-                item.id !== classroomId() && hasUnsaved() ? 'classroom-open-lock' : null
+                item.id !== classroomId() && classroomLocked() ? 'classroom-open-lock' : null
               "
               [attr.aria-label]="'Open ' + item.name"
             >

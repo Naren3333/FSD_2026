@@ -579,6 +579,41 @@ describe('a teacher previewing an assessment', () => {
   });
 });
 
+describe('a teacher moving through the editor', () => {
+  const valid = (prompt: string) => ({ ...generatedShortAnswer(), prompt });
+
+  it('keeps one question open, but never folds one with an error', async () => {
+    vi.useFakeTimers();
+    const { page, settle } = setup('teacher');
+    await settle();
+    page.addGenerated(valid('First?'));
+    page.addGenerated(valid('Second?'));
+    page.addGenerated(valid('Third?'));
+    const [first, second, third] = page.questions.controls;
+    page.goToQuestion(1);
+    expect(page.isCollapsed(first)).toBe(true);
+    expect(page.isCollapsed(second)).toBe(false);
+    expect(page.isCollapsed(third)).toBe(true);
+    // an emptied prompt is an error, so that question stays open when another opens.
+    first.controls.prompt.setValue('');
+    page.goToQuestion(2);
+    expect(page.isCollapsed(first)).toBe(false);
+    expect(page.isCollapsed(second)).toBe(true);
+    expect(page.isCollapsed(third)).toBe(false);
+  });
+
+  it('says the due date in the save bar, or that there is none', async () => {
+    vi.useFakeTimers();
+    const { page, settle } = setup('teacher');
+    await settle();
+    expect(page.dueLine()).toBe('No due date');
+    page.form.controls.due_at.setValue('2026-11-03T17:00');
+    expect(page.dueLine()).toMatch(/^Due 3 Nov 2026/);
+    page.form.controls.due_at.setValue('not a date');
+    expect(page.dueLine()).toBe('No due date');
+  });
+});
+
 describe('a teacher keeping generated questions', () => {
   it('fills the blank first question, then adds after it', async () => {
     vi.useFakeTimers();

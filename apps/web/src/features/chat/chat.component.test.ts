@@ -7,6 +7,7 @@ import { ChatApi, ContentApi } from '../../api/clients';
 import type { ChatMessage, Citation, StreamEvent, Thread } from '../../api/models';
 import { AiUsage } from '../../core/ai-usage';
 import { ClassroomContext } from '../../core/classroom-context';
+import { UnsavedChanges } from '../../core/unsaved-changes';
 import { resetTime } from '../../shared/format';
 import { ChatComponent } from './chat';
 
@@ -323,5 +324,78 @@ describe('following the conversation', () => {
     page.newThread();
     await render();
     expect(jump()).toBeUndefined();
+  });
+});
+
+describe('unsent questions', () => {
+  it('keeps a draft question with its classroom and leaves the classroom free to change', async () => {
+    const chat = {
+      threads: vi.fn(() => Promise.resolve({ threads: [] as Thread[] })),
+      messages: vi.fn(() => Promise.resolve({ messages: [] as ChatMessage[] })),
+    };
+    const classroomId = signal('c1');
+    TestBed.resetTestingModule();
+    TestBed.configureTestingModule({
+      providers: [
+        { provide: ChatApi, useValue: chat },
+        { provide: ContentApi, useValue: {} },
+        { provide: AiUsage, useValue: { refresh: () => undefined } },
+        { provide: ClassroomContext, useValue: { classroomId } },
+      ],
+    });
+    TestBed.overrideComponent(ChatComponent, { set: { template: '', imports: [] } });
+    const fixture = TestBed.createComponent(ChatComponent);
+    const page = fixture.componentInstance;
+    const unsaved = TestBed.inject(UnsavedChanges);
+    fixture.detectChanges();
+    page.form.controls.question.setValue('What is a fraction?');
+    page.form.markAsDirty();
+    expect(unsaved.any()).toBe(true);
+    expect(unsaved.locksClassroom()).toBe(false);
+    // another classroom starts with its own, empty question; the kept one still warns on leaving.
+    classroomId.set('c2');
+    fixture.detectChanges();
+    expect(page.form.controls.question.value).toBe('');
+    expect(unsaved.any()).toBe(true);
+    // coming back restores the draft, still unsaved.
+    classroomId.set('c1');
+    fixture.detectChanges();
+    expect(page.form.controls.question.value).toBe('What is a fraction?');
+    expect(page.form.dirty).toBe(true);
+  });
+
+  it('keeps a question that failed to send with the classroom it was asked in', async () => {
+    let refuse: (error: Error) => void = () => undefined;
+    const chat = {
+      threads: vi.fn(() => Promise.resolve({ threads: [] as Thread[] })),
+      messages: vi.fn(() => Promise.resolve({ messages: [] as ChatMessage[] })),
+      createThread: vi.fn(() => new Promise<Thread>((_, reject) => (refuse = reject))),
+    };
+    const classroomId = signal('c1');
+    TestBed.resetTestingModule();
+    TestBed.configureTestingModule({
+      providers: [
+        { provide: ChatApi, useValue: chat },
+        { provide: ContentApi, useValue: {} },
+        { provide: AiUsage, useValue: { refresh: () => undefined } },
+        { provide: ClassroomContext, useValue: { classroomId } },
+      ],
+    });
+    TestBed.overrideComponent(ChatComponent, { set: { template: '', imports: [] } });
+    const fixture = TestBed.createComponent(ChatComponent);
+    const page = fixture.componentInstance;
+    fixture.detectChanges();
+    await new Promise((resolve) => setTimeout(resolve));
+    page.form.controls.question.setValue('What is a ratio?');
+    page.send();
+    // the teacher moves on while the conversation is still being created, and creating it fails.
+    classroomId.set('c2');
+    fixture.detectChanges();
+    refuse(new Error('offline'));
+    await vi.waitFor(() => expect(page.state.busy()).toBe(false));
+    expect(page.form.controls.question.value).toBe('');
+    classroomId.set('c1');
+    fixture.detectChanges();
+    expect(page.form.controls.question.value).toBe('What is a ratio?');
   });
 });

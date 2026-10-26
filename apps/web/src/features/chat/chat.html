@@ -257,13 +257,14 @@
           <button type="button" class="secondary" (click)="stop()">Stop answer</button>
         }
       </div>
+      <!-- the page's status shows under the question that caused it. -->
+      <app-status [state]="state" />
     </form>
     <div class="feedback">
       <p role="status" aria-live="polite">{{ announcement() }}</p>
     </div>
   </section>
 </div>
-<app-status [state]="state" />
 <ng-template #runs let-runs let-message="message">
   @for (run of asRuns(runs); track $index) {
     @switch (run.kind) {

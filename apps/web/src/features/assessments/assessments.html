@@ -232,7 +232,9 @@
               <li>
                 <button type="button" class="outline-row" (click)="goToQuestion(i)">
                   <span class="outline-number">{{ i + 1 }}</span>
-                  <span class="outline-text">{{ promptLine(question) }}</span>
+                  <span class="outline-text" [attr.title]="question.controls.prompt.value.trim() || null">{{
+                    promptLine(question)
+                  }}</span>
                   <span class="outline-marks">{{ marksText(marksOf(question)) }}</span>
                   @if (hasErrors(question)) {
                     <span class="error-dot" aria-hidden="true"></span>
@@ -351,7 +353,7 @@
                     maxlength="2000"
                   ></textarea>
                 </app-field>
-                <div class="field-row">
+                <div class="field-row question-meta">
                   <app-field [controlId]="'question-' + i + '-type'" label="Question type">
                     <select appFieldControl [id]="'question-' + i + '-type'" formControlName="type">
                       <option value="numerical">Numerical</option>
@@ -697,6 +699,11 @@
               @if (form.dirty) {
                 · <strong class="unsaved-mark">Unsaved changes</strong>
               }
+            </p>
+            <p class="caption">
+              <button type="button" class="quiet bar-link" (click)="goToSchedule()">
+                {{ dueLine() }}<span class="visually-hidden">: go to schedule and grading</span>
+              </button>
             </p>
             <!-- the page's status shows here in the editor, beside the buttons that cause it. -->
             @if (view() === 'edit' && !deleting()) {

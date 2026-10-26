@@ -220,10 +220,14 @@ test('chat streams cited answers, loads figures and reports failures', async ({ 
   );
   await page.getByLabel('Your question').fill('Kept draft');
   await page.getByRole('button', { name: 'Send question', exact: true }).click();
-  await expect(page.getByRole('alert').filter({ hasText: 'The chatbot is restarting.' })).toBeVisible();
+  // the failure shows under the question that caused it.
+  await expect(
+    page.locator('#chat-form').getByRole('alert').filter({ hasText: 'The chatbot is restarting.' }),
+  ).toBeVisible();
   await expect(page.getByLabel('Your question')).toHaveValue('Kept draft');
   await expect(page.getByRole('status').filter({ hasText: 'Answering…' })).toHaveCount(0);
-  await expect(page.getByLabel('Current classroom')).toBeDisabled();
+  // a kept question stays with its classroom, so it does not lock the classroom choice.
+  await expect(page.getByLabel('Current classroom')).toBeEnabled();
   await page.screenshot({ path: 'test-results/chat-desktop.png', fullPage: true });
   await expectNoHorizontalScroll(page, 'test-results/chat-mobile.png');
 });

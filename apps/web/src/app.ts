@@ -175,6 +175,11 @@ export class AppComponent implements OnInit {
     return this.unsaved.any();
   }
 
+  /* whether unsaved work would be lost by changing classrooms. */
+  classroomLocked(): boolean {
+    return this.unsaved.locksClassroom();
+  }
+
   @HostListener('window:beforeunload', ['$event'])
   beforeUnload(event: BeforeUnloadEvent): void {
     if (this.hasUnsaved()) {

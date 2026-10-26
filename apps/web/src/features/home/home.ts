@@ -72,6 +72,14 @@ export class HomeComponent {
     if (!missed) return 'All caught up. You have submitted every assessment.';
     return `Nothing left to submit. ${missed} ${missed === 1 ? 'assessment' : 'assessments'} closed before you submitted.`;
   });
+  /* no finalized result and no topic evidence: one note in place of two empty panels. */
+  readonly noEvidenceYet = computed(
+    () =>
+      this.results.ready() &&
+      this.performance.ready() &&
+      this.results.value()?.length === 0 &&
+      this.performance.value()?.topics.length === 0,
+  );
   readonly practise = computed(
     () => this.performance.value()?.topics.filter((s) => s.weakness_indicator) ?? [],
   );

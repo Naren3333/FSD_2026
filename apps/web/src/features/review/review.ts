@@ -721,7 +721,7 @@ export class ReviewComponent {
         },
         grade.release_policy === 'manual'
           ? 'Grade finalized. Students see it when you release the results.'
-          : 'Grade finalized. Performance will update after event processing.',
+          : 'Grade finalized. Learning performance will update in a moment.',
       )
       .then(() => {
         if (finalized && this.classroomId() === classroomId && this.assessmentId() === assessmentId)

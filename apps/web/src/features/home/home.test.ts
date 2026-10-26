@@ -154,8 +154,10 @@ describe('home empty states', () => {
     await page.settle();
     expect(page.panel('To do')).toContain('No assessments in this classroom yet.');
     expect(page.panel('Waiting for your teacher')).toContain('Nothing waiting.');
-    expect(page.panel('Recent results')).toContain('No finalized results yet.');
-    expect(page.panel('Topics to practise')).toContain('No finalized grades yet');
+    // with no finalized evidence at all, one panel says so in place of two empty ones.
+    expect(page.panel('Results and practice')).toContain('No finalized results yet.');
+    expect(page.panel('Recent results')).toBe('');
+    expect(page.panel('Topics to practise')).toBe('');
   });
 
   it('says when everything is submitted, and when one closed before the student submitted it', async () => {
@@ -204,8 +206,8 @@ describe('topics to practise without the curriculum', () => {
 });
 
 describe('the student’s username card', () => {
-  it('shows the username to share with the teacher', () => {
-    const page = render(Promise.resolve([]), Promise.resolve([]));
+  it('shows the username to share with the teacher while the student is in no classroom', () => {
+    const page = render(Promise.resolve([]), Promise.resolve([]), undefined, undefined, { classroomId: '' });
     expect(page.note()).toContain('Your username: stu.');
     expect(page.note()).toContain('Share it with your teacher');
   });
@@ -213,14 +215,15 @@ describe('the student’s username card', () => {
   it('falls back to the id when the sign-in has no username', () => {
     const page = render(Promise.resolve([]), Promise.resolve([]), undefined, undefined, {
       profile: { id: 'u1', role: 'student', username: '' },
+      classroomId: '',
     });
     expect(page.note()).toContain('Your ID: u1.');
     expect(page.note()).toContain('contact your administrator');
   });
 
-  it('shows while the student is in no classroom yet', () => {
-    const page = render(Promise.resolve([]), Promise.resolve([]), undefined, undefined, { classroomId: '' });
-    expect(page.note()).toContain('Your username: stu.');
+  it('is gone once the student is enrolled', () => {
+    const page = render(Promise.resolve([]), Promise.resolve([]));
+    expect(page.note()).toBe('');
   });
 });
 

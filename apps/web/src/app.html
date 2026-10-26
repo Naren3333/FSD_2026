@@ -18,8 +18,9 @@
             id="active-classroom"
             [value]="context.classroomId()"
             (change)="selectClassroom($event)"
-            [disabled]="hasUnsaved()"
-            [attr.aria-describedby]="hasUnsaved() ? 'classroom-lock' : null"
+            [disabled]="classroomLocked()"
+            [attr.aria-describedby]="classroomLocked() ? 'classroom-lock' : null"
+            [attr.title]="context.classroomName() || null"
           >
             @if (noClassrooms()) {
               <option value="">No classrooms yet</option>
@@ -40,7 +41,7 @@
             />
           }
         </div>
-        @if (hasUnsaved()) {
+        @if (classroomLocked()) {
           <p id="classroom-lock" class="sidebar-note">
             Finish or clear your current form before changing classrooms.
           </p>

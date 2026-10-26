@@ -149,7 +149,7 @@ test('teacher and student complete a real assessment through Kong', async ({ bro
   await teacher.getByLabel('Review notes').fill('Reviewed exact decimal answer.');
   await teacher.getByRole('button', { name: 'Finalize grade', exact: true }).click();
   await expect(
-    teacher.getByText('Grade finalized. Performance will update after event processing.', { exact: true }),
+    teacher.getByText('Grade finalized. Learning performance will update in a moment.', { exact: true }),
   ).toBeVisible();
   await student.getByRole('button', { name: 'Refresh results' }).click();
   await expect(

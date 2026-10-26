@@ -1,22 +1,23 @@
 <app-page-header [title]="classroomName() || 'Home'" subtitle="Your work at a glance.">
   <app-refresh-button label="Refresh home" [disabled]="!classroomId()" (refresh)="refresh()" />
 </app-page-header>
-@if (profile(); as p) {
-  <div class="identity-note">
-    @if (p.username) {
-      <p>
-        Your username: <code>{{ p.username }}</code
-        >. Share it with your teacher so they can enroll you.
-      </p>
-    } @else {
-      <p>
-        Your ID: <code>{{ p.id }}</code
-        >. Your sign-in has no username; contact your administrator.
-      </p>
-    }
-  </div>
-}
 @if (!classroomId()) {
+  <!-- the username matters only until a teacher has enrolled the student. -->
+  @if (profile(); as p) {
+    <div class="identity-note">
+      @if (p.username) {
+        <p>
+          Your username: <code>{{ p.username }}</code
+          >. Share it with your teacher so they can enroll you.
+        </p>
+      } @else {
+        <p>
+          Your ID: <code>{{ p.id }}</code
+          >. Your sign-in has no username; contact your administrator.
+        </p>
+      }
+    </div>
+  }
   <app-no-classroom>
     <p class="empty">
       You are not in a classroom yet. Ask your teacher to enroll you, then choose Refresh classrooms beside
@@ -69,56 +70,67 @@
         }
       </section>
 
-      <section class="panel" aria-labelledby="recent-title">
-        <h3 id="recent-title">Recent results</h3>
-        <app-section-state [section]="results" loading="Loading results…" />
-        @if (results.ready()) {
-          @for (result of recent(); track result.id) {
-            <article class="record roster-row compact-row">
-              <strong>{{ names.title(result) || 'Assessment' }}</strong>
-              <span class="cell-value">{{ result.evidence | marks }} marks</span>
-            </article>
-          } @empty {
-            <p class="empty">No finalized results yet.</p>
+      @if (noEvidenceYet()) {
+        <section class="panel" aria-labelledby="evidence-title">
+          <h3 id="evidence-title">Results and practice</h3>
+          <p class="empty">
+            No finalized results yet. Your results and the topics to practise appear here once your teacher
+            finalizes your grades.
+          </p>
+          <a routerLink="/performance">See your progress</a>
+        </section>
+      } @else {
+        <section class="panel" aria-labelledby="recent-title">
+          <h3 id="recent-title">Recent results</h3>
+          <app-section-state [section]="results" loading="Loading results…" />
+          @if (results.ready()) {
+            @for (result of recent(); track result.id) {
+              <article class="record roster-row compact-row">
+                <strong>{{ names.title(result) || 'Assessment' }}</strong>
+                <span class="cell-value">{{ result.evidence | marks }} marks</span>
+              </article>
+            } @empty {
+              <p class="empty">No finalized results yet.</p>
+            }
+            @if (results.value()?.length) {
+              <a routerLink="/results">See all your results</a>
+            }
           }
-          @if (results.value()?.length) {
-            <a routerLink="/results">See all your results</a>
-          }
-        }
-      </section>
+        </section>
 
-      <section class="panel" aria-labelledby="practise-title">
-        <h3 id="practise-title">Topics to practise</h3>
-        <app-section-state [section]="performance" loading="Loading your topics…" />
-        @if (performance.ready()) {
-          @for (metric of practise(); track metric.topic_id) {
-            <article class="record roster-row compact-row">
-              @if (names.topic(metric); as name) {
-                <strong>{{ name }}</strong>
-              } @else {
-                <strong class="identifier">{{ metric.topic_id }}</strong>
-              }
-              <span
-                >{{ metric.correct }} of {{ metric.attempted }} correct ({{
-                  metric.observed_accuracy | percent: '1.0-0'
-                }})</span
-              >
-            </article>
-          } @empty {
-            <p class="empty">
-              {{
-                performance.value()?.topics?.length
-                  ? 'No topic needs practice right now.'
-                  : 'No finalized grades yet, so there is nothing to suggest.'
-              }}
+        <section class="panel" aria-labelledby="practise-title">
+          <h3 id="practise-title">Topics to practise</h3>
+          <app-section-state [section]="performance" loading="Loading your topics…" />
+          @if (performance.ready()) {
+            @for (metric of practise(); track metric.topic_id) {
+              <article class="record roster-row compact-row">
+                @if (names.topic(metric); as name) {
+                  <strong>{{ name }}</strong>
+                } @else {
+                  <strong class="identifier">{{ metric.topic_id }}</strong>
+                }
+                <span
+                  >{{ metric.correct }} of {{ metric.attempted }} correct ({{
+                    metric.observed_accuracy | percent: '1.0-0'
+                  }})</span
+                >
+              </article>
+            } @empty {
+              <p class="empty">
+                {{
+                  performance.value()?.topics?.length
+                    ? 'No topic needs practice right now.'
+                    : 'No finalized grades yet, so there is nothing to suggest.'
+                }}
+              </p>
+            }
+            <p class="caption">
+              A topic needs practice after five or more questions under 60% correct.
+              <a routerLink="/performance">See your progress</a>
             </p>
           }
-          <p class="caption">
-            A topic needs practice after five or more questions under 60% correct. This is a reporting
-            threshold, not a mastery measure. <a routerLink="/performance">See your progress</a>
-          </p>
-        }
-      </section>
+        </section>
+      }
     </div>
   </div>
 }

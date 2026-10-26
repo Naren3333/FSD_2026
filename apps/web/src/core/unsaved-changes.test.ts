@@ -28,4 +28,20 @@ describe('UnsavedChanges', () => {
     section.destroy();
     expect(unsaved.any()).toBe(false);
   });
+
+  it('keeps the classroom locked only for work a classroom change would lose', () => {
+    TestBed.resetTestingModule();
+    const unsaved = TestBed.inject(UnsavedChanges);
+    let draft = true;
+    TestBed.runInInjectionContext(() => unsaved.track(() => draft, { locksClassroom: false }));
+    // a kept-per-classroom draft still warns on unload and sign-out, but leaves the classroom free.
+    expect(unsaved.any()).toBe(true);
+    expect(unsaved.locksClassroom()).toBe(false);
+    dirty = true;
+    TestBed.createComponent(FormSection);
+    expect(unsaved.locksClassroom()).toBe(true);
+    dirty = false;
+    draft = false;
+    expect(unsaved.any()).toBe(false);
+  });
 });
