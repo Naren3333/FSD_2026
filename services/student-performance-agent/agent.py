@@ -12,7 +12,7 @@ from learning_transport.agents import MIN_CALL, OUT_OF_TIME, ai_core_refusal, ga
 
 import checks
 import prompts
-from clients import Services, billed
+from clients import GENERATE_TIMEOUT, Services, billed
 from config import Settings
 from contracts import Evidence, Observation, RequestContract, ResponseContract, Step
 from workspace import MAX_RESULTS, Topic, Workspace
@@ -22,8 +22,9 @@ log = logging.getLogger("student-performance-agent.agent")
 Outcome = Literal["ok", "refused", "failed"]
 TURN_TOKENS = 1500
 REPORT_TOKENS = 3000
-# time kept back for the report: a tool turn and its tools end this long before the budget runs out.
-REPORT_RESERVE = 60.0
+# time kept back for the report: a tool turn and its tools end this long before the budget runs out. it covers
+# the report call's own timeout, so a late tool turn never leaves the report too little time.
+REPORT_RESERVE = GENERATE_TIMEOUT + MIN_CALL
 # a tool turn that fails with one of these goes straight to the report, which can still use what was gathered.
 RECOVERABLE = {OUT_OF_TIME, "AI_TIMEOUT", "AI_OUTPUT_REJECTED", "AI_PROVIDER_FAILED"}
 NOT_TEACHER = ("FORBIDDEN", "Only the classroom's teacher can interpret a student's results.")
@@ -64,6 +65,7 @@ class Agent:
         self.steps: list[Step] = []
         self.history: list[dict[str, Any]] = []
         self.done: set[tuple[str, str | None, str | None]] = set()  # calls that answered, not to repeat
+        self.shown: set[str] = set()  # evidence refs whose answers the latest turn's task still held
         self.unreadable = 0
         self.failed_turns = 0
         self.started = time.monotonic()
@@ -166,6 +168,7 @@ class Agent:
     async def _turn(self, turn: int, turns: int, final: bool) -> dict[str, Any] | None:
         """one model turn's reply, or none when a tool turn was unreadable or failed recoverably (the next turn reports)."""
         messages = prompts.messages(self.workspace.opening(), self.history, turn, turns, final)
+        self.shown = prompts.shown(messages)
         try:
             output = await self.services.generate(
                 messages,
@@ -296,7 +299,7 @@ class Agent:
 
     def _finish(self, report: dict[str, Any], turn: int, classroom: str, student: str) -> ResponseContract:
         try:
-            checked = checks.report(report, self.workspace)
+            checked = checks.report(report, self.workspace, self.shown)
         except checks.UnreadableOutputError:
             raise unusable_reply() from None
         except checks.RejectedError:

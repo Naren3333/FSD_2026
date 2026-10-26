@@ -1,4 +1,4 @@
-"""question generation and marking guidance (adr 0006): a fixed pipeline, not an agent."""
+"""question generation and marking guidance (adr 0006), with a reviewer pass that sends rejected drafts back for a bounded number of rewrites (adr 0015)."""
 
 import logging
 import time

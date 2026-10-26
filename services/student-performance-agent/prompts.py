@@ -100,6 +100,17 @@ def messages(
     ]
 
 
+def shown(messages: list[dict[str, str]]) -> set[str]:
+    """the evidence refs whose answers are in the task as sent; a read_answers result trimmed from it no longer counts."""
+    history = json.loads(messages[-1]["content"])["tool_history"]
+    return {
+        q["evidence"]
+        for h in history
+        if h["call"]["tool"] == "read_answers" and isinstance(h["output"], dict)
+        for q in h["output"].get("questions") or []
+    }
+
+
 def fitting(history: list[dict[str, Any]], budget: int = HISTORY_BUDGET) -> list[dict[str, Any]]:
     """the tool history, its oldest results trimmed until the rest fits `budget`; the calls themselves stay."""
     kept = list(history)

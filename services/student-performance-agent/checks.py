@@ -47,8 +47,8 @@ def parse(output: str) -> dict[str, Any]:
     return data
 
 
-def report(data: dict[str, Any], workspace: Workspace) -> Checked:
-    """the parts of a report that rest on gathered evidence; raises rejectederror when no observation does."""
+def report(data: dict[str, Any], workspace: Workspace, shown: set[str]) -> Checked:
+    """the parts of a report that rest on gathered evidence; raises rejectederror when no observation does. `shown` is the evidence whose answers the reporting turn could see."""
     try:
         raw_observations = list(data["observations"])
         raw_misconceptions = list(data["possible_misconceptions"])
@@ -58,8 +58,8 @@ def report(data: dict[str, Any], workspace: Workspace) -> Checked:
         raise UnreadableOutputError from None
     dropped: Counter[str] = Counter()
     questions = workspace.questions()
-    observations = _findings(raw_observations, questions, workspace, dropped, misconception=False)
-    misconceptions = _findings(raw_misconceptions, questions, workspace, dropped, misconception=True)
+    observations = _findings(raw_observations, questions, shown, dropped, misconception=False)
+    misconceptions = _findings(raw_misconceptions, questions, shown, dropped, misconception=True)
     if len(observations) > MAX_OBSERVATIONS:
         dropped["TOO_MANY"] += len(observations) - MAX_OBSERVATIONS
     if len(misconceptions) > MAX_MISCONCEPTIONS:
@@ -96,7 +96,7 @@ def _text(value: object) -> str:
 def _findings(
     raw: list[Any],
     questions: dict[str, Question],
-    workspace: Workspace,
+    shown: set[str],
     dropped: Counter[str],
     *,
     misconception: bool,
@@ -112,8 +112,8 @@ def _findings(
             dropped["NO_EVIDENCE"] += 1
         elif any(r not in questions for r in refs):
             dropped["UNKNOWN_EVIDENCE"] += 1
-        elif misconception and any(r not in workspace.read for r in refs):
-            # a misconception must rest on answers the model actually read, not on marks alone.
+        elif misconception and any(r not in shown for r in refs):
+            # a misconception must rest on answers the model can still see, not on marks alone or a trimmed read.
             dropped["ANSWER_NOT_READ"] += 1
         elif misconception and not all(questions[r].lost_marks for r in refs):
             dropped["FULL_MARKS_CITED"] += 1

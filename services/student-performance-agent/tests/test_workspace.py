@@ -26,7 +26,6 @@ def test_reading_answers_shows_lost_marks_first_and_at_most_a_few():
     shown = ws.read_answers(ws.results[0], None)
     assert len(shown["questions"]) == MAX_READ and shown["not_shown"] == 15 - MAX_READ
     assert [q["marks"] for q in shown["questions"][:5]] == ["0/2"] * 5
-    assert ws.read == {q["evidence"] for q in shown["questions"]}
 
 
 def test_old_tool_results_are_trimmed_but_the_calls_stay():
@@ -35,6 +34,17 @@ def test_old_tool_results_are_trimmed_but_the_calls_stay():
     assert sum(len(json.dumps(h)) for h in kept) <= prompts.HISTORY_BUDGET
     assert kept[0]["output"] == "(trimmed to save space)" and kept[-1] == history[-1]
     assert all(h["call"] == {"tool": "read_answers"} for h in kept)
+
+
+def test_answers_trimmed_from_the_task_no_longer_count_as_read():
+    """a misconception may only cite answers the reporting turn can still see."""
+    ws = Workspace()
+    ws.add_results([finalized()], {QUIZ: QUIZ_ASSESSMENT})
+    read = {"call": {"tool": "read_answers"}, "output": ws.read_answers(ws.results[0], None)}
+    refs = {q["evidence"] for q in read["output"]["questions"]}
+    assert prompts.shown(prompts.messages(ws.opening(), [read], 2, 5, False)) == refs
+    filler = [{"call": {"tool": "class_comparison"}, "output": {"text": "x" * 15000}} for _ in range(3)]
+    assert prompts.shown(prompts.messages(ws.opening(), [read, *filler], 5, 5, True)) == set()
 
 
 def test_the_opening_is_fitted_once_so_later_topics_never_drop_a_result():
