@@ -11,6 +11,7 @@ import { CurriculumNames } from '../../core/curriculum-names';
 import { SectionStateComponent } from '../../shared/section-state';
 import { ResultsComponent } from './results';
 import { PageHeaderComponent } from '../../shared/page-header';
+import { PagerComponent } from '../../shared/pager';
 
 const template = (path: string) => readFileSync(new URL(path, import.meta.url), 'utf8');
 
@@ -27,7 +28,15 @@ async function render(
   TestBed.resetTestingModule();
   TestBed.configureTestingModule({
     providers: [
-      { provide: GradingApi, useValue: { mine: () => results } },
+      {
+        provide: GradingApi,
+        useValue: {
+          minePage: async (_classroom: string, offset: number, limit: number) => {
+            const items = await results;
+            return { items: items.slice(offset, offset + limit), total: items.length };
+          },
+        },
+      },
       { provide: AssessmentApi, useValue: { get: assessment } },
       { provide: CurriculumNames, useValue: { need, topicName: () => '' } },
       { provide: ClassroomContext, useValue: { classroomId: signal('c1') } },
@@ -37,6 +46,7 @@ async function render(
   TestBed.overrideComponent(PageHeaderComponent, {
     set: { template: template('../../shared/page-header.html') },
   });
+  TestBed.overrideComponent(PagerComponent, { set: { template: template('../../shared/pager.html') } });
   TestBed.overrideComponent(SectionStateComponent, {
     set: { template: template('../../shared/section-state.html') },
   });
@@ -140,5 +150,29 @@ describe('result questions', () => {
       c.textContent?.replace(/\s+/g, ' ').trim(),
     );
     expect(topics).toEqual(['Topic: k9', 'Topic: k9', 'Topic: k9']);
+  });
+});
+
+describe('results pages', () => {
+  it('pages through more results than fit on one page', async () => {
+    const results = Array.from({ length: 25 }, (_, i) => ({
+      id: `e${i}`,
+      assessment_id: `a${i}`,
+      classroom_id: 'c1',
+      student_id: 'u1',
+      status: 'finalized',
+      evidence: [],
+      answers: {},
+      late: false,
+      finalized_at: null,
+      released_at: null,
+    })) as unknown as Evaluation[];
+    const page = await render(Promise.resolve(results));
+    await page.settle();
+    expect(page.text()).toContain('Page 1 of 2 · 25 results');
+    const next = [...page.root.querySelectorAll('button')].find((b) => b.textContent?.trim() === 'Next')!;
+    next.click();
+    await page.settle();
+    expect(page.text()).toContain('Page 2 of 2 · 25 results');
   });
 });

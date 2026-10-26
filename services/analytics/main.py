@@ -78,21 +78,26 @@ def ready(request: Request) -> dict[str, str]:
 def topic_evidence(pool: ConnectionPool[Any], org: str, classroom_id: UUID, student_id: str) -> list[Any]:
     with pool.connection() as conn:
         return conn.execute(
-            "SELECT topic_id,correct,awarded,possible FROM evidence WHERE org_id=%s AND classroom_id=%s AND student_id=%s",
+            "SELECT e.topic_id,e.correct,e.awarded,e.possible FROM evidence e JOIN evaluations v USING(evaluation_id)"
+            " WHERE e.org_id=%s AND e.classroom_id=%s AND e.student_id=%s ORDER BY v.created_at,e.evaluation_id,e.question_id",
             (org, classroom_id, student_id),
         ).fetchall()
 
 
 TEACHER_ONLY = ("ACCESS_DENIED", "Only the classroom's teacher can view its performance.")
-INTERPRETATION = "Observed accuracy describes finalized question evidence, not a mastery probability."
+INTERPRETATION = (
+    "Observed accuracy describes finalized question evidence, not a mastery probability. Needs practice"
+    " means under 60% of the marks on the topic's latest ten questions, with at least five."
+)
 MAX_PAGE = 50
 
 
 def class_evidence(pool: ConnectionPool[Any], org: str, classroom_id: UUID, students: list[str]) -> list[Any]:
     with pool.connection() as conn:
         return conn.execute(
-            "SELECT student_id,topic_id,correct,awarded,possible FROM evidence WHERE org_id=%s AND classroom_id=%s"
-            " AND student_id = ANY(%s)",
+            "SELECT e.student_id,e.topic_id,e.correct,e.awarded,e.possible FROM evidence e JOIN evaluations v USING(evaluation_id)"
+            " WHERE e.org_id=%s AND e.classroom_id=%s AND e.student_id = ANY(%s)"
+            " ORDER BY v.created_at,e.evaluation_id,e.question_id",
             (org, classroom_id, students),
         ).fetchall()
 

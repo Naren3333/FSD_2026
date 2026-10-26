@@ -39,9 +39,24 @@
         </button>
       </div>
     }
+    @if (assessmentId() && ready(); as count) {
+      <div class="release-box">
+        <p class="caption">
+          {{ count }} {{ count === 1 ? 'draft has' : 'drafts have' }} every question marked.
+        </p>
+        <button
+          type="button"
+          class="secondary"
+          (click)="askFinalizeAll()"
+          [disabled]="state.busy() || bulkState.busy()"
+        >
+          Finalize all fully marked
+        </button>
+      </div>
+    }
   </div>
   <app-section-state [section]="published" loading="Loading assessments…" />
-  @if (!open() && !finalizing() && !releasing()) {
+  @if (!open() && !dialogOpen()) {
     <app-status [state]="state" />
   }
 </section>
@@ -412,7 +427,7 @@
                 </div>
               </section>
             }
-            @if (!finalizing() && !releasing()) {
+            @if (!dialogOpen()) {
               <app-status [state]="state" />
             }
             <div class="marking-bar">
@@ -464,10 +479,18 @@
               }
             </section>
           }
-          @if (!finalizing() && !releasing()) {
+          @if (!dialogOpen()) {
             <app-status [state]="state" />
           }
           <div class="button-row">
+            <button
+              type="button"
+              class="secondary"
+              (click)="askReopen()"
+              [disabled]="state.busy() || reopenState.busy()"
+            >
+              Reopen to correct
+            </button>
             <button type="button" class="quiet" (click)="closePanel()">Close</button>
           </div>
         }
@@ -502,8 +525,8 @@
     </p>
   }
   <p>
-    Finalization records this student's scores in their performance record. A finalized grade cannot be
-    changed.
+    Finalization records this student's scores in their performance record. To change a finalized grade,
+    reopen it.
   </p>
   <form id="finalize-form" novalidate [formGroup]="form" (ngSubmit)="finalize()">
     <app-field controlId="review-reason" label="Review notes" [control]="form.controls.reason">
@@ -531,4 +554,61 @@
     <strong>{{ assessmentTitle(assessmentId()) }}</strong
     >. Grades you finalize later stay hidden until you release again. This cannot be undone.
   </p>
+</app-confirm-dialog>
+<app-confirm-dialog
+  #bulkDialog
+  dialogId="finalize-all"
+  heading="Finalize every fully marked grade?"
+  confirmLabel="Finalize grades"
+  [state]="bulkState"
+  (confirm)="finalizeAll()"
+  (closed)="bulkFinalizing.set(false)"
+>
+  <p>
+    {{ ready() }} {{ ready() === 1 ? 'draft' : 'drafts' }} of
+    <strong>{{ assessmentTitle(assessmentId()) }}</strong> with every question marked will be finalized, each
+    recorded as finalized with the assessment's other fully marked grades. Drafts that still need marking stay
+    drafts.
+    @if (releasesByHand()) {
+      Students see them when you release the results.
+    } @else {
+      Students see them at once.
+    }
+  </p>
+</app-confirm-dialog>
+<app-confirm-dialog
+  #reopenDialog
+  dialogId="reopen"
+  heading="Reopen this grade to correct it?"
+  confirmLabel="Reopen grade"
+  [state]="reopenState"
+  (confirm)="reopen()"
+  (closed)="closeReopen()"
+>
+  @if (viewing(); as grade) {
+    <p>
+      <strong>{{ studentName(grade) || grade.student_id }}</strong>
+      · {{ names.title(grade) || 'Assessment' }} · {{ grade.evidence | marks }} marks
+    </p>
+  }
+  <p>
+    The grade becomes a draft again. The student no longer sees it, and it leaves their performance record,
+    until you finalize it again.
+  </p>
+  <form id="reopen-form" novalidate [formGroup]="reopenForm" (ngSubmit)="reopen()">
+    <app-field
+      controlId="reopen-reason"
+      label="Why it needs correcting"
+      hint="Kept in the grade's history."
+      [control]="reopenForm.controls.reason"
+    >
+      <textarea
+        appFieldControl
+        id="reopen-reason"
+        formControlName="reason"
+        rows="4"
+        maxlength="1000"
+      ></textarea>
+    </app-field>
+  </form>
 </app-confirm-dialog>

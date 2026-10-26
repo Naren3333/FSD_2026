@@ -407,9 +407,21 @@ grading_counts = obj(
         "drafts": {"type": "integer", "minimum": 0},
         "finalized": {"type": "integer", "minimum": 0},
         "unreleased": {"type": "integer", "minimum": 0},
+        # drafts with nothing left to mark: what a bulk finalize finalizes (adr 0016).
+        "ready": {"type": "integer", "minimum": 0},
     }
 )
 release = obj({"assessment_id": UUID, "released": {"type": "integer", "minimum": 0}})
+REVIEW_REASON = {"type": "string", "minLength": 1, "maxLength": 1000}
+reopen_request = obj({"reason": REVIEW_REASON})
+bulk_finalize_request = obj({"assessment_id": UUID, "reason": REVIEW_REASON}, ["assessment_id"])
+bulk_finalized = obj(
+    {
+        "assessment_id": UUID,
+        "finalized": {"type": "integer", "minimum": 0},
+        "needs_marking": {"type": "integer", "minimum": 0},
+    }
+)
 marks_request = obj({"marks": {"type": "object", "additionalProperties": mark, "minProperties": 1}})
 finalize_request = obj(
     {
@@ -662,6 +674,18 @@ operations = {
         ),
         operation("GET", "/v1/evaluations/{id}", None, evaluation),
         operation("GET", "/v1/evaluations/mine", None, array(own_result), query=["classroom_id"]),
+        # one page of the student's released results, newest first, with how many there are.
+        paged(
+            operation(
+                "GET",
+                "/v1/evaluations/mine/page",
+                None,
+                obj({"items": array(own_result, maximum=100), "total": COUNT}),
+                query=["classroom_id"],
+            ),
+            100,
+            20,
+        ),
         operation(
             "GET",
             "/v1/evaluations/counts",
@@ -687,6 +711,10 @@ operations = {
             finalize_request,
             evaluation,
         ),
+        # finalize every enrolled student's draft of an assessment that needs no more marking (adr 0016).
+        operation("POST", "/v1/evaluations/finalize", bulk_finalize_request, bulk_finalized),
+        # a finalized grade back to a draft, to correct it (adr 0016).
+        operation("POST", "/v1/evaluations/{id}/reopen", reopen_request, evaluation),
     ],
 }
 # additive page endpoints preserve existing bounded array clients.
@@ -778,6 +806,9 @@ NAMES = {
     "OwnEvidence": own_evidence,
     "GradingCounts": grading_counts,
     "Release": release,
+    "ReopenRequest": reopen_request,
+    "BulkFinalizeRequest": bulk_finalize_request,
+    "BulkFinalized": bulk_finalized,
 }
 NAMED = {id(schema): name for name, schema in NAMES.items()}
 assert len(NAMED) == len(NAMES), "a schema has two names"
@@ -987,6 +1018,19 @@ payloads = {
             "org_id": TEXT,
             "student_id": TEXT,
             "evidence": array(final_evidence, 1, 50),
+            # absent before adr 0016, meaning 1.
+            "revision": {"type": "integer", "minimum": 1},
+        },
+        ["evaluation_id", "assessment_id", "classroom_id", "org_id", "student_id", "evidence"],
+    ),
+    "grading.reopened.v1": obj(
+        {
+            "evaluation_id": UUID,
+            "assessment_id": UUID,
+            "classroom_id": UUID,
+            "org_id": TEXT,
+            "student_id": TEXT,
+            "revision": {"type": "integer", "minimum": 2},
         }
     ),
 }
@@ -994,7 +1038,7 @@ payloads = {
 FINALIZED_TIMING = (
     "Published when a finalized grade becomes visible to its student: at finalization "
     "with release_policy on_finalize, otherwise when the teacher releases the assessment's results. Consumers "
-    "show its marks to the student, and must deduplicate by evaluation_id."
+    "show its marks to the student, and keep only the newest revision of each evaluation_id (ADR 0016)."
 )
 descriptions = {
     "identity.user.deleted.v1": "A user deleted their own account (ADR 0011); the resource is the user. Assessment, "
@@ -1008,6 +1052,9 @@ descriptions = {
     "assessment.deleted.v1": "A published assessment its teacher deleted, with any submissions (ADR 0008). Grading "
     "deletes its evaluations, Analytics its evidence, and both ignore anything for it that arrives later.",
     "grading.finalized.v3": FINALIZED_TIMING,
+    "grading.reopened.v1": "A teacher reopened a released grade to correct it (ADR 0016); it is a draft again at "
+    "revision. Consumers withdraw its evidence until a grading.finalized.v3 of that revision or newer, and ignore "
+    "either event when they already hold a newer revision.",
 }
 for topic, payload in payloads.items():
     schema = obj(

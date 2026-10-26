@@ -1,4 +1,4 @@
-import { Component, inject } from '@angular/core';
+import { Component, inject, signal } from '@angular/core';
 import { AssessmentApi, GradingApi } from '../../api/clients';
 import type { Assessment, Evidence, OwnResult } from '../../api/models';
 import { ClassroomContext, onClassroomChange } from '../../core/classroom-context';
@@ -9,6 +9,8 @@ import { MarksPipe } from '../../shared/marks';
 import { EvidenceNames, assessmentsOf } from '../../shared/names';
 import { NoClassroomComponent } from '../../shared/no-classroom';
 import { Section } from '../../shared/section';
+import { readPage } from '../../shared/paged-section';
+import { PagerComponent } from '../../shared/pager';
 import { SectionStateComponent } from '../../shared/section-state';
 import { PageHeaderComponent } from '../../shared/page-header';
 import { RefreshButtonComponent } from '../../shared/refresh-button';
@@ -29,6 +31,7 @@ interface Results {
     NoClassroomComponent,
     SectionStateComponent,
     MarksPipe,
+    PagerComponent,
   ],
   templateUrl: './results.html',
 })
@@ -38,13 +41,20 @@ export class ResultsComponent {
   private readonly curriculum = inject(CurriculumNames);
   readonly classroomId = inject(ClassroomContext).classroomId;
   readonly results = new Section<Results>();
+  /* the page of results on show, counted from 0, and how many released results there are. */
+  readonly page = signal(0);
+  readonly total = signal(0);
+  readonly pageSize = 20;
   readonly names = new EvidenceNames(
     () => this.results.value()?.assessments,
     (id) => this.curriculum.topicName(id),
   );
 
   constructor() {
-    onClassroomChange(() => this.load());
+    onClassroomChange(() => {
+      this.page.set(0);
+      this.load();
+    });
     onSectionShown('results', () => {
       const classroomId = this.classroomId();
       if (classroomId) rereadQuietly(this.results, () => this.read(classroomId));
@@ -59,7 +69,15 @@ export class ResultsComponent {
   }
 
   private async read(classroomId: string): Promise<Results> {
-    const results = await this.grading.mine(classroomId);
+    const { result, page } = await readPage(
+      this.page(),
+      this.pageSize,
+      (offset, limit) => this.grading.minePage(classroomId, offset, limit),
+      (r) => !r.items.length,
+    );
+    const results = result.items;
+    this.page.set(page);
+    this.total.set(result.total);
     // the student's copy of each assessment: prompts and options, never the answer key.
     const [assessments] = await Promise.all([
       assessmentsOf(results, (id) => this.assessmentApi.get(id)),

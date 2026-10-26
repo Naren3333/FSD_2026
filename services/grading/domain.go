@@ -147,6 +147,8 @@ type Evaluation struct {
 	ReleasePolicy string            `json:"release_policy"`
 	FinalizedAt   *time.Time        `json:"finalized_at"`
 	ReleasedAt    *time.Time        `json:"released_at"`
+	// revision goes up each time the grade is reopened (adr 0016); events carry it, responses do not.
+	Revision int `json:"-"`
 }
 
 // OwnEvidence is a question's result as its student sees it: marks and feedback, never rubric details or ai

@@ -186,7 +186,9 @@ class Fakes:
                                              "interpretation": "x", "students": students})  # fmt: skip
         if path == "/v1/evaluations":
             assert request.url.params["student_id"] == STUDENT
-            return httpx.Response(200, json={"evaluations": self.evaluations, "total": len(self.evaluations)})
+            offset, limit = int(request.url.params.get("offset", 0)), int(request.url.params.get("limit", 20))
+            page = self.evaluations[offset : offset + limit]
+            return httpx.Response(200, json={"evaluations": page, "total": len(self.evaluations)})
         if path == "/v1/assessments/batch":
             if any(i not in self.assessments for i in body["ids"]):
                 return httpx.Response(404, json={"error": {"code": "NOT_FOUND", "message": "x"}})

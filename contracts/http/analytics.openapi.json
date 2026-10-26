@@ -427,6 +427,18 @@
             "minimum": 1.0,
             "title": "Marks Possible"
           },
+          "recent_attempted": {
+            "type": "integer",
+            "maximum": 10.0,
+            "minimum": 1.0,
+            "title": "Recent Attempted"
+          },
+          "recent_marks_accuracy": {
+            "type": "number",
+            "maximum": 1.0,
+            "minimum": 0.0,
+            "title": "Recent Marks Accuracy"
+          },
           "evidence_status": {
             "type": "string",
             "enum": [
@@ -449,11 +461,13 @@
           "observed_accuracy",
           "marks_awarded",
           "marks_possible",
+          "recent_attempted",
+          "recent_marks_accuracy",
           "evidence_status",
           "weakness_indicator"
         ],
         "title": "TopicMetric",
-        "description": "a topic's finalized evidence: questions attempted and answered with full marks, and the marks earned out of the marks possible (which shows part marks)."
+        "description": "a topic's finalized evidence: questions attempted and answered with full marks, and the marks earned out of the marks possible (which shows part marks). the needs-practice flag reads the share of marks on the topic's latest ten questions."
       }
     }
   }

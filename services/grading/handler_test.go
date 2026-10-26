@@ -20,6 +20,7 @@ const (
 type memoryStore struct {
 	finalizeErr error
 	finalized   []string // reasons
+	reopened    []string // reasons
 	marks       map[string]Mark
 	released    []string // assessments
 	students    []string // the roster the last list, count or release was given
@@ -28,7 +29,7 @@ type memoryStore struct {
 }
 
 // draft is the store's one evaluation, with an answer and an ai suggestion.
-var draft = Evaluation{ID: evaluationID, Assessment: assessmentID, Classroom: room, Answers: map[string]string{"q1": "an answer"}, Evidence: []Evidence{{Question: "q1", Suggestion: &Suggestion{Status: suggestionReady, Feedback: "AI words"}}}}
+var draft = Evaluation{ID: evaluationID, Assessment: assessmentID, Classroom: room, Student: "student-1", Answers: map[string]string{"q1": "an answer"}, Evidence: []Evidence{{Question: "q1", Suggestion: &Suggestion{Status: suggestionReady, Feedback: "AI words"}}}}
 
 func (m *memoryStore) listEvaluations(_ context.Context, _, _, assessment string, students []string, offset, limit int) ([]Evaluation, int, error) {
 	m.students, m.assessment, m.page = students, assessment, [2]int{offset, limit}
@@ -49,7 +50,7 @@ func (m *memoryStore) findEvaluation(_ context.Context, _, id string) (Evaluatio
 }
 
 // listReleased answers for student-1 only, so a test sees whose results were asked for.
-func (m *memoryStore) listReleased(_ context.Context, _, _, student string) ([]Evaluation, error) {
+func (m *memoryStore) listReleased(_ context.Context, _, _, student string, _ ...platform.ListWindow) ([]Evaluation, error) {
 	if student != "student-1" {
 		return []Evaluation{}, nil
 	}
@@ -57,16 +58,23 @@ func (m *memoryStore) listReleased(_ context.Context, _, _, student string) ([]E
 	return []Evaluation{{ID: evaluationID, Student: student, Status: statusFinalized, Evidence: evidence}}, nil
 }
 
+func (m *memoryStore) countReleased(_ context.Context, _, _, student string) (int, error) {
+	if student != "student-1" {
+		return 0, nil
+	}
+	return 1, nil
+}
+
 func (m *memoryStore) countEvaluations(_ context.Context, _, _, assessment string, students []string) (Counts, error) {
 	m.students, m.assessment = students, assessment
 	return Counts{Drafts: 1 - len(m.finalized), Finalized: len(m.finalized)}, nil
 }
 
-func (m *memoryStore) findClassroom(_ context.Context, _, id string) (string, error) {
+func (m *memoryStore) findClassroom(_ context.Context, _, id string) (string, string, error) {
 	if id != evaluationID {
-		return "", platform.ErrNotFound
+		return "", "", platform.ErrNotFound
 	}
-	return room, nil
+	return room, draft.Student, nil
 }
 
 func (m *memoryStore) assessmentClassroom(_ context.Context, _, assessment string) (string, error) {
@@ -168,7 +176,7 @@ func TestOnlyTheTeacherSeesGradingCounts(t *testing.T) {
 	}
 	teacher := server{store: &memoryStore{}, access: platformtest.Access(platform.RelationTeacher), roster: platformtest.Roster{"student-1"}}
 	w := platformtest.Serve(teacher.routes, http.MethodGet, path, "", "teacher-1", "teacher")
-	if w.Code != http.StatusOK || w.Body.String() != `{"drafts":1,"finalized":0,"unreleased":0}`+"\n" {
+	if w.Code != http.StatusOK || w.Body.String() != `{"drafts":1,"finalized":0,"unreleased":0,"ready":0}`+"\n" {
 		t.Fatalf("%d %q", w.Code, w.Body.String())
 	}
 }
@@ -349,5 +357,114 @@ func TestAFinalizeReasonIsAtMost1000Characters(t *testing.T) {
 	}
 	if w := finalize(t, store, platform.RelationTeacher, evaluationID, `{"reason":"`+strings.Repeat("語", 1000)+`"}`, "teacher"); w.Code != http.StatusOK {
 		t.Fatalf("1000 characters (3000 bytes) refused: %d", w.Code)
+	}
+}
+
+func TestStudentsPageTheirResults(t *testing.T) {
+	s := server{store: &memoryStore{}, access: platformtest.Access(platform.RelationStudent), roster: platformtest.Roster{"student-1"}}
+	w := platformtest.Serve(s.routes, http.MethodGet, "/v1/evaluations/mine/page?classroom_id="+room+"&limit=5", "", "student-1", "student")
+	if w.Code != http.StatusOK || !strings.Contains(w.Body.String(), `"total":1`) || !strings.Contains(w.Body.String(), `"items":[`) {
+		t.Fatalf("%d %s", w.Code, w.Body.String())
+	}
+	if w := platformtest.Serve(s.routes, http.MethodGet, "/v1/evaluations/mine/page?classroom_id="+room+"&limit=101", "", "student-1", "student"); w.Code != http.StatusUnprocessableEntity {
+		t.Fatalf("an oversized page was served: %d", w.Code)
+	}
+}
+
+func TestRemovedStudentsGradesCannotChange(t *testing.T) {
+	store := &memoryStore{}
+	s := server{store: store, access: platformtest.Access(platform.RelationTeacher), roster: platformtest.Roster{"student-2"}}
+	for _, path := range []string{"/v1/evaluations/" + evaluationID + "/marks", "/v1/evaluations/" + evaluationID + "/finalize"} {
+		w := platformtest.Serve(s.routes, http.MethodPost, path, `{"reason":"Reviewed","marks":{"q1":{"awarded":1}}}`, "teacher-1", "teacher")
+		if w.Code != http.StatusConflict || !strings.Contains(w.Body.String(), "STUDENT_REMOVED") {
+			t.Errorf("%s: %d %s", path, w.Code, w.Body.String())
+		}
+	}
+	if len(store.finalized) != 0 {
+		t.Fatalf("a removed student's grade was finalized")
+	}
+	if w := platformtest.Serve(s.routes, http.MethodGet, "/v1/evaluations/"+evaluationID, "", "teacher-1", "teacher"); w.Code != http.StatusOK {
+		t.Fatalf("the teacher could not read the grade: %d", w.Code)
+	}
+}
+
+// finalizeAssessment finalizes two drafts and leaves one to mark.
+func (m *memoryStore) finalizeAssessment(_ context.Context, _, assessment, _, reason string, students []string) (int, int, error) {
+	m.finalized = append(m.finalized, reason)
+	m.assessment, m.students = assessment, students
+	return 2, 1, m.finalizeErr
+}
+
+func (m *memoryStore) reopenEvaluation(_ context.Context, _, id, _, reason string) (Evaluation, error) {
+	if m.finalizeErr != nil {
+		return Evaluation{}, m.finalizeErr
+	}
+	m.reopened = append(m.reopened, reason)
+	return Evaluation{ID: id, Classroom: room, Status: statusDraft}, nil
+}
+
+func TestOnlyTheClassroomTeacherReopensAGrade(t *testing.T) {
+	path := "/v1/evaluations/" + evaluationID + "/reopen"
+	cases := []struct {
+		name, relation, body string
+		roster               platformtest.Roster
+		err                  error
+		roles                []string
+		status               int
+		code                 string
+	}{
+		{"reopened", platform.RelationTeacher, `{"reason":"Question 2 was mis-marked"}`, platformtest.Roster{"student-1"}, nil, []string{"teacher"}, http.StatusOK, ""},
+		{"no reason", platform.RelationTeacher, `{"reason":" "}`, platformtest.Roster{"student-1"}, nil, []string{"teacher"}, http.StatusUnprocessableEntity, ""},
+		{"too long", platform.RelationTeacher, `{"reason":"` + strings.Repeat("x", 1001) + `"}`, platformtest.Roster{"student-1"}, nil, []string{"teacher"}, http.StatusUnprocessableEntity, ""},
+		{"a student", platform.RelationStudent, `{"reason":"Fix"}`, platformtest.Roster{"student-1"}, nil, []string{"student"}, http.StatusForbidden, ""},
+		{"another classroom's teacher", platform.RelationStudent, `{"reason":"Fix"}`, platformtest.Roster{"student-1"}, nil, []string{"teacher"}, http.StatusForbidden, ""},
+		{"removed student", platform.RelationTeacher, `{"reason":"Fix"}`, platformtest.Roster{"student-2"}, nil, []string{"teacher"}, http.StatusConflict, "STUDENT_REMOVED"},
+		{"a draft", platform.RelationTeacher, `{"reason":"Fix"}`, platformtest.Roster{"student-1"}, errNotFinalized, []string{"teacher"}, http.StatusConflict, "NOT_FINALIZED"},
+	}
+	for _, tc := range cases {
+		store := &memoryStore{finalizeErr: tc.err}
+		s := server{store: store, access: platformtest.Access(tc.relation), roster: tc.roster}
+		w := platformtest.Serve(s.routes, http.MethodPost, path, tc.body, "teacher-1", tc.roles...)
+		if w.Code != tc.status || !strings.Contains(w.Body.String(), tc.code) {
+			t.Errorf("%s: %d %s", tc.name, w.Code, w.Body.String())
+		}
+		if reopened := len(store.reopened) == 1; reopened != (tc.status == http.StatusOK) {
+			t.Errorf("%s: reopened %v", tc.name, store.reopened)
+		}
+	}
+}
+
+func TestOnlyTheClassroomTeacherFinalizesAnAssessmentsMarkedGrades(t *testing.T) {
+	serve := func(store *memoryStore, relation, body string, roles ...string) *httptest.ResponseRecorder {
+		s := server{store: store, access: platformtest.Access(relation), roster: platformtest.Roster{"student-1"}}
+		return platformtest.Serve(s.routes, http.MethodPost, "/v1/evaluations/finalize", body, "teacher-1", roles...)
+	}
+	store := &memoryStore{}
+	w := serve(store, platform.RelationTeacher, `{"assessment_id":"`+assessmentID+`"}`, "teacher")
+	if w.Code != http.StatusOK || !strings.Contains(w.Body.String(), `"finalized":2`) || !strings.Contains(w.Body.String(), `"needs_marking":1`) {
+		t.Fatalf("%d %s", w.Code, w.Body.String())
+	}
+	if len(store.finalized) != 1 || store.finalized[0] != bulkReason || store.assessment != assessmentID || len(store.students) != 1 || store.students[0] != "student-1" {
+		t.Fatalf("finalized %v for %s %v", store.finalized, store.assessment, store.students)
+	}
+	store = &memoryStore{}
+	if w = serve(store, platform.RelationTeacher, `{"assessment_id":"`+assessmentID+`","reason":"All checked"}`, "teacher"); w.Code != http.StatusOK || store.finalized[0] != "All checked" {
+		t.Fatalf("the teacher's reason was not kept: %d %v", w.Code, store.finalized)
+	}
+	for _, tc := range []struct {
+		name, relation, body string
+		roles                []string
+		status               int
+	}{
+		{"a student", platform.RelationStudent, `{"assessment_id":"` + assessmentID + `"}`, []string{"student"}, http.StatusForbidden},
+		{"another classroom's teacher", platform.RelationStudent, `{"assessment_id":"` + assessmentID + `"}`, []string{"teacher"}, http.StatusForbidden},
+		{"no assessment", platform.RelationTeacher, `{}`, []string{"teacher"}, http.StatusUnprocessableEntity},
+		{"no grades", platform.RelationTeacher, `{"assessment_id":"8b3e7f40-ac6d-4e5f-9a4b-3c4d5e6f7081"}`, []string{"teacher"}, http.StatusNotFound},
+		{"blank reason", platform.RelationTeacher, `{"assessment_id":"` + assessmentID + `","reason":" "}`, []string{"teacher"}, http.StatusUnprocessableEntity},
+	} {
+		store := &memoryStore{}
+		if w := serve(store, tc.relation, tc.body, tc.roles...); w.Code != tc.status || len(store.finalized) != 0 {
+			t.Errorf("%s: %d %s", tc.name, w.Code, w.Body.String())
+		}
 	}
 }

@@ -20,6 +20,7 @@ import type {
   GenerateRequest,
   GenerateResult,
   GradingCounts,
+  BulkFinalized,
   Guidance,
   GuidanceRequest,
   Interpretation,
@@ -352,6 +353,17 @@ export class GradingApi {
   mine(classroomId: string): Promise<OwnResult[]> {
     return this.gateway.request('grading', `/evaluations/mine?classroom_id=${id(classroomId)}`);
   }
+  /* one page of the signed-in student's released results, newest first, with how many there are. */
+  minePage(
+    classroomId: string,
+    offset: number,
+    limit: number,
+  ): Promise<{ items: OwnResult[]; total: number }> {
+    return this.gateway.request(
+      'grading',
+      `/evaluations/mine/page?classroom_id=${id(classroomId)}&offset=${offset}&limit=${limit}`,
+    );
+  }
   /* saves the teacher's marks on a draft without finalizing it. */
   mark(evaluationId: string, marks: Record<string, Mark>): Promise<Evaluation> {
     return this.gateway.request('grading', `/evaluations/${id(evaluationId)}/marks`, {
@@ -364,6 +376,20 @@ export class GradingApi {
     return this.gateway.request('grading', `/evaluations/${id(evaluationId)}/finalize`, {
       method: 'POST',
       body: { reason, marks },
+    });
+  }
+  /* finalizes every enrolled student's draft of an assessment with nothing left to mark. */
+  finalizeAll(assessmentId: string): Promise<BulkFinalized> {
+    return this.gateway.request('grading', '/evaluations/finalize', {
+      method: 'POST',
+      body: { assessment_id: assessmentId },
+    });
+  }
+  /* turns a finalized grade back into a draft to correct it; its student no longer sees it until it is finalized again. */
+  reopen(evaluationId: string, reason: string): Promise<Evaluation> {
+    return this.gateway.request('grading', `/evaluations/${id(evaluationId)}/reopen`, {
+      method: 'POST',
+      body: { reason },
     });
   }
   /* shows an assessment's finalized grades to its enrolled students; a removed student's stay hidden. */

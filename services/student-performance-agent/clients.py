@@ -12,8 +12,9 @@ from config import Settings
 READ_TIMEOUT = 10.0
 # allow a bounded model turn, allowance checks and usage accounting.
 GENERATE_TIMEOUT = 60.0
-# grading's largest page; a student rarely has more finalized assessments in one classroom.
+# grading's largest page, and how many pages are read at most looking for finalized results among drafts.
 EVALUATION_LIMIT = 100
+EVALUATION_PAGES = 5
 # assessment's batch read takes at most 50 ids.
 BATCH = 50
 CLASS_PAGE = 50
@@ -52,26 +53,40 @@ class Services(AgentClients):
         url = f"{self.settings.analytics_url}/v1/performance/{student}"
         return await self._get("analytics", url, authorization, correlation, classroom_id=classroom)
 
-    async def results(self, authorization: str, classroom: str, student: str, correlation: str) -> list[Any]:
-        """the student's finalized evaluations in the classroom, newest first, with their answers."""
-        data = await self._get(
-            "grading",
-            f"{self.settings.grading_url}/v1/evaluations",
-            authorization,
-            correlation,
-            classroom_id=classroom,
-            student_id=student,
-            limit=EVALUATION_LIMIT,
-        )
-        evaluations = data.get("evaluations") if isinstance(data, dict) else None
-        if not isinstance(evaluations, list):
-            raise UpstreamError("grading", 502)
-        finalized = [e for e in evaluations if isinstance(e, dict) and e.get("status") == "finalized"]
-        if not all(
-            isinstance(e.get("id"), str) and isinstance(e.get("assessment_id"), str) for e in finalized
-        ):
-            raise UpstreamError("grading", 502)
-        return finalized
+    async def results(
+        self, authorization: str, classroom: str, student: str, correlation: str, wanted: int
+    ) -> list[Any]:
+        """the student's newest `wanted` finalized evaluations in the classroom, newest first, with their answers. grading lists drafts too, so pages are read until enough are finalized or none are left."""
+        finalized: list[Any] = []
+        for n in range(EVALUATION_PAGES):
+            data = await self._get(
+                "grading",
+                f"{self.settings.grading_url}/v1/evaluations",
+                authorization,
+                correlation,
+                classroom_id=classroom,
+                student_id=student,
+                offset=n * EVALUATION_LIMIT,
+                limit=EVALUATION_LIMIT,
+            )
+            evaluations = data.get("evaluations") if isinstance(data, dict) else None
+            if not isinstance(evaluations, list) or not all(isinstance(e, dict) for e in evaluations):
+                raise UpstreamError("grading", 502)
+            page = [e for e in evaluations if e.get("status") == "finalized"]
+            if not all(
+                isinstance(e.get("id"), str) and isinstance(e.get("assessment_id"), str) for e in page
+            ):
+                raise UpstreamError("grading", 502)
+            finalized += page
+            total = data.get("total")
+            if (
+                len(finalized) >= wanted
+                or len(evaluations) < EVALUATION_LIMIT
+                or not isinstance(total, int)
+                or (n + 1) * EVALUATION_LIMIT >= total
+            ):
+                break
+        return finalized[:wanted]
 
     async def assessments(self, authorization: str, ids: list[str], correlation: str) -> dict[str, Any]:
         """the teacher's view of each assessment by id; one deleted since it was graded is left out."""

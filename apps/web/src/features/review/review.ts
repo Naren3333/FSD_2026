@@ -43,6 +43,8 @@ interface Grades {
   page: number;
   total: number;
   unreleased: number;
+  /* the chosen assessment's drafts with nothing left to mark, across every page: what finalizing all finalizes. */
+  ready: number;
   students: Map<string, string>;
   assessments: Map<string, Assessment>;
 }
@@ -94,6 +96,10 @@ export class ReviewComponent {
   readonly state = new ActionState();
   /* releasing an assessment's results, in its confirmation dialog. */
   readonly releaseState = new ActionState();
+  /* finalizing an assessment's fully marked drafts, in its confirmation dialog. */
+  readonly bulkState = new ActionState();
+  /* reopening a finalized grade, in its confirmation dialog. */
+  readonly reopenState = new ActionState();
   readonly grades = new Section<Grades>();
   readonly names = new EvidenceNames(
     () => this.grades.value()?.assessments,
@@ -156,14 +162,27 @@ export class ReviewComponent {
   readonly overriding = signal<ReadonlySet<string>>(new Set());
   readonly finalizing = signal(false);
   readonly releasing = signal(false);
+  readonly bulkFinalizing = signal(false);
+  readonly reopening = signal(false);
   marks: MarkingForm = new FormGroup({});
   @ViewChild('dialog') dialog?: ConfirmDialogComponent;
   @ViewChild('releaseDialog') releaseDialog?: ConfirmDialogComponent;
+  @ViewChild('bulkDialog') bulkDialog?: ConfirmDialogComponent;
+  @ViewChild('reopenDialog') reopenDialog?: ConfirmDialogComponent;
   readonly form = new FormGroup({
+    reason: new FormControl('', { nonNullable: true, validators: requiredText(1000) }),
+  });
+  readonly reopenForm = new FormGroup({
     reason: new FormControl('', { nonNullable: true, validators: requiredText(1000) }),
   });
   /* the chosen assessment's finalized grades its enrolled students cannot see yet, across every page: what a release releases. */
   readonly unreleased = computed(() => (this.assessmentId() ? (this.grades.value()?.unreleased ?? 0) : 0));
+  /* the chosen assessment's drafts with nothing left to mark, across every page. */
+  readonly ready = computed(() => (this.assessmentId() ? (this.grades.value()?.ready ?? 0) : 0));
+  /* whether any of this page's dialogs is open, so the page's own status stays out of their way. */
+  readonly dialogOpen = computed(
+    () => this.finalizing() || this.releasing() || this.bulkFinalizing() || this.reopening(),
+  );
   readonly flagText = flagText;
   readonly suggestionReason = suggestionReason;
   private poll: ReturnType<typeof setTimeout> | undefined;
@@ -179,7 +198,7 @@ export class ReviewComponent {
   private previousSection = '';
 
   constructor() {
-    inject(UnsavedChanges).track(() => this.form.dirty || this.marks.dirty);
+    inject(UnsavedChanges).track(() => this.form.dirty || this.reopenForm.dirty || this.marks.dirty);
     inject(DestroyRef).onDestroy(() => clearTimeout(this.poll));
     let shownClassroom = '';
     onClassroomChange((classroomId) => {
@@ -314,15 +333,23 @@ export class ReviewComponent {
       (r) => !r.evaluations.length,
     );
     const grades = result.evaluations;
-    const [students, assessments, unreleased] = await Promise.all([
+    const [students, assessments, counts] = await Promise.all([
       this.studentNames(classroomId),
       assessmentsOf(grades, (id) => this.assessmentApi.get(id)),
-      assessmentId ? this.grading.counts(classroomId, assessmentId).then((c) => c.unreleased) : 0,
+      assessmentId ? this.grading.counts(classroomId, assessmentId) : null,
       // without the curriculum, topics show as ids.
       this.curriculum.need(grades.flatMap((g) => g.evidence.map((e) => e.topic_id))).catch(() => undefined),
     ]);
     if (current()) this.page.set(page);
-    return { grades, page, total: result.total, unreleased, students, assessments };
+    return {
+      grades,
+      page,
+      total: result.total,
+      unreleased: counts?.unreleased ?? 0,
+      ready: counts?.ready ?? 0,
+      students,
+      assessments,
+    };
   }
 
   /* the classroom's students' names, read once for it; a failed read is tried again next time. */
@@ -766,6 +793,83 @@ export class ReviewComponent {
       );
       await this.reread(classroomId, assessmentId);
     });
+  }
+
+  // --- finalizing every fully marked grade
+  // -------------------------------------------------------------------------------------------
+
+  askFinalizeAll(): void {
+    if (this.unsavedMarks()) return;
+    this.bulkFinalizing.set(true);
+    this.bulkDialog?.show();
+  }
+
+  closeFinalizeAll(): void {
+    this.bulkFinalizing.set(false);
+    this.bulkDialog?.close();
+  }
+
+  finalizeAll(): void {
+    const assessmentId = this.assessmentId();
+    const classroomId = this.classroomId();
+    if (!assessmentId) return;
+    void this.bulkState.run(async () => {
+      const result = await this.grading.finalizeAll(assessmentId);
+      this.closeFinalizeAll();
+      // a draft open for marking may be final now; its marks were all saved, so nothing is lost.
+      if (this.selected()) this.closeGrade(false);
+      this.state.error.set('');
+      const waiting = result.needs_marking
+        ? ` ${result.needs_marking} still ${result.needs_marking === 1 ? 'needs' : 'need'} marking.`
+        : '';
+      this.state.message.set(
+        `${result.finalized} ${result.finalized === 1 ? 'grade' : 'grades'} finalized.${waiting}`,
+      );
+      await this.reread(classroomId, assessmentId);
+      this.putAddress(true);
+    });
+  }
+
+  // --- reopening
+  // -------------------------------------------------------------------------------------------
+
+  askReopen(): void {
+    if (!this.viewing()) return;
+    this.reopenForm.reset();
+    this.reopening.set(true);
+    this.reopenDialog?.show();
+  }
+
+  closeReopen(): void {
+    this.reopenForm.reset();
+    this.reopening.set(false);
+    this.reopenDialog?.close();
+  }
+
+  /* reopens the finalized grade being read and opens it for marking. */
+  reopen(): void {
+    const grade = this.viewing();
+    if (!grade || !this.reopenState.validate(this.reopenForm, 'reopen-form')) return;
+    const classroomId = this.classroomId();
+    const assessmentId = this.assessmentId();
+    void this.reopenState.run(async () => {
+      const result = await this.grading.reopen(grade.id, this.reopenForm.controls.reason.value);
+      this.closeReopen();
+      this.replace(result);
+      if (this.classroomId() !== classroomId || this.assessmentId() !== assessmentId) return;
+      if (this.viewing()?.id === grade.id) this.openGrade(result);
+      this.state.error.set('');
+      this.state.message.set(
+        'Grade reopened as a draft. The student no longer sees it until you finalize it again.',
+      );
+      // a reopened grade may have been one of the assessment's unreleased ones.
+      await this.reread(classroomId, assessmentId);
+    });
+  }
+
+  /* whether the chosen assessment's grades wait for a release after finalizing. */
+  releasesByHand(): boolean {
+    return this.grades.value()?.assessments.get(this.assessmentId())?.release_policy === 'manual';
   }
 
   assessmentTitle(id: string): string {

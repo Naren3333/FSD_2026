@@ -110,6 +110,8 @@ export type Mark = Grading['Mark'];
 export type EvaluationPage = Grading['EvaluationPage'];
 /* how many of a classroom's grades wait for its teacher, how many are final, and how many of those students cannot see until the teacher releases them. */
 export type GradingCounts = Grading['GradingCounts'];
+/* how many of an assessment's drafts a bulk finalize finalized, and how many still need marking. */
+export type BulkFinalized = Grading['BulkFinalized'];
 
 export type TopicMetric = Analytics['TopicMetric'];
 /* whether a student has any finalized evidence in the classroom yet. */

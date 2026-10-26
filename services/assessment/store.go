@@ -306,6 +306,10 @@ func (p pgStore) insertSubmission(ctx context.Context, v Assessment, sub Submiss
 	if !sameMarking(current, v) {
 		return false, false, errAssessmentChanged
 	}
+	// the teacher may have just moved its opening later: until then students cannot see it.
+	if !current.visibleToStudents(sub.SubmittedAt) {
+		return false, false, platform.ErrNotFound
+	}
 	// against the due date and late policy as they are now, should the teacher have just changed them.
 	if current.closed(sub.SubmittedAt) {
 		return false, false, errClosed

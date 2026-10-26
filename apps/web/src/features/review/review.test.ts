@@ -661,3 +661,105 @@ describe('coming back to grading review', () => {
     expect(page.component.selected()?.id).toBe('e-s1');
   });
 });
+
+describe('reopening a finalized grade', () => {
+  it('asks for a reason, then opens the grade for marking', async () => {
+    const list = [grade('s2', 'finalized')];
+    const reopen = vi.fn((id: string) => {
+      list[0] = { ...grade('s2', 'draft'), id };
+      return Promise.resolve(list[0]);
+    });
+    const page = render(Promise.resolve([]), {
+      evaluations: vi.fn(() => Promise.resolve({ evaluations: [...list], total: list.length })),
+      reopen,
+    });
+    await page.settle();
+    page.component.show(list[0]);
+    page.fixture.detectChanges();
+    page.button('Reopen to correct').click();
+    page.fixture.detectChanges();
+    expect(page.component.reopening()).toBe(true);
+    page.component.reopen();
+    expect(reopen).not.toHaveBeenCalled();
+    page.component.reopenForm.controls.reason.setValue('Question 1 was mis-keyed');
+    page.component.reopen();
+    await page.settle();
+    await page.settle();
+    expect(reopen).toHaveBeenCalledWith('e-s2', 'Question 1 was mis-keyed');
+    expect(page.component.reopening()).toBe(false);
+    expect(page.component.selected()?.id).toBe('e-s2');
+    expect(page.buttons(page.panel())).toContain('Finalize this grade');
+    expect(page.text()).toContain('Grade reopened as a draft.');
+  });
+
+  it('keeps the grade read-only and says why when the reopen is refused', async () => {
+    const page = render(Promise.resolve([grade('s2', 'finalized')]), {
+      reopen: () => Promise.reject(new Error('This student is no longer in the classroom.')),
+    });
+    await page.settle();
+    page.component.show(page.component.grades.value()?.grades[0] as Evaluation);
+    page.fixture.detectChanges();
+    page.component.askReopen();
+    page.component.reopenForm.controls.reason.setValue('Fix');
+    page.component.reopen();
+    await page.settle();
+    expect(page.component.reopening()).toBe(true);
+    expect(page.component.viewing()?.id).toBe('e-s2');
+    expect(page.root.querySelector('dialog[open]')?.textContent).toContain(
+      'This student is no longer in the classroom.',
+    );
+  });
+});
+
+describe('finalizing every fully marked grade', () => {
+  it('confirms the count, then reports and reloads the counts', async () => {
+    let ready = 2;
+    const counts = vi.fn(() => Promise.resolve({ drafts: 3, finalized: 0, unreleased: 0, ready }));
+    const finalizeAll = vi.fn(() => {
+      ready = 0;
+      return Promise.resolve({ assessment_id: 'a1', finalized: 2, needs_marking: 1 });
+    });
+    const page = render(Promise.resolve([grade('s1', 'draft'), grade('s2', 'draft')]), {
+      counts,
+      finalizeAll,
+    });
+    (TestBed.inject(AssessmentApi) as unknown as { list: () => Promise<unknown> }).list = () =>
+      Promise.resolve([{ id: 'a1', title: 'Fractions quiz', status: 'published' }]);
+    page.component.assessmentId.set('a1');
+    page.component.load();
+    await page.settle();
+    expect(page.text()).toContain('2 drafts have every question marked.');
+    page.button('Finalize all fully marked').click();
+    page.fixture.detectChanges();
+    expect(page.root.querySelector('dialog[open]')?.textContent?.replace(/\s+/g, ' ')).toContain(
+      '2 drafts of Fractions quiz',
+    );
+    page.component.finalizeAll();
+    await page.settle();
+    await page.settle();
+    expect(finalizeAll).toHaveBeenCalledWith('a1');
+    expect(page.component.bulkFinalizing()).toBe(false);
+    expect(page.text()).toContain('2 grades finalized. 1 still needs marking.');
+    expect(page.text()).not.toContain('Finalize all fully marked');
+  });
+
+  it('is not offered without an assessment chosen', async () => {
+    const page = render(Promise.resolve([grade('s1', 'draft')]), {
+      counts: () => Promise.resolve({ drafts: 1, finalized: 0, unreleased: 0, ready: 1 }),
+    });
+    await page.settle();
+    expect(page.text()).not.toContain('Finalize all fully marked');
+  });
+
+  it('refuses while marks are unsaved', async () => {
+    const page = render(Promise.resolve([grade('s1', 'draft')]), {
+      counts: () => Promise.resolve({ drafts: 1, finalized: 0, unreleased: 0, ready: 1 }),
+    });
+    await page.settle();
+    page.component.show(page.component.grades.value()?.grades[0] as Evaluation);
+    page.component.marks.markAsDirty();
+    page.component.askFinalizeAll();
+    expect(page.component.bulkFinalizing()).toBe(false);
+    expect(page.component.state.error()).toBe('Save or close the grade you are marking first.');
+  });
+});

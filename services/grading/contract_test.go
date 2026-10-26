@@ -12,6 +12,7 @@ func TestResponsesMatchTheContract(t *testing.T) {
 		"OwnResult":     OwnResult{},
 		"GradingCounts": Counts{},
 		"Mark":          Mark{},
+		"BulkFinalized": BulkFinalized{},
 	} {
 		t.Run(name, func(t *testing.T) {
 			platformtest.MatchesSchema(t, platformtest.HTTPSchema(t, "grading", name), value)
@@ -24,6 +25,7 @@ func TestEventsMatchTheirSchemas(t *testing.T) {
 		topicSubmitted:         Submitted{},
 		topicDueChanged:        DueChanged{},
 		topicAssessmentDeleted: AssessmentDeleted{},
+		topicReopened:          Reopened{},
 	} {
 		t.Run(topic, func(t *testing.T) {
 			platformtest.MatchesSchema(t, platformtest.EventData(t, topic), value)

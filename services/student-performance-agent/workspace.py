@@ -31,6 +31,10 @@ def _metrics_row(t: dict[str, Any]) -> dict[str, Any]:
         "observed_accuracy": float(t["observed_accuracy"]),
         "evidence_status": str(t["evidence_status"]),
         "weakness_indicator": bool(t["weakness_indicator"]),
+        # the share of marks on the topic's latest questions, which needs_practice reads; none from an older analytics.
+        "recent_marks_accuracy": None
+        if t.get("recent_marks_accuracy") is None
+        else float(t["recent_marks_accuracy"]),
     }
 
 
@@ -207,6 +211,7 @@ class Workspace:
             "marks": f"{t['marks_awarded']}/{t['marks_possible']}",
             "observed_accuracy": t["observed_accuracy"],
             "evidence": t["evidence_status"],
+            "recent_marks_share": t["recent_marks_accuracy"],
             "needs_practice": t["weakness_indicator"],
         }
 

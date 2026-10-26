@@ -17,6 +17,8 @@ import (
 const (
 	topicSubmitted = "assessment.submitted.v4"
 	topicFinalized = "grading.finalized.v3"
+	// a released grade its teacher reopened to correct (adr 0016).
+	topicReopened = "grading.reopened.v1"
 )
 
 type Submitted struct {

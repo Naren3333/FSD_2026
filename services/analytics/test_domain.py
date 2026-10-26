@@ -301,6 +301,7 @@ def test_the_consumer_reads_its_topics(monkeypatch):
     assert topics == [
         [
             "grading.finalized.v3",
+            "grading.reopened.v1",
             "identity.classroom.deleted.v1",
             "assessment.deleted.v1",
             "identity.user.deleted.v1",
@@ -308,7 +309,7 @@ def test_the_consumer_reads_its_topics(monkeypatch):
     ]
 
 
-def test_the_weakness_threshold_is_below_sixty_percent_over_five_questions():
+def test_the_weakness_threshold_is_below_sixty_percent_of_the_marks_over_five_questions():
     at_threshold = summarize([row("s", n < 3) for n in range(5)])[0]
     assert (at_threshold["observed_accuracy"], at_threshold["evidence_status"]) == (0.6, "observed")
     assert at_threshold["weakness_indicator"] is False
@@ -316,6 +317,35 @@ def test_the_weakness_threshold_is_below_sixty_percent_over_five_questions():
     assert below["weakness_indicator"] is True
     too_few = summarize([row("s", False) for _ in range(4)])[0]
     assert too_few["evidence_status"] == "insufficient_evidence" and too_few["weakness_indicator"] is False
+
+
+def test_part_marks_count_towards_needs_practice():
+    topic = str(uuid4())
+    # nine marks out of ten on every essay: never full marks, but no weakness either.
+    essays = summarize([row(topic, False, 9, 10) for _ in range(5)])[0]
+    assert (essays["correct"], essays["recent_marks_accuracy"]) == (0, 0.9)
+    assert essays["weakness_indicator"] is False
+    assert TopicMetric.model_validate(essays)
+    weak = summarize([row(topic, False, 5, 10) for _ in range(5)])[0]
+    assert weak["weakness_indicator"] is True
+
+
+def test_needs_practice_reads_the_latest_questions_only():
+    topic = str(uuid4())
+    early = [row(topic, False) for _ in range(8)]
+    later = [row(topic, True) for _ in range(8)]
+    improved = summarize(early + later)[0]
+    assert improved["observed_accuracy"] == 0.5 and improved["recent_attempted"] == 10
+    assert improved["recent_marks_accuracy"] == 0.8 and improved["weakness_indicator"] is False
+    slipped = summarize(later + early)[0]
+    assert slipped["weakness_indicator"] is True
+    assert all(TopicMetric.model_validate(m) for m in (improved, slipped))
+
+
+def test_a_needs_practice_flag_must_match_the_recent_marks():
+    metric = summarize([row(str(uuid4()), False, 9, 10) for _ in range(5)])[0]
+    with pytest.raises(ValidationError):
+        TopicMetric.model_validate(metric | {"weakness_indicator": True})
 
 
 def test_topics_are_sorted_and_rows_add_up():

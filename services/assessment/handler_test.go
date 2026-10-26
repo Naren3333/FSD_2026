@@ -164,6 +164,8 @@ func (m *memoryStore) insertSubmission(_ context.Context, v Assessment, sub Subm
 		return false, false, platform.ErrNotFound
 	case !sameMarking(current, v):
 		return false, false, errAssessmentChanged
+	case !current.visibleToStudents(sub.SubmittedAt):
+		return false, false, platform.ErrNotFound
 	case current.closed(sub.SubmittedAt):
 		return false, false, errClosed
 	}

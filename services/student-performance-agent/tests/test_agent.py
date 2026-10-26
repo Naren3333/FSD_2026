@@ -323,6 +323,16 @@ def test_only_the_newest_results_assessments_are_read(api, fakes: Fakes):
     assert len(fakes.calls("/v1/assessments/batch")[0]["ids"]) == workspace.MAX_RESULTS
 
 
+def test_finalized_results_behind_a_page_of_drafts_are_found(api, fakes: Fakes):
+    drafts = [finalized(id=f"00000000-0000-4000-8000-{i:012d}", status="draft") for i in range(100)]
+    fakes.evaluations = [*drafts, finalized()]
+    fakes.replies = [reply(report(possible_misconceptions=[]))]
+    main.app.state.settings = dataclasses.replace(SETTINGS, max_turns=1)
+    assert api.post(PATH, json=BODY, headers=as_user()).status_code == 200
+    offsets = [r.url.params["offset"] for p, _, r in fakes.requests if p == "/v1/evaluations"]
+    assert offsets == ["0", "100"]
+
+
 def test_the_model_is_told_which_results_are_not_released(api, fakes: Fakes):
     fakes.evaluations = [finalized(released_at=None)]
     fakes.replies = [reply(report(possible_misconceptions=[]))]

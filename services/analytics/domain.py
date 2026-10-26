@@ -7,6 +7,12 @@ from learning_transport.kafka import Envelope
 from pydantic import Field, model_validator
 
 FINALIZED = "grading.finalized.v3"
+# a topic's needs-practice flag reads its latest questions only, so a student who improved loses it.
+RECENT_QUESTIONS = 10
+# fewer questions than this is too little evidence to report on or to flag.
+MIN_EVIDENCE = 5
+# needs practice: under this share of the marks on the topic's latest questions.
+WEAKNESS_MARKS = 0.6
 
 
 class Evidence(Contract):
@@ -34,6 +40,8 @@ class Finalized(Contract):
     org_id: str = Field(min_length=1)
     student_id: str = Field(min_length=1)
     evidence: list[Evidence] = Field(min_length=1, max_length=50)
+    # each reopen raises it (adr 0016); events from before carry none and are revision 1.
+    revision: int = Field(default=1, ge=1, strict=True)
 
     @model_validator(mode="after")
     def unique_questions(self) -> "Finalized":
@@ -72,7 +80,7 @@ class AssessmentDeletedEvent(Envelope):
 
 
 class TopicMetric(Contract):
-    """a topic's finalized evidence: questions attempted and answered with full marks, and the marks earned out of the marks possible (which shows part marks)."""
+    """a topic's finalized evidence: questions attempted and answered with full marks, and the marks earned out of the marks possible (which shows part marks). the needs-practice flag reads the share of marks on the topic's latest ten questions."""
 
     topic_id: UUID
     attempted: int = Field(ge=1)
@@ -80,6 +88,8 @@ class TopicMetric(Contract):
     observed_accuracy: float = Field(ge=0, le=1)
     marks_awarded: int = Field(ge=0)
     marks_possible: int = Field(ge=1)
+    recent_attempted: int = Field(ge=1, le=RECENT_QUESTIONS)
+    recent_marks_accuracy: float = Field(ge=0, le=1)
     evidence_status: Literal["insufficient_evidence", "observed"]
     weakness_indicator: bool
 
@@ -89,9 +99,15 @@ class TopicMetric(Contract):
             raise ValueError("Accuracy must match the observed counts")
         if self.marks_awarded > self.marks_possible or self.marks_possible < self.attempted:
             raise ValueError("Marks must match the observed questions")
-        expected = "insufficient_evidence" if self.attempted < 5 else "observed"
+        if self.recent_attempted != min(self.attempted, RECENT_QUESTIONS):
+            raise ValueError("Recent evidence must be the latest questions")
+        expected = "insufficient_evidence" if self.attempted < MIN_EVIDENCE else "observed"
         if self.evidence_status != expected:
             raise ValueError("Evidence status does not match the reporting threshold")
+        if self.weakness_indicator and (
+            self.recent_attempted < MIN_EVIDENCE or self.recent_marks_accuracy >= WEAKNESS_MARKS
+        ):
+            raise ValueError("Needs practice does not match the recent marks")
         return self
 
 
@@ -135,24 +151,29 @@ def by_student(students: list[str], rows: list[dict[str, Any]]) -> list[dict[str
 
 
 def summarize(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    """each topic's counts from evidence rows (topic_id, correct, awarded, possible)."""
-    counts: dict[str, list[int]] = defaultdict(lambda: [0, 0, 0, 0])
+    """each topic's counts from evidence rows (topic_id, correct, awarded, possible), oldest first."""
+    by_topic: dict[str, list[dict[str, Any]]] = defaultdict(list)
     for row in rows:
-        topic = counts[str(row["topic_id"])]
-        topic[0] += 1
-        topic[1] += int(row["correct"])
-        topic[2] += int(row["awarded"])
-        topic[3] += int(row["possible"])
-    return [
-        {
-            "topic_id": topic,
-            "attempted": n,
-            "correct": correct,
-            "observed_accuracy": round(correct / n, 4),
-            "marks_awarded": awarded,
-            "marks_possible": possible,
-            "evidence_status": "insufficient_evidence" if n < 5 else "observed",
-            "weakness_indicator": n >= 5 and correct / n < 0.6,
-        }
-        for topic, (n, correct, awarded, possible) in sorted(counts.items())
-    ]
+        by_topic[str(row["topic_id"])].append(row)
+    return [_topic(topic, topic_rows) for topic, topic_rows in sorted(by_topic.items())]
+
+
+def _topic(topic: str, rows: list[dict[str, Any]]) -> dict[str, Any]:
+    n = len(rows)
+    correct = sum(int(r["correct"]) for r in rows)
+    recent = rows[-RECENT_QUESTIONS:]
+    recent_awarded = sum(int(r["awarded"]) for r in recent)
+    recent_possible = sum(int(r["possible"]) for r in recent)
+    return {
+        "topic_id": topic,
+        "attempted": n,
+        "correct": correct,
+        "observed_accuracy": round(correct / n, 4),
+        "marks_awarded": sum(int(r["awarded"]) for r in rows),
+        "marks_possible": sum(int(r["possible"]) for r in rows),
+        "recent_attempted": len(recent),
+        "recent_marks_accuracy": round(recent_awarded / recent_possible, 4),
+        "evidence_status": "insufficient_evidence" if n < MIN_EVIDENCE else "observed",
+        "weakness_indicator": len(recent) >= MIN_EVIDENCE
+        and recent_awarded < WEAKNESS_MARKS * recent_possible,
+    }

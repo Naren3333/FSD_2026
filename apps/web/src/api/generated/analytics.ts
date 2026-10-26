@@ -38,6 +38,8 @@ export interface components {
       observed_accuracy: number;
       marks_awarded: number;
       marks_possible: number;
+      recent_attempted: number;
+      recent_marks_accuracy: number;
       evidence_status: 'insufficient_evidence' | 'observed';
       weakness_indicator: boolean;
     };

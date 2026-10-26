@@ -113,13 +113,14 @@ services:
     - for topic in content.uploaded.v1 content.indexed.v1 content.deleted.v1 assessment.submitted.v4
       grading.finalized.v3 identity.classroom.deleted.v1 assessment.deleted.v1
       identity.enrollment.removed.v1 assessment.due_changed.v1 identity.user.deleted.v1
-      assessment.submitted.v4.dlq grading.finalized.v3.dlq
+      grading.reopened.v1
+      assessment.submitted.v4.dlq grading.finalized.v3.dlq grading.reopened.v1.dlq
       identity.classroom.deleted.v1.dlq assessment.deleted.v1.dlq content.deleted.v1.dlq
       identity.enrollment.removed.v1.dlq assessment.due_changed.v1.dlq identity.user.deleted.v1.dlq; do /opt/kafka/bin/kafka-topics.sh
       --bootstrap-server kafka:9092 --create --if-not-exists --topic $$topic --partitions
       3 --replication-factor 1; done;
-      for topic in assessment.submitted.v4 grading.finalized.v3
-      assessment.submitted.v4.dlq grading.finalized.v3.dlq
+      for topic in assessment.submitted.v4 grading.finalized.v3 grading.reopened.v1
+      assessment.submitted.v4.dlq grading.finalized.v3.dlq grading.reopened.v1.dlq
       identity.classroom.deleted.v1.dlq assessment.deleted.v1.dlq content.deleted.v1.dlq
       identity.enrollment.removed.v1.dlq assessment.due_changed.v1.dlq identity.user.deleted.v1.dlq;
       do /opt/kafka/bin/kafka-configs.sh --bootstrap-server kafka:9092 --alter --entity-type topics

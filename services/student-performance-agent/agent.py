@@ -121,10 +121,9 @@ class Agent:
         """the student's released topic summary and finalized results, and the names of their topics."""
         summary, evaluations = await asyncio.gather(
             self.services.performance(self.authorization, classroom, student, self.correlation),
-            self.services.results(self.authorization, classroom, student, self.correlation),
+            self.services.results(self.authorization, classroom, student, self.correlation, MAX_RESULTS),
         )
         # only the newest results reach the workspace, so only their assessments are read.
-        evaluations = evaluations[:MAX_RESULTS]
         try:
             self.workspace.add_summary(list(summary.get("topics") or []))
         except (KeyError, TypeError, ValueError, AttributeError):

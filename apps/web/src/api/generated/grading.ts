@@ -4,6 +4,15 @@ export type paths = Record<string, never>;
 export type webhooks = Record<string, never>;
 export interface components {
   schemas: {
+    BulkFinalizeRequest: {
+      assessment_id: string;
+      reason?: string;
+    };
+    BulkFinalized: {
+      assessment_id: string;
+      finalized: number;
+      needs_marking: number;
+    };
     CriterionScore: {
       criterion_id: string;
       points: number;
@@ -59,6 +68,7 @@ export interface components {
       drafts: number;
       finalized: number;
       unreleased: number;
+      ready: number;
     };
     Mark: {
       criteria?: {
@@ -97,6 +107,9 @@ export interface components {
     Release: {
       assessment_id: string;
       released: number;
+    };
+    ReopenRequest: {
+      reason: string;
     };
     Suggestion: {
       status: 'pending' | 'ready' | 'failed';

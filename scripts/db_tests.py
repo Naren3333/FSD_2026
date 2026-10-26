@@ -97,7 +97,7 @@ def run(command: list[str], extra: dict[str, str]) -> str:
 PYTHON_SUITES = [
     ("question-chatbot-agent", "CHATBOT_TEST_DATABASE_URL", "chatbot", "tests/test_store.py"),
     ("ai-core", "AICORE_TEST_DATABASE_URL", "aicore", "tests/test_ledger.py"),
-    ("analytics", "ANALYTICS_TEST_DATABASE_URL", "analytics", "test_store.py"),
+    ("analytics", "ANALYTICS_TEST_DATABASE_URL", "analytics", "test_store.py test_revisions.py"),
 ]
 
 if __name__ == "__main__":

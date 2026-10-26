@@ -581,7 +581,7 @@ def class_dashboard(u: Users, room_id: str, graded: Graded) -> None:
         {"title": a["title"], "submissions": a["submissions"]} for a in request(u.teacher, "GET", progress)
     ]
     counts = f"/grading/evaluations/counts{query}"
-    assert request(u.teacher, "GET", counts) == {"drafts": 0, "finalized": 1, "unreleased": 0}
+    assert request(u.teacher, "GET", counts) == {"drafts": 0, "finalized": 1, "unreleased": 0, "ready": 0}
     performance = f"/analytics/performance{query}&limit=50"
     page = request(u.teacher, "GET", performance)
     assert page["total"] >= 1 and page["offset"] == 0
@@ -823,12 +823,13 @@ def marking(u: Users, room_id: str, late: Late) -> None:
     )
     assert sql_value("grading", finalized_events) == "0", "grading.finalized.v3 was published before release"
     counts = f"/grading/evaluations/counts?classroom_id={room_id}"
-    assert request(u.teacher, "GET", counts) == {"drafts": 0, "finalized": 2, "unreleased": 1}
+    assert request(u.teacher, "GET", counts) == {"drafts": 0, "finalized": 2, "unreleased": 1, "ready": 0}
     # one assessment's counts are those its release acts on.
     assert request(u.teacher, "GET", f"{counts}&assessment_id={late.assessment_id}") == {
         "drafts": 0,
         "finalized": 1,
         "unreleased": 1,
+        "ready": 0,
     }
     release = "/grading/evaluations/release"
     request(u.student, "POST", release, 403, json={"assessment_id": late.assessment_id})
@@ -1028,8 +1029,8 @@ def databases() -> None:
         ("content", "1,2,3,4,5,6"),
         ("identity", "1,2,3,4,5,6,7,8"),
         ("assessment", "1,2,3,4,5"),
-        ("grading", "1,2,3,4,5,6,7"),
-        ("analytics", "1,2,3,4,5,6"),
+        ("grading", "1,2,3,4,5,6,7,8"),
+        ("analytics", "1,2,3,4,5,6,7"),
         ("curriculum", "1,2"),
         ("chatbot", "1,2,3,4,5,6"),
         ("aicore", "1,2,3"),
@@ -1165,6 +1166,7 @@ def run() -> None:
     graded = step("Assessment and grading", lambda: assess_and_grade(users, room_id))
     step("Restart and replayed events", lambda: replayed_events(users, room_id, graded))
     step("Class dashboard", lambda: class_dashboard(users, room_id, graded))
+    step("Reopening and bulk finalizing", lambda: reopen_and_bulk_finalize(users, room_id, graded))
     step("Performance interpretation", lambda: performance_interpretation(users, room_id))
     late = step("Assessment lifecycle", lambda: lifecycle(users, room_id))
     step("Marking and release", lambda: marking(users, room_id, late))
@@ -1177,6 +1179,65 @@ def run() -> None:
     step("Protected operational measurements", lambda: operational_metrics(users))
     step("Per-session rate limit", rate_limit_per_session)
     step("Removing this run's topics", remove_topics)
+
+
+def reopen_and_bulk_finalize(u: Users, room_id: str, graded: Graded) -> None:
+    """a released grade reopened to correct leaves the student's results and analytics until a bulk finalize puts it back, and an older revision replayed afterwards changes nothing (adr 0016)."""
+    grade = str(UUID(graded.grade_id))  # returned by a verified api
+    reopen = f"/grading/evaluations/{grade}/reopen"
+    request(u.student, "POST", reopen, 403, json={"reason": "Forbidden"})
+    request(u.other, "POST", reopen, 403, json={"reason": "Forbidden"})
+    request(u.teacher, "POST", reopen, 422, json={"reason": " "})
+    assessment = request(u.teacher, "POST", reopen, json={"reason": "Correcting a mark"})["assessment_id"]
+    request(u.teacher, "POST", reopen, 409, json={"reason": "Again"})
+    mine = f"/grading/evaluations/mine/page?classroom_id={room_id}&limit=1"
+    assert request(u.student, "GET", mine) == {"items": [], "total": 0}
+    counts = f"/grading/evaluations/counts?classroom_id={room_id}&assessment_id={assessment}"
+    assert request(u.teacher, "GET", counts) == {"drafts": 1, "finalized": 0, "unreleased": 0, "ready": 1}
+    eventually(
+        lambda: request(u.teacher, "GET", graded.performance_path)["topics"],
+        lambda topics: topics == [],
+        "analytics withdrawal",
+    )
+
+    bulk = "/grading/evaluations/finalize"
+    request(u.student, "POST", bulk, 403, json={"assessment_id": assessment})
+    request(u.other, "POST", bulk, 403, json={"assessment_id": assessment})
+    done = request(u.teacher, "POST", bulk, json={"assessment_id": assessment})
+    assert (done["finalized"], done["needs_marking"]) == (1, 0), done
+    assert request(u.teacher, "POST", bulk, json={"assessment_id": assessment})["finalized"] == 0
+    page = request(u.student, "GET", mine)
+    assert page["total"] == 1 and [r["id"] for r in page["items"]] == [graded.grade_id]
+    eventually(
+        lambda: request(u.teacher, "GET", graded.performance_path)["topics"],
+        lambda topics: topics == graded.topics,
+        "corrected grade in analytics",
+    )
+
+    # the first revision's event, replayed under a fresh id after the correction, is older and ignored.
+    first = sql_value(
+        "grading",
+        f"SELECT body FROM outbox WHERE partition_key='{grade}' AND topic='grading.finalized.v3' "
+        "ORDER BY created_at LIMIT 1",
+    )
+    event = json.loads(first)
+    assert event["data"].get("revision", 1) == 1, event["data"]
+    older = str(uuid4())
+    publish("grading.finalized.v3", grade, {**event, "event_id": older})
+    again = str(uuid4())
+    reopened = {**event, "event_type": "grading.reopened.v1", "event_id": again}
+    reopened["data"] = {
+        k: event["data"][k]
+        for k in ("evaluation_id", "assessment_id", "classroom_id", "org_id", "student_id")
+    }
+    reopened["data"]["revision"] = 2
+    publish("grading.reopened.v1", grade, reopened)  # the same reopen again, under a new event id
+    eventually(
+        lambda: sql_value("analytics", f"SELECT count(*) FROM inbox WHERE event_id IN ('{older}','{again}')"),
+        lambda n: n == "2",
+        "replayed revision events",
+    )
+    assert request(u.teacher, "GET", graded.performance_path)["topics"] == graded.topics
 
 
 def operational_metrics(users: Users) -> None:

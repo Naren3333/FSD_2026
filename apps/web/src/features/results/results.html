@@ -10,7 +10,7 @@
   />
 </app-page-header>
 <section class="results-list" aria-label="Results">
-  <p class="caption">Up to 100 most recent results</p>
+  <p class="caption">Newest first</p>
   <app-section-state [section]="results" loading="Loading results…" />
   @if (results.ready()) {
     @for (result of results.value()?.results ?? []; track result.id) {
@@ -76,4 +76,14 @@
       </div>
     }
   }
+  <app-pager
+    label="Results pages"
+    [page]="page()"
+    (pageChange)="page.set($event)"
+    [pageSize]="pageSize"
+    [total]="total()"
+    noun="results"
+    [disabled]="results.loading() || !classroomId()"
+    (go)="load()"
+  />
 </section>

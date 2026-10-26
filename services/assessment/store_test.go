@@ -452,6 +452,25 @@ func TestAReplacementsNewDueDateIsAnnounced(t *testing.T) {
 
 // a submission is judged against the due date and late policy stored when it commits, which the teacher may
 // have changed since the handler read them, and reports the late flag it stored.
+func TestASubmissionWaitsForTheOpeningAsStored(t *testing.T) {
+	p, ctx := testStore(t), context.Background()
+	v := stored(t, p, "org", statusPublished, nil)
+	later := v
+	opens := time.Now().Add(time.Hour)
+	later.OpensAt = &opens
+	if err := p.updateAssessment(ctx, "org", v, later); err != nil {
+		t.Fatal(err)
+	}
+	// the student opened it before the teacher moved its opening later.
+	sub := Submission{ID: uuid.NewString(), Org: "org", Student: "s", Answers: map[string]string{v.Questions[0].ID: "2"}, SubmittedAt: time.Now()}
+	if _, _, err := p.insertSubmission(ctx, v, sub); !errors.Is(err, platform.ErrNotFound) {
+		t.Fatalf("a submission before the new opening: %v", err)
+	}
+	if n := count(t, p, "SELECT count(*) FROM submissions WHERE assessment_id=$1", v.ID); n != 0 {
+		t.Fatalf("%d stored", n)
+	}
+}
+
 func TestASubmissionTakesTheLatePolicyAsStored(t *testing.T) {
 	p, ctx := testStore(t), context.Background()
 	v := stored(t, p, "org", statusPublished, nil)
