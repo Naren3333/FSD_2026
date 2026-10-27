@@ -70,8 +70,12 @@ class Services(AgentClients):
                     await resp.aread()
                     raise self.ai_core_refused(resp)
                 async for event, data in read_events(resp.aiter_lines()):
+                    if not isinstance(data, dict):
+                        raise UpstreamError("ai-core", 502, "AI_PROVIDER_FAILED")
                     if event == "delta":
-                        yield data["text"]
+                        if not isinstance(text := data.get("text"), str):
+                            raise UpstreamError("ai-core", 502, "AI_PROVIDER_FAILED")
+                        yield text
                     elif event == "done":
                         yield Done(data.get("model_version"), data.get("usage_tokens"))
                         return

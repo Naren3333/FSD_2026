@@ -82,7 +82,6 @@ class Workspace:
     results: list[Result] = field(default_factory=list)
     topics: dict[str, Topic] = field(default_factory=dict)  # by topic id
     summary: list[dict[str, Any]] = field(default_factory=list)  # analytics' topic metrics
-    read: set[str] = field(default_factory=set)  # evidence refs whose answers the model has seen
 
     # ---- building it
 
@@ -220,7 +219,6 @@ class Workspace:
         chosen = [q for q in result.questions if topic is None or q.topic_id == topic.topic_id]
         chosen.sort(key=lambda q: (not q.lost_marks, q.ref))
         shown = chosen[:MAX_READ]
-        self.read.update(q.ref for q in shown)
         return {
             "assessment": result.title,
             "questions": [self._answer(q) for q in shown],

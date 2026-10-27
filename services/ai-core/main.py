@@ -147,7 +147,10 @@ async def usage_today(
         raise ledger_unavailable() from None
 
 
-@app.post("/v1/inference", response_model=ResponseContract, responses=ERRORS)
+# a structured reply that ran out of its time, or of the time the caller gave it, is a 504 AI_TIMEOUT.
+@app.post(
+    "/v1/inference", response_model=ResponseContract, responses={**ERRORS, 504: {"model": ErrorResponse}}
+)
 async def execute(request: RequestContract, http: Request, _caller: Claims = Depends(SERVICE)) -> Any:
     return await budgeted(http, request.billed_to, lambda: execute_reserved(request, http))
 
@@ -197,7 +200,11 @@ async def infer(request: RequestContract, http: Request, slot: Slot) -> Any:
 
             return ClosingStream(events(first, stream, bill), finish)
         reply = await openai_client.generate(
-            messages, request.max_tokens, request.response_schema, name=request.schema_name or ""
+            messages,
+            request.max_tokens,
+            request.response_schema,
+            name=request.schema_name or "",
+            timeout=request.timeout,
         )
     except openai_client.StructuredOutputError as error:
         # openai bills a refused or cut-off reply like any other: charge it, then refuse it.
@@ -219,6 +226,8 @@ async def infer(request: RequestContract, http: Request, slot: Slot) -> Any:
             await billing.charge_timeout(
                 billed, correlation, operation, settings.chat_model, messages, request.max_tokens
             )
+            if operation == "generate":
+                raise failure(504, "AI_TIMEOUT", "The model did not answer in time.") from None
         provider_error(error)
     except PROVIDER_ERRORS as error:
         provider_error(error)

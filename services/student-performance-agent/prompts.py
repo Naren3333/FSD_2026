@@ -84,14 +84,31 @@ def messages(
         if final
         else f"Call up to {MAX_CALLS} tools, or report if you have enough.",
     }
-    # the history gets what the rest leaves of ai-core's message, so the cut below never splits the json; the
-    # opening can grow past its budget as tools add topics.
+    # the history gets what the rest leaves of ai-core's message; the opening can grow past its budget as tools
+    # add topics.
     room = MAX_MESSAGE - len(json.dumps(task, ensure_ascii=False)) - 2 * len(history)
     task["tool_history"] = fitting(history, min(HISTORY_BUDGET, room))
+    content = json.dumps(task, ensure_ascii=False)
+    # still too long: the newest topics' names go (the tool results that added them name them too), never a cut
+    # through the json.
+    while len(content) > MAX_MESSAGE and opening.get("topics"):
+        opening["topics"].pop()
+        content = json.dumps(task, ensure_ascii=False)
     return [
         {"role": "system", "content": INSTRUCTIONS},
-        {"role": "user", "content": json.dumps(task, ensure_ascii=False)[:MAX_MESSAGE]},
+        {"role": "user", "content": content},
     ]
+
+
+def shown(messages: list[dict[str, str]]) -> set[str]:
+    """the evidence refs whose answers are in the task as sent; a read_answers result trimmed from it no longer counts."""
+    history = json.loads(messages[-1]["content"])["tool_history"]
+    return {
+        q["evidence"]
+        for h in history
+        if h["call"]["tool"] == "read_answers" and isinstance(h["output"], dict)
+        for q in h["output"].get("questions") or []
+    }
 
 
 def fitting(history: list[dict[str, Any]], budget: int = HISTORY_BUDGET) -> list[dict[str, Any]]:

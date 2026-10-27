@@ -26,6 +26,7 @@ from conftest import (
     tools,
 )
 from fastapi.testclient import TestClient
+from learning_transport import agents
 
 import agent
 import main
@@ -181,13 +182,27 @@ def test_refused_and_failed_tools_are_reported_to_the_model_and_the_teacher(api,
     assert errors[4] == "You already made this call; its result is above."
 
 
-def test_an_unreadable_turn_is_skipped(api, fakes: Fakes):
+def test_an_unreadable_turn_is_followed_by_a_report(api, fakes: Fakes):
     fakes.replies = [
         httpx.Response(200, json={"output": "not json", "model_version": "m", "usage_tokens": 1}),
-        reply(done(possible_misconceptions=[])),
+        reply(report(possible_misconceptions=[])),
     ]
     resp = api.post(PATH, json=BODY, headers=as_user())
     assert resp.status_code == 200 and resp.json()["dropped"] == {"UNREADABLE_TURN": 1}
+    assert fakes.calls("/v1/inference")[1]["schema_name"] == "performance.report"
+
+
+def test_a_failed_tool_turn_still_reports_what_was_gathered(api, fakes: Fakes):
+    fakes.replies = [
+        reply(tools(call("class_comparison"))),
+        httpx.Response(502, json={"error": {"code": "AI_PROVIDER_FAILED", "message": "x"}}),
+        reply(report(possible_misconceptions=[])),
+    ]
+    resp = api.post(PATH, json=BODY, headers=as_user())
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["dropped"] == {"FAILED_TURN": 1} and resp.json()["model_turns"] == 3
+    assert [s["outcome"] for s in resp.json()["steps"]] == ["ok"]
+    assert fakes.calls("/v1/inference")[2]["schema_name"] == "performance.report"
 
 
 def test_answers_reach_the_model_as_data(api, fakes: Fakes):
@@ -302,6 +317,8 @@ def test_every_call_is_cut_off_inside_the_budget(api, fakes: Fakes):
         "timeout"
     ]
     assert timeout["read"] <= 100.0 - agent.REPORT_RESERVE
+    # ai-core is told to give up first, so it never finishes and bills a reply nobody waits for.
+    assert fakes.calls("/v1/inference")[0]["timeout"] <= timeout["read"] - agents.REPLY_MARGIN
     main.app.state.settings = dataclasses.replace(SETTINGS, budget=agent.REPORT_RESERVE)
     fakes.replies = [reply(report(possible_misconceptions=[]))]
     resp = api.post(PATH, json=BODY, headers=as_user())

@@ -302,7 +302,8 @@ class Turn:
             searches.append(outcome)
         self.top_score = max((float(r["score"]) for rs in searches for r in rs), default=None)
         if len(searches) == 1:
-            self.results = searches[0]
+            # the turn is gated on the best passage; a much weaker one is not offered as evidence.
+            self.results = [r for r in searches[0] if float(r["score"]) >= self.settings.topic_floor]
             return
         merged = merge(searches, self.settings.relevance_floor, self.settings.topic_floor)
         self.results = [r for r, _ in merged]
@@ -501,7 +502,7 @@ def _covered(primary: list[dict[str, Any]], query: str, floor: float) -> list[di
 def merge(
     searches: list[list[dict[str, Any]]], floor: float, topic_floor: float
 ) -> list[tuple[dict[str, Any], int]]:
-    """one list from several searches, each best first, as (result, the index of the search that found it): they take turns giving their next passage, so each topic gets its share."""
+    """one list from several searches, each best first, as (result, the index of the search that found it): they take turns giving their next passage, so each topic gets its share. a passage below `topic_floor` is left out."""
     queues = [
         (n, list(rs))
         for n, rs in enumerate(searches)
@@ -515,7 +516,11 @@ def merge(
             while queue:
                 r = queue.pop(0)
                 chunk, document = str(r["chunk_id"]), str(r.get("document_id"))
-                if chunk in taken or per_document.get(document, 0) >= PER_DOCUMENT:
+                if (
+                    chunk in taken
+                    or float(r["score"]) < topic_floor
+                    or per_document.get(document, 0) >= PER_DOCUMENT
+                ):
                     continue
                 taken.add(chunk)
                 per_document[document] = per_document.get(document, 0) + 1

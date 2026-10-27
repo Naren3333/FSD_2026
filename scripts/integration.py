@@ -69,9 +69,28 @@ def sql_value(service: str, sql: str) -> str:
     return psql_value(sql, database=service, user=service)
 
 
+# a session signs in again after this many seconds, inside keycloak's 5-minute access token lifespan: a full run
+# takes longer than one token lasts.
+TOKEN_RENEWAL = 240.0
+
+
+class SignedIn(httpx.Auth):
+    """a person's bearer token, renewed before it expires."""
+
+    def __init__(self, username: str, password_key: str) -> None:
+        self.username, self.password_key = username, password_key
+        self.token, self.signed_in = "", 0.0
+
+    def auth_flow(self, request: httpx.Request) -> Any:
+        if not self.token or time.monotonic() - self.signed_in > TOKEN_RENEWAL:
+            self.token = password_token(self.username, env()[self.password_key])
+            self.signed_in = time.monotonic()
+        request.headers["Authorization"] = "Bearer " + self.token
+        yield request
+
+
 def login(username: str, password_key: str) -> httpx.Client:
-    token = password_token(username, env()[password_key])
-    return httpx.Client(base_url=BASE, headers={"Authorization": "Bearer " + token}, timeout=25)
+    return httpx.Client(base_url=BASE, auth=SignedIn(username, password_key), timeout=25)
 
 
 def service_token(client_id: str) -> str:

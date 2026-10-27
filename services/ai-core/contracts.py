@@ -25,6 +25,9 @@ class RequestContract(Contract):
     schema_name: str | None = Field(default=None, pattern=r"^[A-Za-z0-9_.-]{1,64}$")
     stream: bool = False
     model_profile: Literal["default"] = "default"
+    # the seconds the caller waits for a non-streamed reply; ai-core gives up first instead of finishing a reply
+    # nobody reads.
+    timeout: float | None = Field(default=None, ge=1, le=300)
     billed_to: Billed  # whose daily ai allowance pays for the call (adr 0003)
 
     @model_validator(mode="after")
@@ -41,6 +44,8 @@ class RequestContract(Contract):
             raise ValueError("generate takes input or messages")
         elif self.stream and self.response_schema is not None:
             raise ValueError("a structured reply cannot be streamed")
+        elif self.stream and self.timeout is not None:
+            raise ValueError("a streamed reply takes no timeout")
         if self.response_schema is not None and len(json.dumps(self.response_schema)) > MAX_SCHEMA_CHARS:
             raise ValueError(f"response_schema is over {MAX_SCHEMA_CHARS} characters as JSON")
         return self

@@ -93,6 +93,27 @@ flowchart LR
 
 ai-core implements `/v1/ingest` (PDF bytes in; chunks, vectors and figure crops out), `/v1/inference` (embed, generate, structured or streamed generation) and `/v1/rerank` (Content sends each hit's title, section path and content, and ai-core builds the scored text with the same rule it used for the embedded text), statelessly: Content stores the results. Provider failures are errors (502/503), never placeholder output; Content retries indexing and answers search with 503 `SEARCH_UNAVAILABLE` instead of inventing results.
 
+One chatbot turn:
+
+```mermaid
+flowchart TD
+  Msg([Student or teacher message]) --> Simple{"First turn, short single-subject<br/>'what is / define / explain'?"}
+  Simple -->|yes| Search
+  Simple -->|no| Rewrite["ai-core rewrite: standalone query,<br/>on topic?, small talk?, sub-topics"]
+  Rewrite -->|small talk| Small[Answer without documents]
+  Rewrite -->|off topic| Refuse[Refusal, no answer call]
+  Rewrite --> Search["Content search with the user's token:<br/>the whole query, then each sub-topic not already covered"]
+  Search --> Floor{Best passage above the relevance floor?}
+  Floor -->|no| Refuse
+  Floor -->|yes| Fit["Keep passages that fit the prompt,<br/>one per sub-topic first"]
+  Fit --> Answer[ai-core streamed answer with citation tags]
+  Answer --> Cite["Tags mapped to chunks;<br/>a note names sub-topics left uncited"]
+  Small --> Save
+  Refuse --> Save
+  Cite --> Save[(Save the turn in the chatbot database)]
+  Save --> Events([citations and done events])
+```
+
 Every paid call is charged to a user (ADR 0003): callers pass `billed_to` (the searching or chatting user, or the teacher who uploaded the document being indexed), and ai-core records each call's cost in its own `aicore` database. Before a call it refuses with `429 AI_SPEND_LIMIT` once the user's spend since local midnight reaches the daily limit ($5 for a student, $10 for a teacher). The chatbot shows the user their spend through `GET /v1/usage`.
 
 Content's index: a PDF upload commits the document (status `indexing`) and its `index_jobs` row together. Worker goroutines lease due jobs with `FOR UPDATE SKIP LOCKED`; the result is stored in one transaction that first deletes the job by its lease, so a run that lost its lease (outlived it, or was taken over) changes nothing and `content.indexed.v1` is emitted once per completed run. Chunks carry copies of the document's org, classroom and type, kept identical by a composite foreign key, so search filters on them without a join; vectors are compared only within the query's embedding model. A reindex keeps the old chunks searchable until the new result replaces them; a reindex that fails leaves them searchable while the document shows `failed`. Cached query vectors expire after 10 minutes and are dropped when the embedding model changes; identical misses coalesce within a replica. Document deletion and classroom purge commit durable object cleanup jobs with their metadata changes; leased workers retry object removal after commit. ai-core locally extracts clean PDF text and selects uncertain graphics/layout for vision, reuses versioned preparation and exact embeddings, and groups landscape slides at page boundaries (ADR 0012). Search applies the caller's own classroom access (through Identity) and, for students, teaching material only; the chatbot calls it with the student's token, so an agent never gets wider access than its user. The chatbot stores only threads and messages (with the chunk ids each answer was given and cited) in its own `chatbot` database.
