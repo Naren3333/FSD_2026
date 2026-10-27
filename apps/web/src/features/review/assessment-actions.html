@@ -1,0 +1,52 @@
+@if (assessmentId && unreleased; as count) {
+  <div class="release-box">
+    <p class="caption">
+      {{ count }} finalized {{ count === 1 ? 'grade is' : 'grades are' }} hidden from students until you
+      release them.
+    </p>
+    <button (click)="askRelease()" [disabled]="busy || releaseState.busy()">Release results</button>
+  </div>
+}
+@if (assessmentId && ready; as count) {
+  <div class="release-box">
+    <p class="caption">{{ count }} {{ count === 1 ? 'draft has' : 'drafts have' }} every question marked.</p>
+    <button type="button" class="secondary" (click)="askFinalizeAll()" [disabled]="busy || bulkState.busy()">
+      Finalize all fully marked
+    </button>
+  </div>
+}
+<app-confirm-dialog
+  #releaseDialog
+  dialogId="release"
+  heading="Release these results?"
+  confirmLabel="Release results"
+  [state]="releaseState"
+  (confirm)="release()"
+  (closed)="releasing.set(false)"
+>
+  <p>
+    Students will see their finalized grades and feedback for
+    <strong>{{ assessmentTitle() }}</strong
+    >. Grades you finalize later stay hidden until you release again. This cannot be undone.
+  </p>
+</app-confirm-dialog>
+<app-confirm-dialog
+  #bulkDialog
+  dialogId="finalize-all"
+  heading="Finalize every fully marked grade?"
+  confirmLabel="Finalize grades"
+  [state]="bulkState"
+  (confirm)="finalizeAll()"
+  (closed)="bulkFinalizing.set(false)"
+>
+  <p>
+    {{ ready }} {{ ready === 1 ? 'draft' : 'drafts' }} of <strong>{{ assessmentTitle() }}</strong> with every
+    question marked will be finalized, each recorded as finalized with the assessment's other fully marked
+    grades. Drafts that still need marking stay drafts.
+    @if (releasesByHand()) {
+      Students see them when you release the results.
+    } @else {
+      Students see them at once.
+    }
+  </p>
+</app-confirm-dialog>

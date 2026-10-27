@@ -1,10 +1,10 @@
-import { Component, DestroyRef, ViewChild, computed, inject, signal } from '@angular/core';
+import { Component, ViewChild, computed, inject, signal } from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { FormControl, FormGroup, ReactiveFormsModule } from '@angular/forms';
 import { NavigationEnd, Router } from '@angular/router';
 import { filter } from 'rxjs';
-import { AssessmentApi, GradingApi, IdentityApi } from '../../api/clients';
-import type { Assessment, AssessmentSummary, Evaluation, Evidence } from '../../api/models';
+import { AssessmentApi, GradingApi } from '../../api/clients';
+import type { AssessmentSummary, Evaluation, Evidence } from '../../api/models';
 import { ClassroomContext, onClassroomChange } from '../../core/classroom-context';
 import { onSectionShown, rereadQuietly, sectionOf } from '../../core/section-shown';
 import { CurriculumNames } from '../../core/curriculum-names';
@@ -13,11 +13,10 @@ import { ActionState } from '../../shared/action-state';
 import { ConfirmDialogComponent } from '../../shared/confirm-dialog';
 import { FieldComponent, FieldControlDirective } from '../../shared/field';
 import { messageOf } from '../../shared/errors';
-import { dateTime } from '../../shared/format';
 import { IconComponent } from '../../shared/icon';
 import { MarksPipe } from '../../shared/marks';
 import { NoClassroomComponent } from '../../shared/no-classroom';
-import { EvidenceNames, assessmentsOf, studentNames } from '../../shared/names';
+import { EvidenceNames } from '../../shared/names';
 import { PagerComponent } from '../../shared/pager';
 import { Section } from '../../shared/section';
 import { SectionStateComponent } from '../../shared/section-state';
@@ -27,45 +26,31 @@ import { PageHeaderComponent } from '../../shared/page-header';
 import { RefreshButtonComponent } from '../../shared/refresh-button';
 import {
   applySuggestion,
+  collapsible,
   flagText,
+  levelName,
   markingForm,
+  markingSummary,
   marksOf,
+  outcome,
+  submittedAt,
   suggestionReason,
+  toMark,
   type MarkingForm,
 } from './marking';
+import { AssessmentActionsComponent, type AssessmentActionDone } from './assessment-actions';
+import { ReopenComponent, type Reopened } from './reopen';
 import { focusLater } from '../../shared/focus';
-import { readPage } from '../../shared/paged-section';
-
-/* load evaluations, display names, totals and unreleased grade counts. */
-interface Grades {
-  grades: Evaluation[];
-  /* the page these are, counted from 0. */
-  page: number;
-  total: number;
-  unreleased: number;
-  /* the chosen assessment's drafts with nothing left to mark, across every page: what finalizing all finalizes. */
-  ready: number;
-  students: Map<string, string>;
-  assessments: Map<string, Assessment>;
-}
-
-/* how many grades one page shows; each carries the student's answers. */
-const PAGE_SIZE = 20;
-
-/* how long an open grade first waits before re-reading ai suggestions still being prepared, and the longest wait. */
-const SUGGESTION_POLL = 5000;
-const SUGGESTION_POLL_MAX = 60000;
-
-/* which of the page's grades the queue shows. */
-export type GradeFilter = 'all' | 'mark' | 'draft' | 'finalized';
-
-/* the first draft after the grade `id` in the list, wrapping to earlier ones; the first draft when `id` is not in it. */
-export function draftAfter(list: readonly Evaluation[], id: string): Evaluation | null {
-  const draft = (g: Evaluation) => g.status === 'draft' && g.id !== id;
-  const at = list.findIndex((g) => g.id === id);
-  if (at < 0) return list.find(draft) ?? null;
-  return list.slice(at + 1).find(draft) ?? list.slice(0, at).find(draft) ?? null;
-}
+import {
+  GRADE_FILTERS,
+  GradeReader,
+  PAGE_SIZE,
+  draftAfter,
+  matches,
+  type GradeFilter,
+  type Grades,
+} from './grades';
+import { SuggestionPoll } from './suggestions';
 
 @Component({
   selector: 'app-review',
@@ -83,23 +68,19 @@ export function draftAfter(list: readonly Evaluation[], id: string): Evaluation 
     NoClassroomComponent,
     MarksPipe,
     IconComponent,
+    AssessmentActionsComponent,
+    ReopenComponent,
   ],
   templateUrl: './review.html',
 })
 export class ReviewComponent {
   private readonly grading = inject(GradingApi);
-  private readonly identity = inject(IdentityApi);
   private readonly assessmentApi = inject(AssessmentApi);
   private readonly curriculum = inject(CurriculumNames);
   private readonly router = inject(Router);
+  private readonly reader = new GradeReader();
   readonly classroomId = inject(ClassroomContext).classroomId;
   readonly state = new ActionState();
-  /* releasing an assessment's results, in its confirmation dialog. */
-  readonly releaseState = new ActionState();
-  /* finalizing an assessment's fully marked drafts, in its confirmation dialog. */
-  readonly bulkState = new ActionState();
-  /* reopening a finalized grade, in its confirmation dialog. */
-  readonly reopenState = new ActionState();
   readonly grades = new Section<Grades>();
   readonly names = new EvidenceNames(
     () => this.grades.value()?.assessments,
@@ -125,22 +106,17 @@ export class ReviewComponent {
   });
   /* the queue's status filter, applied to the loaded page only. */
   readonly gradeFilter = signal<GradeFilter>('all');
-  readonly filters: readonly { id: GradeFilter; label: string; empty: string }[] = [
-    { id: 'all', label: 'All', empty: 'No grades on this page.' },
-    { id: 'mark', label: 'To mark', empty: 'No grades to mark on this page.' },
-    { id: 'draft', label: 'Drafts', empty: 'No draft grades on this page.' },
-    { id: 'finalized', label: 'Finalized', empty: 'No finalized grades on this page.' },
-  ];
+  readonly filters = GRADE_FILTERS;
   /* how many of the page's grades each filter keeps. */
   readonly counts = computed(() => {
     const grades = this.grades.value()?.grades ?? [];
-    const count = (kept: GradeFilter) => grades.filter((g) => this.matches(g, kept)).length;
+    const count = (kept: GradeFilter) => grades.filter((g) => matches(g, kept)).length;
     return { all: grades.length, mark: count('mark'), draft: count('draft'), finalized: count('finalized') };
   });
   /* the page's grades the filter keeps, in queue order. */
   readonly shown = computed(() => {
     const kept = this.gradeFilter();
-    return (this.grades.value()?.grades ?? []).filter((g) => this.matches(g, kept));
+    return (this.grades.value()?.grades ?? []).filter((g) => matches(g, kept));
   });
   /* the next draft on the page after the open grade, whatever the filter shows. */
   readonly nextDraft = computed(() => {
@@ -161,18 +137,20 @@ export class ReviewComponent {
   /* correct automatic answers whose override controls are showing, by question id. */
   readonly overriding = signal<ReadonlySet<string>>(new Set());
   readonly finalizing = signal(false);
-  readonly releasing = signal(false);
-  readonly bulkFinalizing = signal(false);
-  readonly reopening = signal(false);
   marks: MarkingForm = new FormGroup({});
   @ViewChild('dialog') dialog?: ConfirmDialogComponent;
-  @ViewChild('releaseDialog') releaseDialog?: ConfirmDialogComponent;
-  @ViewChild('bulkDialog') bulkDialog?: ConfirmDialogComponent;
-  @ViewChild('reopenDialog') reopenDialog?: ConfirmDialogComponent;
+  /* the release and finalize-all banners, and the open finalized grade's reopen, each with its own dialog. */
+  readonly actions = signal<AssessmentActionsComponent | undefined>(undefined);
+  readonly reopener = signal<ReopenComponent | undefined>(undefined);
+  @ViewChild(AssessmentActionsComponent) private set actionsQuery(
+    child: AssessmentActionsComponent | undefined,
+  ) {
+    this.actions.set(child);
+  }
+  @ViewChild(ReopenComponent) private set reopenerQuery(child: ReopenComponent | undefined) {
+    this.reopener.set(child);
+  }
   readonly form = new FormGroup({
-    reason: new FormControl('', { nonNullable: true, validators: requiredText(1000) }),
-  });
-  readonly reopenForm = new FormGroup({
     reason: new FormControl('', { nonNullable: true, validators: requiredText(1000) }),
   });
   /* the chosen assessment's finalized grades its enrolled students cannot see yet, across every page: what a release releases. */
@@ -181,13 +159,29 @@ export class ReviewComponent {
   readonly ready = computed(() => (this.assessmentId() ? (this.grades.value()?.ready ?? 0) : 0));
   /* whether any of this page's dialogs is open, so the page's own status stays out of their way. */
   readonly dialogOpen = computed(
-    () => this.finalizing() || this.releasing() || this.bulkFinalizing() || this.reopening(),
+    () =>
+      this.finalizing() ||
+      !!this.actions()?.releasing() ||
+      !!this.actions()?.bulkFinalizing() ||
+      !!this.reopener()?.reopening(),
   );
+  /* the chosen assessment's title, for the release and finalize-all dialogs. */
+  readonly assessmentTitle = computed(
+    () => this.published.value()?.find((a) => a.id === this.assessmentId())?.title,
+  );
+  /* the chosen assessment's release policy. */
+  readonly releasePolicy = computed(
+    () => this.grades.value()?.assessments.get(this.assessmentId())?.release_policy,
+  );
+  /* whether marks not saved yet hold an action on the whole assessment. */
+  readonly blocked = () => this.unsavedMarks();
   readonly flagText = flagText;
   readonly suggestionReason = suggestionReason;
-  private poll: ReturnType<typeof setTimeout> | undefined;
-  /* the classroom's students' names, read once per classroom (or refresh) rather than for every page. */
-  private names$: { classroomId: string; names: Promise<Map<string, string>> } | null = null;
+  readonly toMark = toMark;
+  readonly outcome = outcome;
+  readonly submittedAt = submittedAt;
+  readonly collapsible = collapsible;
+  private readonly suggestions = new SuggestionPoll(this.selected, this.classroomId);
   /* the grade the address asks for, to open once the page has loaded ('' closes the open one), or null. */
   private requestedGrade: string | null = null;
   /* next to mark moved to the next page, so its first draft opens once it loads. */
@@ -198,8 +192,9 @@ export class ReviewComponent {
   private previousSection = '';
 
   constructor() {
-    inject(UnsavedChanges).track(() => this.form.dirty || this.reopenForm.dirty || this.marks.dirty);
-    inject(DestroyRef).onDestroy(() => clearTimeout(this.poll));
+    inject(UnsavedChanges).track(
+      () => this.form.dirty || !!this.reopener()?.reopenForm.dirty || this.marks.dirty,
+    );
     let shownClassroom = '';
     onClassroomChange((classroomId) => {
       // the assessment and grade of the classroom left behind no longer belong in the address.
@@ -227,7 +222,7 @@ export class ReviewComponent {
       const assessmentId = this.assessmentId();
       if (!classroomId || this.selected()) return;
       // a student enrolled since the names were read would show without one.
-      this.names$ = null;
+      this.reader.forget();
       const same = () => this.classroomId() === classroomId && this.assessmentId() === assessmentId;
       rereadQuietly(this.grades, () => this.read(classroomId, assessmentId, same));
     });
@@ -256,7 +251,7 @@ export class ReviewComponent {
     this.grades.clear();
     this.published.clear();
     this.stopMarking();
-    this.names$ = null;
+    this.reader.forget();
     this.firstDraft = false;
     if (!classroomId) return;
     this.loadGrades();
@@ -324,44 +319,11 @@ export class ReviewComponent {
     this.putAddress(true);
   }
 
-  /* the page of evaluations asked for with the names of their students, assessments, questions and topics. */
+  /* the page of evaluations asked for, and the page it turned out to be while it is still wanted. */
   private async read(classroomId: string, assessmentId: string, current: () => boolean): Promise<Grades> {
-    const { result, page } = await readPage(
-      this.page(),
-      PAGE_SIZE,
-      (offset, limit) => this.grading.evaluations(classroomId, assessmentId, offset, limit),
-      (r) => !r.evaluations.length,
-    );
-    const grades = result.evaluations;
-    const [students, assessments, counts] = await Promise.all([
-      this.studentNames(classroomId),
-      assessmentsOf(grades, (id) => this.assessmentApi.get(id)),
-      assessmentId ? this.grading.counts(classroomId, assessmentId) : null,
-      // without the curriculum, topics show as ids.
-      this.curriculum.need(grades.flatMap((g) => g.evidence.map((e) => e.topic_id))).catch(() => undefined),
-    ]);
-    if (current()) this.page.set(page);
-    return {
-      grades,
-      page,
-      total: result.total,
-      unreleased: counts?.unreleased ?? 0,
-      ready: counts?.ready ?? 0,
-      students,
-      assessments,
-    };
-  }
-
-  /* the classroom's students' names, read once for it; a failed read is tried again next time. */
-  private studentNames(classroomId: string): Promise<Map<string, string>> {
-    if (this.names$?.classroomId !== classroomId) {
-      const names = this.identity.roster(classroomId).then(studentNames);
-      names.catch(() => {
-        if (this.names$?.names === names) this.names$ = null;
-      });
-      this.names$ = { classroomId, names };
-    }
-    return this.names$.names;
+    const value = await this.reader.read(classroomId, assessmentId, this.page());
+    if (current()) this.page.set(value.page);
+    return value;
   }
 
   /* re-reads the page on show after a change that already succeeded. */
@@ -460,7 +422,7 @@ export class ReviewComponent {
     const token = ++this.opening;
     const current = () =>
       token === this.opening && this.classroomId() === classroomId && this.assessmentId() === assessmentId;
-    void this.readGrade(id, classroomId, assessmentId).then(
+    void this.reader.grade(id, classroomId, assessmentId, this.grades).then(
       (grade) => {
         if (current()) this.openGrade(grade);
       },
@@ -472,47 +434,12 @@ export class ReviewComponent {
     );
   }
 
-  /* a grade not on the page, with its assessment's questions and its topics' names, so it can be marked. */
-  private async readGrade(id: string, classroomId: string, assessmentId: string): Promise<Evaluation> {
-    const grade = await this.grading.evaluation(id);
-    if (grade.classroom_id !== classroomId || (assessmentId && grade.assessment_id !== assessmentId))
-      throw new Error('The grade could not be opened.');
-    if (!this.grades.value()?.assessments.has(grade.assessment_id)) {
-      const assessment = await this.assessmentApi.get(grade.assessment_id);
-      const value = this.grades.value();
-      if (value)
-        this.grades.value.set({
-          ...value,
-          assessments: new Map(value.assessments).set(grade.assessment_id, assessment),
-        });
-    }
-    await this.curriculum.need(grade.evidence.map((e) => e.topic_id)).catch(() => undefined);
-    return grade;
-  }
-
   // --- the queue
   // ---------------------------------------------------------------------------------------------
 
   /* the student's roster name, or '' for a student no longer enrolled or not yet named. */
   studentName(grade: Evaluation): string {
     return this.grades.value()?.students.get(grade.student_id) ?? '';
-  }
-  toMark(grade: Evaluation): number {
-    return grade.evidence.filter((e) => e.needs_marking).length;
-  }
-  outcome(evidence: Evidence): string {
-    if (evidence.needs_marking) return 'Needs marking';
-    if (evidence.marked_by === 'teacher') return 'Marked by you';
-    return evidence.correct ? 'Correct' : 'Incorrect';
-  }
-  submittedAt(grade: Evaluation): string {
-    return grade.submitted_at ? dateTime(grade.submitted_at) : '';
-  }
-  private matches(grade: Evaluation, kept: GradeFilter): boolean {
-    if (kept === 'mark') return grade.status === 'draft' && this.toMark(grade) > 0;
-    if (kept === 'draft') return grade.status === 'draft';
-    if (kept === 'finalized') return grade.status === 'finalized';
-    return true;
   }
   filterEmpty(): string {
     return this.filters.find((f) => f.id === this.gradeFilter())?.empty ?? '';
@@ -558,7 +485,7 @@ export class ReviewComponent {
       const questions = this.grades.value()?.assessments.get(grade.assessment_id)?.questions ?? [];
       this.marks = markingForm(grade.evidence, questions);
       this.selected.set(grade);
-      this.watchSuggestions();
+      this.suggestions.watch();
     } else {
       this.viewing.set(grade);
     }
@@ -590,7 +517,7 @@ export class ReviewComponent {
   }
 
   stopMarking(): void {
-    clearTimeout(this.poll);
+    this.suggestions.stop();
     this.marks = new FormGroup({});
     this.selected.set(null);
     this.viewing.set(null);
@@ -602,11 +529,6 @@ export class ReviewComponent {
     return this.studentName(grade) || 'Student not on the roster';
   }
 
-  /* a correct answer marked automatically, shown as one line until the teacher overrides it. */
-  collapsible(evidence: Evidence): boolean {
-    return !evidence.needs_marking && evidence.marked_by === 'auto' && evidence.correct;
-  }
-
   toggleOverride(questionId: string): void {
     const next = new Set(this.overriding());
     if (next.has(questionId)) next.delete(questionId);
@@ -614,28 +536,8 @@ export class ReviewComponent {
     this.overriding.set(next);
   }
 
-  /* the marks the form gives so far, and how many questions still need marking. */
   markingSummary(grade: Evaluation): string {
-    let awarded = 0;
-    let possible = 0;
-    let left = 0;
-    for (const e of grade.evidence) {
-      possible += e.possible;
-      const value = this.marks.controls[e.question_id]?.getRawValue();
-      const levels = Object.values(value?.criteria ?? {});
-      let points: number | null = value?.awarded ?? null;
-      if (levels.length)
-        points = levels.every((p) => p !== null)
-          ? levels.reduce<number>((sum, p) => sum + Number(p), 0)
-          : null;
-      if (points !== null) awarded += Number(points);
-      else if (e.needs_marking) left++;
-      else awarded += e.awarded;
-    }
-    const rest = left
-      ? `${left} ${left === 1 ? 'question' : 'questions'} left to mark`
-      : 'every question marked';
-    return `${awarded} of ${possible} marks · ${rest}`;
+    return markingSummary(grade, this.marks);
   }
 
   // --- marking
@@ -647,11 +549,7 @@ export class ReviewComponent {
   }
 
   levelName(grade: Evaluation, evidence: Evidence, criterionId: string, points: number): string {
-    const criterion = this.names
-      .question(grade, evidence)
-      ?.rubric?.criteria.find((c) => c.id === criterionId);
-    const level = criterion?.levels.find((l) => l.points === points);
-    return `${criterion?.title ?? 'Criterion'}: ${points} (${level?.descriptor ?? 'level'})`;
+    return levelName(this.names.question(grade, evidence), criterionId, points);
   }
 
   saveMarks(): void {
@@ -677,33 +575,6 @@ export class ReviewComponent {
       this.marks = markingForm(grade.evidence, questions);
       this.selected.set(grade);
     }
-  }
-
-  /* while a suggestion is being prepared, re-reads the grade so it appears without a refresh, less often the longer it takes. */
-  private watchSuggestions(delay = SUGGESTION_POLL): void {
-    clearTimeout(this.poll);
-    const grade = this.selected();
-    if (!grade?.evidence.some((e) => e.suggestion?.status === 'pending')) return;
-    const classroomId = this.classroomId();
-    this.poll = setTimeout(() => {
-      void this.grading.evaluation(grade.id).then(
-        (fresh) => {
-          const current = this.selected();
-          if (current?.id !== grade.id || this.classroomId() !== classroomId) return;
-          // only the suggestions change here, so the teacher's unsaved marks stay.
-          const suggestions = new Map(fresh.evidence.map((e) => [e.question_id, e.suggestion]));
-          this.selected.set({
-            ...current,
-            evidence: current.evidence.map((e) => ({ ...e, suggestion: suggestions.get(e.question_id) })),
-          });
-          this.watchSuggestions(Math.min(delay * 2, SUGGESTION_POLL_MAX));
-        },
-        () => {
-          if (this.selected()?.id === grade.id)
-            this.watchSuggestions(Math.min(delay * 2, SUGGESTION_POLL_MAX));
-        },
-      );
-    }, delay);
   }
 
   askFinalize(): void {
@@ -765,114 +636,33 @@ export class ReviewComponent {
     this.putAddress(true);
   }
 
-  // --- releasing
+  // --- the assessment's actions and reopening
   // -------------------------------------------------------------------------------------------
 
-  askRelease(): void {
-    this.releasing.set(true);
-    this.releaseDialog?.show();
+  /* a release or finalize-all succeeded: the page says so at once, after its dialog has closed; a failed re-read is
+     reported beside it. */
+  actionDone(done: AssessmentActionDone): void {
+    this.state.error.set('');
+    this.state.message.set(done.message);
+    void this.reread(done.classroomId, done.assessmentId);
   }
 
-  closeRelease(): void {
-    this.releasing.set(false);
-    this.releaseDialog?.close();
+  /* a draft open for marking may be final now; its marks were all saved, so nothing is lost. */
+  finalizedAll(): void {
+    if (this.selected()) this.closeGrade(false);
+    this.putAddress(true);
   }
 
-  release(): void {
-    const assessmentId = this.assessmentId();
-    const classroomId = this.classroomId();
-    if (!assessmentId) return;
-    void this.releaseState.run(async () => {
-      const result = await this.grading.release(assessmentId);
-      this.closeRelease();
-      // released, so the page says so at once, after the dialog has closed; a failed re-read is reported
-      // beside it.
-      this.state.error.set('');
-      this.state.message.set(
-        `${result.released} ${result.released === 1 ? 'result' : 'results'} released to students.`,
-      );
-      await this.reread(classroomId, assessmentId);
-    });
-  }
-
-  // --- finalizing every fully marked grade
-  // -------------------------------------------------------------------------------------------
-
-  askFinalizeAll(): void {
-    if (this.unsavedMarks()) return;
-    this.bulkFinalizing.set(true);
-    this.bulkDialog?.show();
-  }
-
-  closeFinalizeAll(): void {
-    this.bulkFinalizing.set(false);
-    this.bulkDialog?.close();
-  }
-
-  finalizeAll(): void {
-    const assessmentId = this.assessmentId();
-    const classroomId = this.classroomId();
-    if (!assessmentId) return;
-    void this.bulkState.run(async () => {
-      const result = await this.grading.finalizeAll(assessmentId);
-      this.closeFinalizeAll();
-      // a draft open for marking may be final now; its marks were all saved, so nothing is lost.
-      if (this.selected()) this.closeGrade(false);
-      this.state.error.set('');
-      const waiting = result.needs_marking
-        ? ` ${result.needs_marking} still ${result.needs_marking === 1 ? 'needs' : 'need'} marking.`
-        : '';
-      this.state.message.set(
-        `${result.finalized} ${result.finalized === 1 ? 'grade' : 'grades'} finalized.${waiting}`,
-      );
-      await this.reread(classroomId, assessmentId);
-      this.putAddress(true);
-    });
-  }
-
-  // --- reopening
-  // -------------------------------------------------------------------------------------------
-
-  askReopen(): void {
-    if (!this.viewing()) return;
-    this.reopenForm.reset();
-    this.reopening.set(true);
-    this.reopenDialog?.show();
-  }
-
-  closeReopen(): void {
-    this.reopenForm.reset();
-    this.reopening.set(false);
-    this.reopenDialog?.close();
-  }
-
-  /* reopens the finalized grade being read and opens it for marking. */
-  reopen(): void {
-    const grade = this.viewing();
-    if (!grade || !this.reopenState.validate(this.reopenForm, 'reopen-form')) return;
-    const classroomId = this.classroomId();
-    const assessmentId = this.assessmentId();
-    void this.reopenState.run(async () => {
-      const result = await this.grading.reopen(grade.id, this.reopenForm.controls.reason.value);
-      this.closeReopen();
-      this.replace(result);
-      if (this.classroomId() !== classroomId || this.assessmentId() !== assessmentId) return;
-      if (this.viewing()?.id === grade.id) this.openGrade(result);
-      this.state.error.set('');
-      this.state.message.set(
-        'Grade reopened as a draft. The student no longer sees it until you finalize it again.',
-      );
-      // a reopened grade may have been one of the assessment's unreleased ones.
-      await this.reread(classroomId, assessmentId);
-    });
-  }
-
-  /* whether the chosen assessment's grades wait for a release after finalizing. */
-  releasesByHand(): boolean {
-    return this.grades.value()?.assessments.get(this.assessmentId())?.release_policy === 'manual';
-  }
-
-  assessmentTitle(id: string): string {
-    return this.published.value()?.find((a) => a.id === id)?.title ?? 'this assessment';
+  /* opens the reopened grade for marking, while the page still shows it. */
+  reopened({ result, classroomId, assessmentId }: Reopened): void {
+    this.replace(result);
+    if (this.classroomId() !== classroomId || this.assessmentId() !== assessmentId) return;
+    if (this.viewing()?.id === result.id) this.openGrade(result);
+    this.state.error.set('');
+    this.state.message.set(
+      'Grade reopened as a draft. The student no longer sees it until you finalize it again.',
+    );
+    // a reopened grade may have been one of the assessment's unreleased ones.
+    void this.reread(classroomId, assessmentId);
   }
 }

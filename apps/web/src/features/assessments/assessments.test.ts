@@ -14,6 +14,7 @@ import { Session } from '../../core/session';
 import { UnsavedChanges } from '../../core/unsaved-changes';
 import { AnswerSheetComponent } from './answer-sheet';
 import { AssessmentsComponent } from './assessments';
+import { AssessmentEditorComponent } from './editor-view';
 import { fillForm, optionLines } from './editor';
 
 describe('optionLines', () => {
@@ -53,7 +54,7 @@ const summary: AssessmentSummary = {
   points: 1,
 };
 
-/* the assessments page's logic (no template) for a user with `role`, against a fake assessment api, with the answer sheet (no template either) that opens its assessments. */
+/* the assessments page's logic (no template) for a user with `role`, against a fake assessment api, with the answer sheet and the editor (no templates either) that it drives. */
 function setup(
   role: 'student' | 'teacher',
   open: Assessment = assessment(),
@@ -120,21 +121,32 @@ function setup(
   });
   TestBed.overrideComponent(AssessmentsComponent, { set: { template: '', imports: [] } });
   TestBed.overrideComponent(AnswerSheetComponent, { set: { template: '', imports: [] } });
+  TestBed.overrideComponent(AssessmentEditorComponent, { set: { template: '', imports: [] } });
   const fixture = TestBed.createComponent(AssessmentsComponent);
   fixture.detectChanges();
   const sheetFixture = TestBed.createComponent(AnswerSheetComponent);
   sheetFixture.componentRef.setInput('assessments', fixture.componentInstance.assessments);
   sheetFixture.componentRef.setInput('state', fixture.componentInstance.state);
   sheetFixture.detectChanges();
-  // the page's template, and so its static query, is left out.
-  fixture.componentInstance.sheet = sheetFixture.componentInstance;
+  const page = fixture.componentInstance;
+  const editorFixture = TestBed.createComponent(AssessmentEditorComponent);
+  editorFixture.componentRef.setInput('form', page.form);
+  editorFixture.componentRef.setInput('state', page.state);
+  editorFixture.componentRef.setInput('classroomId', 'c1');
+  editorFixture.componentRef.setInput('documents', page.classDocs);
+  editorFixture.componentRef.setInput('topicsState', page.topicsState);
+  editorFixture.detectChanges();
+  // the page's template, and so its queries, are left out.
+  page.sheet = sheetFixture.componentInstance;
+  page.editor = editorFixture.componentInstance;
   const settle = () => vi.advanceTimersByTimeAsync(0);
   /* the address naming `open` (a string), or any query such as `{ edit }`, or the list's address. */
   const go = (query?: string | Record<string, string>) =>
     params.next(convertToParamMap(typeof query === 'string' ? { open: query } : (query ?? {})));
   return {
-    page: fixture.componentInstance,
+    page,
     sheet: sheetFixture.componentInstance,
+    editor: editorFixture.componentInstance,
     api,
     router,
     route,
@@ -584,40 +596,40 @@ describe('a teacher moving through the editor', () => {
 
   it('keeps one question open, but never folds one with an error', async () => {
     vi.useFakeTimers();
-    const { page, settle } = setup('teacher');
+    const { page, editor, settle } = setup('teacher');
     await settle();
-    page.addGenerated(valid('First?'));
-    page.addGenerated(valid('Second?'));
-    page.addGenerated(valid('Third?'));
+    editor.addGenerated(valid('First?'));
+    editor.addGenerated(valid('Second?'));
+    editor.addGenerated(valid('Third?'));
     const [first, second, third] = page.questions.controls;
-    page.goToQuestion(1);
-    expect(page.isCollapsed(first)).toBe(true);
-    expect(page.isCollapsed(second)).toBe(false);
-    expect(page.isCollapsed(third)).toBe(true);
+    editor.goToQuestion(1);
+    expect(editor.isCollapsed(first)).toBe(true);
+    expect(editor.isCollapsed(second)).toBe(false);
+    expect(editor.isCollapsed(third)).toBe(true);
     // an emptied prompt is an error, so that question stays open when another opens.
     first.controls.prompt.setValue('');
-    page.goToQuestion(2);
-    expect(page.isCollapsed(first)).toBe(false);
-    expect(page.isCollapsed(second)).toBe(true);
-    expect(page.isCollapsed(third)).toBe(false);
+    editor.goToQuestion(2);
+    expect(editor.isCollapsed(first)).toBe(false);
+    expect(editor.isCollapsed(second)).toBe(true);
+    expect(editor.isCollapsed(third)).toBe(false);
   });
 
   it('says the due date in the save bar, or that there is none', async () => {
     vi.useFakeTimers();
-    const { page, settle } = setup('teacher');
+    const { page, editor, settle } = setup('teacher');
     await settle();
-    expect(page.dueLine()).toBe('No due date');
+    expect(editor.dueLine()).toBe('No due date');
     page.form.controls.due_at.setValue('2026-11-03T17:00');
-    expect(page.dueLine()).toMatch(/^Due 3 Nov 2026/);
+    expect(editor.dueLine()).toMatch(/^Due 3 Nov 2026/);
     page.form.controls.due_at.setValue('not a date');
-    expect(page.dueLine()).toBe('No due date');
+    expect(editor.dueLine()).toBe('No due date');
   });
 });
 
 describe('a teacher keeping generated questions', () => {
   it('fills the blank first question, then adds after it', async () => {
     vi.useFakeTimers();
-    const { page, settle, unsaved } = setup('teacher');
+    const { page, editor, settle, unsaved } = setup('teacher');
     await settle();
     const generated = {
       prompt: 'Which test checks one function?',
@@ -629,11 +641,11 @@ describe('a teacher keeping generated questions', () => {
       sources: [{ text: 'A unit test checks one function.' }],
       origin: 'generated' as const,
     };
-    page.addGenerated(generated);
+    editor.addGenerated(generated);
     expect(page.questions.length).toBe(1);
     expect(page.questions.at(0).controls.origin.value).toBe('generated');
-    page.addGenerated({ ...generated, prompt: 'Name another test.' });
-    expect(page.prompts()).toEqual(['Which test checks one function?', 'Name another test.']);
+    editor.addGenerated({ ...generated, prompt: 'Name another test.' });
+    expect(editor.prompts()).toEqual(['Which test checks one function?', 'Name another test.']);
     expect(page.state.message()).toBe('Generated question added as question 2.');
     expect(unsaved.any()).toBe(true);
     expect(page.canSuggest()).toBe(true);
@@ -641,24 +653,25 @@ describe('a teacher keeping generated questions', () => {
 
   it('keeps a first question the teacher has started, even without wording', async () => {
     vi.useFakeTimers();
-    const { page, settle } = setup('teacher');
+    const { page, editor, settle } = setup('teacher');
     await settle();
     const first = page.questions.at(0).controls;
     first.type.setValue('multiple_choice');
     first.type.markAsDirty();
-    page.addGenerated(generatedShortAnswer());
+    editor.addGenerated(generatedShortAnswer());
     expect(page.questions.length).toBe(2);
     expect(page.questions.at(0).controls.type.value).toBe('multiple_choice');
   });
 
   it('leaves out marking points the assessment has no room for', async () => {
     vi.useFakeTimers();
-    const { page, settle } = setup('teacher');
+    const { page, editor, settle } = setup('teacher');
     await settle();
     const full = Array.from({ length: 5 }, (_, n) => ({ text: `Point ${n}` }));
-    for (let n = 0; n < 4; n++) page.addGenerated({ ...generatedShortAnswer(`Q${n}`), marking_scheme: full });
-    expect(page.markingPoints()).toBe(20);
-    page.addGenerated(generatedShortAnswer('One more'));
+    for (let n = 0; n < 4; n++)
+      editor.addGenerated({ ...generatedShortAnswer(`Q${n}`), marking_scheme: full });
+    expect(editor.markingPoints()).toBe(20);
+    editor.addGenerated(generatedShortAnswer('One more'));
     expect(page.questions.at(4).controls.marking_scheme.value).toEqual([]);
     expect(page.state.message()).toContain('Its marking points were left out');
     expect(page.questions.hasError('schemeTotal')).toBe(false);
@@ -911,7 +924,7 @@ describe('a teacher editing a question whose topic is archived', () => {
   it('names the archived topic and saves only once an active one is chosen', async () => {
     vi.useFakeTimers();
     const question = { ...assessment().questions[0], answer: '0.5', tolerance: '0' };
-    const { page, api, archived, settle } = setup(
+    const { page, editor, api, archived, settle } = setup(
       'teacher',
       assessment({ status: 'draft', questions: [question] }),
     );
@@ -927,9 +940,9 @@ describe('a teacher editing a question whose topic is archived', () => {
     await settle();
     expect(api.update).not.toHaveBeenCalled();
     // a question added after it does not take the archived topic.
-    page.addQuestion();
+    editor.addQuestion();
     expect(page.questions.at(1).controls.topic_id.value).toBe('');
-    page.removeQuestion(1);
+    editor.removeQuestion(1);
 
     topic.setValue('s2');
     expect(topic.valid).toBe(true);

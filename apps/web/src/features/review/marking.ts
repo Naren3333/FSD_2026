@@ -1,5 +1,6 @@
 import { FormControl, FormGroup, Validators } from '@angular/forms';
-import type { Evidence, Mark, Question, Suggestion } from '../../api/models';
+import type { Evaluation, Evidence, Mark, Question, Suggestion } from '../../api/models';
+import { dateTime } from '../../shared/format';
 
 /* the marking form for one evaluation and what it sends to grading. */
 
@@ -119,4 +120,54 @@ export function flagText(flag: string): string {
     feedback_withheld: 'Feedback was withheld because it repeated the model answer.',
   };
   return flags[flag] ?? flag;
+}
+
+/* how many of a grade's questions still need marking. */
+export function toMark(grade: Evaluation): number {
+  return grade.evidence.filter((e) => e.needs_marking).length;
+}
+
+/* how a question of a finalized grade was marked, in words. */
+export function outcome(evidence: Evidence): string {
+  if (evidence.needs_marking) return 'Needs marking';
+  if (evidence.marked_by === 'teacher') return 'Marked by you';
+  return evidence.correct ? 'Correct' : 'Incorrect';
+}
+
+export function submittedAt(grade: Evaluation): string {
+  return grade.submitted_at ? dateTime(grade.submitted_at) : '';
+}
+
+/* a correct answer marked automatically, shown as one line until the teacher overrides it. */
+export function collapsible(evidence: Evidence): boolean {
+  return !evidence.needs_marking && evidence.marked_by === 'auto' && evidence.correct;
+}
+
+/* the marks the form gives so far, and how many questions still need marking. */
+export function markingSummary(grade: Evaluation, form: MarkingForm): string {
+  let awarded = 0;
+  let possible = 0;
+  let left = 0;
+  for (const e of grade.evidence) {
+    possible += e.possible;
+    const value = form.controls[e.question_id]?.getRawValue();
+    const levels = Object.values(value?.criteria ?? {});
+    let points: number | null = value?.awarded ?? null;
+    if (levels.length)
+      points = levels.every((p) => p !== null) ? levels.reduce<number>((sum, p) => sum + Number(p), 0) : null;
+    if (points !== null) awarded += Number(points);
+    else if (e.needs_marking) left++;
+    else awarded += e.awarded;
+  }
+  const rest = left
+    ? `${left} ${left === 1 ? 'question' : 'questions'} left to mark`
+    : 'every question marked';
+  return `${awarded} of ${possible} marks · ${rest}`;
+}
+
+/* a suggested rubric level, named by its criterion and descriptor. */
+export function levelName(question: Question | undefined, criterionId: string, points: number): string {
+  const criterion = question?.rubric?.criteria.find((c) => c.id === criterionId);
+  const level = criterion?.levels.find((l) => l.points === points);
+  return `${criterion?.title ?? 'Criterion'}: ${points} (${level?.descriptor ?? 'level'})`;
 }

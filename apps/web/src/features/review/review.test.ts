@@ -14,6 +14,8 @@ import { FieldComponent } from '../../shared/field';
 import { PagerComponent } from '../../shared/pager';
 import { SectionStateComponent } from '../../shared/section-state';
 import { StatusComponent } from '../../shared/status';
+import { AssessmentActionsComponent } from './assessment-actions';
+import { ReopenComponent } from './reopen';
 import { ReviewComponent } from './review';
 import { PageHeaderComponent } from '../../shared/page-header';
 
@@ -115,6 +117,8 @@ function render(grades: Promise<Evaluation[]>, grading: Record<string, unknown> 
     [StatusComponent, '../../shared/status.html'],
     [ConfirmDialogComponent, '../../shared/confirm-dialog.html'],
     [PagerComponent, '../../shared/pager.html'],
+    [AssessmentActionsComponent, './assessment-actions.html'],
+    [ReopenComponent, './reopen.html'],
   ] as const)
     TestBed.overrideComponent(component, { set: { template: template(path) } });
   const fixture = TestBed.createComponent(ReviewComponent);
@@ -203,7 +207,8 @@ describe('finalizing', () => {
     expect(panel?.textContent).toContain('Ben Tan · Fractions quiz');
     expect(panel?.textContent).toContain('Half of 1?');
     expect(panel?.textContent?.replace(/\s+/g, ' ')).toContain('Topic: Halves');
-    expect(panel?.querySelectorAll('input, textarea').length).toBe(0);
+    // the reopen dialog's reason is the only field.
+    expect(panel?.querySelectorAll(':not(dialog *):is(input, textarea)').length).toBe(0);
     expect(page.buttons(panel)).not.toContain('Finalize this grade');
   });
 
@@ -243,7 +248,7 @@ describe('finalizing', () => {
     page.component.show(page.component.grades.value()?.grades[0] as Evaluation);
     page.fixture.detectChanges();
     expect(page.panel()?.textContent).toContain('Not released');
-    page.component.release();
+    page.component.actions()?.release();
     await page.settle();
     await page.settle();
     expect(page.component.viewing()?.id).toBe('e-s2');
@@ -570,11 +575,12 @@ describe('a change whose re-read fails', () => {
     await page.settle();
     expect(page.text()).toContain('1 finalized grade is hidden from students');
     failing = true;
-    page.component.releasing.set(true);
-    page.component.release();
+    const actions = page.component.actions() as AssessmentActionsComponent;
+    actions.releasing.set(true);
+    actions.release();
     await page.settle();
     await page.settle();
-    expect(page.component.releasing()).toBe(false);
+    expect(actions.releasing()).toBe(false);
     expect(page.text()).toContain('1 result released to students.');
     expect(page.text()).toContain('The grades could not be refreshed. Grading is unavailable.');
   });
@@ -678,15 +684,16 @@ describe('reopening a finalized grade', () => {
     page.fixture.detectChanges();
     page.button('Reopen to correct').click();
     page.fixture.detectChanges();
-    expect(page.component.reopening()).toBe(true);
-    page.component.reopen();
+    const reopener = page.component.reopener() as ReopenComponent;
+    expect(reopener.reopening()).toBe(true);
+    reopener.reopen();
     expect(reopen).not.toHaveBeenCalled();
-    page.component.reopenForm.controls.reason.setValue('Question 1 was mis-keyed');
-    page.component.reopen();
+    reopener.reopenForm.controls.reason.setValue('Question 1 was mis-keyed');
+    reopener.reopen();
     await page.settle();
     await page.settle();
     expect(reopen).toHaveBeenCalledWith('e-s2', 'Question 1 was mis-keyed');
-    expect(page.component.reopening()).toBe(false);
+    expect(reopener.reopening()).toBe(false);
     expect(page.component.selected()?.id).toBe('e-s2');
     expect(page.buttons(page.panel())).toContain('Finalize this grade');
     expect(page.text()).toContain('Grade reopened as a draft.');
@@ -699,11 +706,12 @@ describe('reopening a finalized grade', () => {
     await page.settle();
     page.component.show(page.component.grades.value()?.grades[0] as Evaluation);
     page.fixture.detectChanges();
-    page.component.askReopen();
-    page.component.reopenForm.controls.reason.setValue('Fix');
-    page.component.reopen();
+    const reopener = page.component.reopener() as ReopenComponent;
+    reopener.askReopen();
+    reopener.reopenForm.controls.reason.setValue('Fix');
+    reopener.reopen();
     await page.settle();
-    expect(page.component.reopening()).toBe(true);
+    expect(reopener.reopening()).toBe(true);
     expect(page.component.viewing()?.id).toBe('e-s2');
     expect(page.root.querySelector('dialog[open]')?.textContent).toContain(
       'This student is no longer in the classroom.',
@@ -734,11 +742,12 @@ describe('finalizing every fully marked grade', () => {
     expect(page.root.querySelector('dialog[open]')?.textContent?.replace(/\s+/g, ' ')).toContain(
       '2 drafts of Fractions quiz',
     );
-    page.component.finalizeAll();
+    const actions = page.component.actions() as AssessmentActionsComponent;
+    actions.finalizeAll();
     await page.settle();
     await page.settle();
     expect(finalizeAll).toHaveBeenCalledWith('a1');
-    expect(page.component.bulkFinalizing()).toBe(false);
+    expect(actions.bulkFinalizing()).toBe(false);
     expect(page.text()).toContain('2 grades finalized. 1 still needs marking.');
     expect(page.text()).not.toContain('Finalize all fully marked');
   });
@@ -758,8 +767,9 @@ describe('finalizing every fully marked grade', () => {
     await page.settle();
     page.component.show(page.component.grades.value()?.grades[0] as Evaluation);
     page.component.marks.markAsDirty();
-    page.component.askFinalizeAll();
-    expect(page.component.bulkFinalizing()).toBe(false);
+    const actions = page.component.actions() as AssessmentActionsComponent;
+    actions.askFinalizeAll();
+    expect(actions.bulkFinalizing()).toBe(false);
     expect(page.component.state.error()).toBe('Save or close the grade you are marking first.');
   });
 });

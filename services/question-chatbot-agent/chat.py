@@ -6,7 +6,7 @@ import json
 import logging
 import re
 import time
-from collections.abc import AsyncIterator, Callable
+from collections.abc import AsyncGenerator, AsyncIterator, Callable
 from contextlib import aclosing
 from dataclasses import dataclass
 from typing import Any
@@ -195,35 +195,51 @@ class Turn:
         step = time.perf_counter()
         await self._rewrite()
         step = self._took("rewrite_ms", step)
+        if not self.small_talk and self.is_on_topic is not False:
+            await self._search()
+            step = self._took("search_ms", step)
+        prompt = self._prompt(role)
+        if prompt is None:
+            self.outcome = "no_results"
+            reply = prompts.refusal(role)
+            self.parts.append(reply)
+            yield sse_event("token", {"text": reply})
+            return
+        # closed with the turn, so a disconnect ends the provider stream at once.
+        async with aclosing(self._stream(*prompt, step)) as pieces:
+            async for out in pieces:
+                self.parts.append(out)
+                yield sse_event("token", {"text": out})
+        if notice := self._coverage_notice():
+            self.parts.append(notice)
+            yield sse_event("token", {"text": notice})
+        self._took("answer_ms", step)
+
+    def _prompt(self, role: str) -> tuple[list[dict[str, str]], dict[str, str]] | None:
+        """the answer call's messages and citation tags, or none when the materials cannot answer it."""
         if self.small_talk:
             self.version = prompts.SMALL_TALK
-            messages = prompts.build_small_talk_messages(role, self.history, self.content)
-            tag_map: dict[str, str] = {}  # no documents, so any tag the model writes is dropped
-        else:
-            if self.is_on_topic is not False:
-                await self._search()
-                step = self._took("search_ms", step)
-            if (
-                self.is_on_topic is False
-                or self.top_score is None
-                or self.top_score < self.settings.relevance_floor
-            ):
-                self.outcome = "no_results"
-                reply = prompts.refusal(role)
-                self.parts.append(reply)
-                yield sse_event("token", {"text": reply})
-                return
-            fitting = self._fitting()
-            if not fitting:
-                self.outcome = "no_results"
-                reply = prompts.refusal(role)
-                self.parts.append(reply)
-                yield sse_event("token", {"text": reply})
-                return
-            messages, self.version, tag_map = prompts.build_messages(
-                role, fitting, self.history, self.content, self.topic_of
-            )
-        self.rewriter = CitationRewriter(tag_map)
+            # no documents, so any tag the model writes is dropped
+            return prompts.build_small_talk_messages(role, self.history, self.content), {}
+        if (
+            self.is_on_topic is False
+            or self.top_score is None
+            or self.top_score < self.settings.relevance_floor
+        ):
+            return None
+        fitting = self._fitting()
+        if not fitting:
+            return None
+        messages, self.version, tag_map = prompts.build_messages(
+            role, fitting, self.history, self.content, self.topic_of
+        )
+        return messages, tag_map
+
+    async def _stream(
+        self, messages: list[dict[str, str]], tag_map: dict[str, str], step: float
+    ) -> AsyncGenerator[str]:
+        """the answer's text with citation tags rewritten, as it arrives."""
+        rewriter = self.rewriter = CitationRewriter(tag_map)
         async for item in self.services.stream(
             messages, self.settings.answer_max_tokens, self.correlation, self.billed_to
         ):
@@ -231,23 +247,24 @@ class Turn:
                 self._took("first_token_ms", step)
             if isinstance(item, Done):
                 self.model, self.usage_tokens = item.model, item.usage_tokens
-            elif out := self.rewriter.feed(item):
-                self.parts.append(out)
-                yield sse_event("token", {"text": out})
-        if out := self.rewriter.flush():
-            self.parts.append(out)
-            yield sse_event("token", {"text": out})
+            elif out := rewriter.feed(item):
+                yield out
+        if out := rewriter.flush():
+            yield out
+
+    def _coverage_notice(self) -> str | None:
+        """a note naming the message's topics that no citation covers."""
+        if self.small_talk or self.rewriter is None:
+            return None
         # structural coverage only: a citation's presence does not establish semantic entailment.
         cited_topics = {t for cid in self.rewriter.cited for t in self.topic_of.get(cid, [])}
-        missing = [t for t in self.sub_queries if t not in cited_topics] if not self.small_talk else []
-        if missing:
-            # rewrite output is untrusted.
-            labels = [re.sub(r"[\[\]<>`*_]", "", " ".join(t.split()))[:200] for t in missing]
-            notice = "\n\nCitation coverage is incomplete for: " + "; ".join(labels) + "."
-            self.parts.append(notice)
-            yield sse_event("token", {"text": notice})
-            log.warning("chat_topic_citations_incomplete", extra={"topics": missing})
-        self._took("answer_ms", step)
+        missing = [t for t in self.sub_queries if t not in cited_topics]
+        if not missing:
+            return None
+        log.warning("chat_topic_citations_incomplete", extra={"topics": missing})
+        # rewrite output is untrusted.
+        labels = [re.sub(r"[\[\]<>`*_]", "", " ".join(t.split()))[:200] for t in missing]
+        return "\n\nCitation coverage is incomplete for: " + "; ".join(labels) + "."
 
     def _took(self, name: str, since: float) -> float:
         """records the ms since `since` as `name` and returns now, the next step's start."""
@@ -271,31 +288,7 @@ class Turn:
             primary = await lookup(queries[0])
 
             async def topic(q: str) -> list[dict[str, Any]]:
-                terms = set(re.findall(r"[a-z0-9]+", q.lower())) - {
-                    "the",
-                    "a",
-                    "an",
-                    "of",
-                    "in",
-                    "to",
-                    "and",
-                    "for",
-                }
-                covered = [
-                    r
-                    for r in primary
-                    if terms
-                    and terms.issubset(
-                        set(
-                            re.findall(
-                                r"[a-z0-9]+",
-                                (str(r.get("title", "")) + " " + str(r.get("section_path", ""))).lower(),
-                            )
-                        )
-                    )
-                    and float(r["score"]) >= self.settings.relevance_floor
-                ]
-                return covered if covered else await lookup(q)
+                return _covered(primary, q, self.settings.relevance_floor) or await lookup(q)
 
             outcomes = await asyncio.gather(*(topic(q) for q in queries[1:]), return_exceptions=True)
             searches = [primary]
@@ -313,10 +306,13 @@ class Turn:
             return
         merged = merge(searches, self.settings.relevance_floor, self.settings.topic_floor)
         self.results = [r for r, _ in merged]
-        # attribute every qualifying topic leg, including passages taken first by the primary search.
+        self._attribute_topics(searches[1:])
+
+    def _attribute_topics(self, legs: list[list[dict[str, Any]]]) -> None:
+        """names each kept passage's topics: every qualifying topic leg, including passages taken first by the primary search."""
         retained = {str(r["chunk_id"]) for r in self.results}
         self.topic_of = {}
-        for topic_label, passages in zip(self.sub_queries, searches[1:], strict=True):
+        for topic_label, passages in zip(self.sub_queries, legs, strict=True):
             for passage in passages:
                 cid = str(passage["chunk_id"])
                 if cid in retained and float(passage["score"]) >= self.settings.topic_floor:
@@ -480,6 +476,26 @@ def topics(value: Any, query: str) -> list[str]:
             out.append(text)
     out = out[:MAX_SUB_QUERIES]
     return out if len(out) > 1 else []
+
+
+_STOPWORDS = frozenset({"the", "a", "an", "of", "in", "to", "and", "for"})
+
+
+def _words(text: str) -> set[str]:
+    return set(re.findall(r"[a-z0-9]+", text.lower()))
+
+
+def _covered(primary: list[dict[str, Any]], query: str, floor: float) -> list[dict[str, Any]]:
+    """the primary search's passages whose title and section name every word of `query` and score at least `floor`."""
+    terms = _words(query) - _STOPWORDS
+    if not terms:
+        return []
+    return [
+        r
+        for r in primary
+        if terms.issubset(_words(str(r.get("title", "")) + " " + str(r.get("section_path", ""))))
+        and float(r["score"]) >= floor
+    ]
 
 
 def merge(

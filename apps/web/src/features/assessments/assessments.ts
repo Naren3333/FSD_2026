@@ -3,23 +3,10 @@ import { PagedSection } from '../../shared/paged-section';
 import { PagerComponent } from '../../shared/pager';
 import { Component, ViewChild, computed, inject, signal } from '@angular/core';
 import { takeUntilDestroyed, toSignal } from '@angular/core/rxjs-interop';
-import {
-  FormArray,
-  FormGroup,
-  ReactiveFormsModule,
-  type AbstractControl,
-  type ValidatorFn,
-} from '@angular/forms';
+import type { ValidatorFn } from '@angular/forms';
 import { ActivatedRoute, Router, RouterLink } from '@angular/router';
 import { AssessmentApi, ContentApi } from '../../api/clients';
-import type {
-  Assessment,
-  AssessmentSummary,
-  DocumentRecord,
-  Excerpt,
-  Question,
-  Topic,
-} from '../../api/models';
+import type { Assessment, AssessmentSummary, DocumentRecord, Topic } from '../../api/models';
 import { ClassroomContext, onClassroomChange } from '../../core/classroom-context';
 import { onSectionShown, rereadQuietly } from '../../core/section-shown';
 import { CurriculumNames } from '../../core/curriculum-names';
@@ -28,7 +15,6 @@ import { Session } from '../../core/session';
 import { UnsavedChanges } from '../../core/unsaved-changes';
 import { ActionState } from '../../shared/action-state';
 import { ConfirmDialogComponent } from '../../shared/confirm-dialog';
-import { FieldComponent, FieldControlDirective } from '../../shared/field';
 import { IconComponent } from '../../shared/icon';
 import { NoClassroomComponent } from '../../shared/no-classroom';
 import { dueState } from '../../shared/due';
@@ -38,33 +24,17 @@ import { StatusComponent } from '../../shared/status';
 import { PageHeaderComponent } from '../../shared/page-header';
 import { RefreshButtonComponent } from '../../shared/refresh-button';
 import {
-  MAX_ASSESSMENT_EXCERPTS,
-  MAX_CRITERIA,
-  MAX_QUESTIONS,
   assessmentForm,
   clearForm,
-  criterionForm,
-  excerptLabel,
   fillForm,
-  markWrittenBy,
   marksText,
-  parseLevels,
-  questionForm,
-  rubricTotal,
-  schemeTotal,
   teacherMarked,
   toAssessment,
   toDetails,
-  untouched,
-  usesScheme,
-  type QuestionForm,
 } from './editor';
 import { AnswerSheetComponent, schedule } from './answer-sheet';
-import { QuestionGeneratorComponent } from './generator';
-import { MarkingGuidanceComponent } from './guidance';
-import { MarkingPointsComponent } from './marking-points';
+import { AssessmentEditorComponent } from './editor-view';
 import { focusLater } from '../../shared/focus';
-import { dateTime } from '../../shared/format';
 
 /* why a published assessment's replacement was refused, after which the editor keeps only its details. */
 const LOCKED =
@@ -81,19 +51,14 @@ export type AssessmentsView = 'list' | 'edit' | 'preview';
     PageHeaderComponent,
     RefreshButtonComponent,
     RouterLink,
-    ReactiveFormsModule,
-    FieldComponent,
-    FieldControlDirective,
     IconComponent,
     StatusComponent,
     SectionStateComponent,
     ConfirmDialogComponent,
     NoClassroomComponent,
     PagerComponent,
-    MarkingPointsComponent,
-    QuestionGeneratorComponent,
-    MarkingGuidanceComponent,
     AnswerSheetComponent,
+    AssessmentEditorComponent,
   ],
   templateUrl: './assessments.html',
 })
@@ -109,13 +74,14 @@ export class AssessmentsComponent {
   /* deleting an assessment, in its confirmation dialog. */
   readonly deleteState = new ActionState();
   readonly assessments = new PagedSection<AssessmentSummary>();
-  readonly topics = this.curriculum.topics;
   /* reading the curriculum for the topic a new question uses. */
   readonly topicsState = new Section<Topic[]>();
   /* the classroom's documents, read once for generation, drafted guidance and where passages came from. */
   readonly classDocs = new Section<DocumentRecord[]>();
   /* the open assessment, answered or previewed. */
   @ViewChild(AnswerSheetComponent, { static: true }) sheet?: AnswerSheetComponent;
+  /* the teacher's editor, which opens questions for validation and editing. */
+  @ViewChild(AssessmentEditorComponent) editor?: AssessmentEditorComponent;
   /* the assessment the editor is changing; null while it creates a new one. */
   readonly editing = signal<Assessment | null>(null);
   /* whether anyone had submitted the assessment being edited when the teacher opened it. */
@@ -133,10 +99,6 @@ export class AssessmentsComponent {
   });
   readonly submittedBy = submittedBy;
   @ViewChild('deleteDialog') deleteDialog?: ConfirmDialogComponent;
-  readonly maxQuestions = MAX_QUESTIONS;
-  readonly maxCriteria = MAX_CRITERIA;
-  readonly maxMarkingPoints = MAX_ASSESSMENT_EXCERPTS;
-  readonly usesScheme = usesScheme;
   /* the assessment a link such as student home asked to open (or a teacher's address to edit), until the classroom's list has it. */
   private requested: { id: string; edit: boolean } | null = null;
   /* the assessment the address names to open (`?open=`, or a teacher's `?preview=`), or ''. */
@@ -265,7 +227,7 @@ export class AssessmentsComponent {
         });
         return;
       }
-      if (!open) this.revealAndFocus('open-' + current);
+      if (!open) focusLater('open-' + current);
     }
     this.requested = open ? { id: open, edit: false } : null;
     this.openRequested();
@@ -389,7 +351,7 @@ export class AssessmentsComponent {
   }
 
   newAssessment(): void {
-    void this.showEditor('new').then(() => this.revealAndFocus('assessment-title'));
+    void this.showEditor('new').then(() => focusLater('assessment-title'));
   }
 
   editFromList(item: AssessmentSummary): void {
@@ -404,14 +366,14 @@ export class AssessmentsComponent {
   previewClosed(id: string): void {
     void this.router
       .navigate([], { relativeTo: this.route, queryParams: {} })
-      .then(() => this.revealAndFocus('preview-' + id));
+      .then(() => focusLater('preview-' + id));
   }
 
   /* back to the list after the editor is done with (`replaceUrl` after a save, so back does not reopen a cleared form). */
   private leaveEditor(replaceUrl: boolean): void {
     void this.router
       .navigate([], { relativeTo: this.route, queryParams: {}, replaceUrl })
-      .then(() => this.revealAndFocus('new-assessment'));
+      .then(() => focusLater('new-assessment'));
   }
 
   stopEditing(): void {
@@ -424,222 +386,10 @@ export class AssessmentsComponent {
     return this.editing()?.title || this.form.controls.title.value.trim() || 'a new assessment';
   }
 
-  // --- the teacher's editor
-  // --------------------------------------------------------------------------------
-
-  addQuestion(): void {
-    if (this.questions.length >= MAX_QUESTIONS) return;
-    // a new question starts with the previous one's topic, which is usually the same, unless it is
-    // archived.
-    const topic = this.questions.at(this.questions.length - 1)?.controls.topic_id.value ?? '';
-    const q = questionForm();
-    q.controls.topic_id.setValue(this.archivedTopic(topic) ? '' : topic);
-    this.questions.push(q);
-    this.form.markAsDirty();
-    this.focusOn(q);
-    this.revealAndFocus(`question-${this.questions.length - 1}-prompt`);
-  }
-
-  /* adds a generated draft the teacher kept, in place of the editor's one question if the teacher has not started it. */
-  addGenerated(question: Omit<Question, 'id'>): void {
-    const replace = this.questions.length === 1 && untouched(this.questions.at(0));
-    if (!replace && this.questions.length >= MAX_QUESTIONS) return;
-    const room = MAX_ASSESSMENT_EXCERPTS - (replace ? 0 : this.markingPoints());
-    const scheme = question.marking_scheme ?? [];
-    const kept =
-      usesScheme(question.type) && scheme.length > room ? { ...question, marking_scheme: [] } : question;
-    const form = questionForm(kept);
-    for (const excerpt of kept.marking_scheme ?? [])
-      markWrittenBy(form.controls.marking_scheme, excerpt, 'ai');
-    if (replace) this.questions.setControl(0, form);
-    else this.questions.push(form);
-    this.form.markAsDirty();
-    const position = replace ? 1 : this.questions.length;
-    this.state.message.set(
-      `Generated question added as question ${position}.` +
-        (kept === question
-          ? ''
-          : ` Its marking points were left out: the assessment has ${MAX_ASSESSMENT_EXCERPTS} marking points already.`),
-    );
-  }
-
-  /* the editor's question prompts, so generation leaves out near-duplicates. */
-  prompts(): string[] {
-    return this.questions.controls.map((q) => q.controls.prompt.value);
-  }
-
-  /* marking points across the editor's questions. */
-  markingPoints(): number {
-    return schemeTotal(this.questions.getRawValue());
-  }
-
-  /* where a generated question's passage is from. */
-  sourceOf(excerpt: Excerpt): string {
-    return excerptLabel(excerpt, this.classDocs.value());
-  }
-
-  removeQuestion(index: number): void {
-    if (this.questions.length <= 1) return;
-    this.questions.removeAt(index);
-    this.form.markAsDirty();
-    this.revealAndFocus(`question-${Math.min(index, this.questions.length - 1)}-prompt`);
-  }
-
-  addCriterion(question: QuestionForm, index: number): void {
-    if (question.controls.criteria.length >= MAX_CRITERIA) return;
-    question.controls.criteria.push(criterionForm());
-    this.form.markAsDirty();
-    this.revealAndFocus(`question-${index}-criterion-${question.controls.criteria.length - 1}-title`);
-  }
-
-  removeCriterion(question: QuestionForm, index: number): void {
-    if (question.controls.criteria.length <= 1) return;
-    question.controls.criteria.removeAt(index);
-    this.form.markAsDirty();
-  }
-
-  /* a criterion's levels as the editor reads them, or null when a line cannot be read. */
-  readonly parseLevels = parseLevels;
-
-  /* the due date for the save bar, so it can be checked before publishing without scrolling to it. */
-  private readonly dueValue = toSignal(this.form.controls.due_at.valueChanges, {
-    initialValue: this.form.controls.due_at.value,
-  });
-  readonly dueLine = computed(() => {
-    const due = this.dueValue();
-    // a value the browser could not read as a date counts as none, rather than breaking the bar.
-    const when = due ? new Date(due) : null;
-    return when && !Number.isNaN(when.getTime()) ? `Due ${dateTime(when.toISOString())}` : 'No due date';
-  });
-
-  /* the editor's heading, which the page header shows. */
-  readonly editorTitle = computed(() => {
-    const current = this.editing();
-    if (!current) return 'Create an assessment';
-    return (this.editingPublished() ? 'Edit assessment: ' : 'Edit draft: ') + current.title;
-  });
-
-  /* a free response's points: its rubric's highest levels added up. */
-  rubricPoints(question: QuestionForm): number {
-    return rubricTotal(question.controls.criteria.getRawValue());
-  }
-
-  /* a question's marks: its own, or for a written response its rubric's. */
-  marksOf(question: QuestionForm): number {
-    return question.controls.type.value === 'free_response'
-      ? this.rubricPoints(question)
-      : Number(question.controls.points.value) || 0;
-  }
-
-  /* "3 questions · 8 marks", for the save bar. */
-  size(): string {
-    const count = this.questions.length;
-    const marks = this.questions.controls.reduce((sum, q) => sum + this.marksOf(q), 0);
-    return `${count} ${count === 1 ? 'question' : 'questions'} · ${marksText(marks)}`;
-  }
-
-  readonly marksText = marksText;
-
-  /* the outline's line for a question: the start of its prompt. */
-  promptLine(question: QuestionForm): string {
-    const prompt = question.controls.prompt.value.trim().split('\n')[0] ?? '';
-    if (!prompt) return 'Untitled question';
-    return prompt.length > 60 ? prompt.slice(0, 57).trimEnd() + '…' : prompt;
-  }
-
-  typeName(type: string): string {
-    return TYPE_NAMES[type] ?? type;
-  }
-
-  /* a question's topic name, archived ones included, or ''. */
-  topicName(topicId: string): string {
-    return this.curriculum.topicName(topicId);
-  }
-
-  /* whether the teacher has touched a control of the question that is invalid, for the outline's error dot. */
-  hasErrors(question: QuestionForm): boolean {
-    return invalidControl(question, true);
-  }
-
-  /* questions shown as their header only; collapsing keeps everything typed. */
-  readonly collapsed = signal<ReadonlySet<QuestionForm>>(new Set());
-
-  isCollapsed(question: QuestionForm): boolean {
-    return this.collapsed().has(question);
-  }
-
-  toggleCollapsed(question: QuestionForm): void {
-    const next = new Set(this.collapsed());
-    if (!next.delete(question)) next.add(question);
-    this.collapsed.set(next);
-  }
-
-  /* opens one question and folds the others, except any with an error, so a long assessment stays one screen per question. */
-  private focusOn(question: QuestionForm): void {
-    this.collapsed.set(
-      new Set(this.questions.controls.filter((q) => q !== question && !invalidControl(q, false))),
-    );
-  }
-
-  private expand(questions: readonly QuestionForm[]): void {
-    const next = new Set(this.collapsed());
-    for (const q of questions) next.delete(q);
-    this.collapsed.set(next);
-  }
-
-  /* the outline's row: the question, opened, with its prompt focused. */
-  goToQuestion(index: number): void {
-    const question = this.questions.at(index);
-    if (!question) return;
-    this.focusOn(question);
-    setTimeout(() => {
-      document.getElementById(`question-${index}`)?.scrollIntoView({ block: 'start' });
-      document.getElementById(`question-${index}-prompt`)?.focus({ preventScroll: true });
-    });
-  }
-
-  /* the outline's last row: the schedule and grading settings, with their first control focused. */
-  goToSchedule(): void {
-    setTimeout(() => {
-      document.getElementById('schedule-grading')?.scrollIntoView({ block: 'start' });
-      document
-        .getElementById('schedule-grading')
-        ?.querySelector<HTMLElement>('input, select')
-        ?.focus({ preventScroll: true });
-    });
-  }
-
-  /* the ai drafting panel: closed means hidden, so its drafts and a generation on its way stay. */
-  readonly generatorOpen = signal(false);
-
-  toggleGenerator(): void {
-    if (this.generatorOpen()) {
-      this.closeGenerator();
-      return;
-    }
-    this.generatorOpen.set(true);
-    this.revealAndFocus('generator-heading');
-  }
-
-  closeGenerator(): void {
-    this.generatorOpen.set(false);
-    this.revealAndFocus('generator-toggle');
-  }
-
-  private revealAndFocus(id: string): void {
-    // a question focused this way is opened first.
-    const question = /^question-(\d+)-/.exec(id);
-    if (question) {
-      const q = this.questions.at(Number(question[1]));
-      if (q) this.expand([q]);
-    }
-    focusLater(id);
-  }
-
   /* saves the editor as a draft (new or existing), publishes it, or saves the changes to a published assessment (only its details once students have submitted it). */
   save(publish: boolean): void {
     // validation focuses the first error it can see, so a collapsed question with one opens first.
-    this.expand(this.questions.controls.filter((q) => invalidControl(q, false)));
+    this.editor?.expandInvalid();
     if (!this.state.validate(this.form, 'assessment-editor')) return;
     const editing = this.editing();
     if (editing && this.editingPublished()) {
@@ -712,10 +462,10 @@ export class AssessmentsComponent {
       }
       this.editing.set(assessment);
       const firstQuestion = this.questions.at(0);
-      if (firstQuestion) this.focusOn(firstQuestion);
+      if (firstQuestion) this.editor?.focusOn(firstQuestion);
       this.typesChanged();
       this.lockTo(submittedBy(item));
-      this.revealAndFocus('assessment-title');
+      focusLater('assessment-title');
     });
   }
 
@@ -800,29 +550,13 @@ export class AssessmentsComponent {
   // ----------------------------------------------------------------------------------------------
 
   readonly schedule = schedule;
+  readonly marksText = marksText;
 
   dueBadge(item: AssessmentSummary): string {
     if (item.status === 'draft' || item.submitted) return '';
     const state = dueState(item.due_at, item.late_policy);
     return state === 'late' ? 'Overdue' : state === 'closed' ? 'Closed' : '';
   }
-}
-
-const TYPE_NAMES: Record<string, string> = {
-  numerical: 'Numerical',
-  multiple_choice: 'Multiple choice',
-  short_answer: 'Short answer',
-  free_response: 'Written response',
-};
-
-/* whether an enabled control in `control` is invalid (and, with `touched`, touched). */
-function invalidControl(control: AbstractControl, touched: boolean): boolean {
-  if (control.disabled) return false;
-  if (control instanceof FormGroup || control instanceof FormArray)
-    return Object.values(control.controls as Record<string, AbstractControl>).some((c) =>
-      invalidControl(c, touched),
-    );
-  return control.invalid && (!touched || control.touched);
 }
 
 /* whether anyone has submitted the assessment, students since removed from the classroom included. */

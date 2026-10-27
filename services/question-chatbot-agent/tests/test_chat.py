@@ -726,6 +726,18 @@ def test_topics_are_cleaned() -> None:
     assert topics(["only one"], "q") == [] and topics("not a list", "q") == [] and topics(None, "q") == []
 
 
+def test_a_topic_is_covered_by_primary_passages_naming_all_its_words() -> None:
+    from chat import _covered
+
+    named = result(C1, "x", 1, title="Cell Biology", section_path="Light reactions", score=0.8)
+    weak = result(C2, "x", 2, title="Cell Biology", section_path="Light reactions", score=0.3)
+    other = result(C3, "x", 3, title="Cell Biology", section_path="Respiration", score=0.9)
+    assert _covered([named, weak, other], "the light reactions", 0.61) == [named]
+    assert _covered([named], "dark reactions", 0.61) == []
+    # a topic of only stopwords is never covered, so it gets its own search.
+    assert _covered([named], "of the", 0.61) == []
+
+
 def test_merge_stops_at_merged_top_k() -> None:
     from chat import MERGED_TOP_K, merge
 

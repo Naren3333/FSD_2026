@@ -28,32 +28,18 @@
         }
       </div>
     }
-    @if (assessmentId() && unreleased(); as count) {
-      <div class="release-box">
-        <p class="caption">
-          {{ count }} finalized {{ count === 1 ? 'grade is' : 'grades are' }} hidden from students until you
-          release them.
-        </p>
-        <button (click)="askRelease()" [disabled]="state.busy() || releaseState.busy()">
-          Release results
-        </button>
-      </div>
-    }
-    @if (assessmentId() && ready(); as count) {
-      <div class="release-box">
-        <p class="caption">
-          {{ count }} {{ count === 1 ? 'draft has' : 'drafts have' }} every question marked.
-        </p>
-        <button
-          type="button"
-          class="secondary"
-          (click)="askFinalizeAll()"
-          [disabled]="state.busy() || bulkState.busy()"
-        >
-          Finalize all fully marked
-        </button>
-      </div>
-    }
+    <app-review-assessment-actions
+      [classroomId]="classroomId()"
+      [assessmentId]="assessmentId()"
+      [unreleased]="unreleased()"
+      [ready]="ready()"
+      [releasePolicy]="releasePolicy()"
+      [title]="assessmentTitle()"
+      [blocked]="blocked"
+      [busy]="state.busy()"
+      (done)="actionDone($event)"
+      (finalized)="finalizedAll()"
+    />
   </div>
   <app-section-state [section]="published" loading="Loading assessments…" />
   @if (!open() && !dialogOpen()) {
@@ -483,14 +469,15 @@
             <app-status [state]="state" />
           }
           <div class="button-row">
-            <button
-              type="button"
-              class="secondary"
-              (click)="askReopen()"
-              [disabled]="state.busy() || reopenState.busy()"
-            >
-              Reopen to correct
-            </button>
+            <app-review-reopen
+              [grade]="grade"
+              [student]="studentName(grade) || grade.student_id"
+              [title]="names.title(grade) || 'Assessment'"
+              [classroomId]="classroomId()"
+              [assessmentId]="assessmentId()"
+              [busy]="state.busy()"
+              (reopened)="reopened($event)"
+            />
             <button type="button" class="quiet" (click)="closePanel()">Close</button>
           </div>
         }
@@ -533,78 +520,6 @@
       <textarea
         appFieldControl
         id="review-reason"
-        formControlName="reason"
-        rows="4"
-        maxlength="1000"
-      ></textarea>
-    </app-field>
-  </form>
-</app-confirm-dialog>
-<app-confirm-dialog
-  #releaseDialog
-  dialogId="release"
-  heading="Release these results?"
-  confirmLabel="Release results"
-  [state]="releaseState"
-  (confirm)="release()"
-  (closed)="releasing.set(false)"
->
-  <p>
-    Students will see their finalized grades and feedback for
-    <strong>{{ assessmentTitle(assessmentId()) }}</strong
-    >. Grades you finalize later stay hidden until you release again. This cannot be undone.
-  </p>
-</app-confirm-dialog>
-<app-confirm-dialog
-  #bulkDialog
-  dialogId="finalize-all"
-  heading="Finalize every fully marked grade?"
-  confirmLabel="Finalize grades"
-  [state]="bulkState"
-  (confirm)="finalizeAll()"
-  (closed)="bulkFinalizing.set(false)"
->
-  <p>
-    {{ ready() }} {{ ready() === 1 ? 'draft' : 'drafts' }} of
-    <strong>{{ assessmentTitle(assessmentId()) }}</strong> with every question marked will be finalized, each
-    recorded as finalized with the assessment's other fully marked grades. Drafts that still need marking stay
-    drafts.
-    @if (releasesByHand()) {
-      Students see them when you release the results.
-    } @else {
-      Students see them at once.
-    }
-  </p>
-</app-confirm-dialog>
-<app-confirm-dialog
-  #reopenDialog
-  dialogId="reopen"
-  heading="Reopen this grade to correct it?"
-  confirmLabel="Reopen grade"
-  [state]="reopenState"
-  (confirm)="reopen()"
-  (closed)="closeReopen()"
->
-  @if (viewing(); as grade) {
-    <p>
-      <strong>{{ studentName(grade) || grade.student_id }}</strong>
-      · {{ names.title(grade) || 'Assessment' }} · {{ grade.evidence | marks }} marks
-    </p>
-  }
-  <p>
-    The grade becomes a draft again. The student no longer sees it, and it leaves their performance record,
-    until you finalize it again.
-  </p>
-  <form id="reopen-form" novalidate [formGroup]="reopenForm" (ngSubmit)="reopen()">
-    <app-field
-      controlId="reopen-reason"
-      label="Why it needs correcting"
-      hint="Kept in the grade's history."
-      [control]="reopenForm.controls.reason"
-    >
-      <textarea
-        appFieldControl
-        id="reopen-reason"
         formControlName="reason"
         rows="4"
         maxlength="1000"

@@ -1,0 +1,37 @@
+<button type="button" class="secondary" (click)="askReopen()" [disabled]="busy || reopenState.busy()">
+  Reopen to correct
+</button>
+<app-confirm-dialog
+  #reopenDialog
+  dialogId="reopen"
+  heading="Reopen this grade to correct it?"
+  confirmLabel="Reopen grade"
+  [state]="reopenState"
+  (confirm)="reopen()"
+  (closed)="closeReopen()"
+>
+  <p>
+    <strong>{{ student }}</strong>
+    · {{ title }} · {{ grade.evidence | marks }} marks
+  </p>
+  <p>
+    The grade becomes a draft again. The student no longer sees it, and it leaves their performance record,
+    until you finalize it again.
+  </p>
+  <form id="reopen-form" novalidate [formGroup]="reopenForm" (ngSubmit)="reopen()">
+    <app-field
+      controlId="reopen-reason"
+      label="Why it needs correcting"
+      hint="Kept in the grade's history."
+      [control]="reopenForm.controls.reason"
+    >
+      <textarea
+        appFieldControl
+        id="reopen-reason"
+        formControlName="reason"
+        rows="4"
+        maxlength="1000"
+      ></textarea>
+    </app-field>
+  </form>
+</app-confirm-dialog>

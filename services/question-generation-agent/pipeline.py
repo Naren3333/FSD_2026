@@ -115,6 +115,17 @@ def omitted(n: int) -> Review:
     return Review(status="not_reviewed", note="The reviewer gave no verdict on this draft.", round=n)
 
 
+@dataclass(frozen=True)
+class Job:
+    """what every round of one generation request shares."""
+
+    topic: str
+    body: GenerateRequest
+    passages: list[Passage]
+    deadline: float  # every call after the first generation is cut off here
+    with_review: bool
+
+
 @dataclass
 class Run:
     """what a reviewed generation has so far."""
@@ -267,7 +278,7 @@ class Pipeline:
     ) -> GenerateResponse:
         """generate, review and retry the shortfall (adr 0006); without a review, one round of checks only. a retry needs 1.5 times the longest round to fit in review_deadline, and every call after the first generation is cut off at it."""
         run = Run()
-        deadline = started + self.settings.review_deadline
+        job = Job(topic, body, passages, started + self.settings.review_deadline, with_review)
         round_started, longest = started, 0.0
         for n in range(self.settings.review_retries + 1 if with_review else 1):
             now = time.monotonic()
@@ -279,51 +290,64 @@ class Pipeline:
                 run.rounds[-1].retried = True
             round_started = now
             request = run.next_request(body, shortfall)
-            try:
-                output = await self._ask(
-                    prompts.generation_messages(topic, request, passages, run.attempts),
-                    GENERATION_TOKENS,
-                    prompts.generation_schema(request.question_types),
-                    "questions.generated",
-                    deadline if n > 0 else None,
-                )
-            except UpstreamError as e:
-                log.warning("generation_failed", extra={"error": str(e), "round": n})
-                if n == 0:
-                    raise refused(e) from None
-                run.stop_error = None if e.code == OUT_OF_TIME else e
+            output = await self._generate(job, n, request, run)
+            if output is None or not await self._check_and_review(job, n, output, request, run):
                 break
-            run.calls += 1
-            try:
-                kept, dropped, rejected, generated = checks.questions(output, request, passages)
-            except checks.UnreadableOutputError:
-                if n == 0:
-                    raise unusable_reply() from None
-                run.rounds.append(
-                    Round(generated=0, passed_checks=0, passed_review=0, rejected={UNREADABLE_REPLY: 1})
-                )
-                run.unreadable_retry = True
-                break
-            counts, sent_back = dropped, Counter[str]()
-            run.checked(rejected, dropped, sent_back)
-            if not kept:
-                run.rounds.append(_round(generated, kept, counts, sent_back, 0))
-                continue
-            if not with_review:
-                run.unreviewed += [held(g, g.review) for g in kept]
-                run.rounds.append(_round(generated, kept, counts, sent_back, len(kept)))
-                continue
-            try:
-                verdicts = await self._review(topic, body, kept, passages, run, deadline)
-            except (UpstreamError, checks.UnreadableOutputError) as e:
-                log.warning("review_failed", extra={"error": str(e), "round": n})
-                run.unreviewed += [held(g, not_run(n)) for g in kept]
-                run.rounds.append(_round(generated, kept, counts, sent_back, len(kept)))
-                run.stop_error = e if isinstance(e, UpstreamError) and e.code != OUT_OF_TIME else None
-                break
-            passed = run.judged(n, kept, verdicts, counts, sent_back)
-            run.rounds.append(_round(generated, kept, counts, sent_back, passed, reviewed=True))
         return self._response(body, run)
+
+    async def _generate(self, job: Job, n: int, request: GenerateRequest, run: Run) -> str | None:
+        """round n's generation call; none when a retry's call failed and the run keeps what it has."""
+        try:
+            output = await self._ask(
+                prompts.generation_messages(job.topic, request, job.passages, run.attempts),
+                GENERATION_TOKENS,
+                prompts.generation_schema(request.question_types),
+                "questions.generated",
+                job.deadline if n > 0 else None,
+            )
+        except UpstreamError as e:
+            log.warning("generation_failed", extra={"error": str(e), "round": n})
+            if n == 0:
+                raise refused(e) from None
+            run.stop_error = None if e.code == OUT_OF_TIME else e
+            return None
+        run.calls += 1
+        return output
+
+    async def _check_and_review(
+        self, job: Job, n: int, output: str, request: GenerateRequest, run: Run
+    ) -> bool:
+        """checks and reviews round n's reply and records the round; false when the run stops here."""
+        try:
+            kept, dropped, rejected, generated = checks.questions(output, request, job.passages)
+        except checks.UnreadableOutputError:
+            if n == 0:
+                raise unusable_reply() from None
+            run.rounds.append(
+                Round(generated=0, passed_checks=0, passed_review=0, rejected={UNREADABLE_REPLY: 1})
+            )
+            run.unreadable_retry = True
+            return False
+        counts, sent_back = dropped, Counter[str]()
+        run.checked(rejected, dropped, sent_back)
+        if not kept:
+            run.rounds.append(_round(generated, kept, counts, sent_back, 0))
+            return True
+        if not job.with_review:
+            run.unreviewed += [held(g, g.review) for g in kept]
+            run.rounds.append(_round(generated, kept, counts, sent_back, len(kept)))
+            return True
+        try:
+            verdicts = await self._review(job.topic, job.body, kept, job.passages, run, job.deadline)
+        except (UpstreamError, checks.UnreadableOutputError) as e:
+            log.warning("review_failed", extra={"error": str(e), "round": n})
+            run.unreviewed += [held(g, not_run(n)) for g in kept]
+            run.rounds.append(_round(generated, kept, counts, sent_back, len(kept)))
+            run.stop_error = e if isinstance(e, UpstreamError) and e.code != OUT_OF_TIME else None
+            return False
+        passed = run.judged(n, kept, verdicts, counts, sent_back)
+        run.rounds.append(_round(generated, kept, counts, sent_back, passed, reviewed=True))
+        return True
 
     def _response(self, body: GenerateRequest, run: Run) -> GenerateResponse:
         final = run.assembled(body)
