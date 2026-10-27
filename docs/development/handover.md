@@ -2,6 +2,24 @@
 
 This is the current state of the system. Why each rule exists is in `docs/decisions/` (ADRs 0001–0013), how to run and recover it is in `docs/development/operations.md`, and service boundaries and data ownership are in `docs/architecture/system.md`. Dated history lives in git and in the ADRs.
 
+## Agent evals — 2026-10-27
+
+There are new paid, manually run evals for the two agentic workflows, under `scripts/eval/`:
+
+- `run_performance.py`, over scripted students seeded by `load_performance.py` from `performance.yaml`;
+- `run_generation.py`, which compares the review on and off over the golden corpus;
+- the `--probe` option, which sends planted faulty drafts from `review_probe.yaml` to the deployed reviewer through `probe_inside.py`.
+
+Each run is capped by `--max-usd` (default $0.50). Every request carries its own `X-Correlation-ID`, and its cost is read from ai-core's `usage` table. The eval session no longer retries a 429 that says the allowance is used up. How to run them, what they check and the first results are in `operations.md`, Agent evals.
+
+The first runs cost $0.014 in all:
+
+- The reviewer caught 11 of 13 planted faults and wrongly failed no good draft.
+- With the review on, it passed every real draft, at twice the calls.
+- 3 of 5 interpretations were refused `INTERPRETATION_REJECTED`, all of them for students with mostly full marks: their observations cited result or topic references instead of questions. Each turn's reply schema now lists the question references a report may cite and the topic references it may recommend (ADR 0014), and `interpretation_rejected` logs what was dropped by reason. After the fix, two full runs accepted 10 of 10 with nothing dropped. The agent still skipped `prerequisites` and `class_comparison` (expected tool use 0.33), since the opening shows no prerequisite links or class figures. Each tool turn's task now lists `suggested_checks`, the prerequisite and class checks the results call for that were not yet made (`prompts.suggested`). Two more runs ($0.009) used both tools where expected (1.0), flagged nothing and kept every other figure at 1.0 with nothing dropped, at 2.6–2.8 turns on average.
+
+Scripts tests, Ruff and `scripts/check.py` pass. The stack integration and E2E suites were not run, since this changes no service.
+
 ## AI agent timeouts and grounding — 2026-10-26
 
 Agents now pass ai-core an optional `timeout` (seconds) on non-streamed `generate`, `REPLY_MARGIN` (5 s) under their own client timeout, and ai-core caps its generation budget to it, so it never finishes and bills a reply the agent stopped waiting for. A structured reply that runs out of time is now 504 `AI_TIMEOUT` instead of 502 `AI_PROVIDER_FAILED` (it is still charged as before; streams and embeds are unchanged). The deadline check and `OUT_OF_TIME` remap moved into `learning_transport.agents.AgentClients.generate(deadline=)`, used by question generation and the performance agent. The performance agent's client timeout is 75 s (the 3000-token report's 70 s ai-core budget plus accounting); a tool turn that is unreadable or fails with `AI_TIMEOUT`, `AI_OUTPUT_REJECTED`, `AI_PROVIDER_FAILED` or `OUT_OF_TIME` now goes straight to the report (counted as `UNREADABLE_TURN` / `FAILED_TURN` in `dropped`) instead of retrying or failing the request; its opening reads cancel each other on failure, per-topic and per-assessment reads run at most 8 at once, a shared class read is cancelled when the request ends, and an over-long task document drops topic names rather than being cut mid-JSON. Passages below the floor no longer reach the model: the chatbot drops results under `TOPIC_FLOOR` (0.5), and question generation drops those under `RELEVANCE_FLOOR` (0.5), not only gating on the best one. The chatbot treats a malformed stream event as `AI_PROVIDER_FAILED`. Unit tests, Ruff and mypy pass for ai-core, the three agents and python-platform; Go, web, integration and E2E runs were not done, and the floor change was not re-run against the eval corpus.

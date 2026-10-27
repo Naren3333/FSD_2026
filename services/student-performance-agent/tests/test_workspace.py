@@ -1,6 +1,7 @@
 """what the model is shown stays within ai-core's message size however much evidence a student has."""
 
 import json
+from typing import Any
 
 from conftest import QUIZ, QUIZ_ASSESSMENT, finalized
 
@@ -68,3 +69,51 @@ def test_the_task_stays_whole_json_when_the_opening_grows_past_its_budget():
     _, user = prompts.messages(ws.opening(), history, 3, 5, False)
     assert len(user["content"]) <= prompts.MAX_MESSAGE
     assert json.loads(user["content"])["tool_history"][-1]["call"] == {"tool": "read_answers"}
+
+
+def test_too_many_or_no_references_fall_back_to_plain_strings():
+    many = [f"E{n}" for n in range(1, prompts.MAX_ENUM + 2)]
+    assert prompts.refs(many)["items"] == {"type": "string"}
+    assert prompts.refs([])["items"] == {"type": "string"}
+    assert prompts.refs(["E1"])["items"] == {"type": "string", "enum": ["E1"]}
+    # the report alone on the last turn, inside a turn otherwise; both stay strict.
+    assert prompts.schema(True, ["E1"], ["T1"])["additionalProperties"] is False
+    assert set(prompts.schema(False, ["E1"], ["T1"])["properties"]) == {"action", "tool_calls", "report"}
+
+
+def test_prerequisite_and_class_checks_are_suggested_until_made():
+    """the opening shows no prerequisite links or class figures, so the task names the checks that could change the report."""
+
+    def opening(marks: dict[str, list[str]]) -> dict[str, Any]:
+        questions = [{"topic": t, "marks": m} for t, ms in marks.items() for m in ms]
+        return {"results": [{"result": "R1", "questions": questions}]}
+
+    def calls(task: list[dict[str, str]]) -> list[tuple[str, str | None]]:
+        return [(c["tool"], c["topic"]) for c in json.loads(task[-1]["content"])["suggested_checks"]]
+
+    # one slip, nothing weak: no checks.
+    assert calls(prompts.messages(opening({"T1": ["0/2", "2/2"], "T2": ["1/1"]}), [], 1, 5, False)) == []
+    # one weak topic: the class, not prerequisites.
+    one = opening({"T1": ["0/2", "1/2"], "T2": ["0/1"]})
+    assert calls(prompts.messages(one, [], 1, 5, False)) == [("class_comparison", None)]
+    # two weak topics: either may build on the other.
+    two = opening({"T1": ["0/2", "1/2"], "T2": ["0/1", "0/1", "1/1"]})
+    assert calls(prompts.messages(two, [], 1, 5, False)) == [
+        ("prerequisites", "T1"),
+        ("prerequisites", "T2"),
+        ("class_comparison", None),
+    ]
+    # an answered call is no longer suggested; a failed one still is.
+    history = [
+        {"call": {"tool": "prerequisites", "result": None, "topic": "T1"}, "output": {"prerequisites": []}},
+        {
+            "call": {"tool": "class_comparison", "result": None, "topic": "T2"},
+            "output": {"error": "No time."},
+        },
+    ]
+    assert calls(prompts.messages(two, history, 2, 5, False)) == [
+        ("prerequisites", "T2"),
+        ("class_comparison", None),
+    ]
+    # the last turn may not call tools, so it suggests none.
+    assert "suggested_checks" not in json.loads(prompts.messages(two, [], 5, 5, True)[-1]["content"])

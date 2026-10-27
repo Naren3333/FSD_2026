@@ -1,0 +1,52 @@
+# the question generation eval (adr 0006, 0015) over the golden corpus that load_corpus.py loads. each case
+# runs with the review on and, unless --no-ab or `ab: false`, again with it off. topics are created as
+# "Eval gen · <topic>". documents are corpus titles; a case's documents must share a classroom.
+prefix: "Eval gen · "
+
+cases:
+  - id: testing
+    topic: Software testing
+    documents: [Software Testing]
+    counts: {multiple_choice: 3, short_answer: 1}
+    difficulty: intermediate
+    focus: unit tests, stubs and drivers
+  - id: persistence
+    topic: Persistence
+    documents: [Persistence]
+    counts: {multiple_choice: 3, free_response: 1}
+    difficulty: introductory
+  - id: design
+    topic: Software design
+    documents: [Software Design]
+    counts: {multiple_choice: 2, short_answer: 2}
+    difficulty: advanced
+  - id: git
+    topic: Git workflow
+    documents: [Git Workflow Handout, Collaboration Methods]
+    counts: {multiple_choice: 3}
+    difficulty: introductory
+    focus: branching and merging
+  - id: security
+    topic: Password security
+    documents: [Basic Security]
+    counts: {multiple_choice: 2, short_answer: 1, free_response: 1}
+    difficulty: intermediate
+    focus: password hashing and salts
+  - id: existing
+    topic: Software testing
+    documents: [Software Testing]
+    counts: {multiple_choice: 3}
+    difficulty: intermediate
+    existing:
+      - What is the purpose of a unit test?
+      - What does a test stub stand in for?
+      - What is regression testing?
+      - What is the difference between black-box and white-box testing?
+  - id: off-topic
+    topic: Photosynthesis
+    documents: [Software Design]
+    counts: {multiple_choice: 2}
+    difficulty: introductory
+    focus: how plants turn light into glucose
+    ab: false
+    expect: {status: 422, code: INSUFFICIENT_SOURCE}

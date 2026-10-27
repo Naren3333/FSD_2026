@@ -19,7 +19,11 @@ class UnreadableOutputError(Exception):
 
 
 class RejectedError(Exception):
-    """no observation survived the checks."""
+    """no observation survived the checks; `dropped` says why each part was dropped."""
+
+    def __init__(self, dropped: Counter[str]) -> None:
+        super().__init__("no observation survived")
+        self.dropped = dropped
 
 
 @dataclass
@@ -79,7 +83,7 @@ def report(data: dict[str, Any], workspace: Workspace, shown: set[str]) -> Check
         elif topic.topic_id not in topic_ids:
             topic_ids.append(topic.topic_id)
     if not observations:
-        raise RejectedError
+        raise RejectedError(dropped)
     return Checked(
         observations[:MAX_OBSERVATIONS],
         misconceptions[:MAX_MISCONCEPTIONS],

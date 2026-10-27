@@ -152,10 +152,31 @@ def test_the_checks_drop_what_the_evidence_does_not_support(api, fakes: Fakes):
     }
 
 
-def test_a_report_with_no_supported_observation_is_refused(api, fakes: Fakes):
+def test_a_report_with_no_supported_observation_is_refused(api, fakes: Fakes, caplog):
     fakes.replies = [reply(done(observations=[{"text": "x", "evidence": ["E9"]}]))]
-    resp = api.post(PATH, json=BODY, headers=as_user())
+    with caplog.at_level("INFO", logger="student-performance-agent.agent"):
+        resp = api.post(PATH, json=BODY, headers=as_user())
     assert resp.status_code == 422 and resp.json()["error"]["code"] == "INTERPRETATION_REJECTED"
+    # the log says why, so a refusal can be told apart from another.
+    [rejected] = [r for r in caplog.records if r.getMessage() == "interpretation_rejected"]
+    assert rejected.dropped["UNKNOWN_EVIDENCE"] == 1  # type: ignore[attr-defined]
+
+
+def test_each_turns_schema_lists_the_references_a_report_may_cite(api, fakes: Fakes):
+    counting = "6a1f0c2e-3b4d-4e5f-8a9b-0c1d2e3f4a5b"
+    fakes.prerequisites = {LOOPS: [{"id": counting, "name": "Counting"}]}
+    fakes.replies = [reply(tools(call("prerequisites", topic="T1"))), reply(done())]
+    assert api.post(PATH, json=BODY, headers=as_user()).status_code == 200
+    first, second = (c["response_schema"] for c in fakes.calls("/v1/inference"))
+    report = first["properties"]["report"]["anyOf"][0]["properties"]
+    evidence = report["observations"]["items"]["properties"]["evidence"]["items"]
+    # results (R1) and topics (T1) are not evidence, so the model cannot cite them for an observation.
+    assert evidence == {"type": "string", "enum": ["E1", "E2", "E3"]}
+    shown = report["recommended_topics"]["items"]["enum"]
+    assert shown == ["T1", "T2"]
+    # a topic a tool brought in (the prerequisite) may be recommended from then on.
+    later = second["properties"]["report"]["anyOf"][0]["properties"]
+    assert later["recommended_topics"]["items"]["enum"] == [*shown, "T3"]
 
 
 def test_refused_and_failed_tools_are_reported_to_the_model_and_the_teacher(api, fakes: Fakes):

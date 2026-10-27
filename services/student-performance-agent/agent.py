@@ -173,7 +173,9 @@ class Agent:
             output = await self.services.generate(
                 messages,
                 REPORT_TOKENS if final else TURN_TOKENS,
-                prompts.schema(final),
+                prompts.schema(
+                    final, list(self.workspace.questions()), [t.ref for t in self.workspace.topics.values()]
+                ),
                 "performance.report" if final else "performance.turn",
                 self.correlation,
                 billed(self.claims),
@@ -302,8 +304,8 @@ class Agent:
             checked = checks.report(report, self.workspace, self.shown)
         except checks.UnreadableOutputError:
             raise unusable_reply() from None
-        except checks.RejectedError:
-            log.info("interpretation_rejected", extra={"turns": turn})
+        except checks.RejectedError as e:
+            log.info("interpretation_rejected", extra={"turns": turn, "dropped": dict(e.dropped)})
             raise failure(
                 422,
                 "INTERPRETATION_REJECTED",

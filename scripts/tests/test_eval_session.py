@@ -34,6 +34,23 @@ def test_a_401_after_429s_signs_in_again(monkeypatch: pytest.MonkeyPatch) -> Non
     assert len(sign_ins) == 3  # the first sign-in, then one per expiry
 
 
+def test_a_used_up_allowance_is_the_answer_not_a_wait(monkeypatch: pytest.MonkeyPatch) -> None:
+    made, _ = session(monkeypatch, [])
+    spent = {"error": {"code": "AI_SPEND_LIMIT", "message": "used up"}}
+    answers = iter([httpx.Response(429, json=spent), httpx.Response(200)])
+    made.http = httpx.Client(
+        base_url="http://gateway.test", transport=httpx.MockTransport(lambda _: next(answers))
+    )
+    res = made.request("POST", "/a")
+    assert res.status_code == 429 and res.json() == spent
+
+
+def test_claims_are_read_from_the_token(monkeypatch: pytest.MonkeyPatch) -> None:
+    made, _ = session(monkeypatch, [])
+    made.http.headers["Authorization"] = "Bearer e30.eyJzdWIiOiJhYmMiLCJvcmdfaWQiOiJvIn0.sig"
+    assert made.claims() == {"sub": "abc", "org_id": "o"}
+
+
 def test_a_401_straight_after_signing_in_is_the_answer(monkeypatch: pytest.MonkeyPatch) -> None:
     made, sign_ins = session(monkeypatch, [401, 401])
     assert made.request("GET", "/a").status_code == 401

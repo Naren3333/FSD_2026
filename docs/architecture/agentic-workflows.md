@@ -136,7 +136,7 @@ flowchart TD
   Check -->|some survive| Done(["Draft: observations, misconceptions,<br/>next steps, topics, cited questions, steps, dropped counts<br/>requires_teacher_review, nothing saved"])
 ```
 
-Next steps for it: evaluate reports against a teacher's own reading of a few real students, then decide whether to link findings to teaching material once retrieval settles.
+`scripts/eval/run_performance.py` checks it against scripted students of known shape (`docs/development/operations.md`, Agent evals). Next steps for it: rate those reports by hand, try it on a few real students, then decide whether to link findings to teaching material once retrieval settles.
 
 ## 2. Marking critic and escalation
 
@@ -176,6 +176,8 @@ flowchart TD
   NotReviewed --> Out
   Last --> Out(["Drafts by type, passed first, with each round's<br/>counts and the call count; nothing added until the teacher does"])
 ```
+
+`scripts/eval/run_generation.py` compares requests with the review on and off, and its `--probe` sends planted faulty drafts straight to the reviewer to measure what it catches. Next steps for it: use the probe's misses to tune the reviewer, and decide from the on/off comparison whether the review earns its extra calls.
 
 ## 4. Adaptive resit agent
 

@@ -1,0 +1,51 @@
+# the reviewer probe (adr 0015): drafts with a known fault, and good controls, sent straight to the deployed
+# reviewer. the passages are written for this probe. `reason` is the fault the reviewer should name; `also` lists
+# other reasons that are a fair reading of the same fault.
+topic: Web and database basics
+difficulty: intermediate
+
+batches:
+  http:
+    passages:
+      P1: >-
+        HTTP status codes are grouped by their first digit. Codes from 200 to 299 mean the request succeeded;
+        201 Created means a new resource was made. Codes from 400 to 499 mean the client made a mistake: 404 Not
+        Found means the resource does not exist, and 401 Unauthorized means the request had no valid
+        credentials. Codes from 500 to 599 mean the server failed while handling a valid request.
+      P2: >-
+        An idempotent HTTP method has the same effect whether it is sent once or many times. GET, PUT and DELETE
+        are idempotent; POST is not, because sending the same POST twice can create two resources. Safe methods,
+        such as GET and HEAD, do not change the resource at all.
+    existing: []
+    drafts:
+      - {id: good-created, expect: pass, type: multiple_choice, sources: [P1], prompt: "Which status code means a new resource was created?", options: ["201", "200", "404", "500"], answer: "201"}
+      - {id: good-not-idempotent, expect: pass, type: short_answer, sources: [P2], prompt: "Of GET, PUT, DELETE and POST, which method is not idempotent?", accepted: ["POST"]}
+      - {id: key-server-range, expect: fail, reason: WRONG_KEY, type: multiple_choice, sources: [P1], prompt: "Which range of status codes means the server failed while handling a valid request?", options: ["400 to 499", "500 to 599", "200 to 299", "300 to 399"], answer: "400 to 499"}
+      - {id: key-safe-method, expect: fail, reason: WRONG_KEY, type: multiple_choice, sources: [P2], prompt: "Which of these methods is safe as well as idempotent?", options: ["GET", "POST", "DELETE", "PUT"], answer: "DELETE"}
+      - {id: two-idempotent, expect: fail, reason: AMBIGUOUS, also: [WRONG_KEY], type: multiple_choice, sources: [P2], prompt: "Which method is idempotent?", options: ["GET", "PUT", "DELETE", "POST"], answer: "GET"}
+      - {id: too-many-requests, expect: fail, reason: NOT_ANSWERABLE, type: multiple_choice, sources: [P1], prompt: "Which status code means the client sent too many requests?", options: ["429", "404", "401", "500"], answer: "429"}
+      - {id: groups-shown, expect: fail, reason: NEEDS_MATERIALS, type: multiple_choice, sources: [P1], prompt: "Using the three groups shown, which group does 404 belong to?", options: ["The client error group", "The success group", "The server error group", "None of the groups"], answer: "The client error group"}
+      - {id: silly-options, expect: fail, reason: WEAK_DISTRACTORS, type: multiple_choice, sources: [P1], prompt: "What does 404 Not Found mean?", options: ["The resource does not exist", "Bananas are yellow", "The moon is made of cheese", "Nothing ever happens"], answer: "The resource does not exist"}
+
+  sql:
+    passages:
+      P3: >-
+        A transaction groups several database changes so that they all happen or none do. If any statement in
+        the transaction fails, a rollback undoes the changes made so far; a commit makes them permanent.
+        Isolation means that transactions running at the same time do not see each other's uncommitted changes.
+      P4: >-
+        An index is a separate structure that lets the database find rows by a column's value without reading
+        the whole table. Indexes speed up reads on that column but slow down inserts and updates, because the
+        index must be updated too.
+    existing:
+      - "What does a commit do to the changes made in a transaction?"
+    drafts:
+      - {id: good-rollback, expect: pass, type: multiple_choice, sources: [P3], prompt: "A statement in a transaction fails and the transaction is rolled back. What happens to the changes it made so far?", options: ["They are undone", "They are made permanent", "Only the failed statement's change is undone", "They become visible to other transactions"], answer: "They are undone"}
+      - {id: good-index-cost, expect: pass, type: short_answer, sources: [P4], prompt: "What is the cost of adding an index to a column?", accepted: ["Inserts and updates become slower", "slower inserts and updates", "slower writes"]}
+      - {id: key-rollback, expect: fail, reason: WRONG_KEY, type: short_answer, sources: [P3], prompt: "Which operation makes a transaction's changes permanent?", accepted: ["rollback"]}
+      - {id: true-of-index, expect: fail, reason: AMBIGUOUS, type: multiple_choice, sources: [P4], prompt: "Which is true of an index?", options: ["It speeds up reads on its column", "It slows down inserts", "It is a separate structure", "It deletes old rows"], answer: "It speeds up reads on its column"}
+      - {id: transaction-guarantee, expect: fail, reason: AMBIGUOUS, type: multiple_choice, sources: [P3], prompt: "What does running changes in a transaction guarantee?", options: ["All of its changes happen or none do", "Other transactions do not see its uncommitted changes", "Its queries run faster", "Its tables never need indexes"], answer: "All of its changes happen or none do"}
+      - {id: dirty-reads, expect: fail, reason: NOT_ANSWERABLE, type: multiple_choice, sources: [P3], prompt: "Which isolation level allows dirty reads?", options: ["Read uncommitted", "Serializable", "Repeatable read", "Snapshot"], answer: "Read uncommitted"}
+      - {id: example-structure, expect: fail, reason: NEEDS_MATERIALS, type: multiple_choice, sources: [P4], prompt: "Why does the example structure slow down updates?", options: ["It must be updated too", "It locks the whole database", "It deletes rows", "It reads every table"], answer: "It must be updated too"}
+      - {id: silly-isolation, expect: fail, reason: WEAK_DISTRACTORS, type: multiple_choice, sources: [P3], prompt: "What does isolation mean for transactions running at the same time?", options: ["They do not see each other's uncommitted changes", "They always crash", "They never run", "Only purple tables are affected"], answer: "They do not see each other's uncommitted changes"}
+      - {id: repeats-commit, expect: fail, reason: REPEATS_EXISTING, type: multiple_choice, sources: [P3], prompt: "What does committing a transaction do to its changes?", options: ["Makes them permanent", "Undoes them", "Hides them from every query", "Copies them into an index"], answer: "Makes them permanent"}
