@@ -180,3 +180,61 @@ export function deleteTestDataAfterEach(): void {
     for (const name of createdTopics.splice(0)) deleteTestTopic(name);
   });
 }
+
+/* a local test student made through keycloak's admin api, as scripts/local_stack.py's ensure_person makes one: the local student's password, the student role and the local school; they appear in identity once they sign in. */
+export async function ensureTestStudent(username: string, first: string, last: string): Promise<void> {
+  const signIn = await fetch(`${KEYCLOAK}/realms/master/protocol/openid-connect/token`, {
+    method: 'POST',
+    body: new URLSearchParams({
+      client_id: 'admin-cli',
+      grant_type: 'password',
+      username: 'admin',
+      password: env.KEYCLOAK_ADMIN_PASSWORD,
+    }),
+  });
+  if (!signIn.ok) throw new Error(`Keycloak admin sign-in failed: ${signIn.status}`);
+  const { access_token } = (await signIn.json()) as { access_token: string };
+  const admin = async (path: string, init: { method?: string; body?: unknown } = {}): Promise<unknown> => {
+    const response = await fetch(`${KEYCLOAK}/admin/realms/learning${path}`, {
+      method: init.method ?? 'GET',
+      headers: { Authorization: 'Bearer ' + access_token, 'Content-Type': 'application/json' },
+      body: init.body === undefined ? undefined : JSON.stringify(init.body),
+    });
+    if (!response.ok) throw new Error(`Keycloak ${init.method ?? 'GET'} ${path} failed: ${response.status}`);
+    return response.status === 204 || response.status === 201 ? undefined : response.json();
+  };
+  const find = async () =>
+    (await admin(`/users?exact=true&username=${encodeURIComponent(username)}`)) as { id: string }[];
+  const credential = { type: 'password', value: env.STUDENT_PASSWORD, temporary: false };
+  let [user] = await find();
+  if (user) await admin(`/users/${user.id}/reset-password`, { method: 'PUT', body: credential });
+  else {
+    await admin('/users', {
+      method: 'POST',
+      body: {
+        username,
+        enabled: true,
+        emailVerified: true,
+        firstName: first,
+        lastName: last,
+        email: `${username}@example.test`,
+        credentials: [credential],
+      },
+    });
+    [user] = await find();
+  }
+  const role = await admin('/roles/student');
+  await admin(`/users/${user.id}/role-mappings/realm`, { method: 'POST', body: [role] });
+  // org_id is an unmanaged attribute only admins may set.
+  const profile = (await admin('/users/profile')) as { unmanagedAttributePolicy?: string };
+  if (!['ADMIN_EDIT', 'ENABLED'].includes(profile.unmanagedAttributePolicy ?? ''))
+    await admin('/users/profile', {
+      method: 'PUT',
+      body: { ...profile, unmanagedAttributePolicy: 'ADMIN_EDIT' },
+    });
+  const record = (await admin(`/users/${user.id}`)) as { attributes?: Record<string, string[]> };
+  await admin(`/users/${user.id}`, {
+    method: 'PUT',
+    body: { ...record, attributes: { ...(record.attributes ?? {}), org_id: ['local-school'] } },
+  });
+}

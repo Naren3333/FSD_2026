@@ -1210,3 +1210,43 @@ function generatedShortAnswer(prompt = 'Which test checks one function?') {
     origin: 'generated' as const,
   };
 }
+
+describe('the resit builder view', () => {
+  it('is chosen by the address and closes with the classroom it belongs to', async () => {
+    vi.useFakeTimers();
+    const { page, go, classroomId, settle } = setup('teacher');
+    await settle();
+    go({ resit: 'a1' });
+    await settle();
+    expect(page.view()).toBe('resit');
+    expect(page.resitAddress()).toBe('a1');
+    classroomId.set('c2');
+    TestBed.tick();
+    expect(page.resitAddress()).toBe('');
+  });
+
+  it('opens a published row and a new draft in the editor, announcing it there', async () => {
+    vi.useFakeTimers();
+    const resit = { ...summary, id: 'r1', status: 'draft' as const, resit_of: 'a1' };
+    const { page, api, router, route, go, settle } = setup('teacher', assessment({ id: 'r1' }));
+    await settle();
+    page.resitFromList(summary);
+    expect(router.navigate).toHaveBeenLastCalledWith([], { relativeTo: route, queryParams: { resit: 'a1' } });
+    go({ resit: 'a1' });
+    await settle();
+    api.list.mockResolvedValue([resit, summary]);
+    page.assessments.page.set(2);
+    page.resitCreated(assessment({ id: 'r1', status: 'draft', resit_of: 'a1', assignees: ['s1'] }));
+    await settle();
+    expect(page.assessments.page()).toBe(0);
+    expect(router.navigate).toHaveBeenLastCalledWith([], {
+      relativeTo: route,
+      queryParams: { edit: 'r1' },
+      replaceUrl: true,
+    });
+    go({ edit: 'r1' });
+    await settle();
+    expect(page.editing()?.id).toBe('r1');
+    expect(page.state.message()).toBe('Resit draft created for 1 student. Review it, then publish it.');
+  });
+});

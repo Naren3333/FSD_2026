@@ -1,3 +1,11 @@
+@if (assessmentId) {
+  <div class="release-box">
+    <p class="caption">Give students who lost marks another attempt, as a new draft.</p>
+    <a class="button-link" routerLink="/assessments" [queryParams]="{ resit: assessmentId }"
+      >Create resit<span class="visually-hidden"> of {{ assessmentTitle() }}</span></a
+    >
+  </div>
+}
 @if (assessmentId && unreleased; as count) {
   <div class="release-box">
     <p class="caption">

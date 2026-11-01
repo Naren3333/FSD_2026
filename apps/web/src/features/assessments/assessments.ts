@@ -35,6 +35,7 @@ import {
 } from './editor';
 import { AnswerSheetComponent, schedule } from './answer-sheet';
 import { AssessmentEditorComponent } from './editor-view';
+import { ResitBuilderComponent } from './resit-builder';
 import { focusLater } from '../../shared/focus';
 
 /* why a published assessment's replacement was refused, after which the editor keeps only its details. */
@@ -42,8 +43,8 @@ const LOCKED =
   'Students have submitted this assessment, so only its title, due date and late policy can change now. Save ' +
   'again to keep those changes.';
 
-/* a teacher's view of the page, from its address: the list, the editor (`?edit=`) or a preview (`?preview=`). */
-export type AssessmentsView = 'list' | 'edit' | 'preview';
+/* a teacher's view of the page, from its address: the list, the editor (`?edit=`), a preview (`?preview=`) or the resit builder (`?resit=`). */
+export type AssessmentsView = 'list' | 'edit' | 'preview' | 'resit';
 
 @Component({
   selector: 'app-assessments',
@@ -60,6 +61,7 @@ export type AssessmentsView = 'list' | 'edit' | 'preview';
     PagerComponent,
     AnswerSheetComponent,
     AssessmentEditorComponent,
+    ResitBuilderComponent,
   ],
   templateUrl: './assessments.html',
 })
@@ -106,6 +108,10 @@ export class AssessmentsComponent {
   private address = '';
   /* the assessment the teacher's address names to edit (`?edit=`, `new` for a new one), or ''. */
   private editAddress = '';
+  /* the published assessment the teacher's address names to resit (`?resit=`), or ''. */
+  readonly resitAddress = signal('');
+  /* what to announce once the editor has opened a resit draft just created. */
+  private announce: { id: string; message: string } | null = null;
   /* the address's changes, followed one after another since leaving an assessment can wait on a save. */
   private following: Promise<void> = Promise.resolve();
   private readonly router = inject(Router);
@@ -116,6 +122,7 @@ export class AssessmentsComponent {
     const params = this.query();
     if (!params || !this.session.isTeacher()) return 'list';
     if (params.get('edit')) return 'edit';
+    if (params.get('resit')) return 'resit';
     return params.get('preview') || params.get('open') ? 'preview' : 'list';
   });
   readonly form = assessmentForm();
@@ -131,9 +138,10 @@ export class AssessmentsComponent {
     let shownClassroom = '';
     onClassroomChange((classroomId) => {
       // an assessment of the classroom left behind no longer belongs in the address; a new one may stay.
-      const named = this.address || (this.editAddress !== 'new' && this.editAddress);
+      const named = this.address || (this.editAddress !== 'new' && this.editAddress) || this.resitAddress();
       if (shownClassroom && classroomId !== shownClassroom && named) {
         this.requested = null;
+        this.resitAddress.set('');
         this.showList();
       }
       shownClassroom = classroomId;
@@ -144,10 +152,11 @@ export class AssessmentsComponent {
     this.route.queryParamMap.pipe(takeUntilDestroyed()).subscribe((params) => {
       const open = params.get('open') ?? '';
       const edit = params.get('edit') ?? '';
+      const resit = edit ? '' : (params.get('resit') ?? '');
       // a teacher's `?open=` (from a link such as home) is their preview, as it always was.
-      const preview = edit ? '' : params.get('preview') || open;
+      const preview = edit || resit ? '' : params.get('preview') || open;
       this.following = this.following.then(() =>
-        this.session.isTeacher() ? this.followTeacher(edit, preview) : this.follow(open),
+        this.session.isTeacher() ? this.followTeacher(edit, preview, resit) : this.follow(open),
       );
     });
     // only the list: the topics, documents and any open form stay as they are.
@@ -234,10 +243,11 @@ export class AssessmentsComponent {
     this.openRequested();
   }
 
-  /* follows a teacher's address: the assessment it names to edit, or to preview, or the list. */
-  private async followTeacher(edit: string, preview: string): Promise<void> {
+  /* follows a teacher's address: the assessment it names to edit, to preview or to resit, or the list. */
+  private async followTeacher(edit: string, preview: string, resit = ''): Promise<void> {
     this.address = preview;
     this.editAddress = edit;
+    this.resitAddress.set(resit);
     this.requested = null;
     const shown = this.sheet?.selected()?.id ?? '';
     if (shown && shown !== preview) this.sheet?.closePreview();
@@ -245,7 +255,7 @@ export class AssessmentsComponent {
     // the assessment already being edited stays as it is, as after create draft or back and forward.
     else if (edit && edit !== this.editing()?.id) this.requested = { id: edit, edit: true };
     else if (preview && preview !== shown) this.requested = { id: preview, edit: false };
-    this.focusView(edit ? 'edit' : preview ? 'preview' : 'list');
+    this.focusView(edit ? 'edit' : resit ? 'resit' : preview ? 'preview' : 'list');
     this.openRequested();
   }
 
@@ -261,7 +271,13 @@ export class AssessmentsComponent {
     setTimeout(() => {
       const active = document.activeElement;
       if (active && active !== document.body && !active.closest('[hidden]')) return;
-      document.getElementById(view === 'edit' ? 'assessment-title' : 'new-assessment')?.focus();
+      const target = {
+        edit: 'assessment-title',
+        resit: 'resit-title',
+        preview: 'preview-title',
+        list: 'new-assessment',
+      }[view];
+      document.getElementById(target)?.focus();
     });
   }
 
@@ -337,9 +353,12 @@ export class AssessmentsComponent {
       this.showList();
       return;
     }
+    const announce = this.announce?.id === id ? this.announce.message : '';
+    this.announce = null;
     void this.edit(item).then(() => {
       // it could not be read: the error shows on the list.
       if (this.editAddress === id && this.editing()?.id !== id) this.showList();
+      else if (announce && this.editing()?.id === id) this.state.message.set(announce);
     });
   }
 
@@ -357,6 +376,26 @@ export class AssessmentsComponent {
 
   editFromList(item: AssessmentSummary): void {
     void this.showEditor(item.id);
+  }
+
+  resitFromList(item: AssessmentSummary): void {
+    void this.router.navigate([], { relativeTo: this.route, queryParams: { resit: item.id } });
+  }
+
+  /* opens the new resit draft in the editor once the list has it; back then skips the builder. */
+  resitCreated(saved: Assessment): void {
+    const classroomId = this.classroomId();
+    const count = saved.assignees?.length ?? 0;
+    this.announce = {
+      id: saved.id,
+      message: `Resit draft created for ${count} ${count === 1 ? 'student' : 'students'}. Review it, then publish it.`,
+    };
+    // the newest assessment is first on page one.
+    this.assessments.page.set(0);
+    void this.assessments
+      .reload(() => this.readList(classroomId))
+      .catch(() => undefined)
+      .then(() => this.showEditor(saved.id, true));
   }
 
   previewFromList(id: string): void {

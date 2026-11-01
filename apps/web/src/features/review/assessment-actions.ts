@@ -1,4 +1,5 @@
 import { Component, EventEmitter, Input, Output, ViewChild, inject, signal } from '@angular/core';
+import { RouterLink } from '@angular/router';
 import { GradingApi } from '../../api/clients';
 import type { ReleasePolicy } from '../../api/models';
 import { ActionState } from '../../shared/action-state';
@@ -11,11 +12,11 @@ export interface AssessmentActionDone {
   assessmentId: string;
 }
 
-/* the chosen assessment's release and finalize-all banners, with their confirmation dialogs. */
+/* the chosen assessment's resit link and its release and finalize-all banners, with their confirmation dialogs. */
 @Component({
   selector: 'app-review-assessment-actions',
   standalone: true,
-  imports: [ConfirmDialogComponent],
+  imports: [ConfirmDialogComponent, RouterLink],
   templateUrl: './assessment-actions.html',
   // the banners sit in the page's filter row as its own items.
   host: { style: 'display: contents' },

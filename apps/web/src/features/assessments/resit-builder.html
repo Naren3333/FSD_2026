@@ -1,0 +1,243 @@
+<section class="resit-view" [hidden]="!shown" aria-labelledby="resit-title">
+  <a class="back-link" routerLink="/assessments">
+    <app-icon name="chevron-left" />
+    <span><span class="visually-hidden">Back to </span>Assessments</span>
+  </a>
+  <app-page-header
+    [title]="heading()"
+    headingId="resit-title"
+    subtitle="Choose who resits and which questions. It is created as a draft for you to review and publish."
+  >
+    <app-refresh-button
+      label="Refresh resit choices"
+      [busy]="original.loading() || grades.loading() || roster.loading()"
+      [disabled]="state.busy() || !assessmentId"
+      (refresh)="refresh()"
+    />
+  </app-page-header>
+
+  <app-section-state [section]="original" loading="Loading the assessment…" />
+  @if (original.error()) {
+    <button type="button" class="secondary" (click)="load()">Try again</button>
+  }
+  @if (original.ready() && original.value(); as assessment) {
+    <form id="resit-form" class="resit-form" novalidate [formGroup]="form" (ngSubmit)="create()">
+      <fieldset class="question-set" id="resit-students">
+        <legend>1. Students</legend>
+        <p class="caption">
+          Students who lost marks on a finalized grade are ticked. Choose 1 to {{ maxStudents }}:
+          {{ students().size }} chosen.
+        </p>
+        <app-section-state [section]="grades" loading="Loading finalized grades…" />
+        @if (grades.error()) {
+          <button type="button" class="secondary" (click)="loadGrades()">Try again</button>
+        }
+        @if (grades.ready() && grades.value(); as read) {
+          @if (!read.grades.length) {
+            <p class="caption">
+              No finalized grades yet, so no one is suggested. You can still choose anyone.
+            </p>
+          }
+          @if (read.partial) {
+            <p class="caption">Suggestions use the first 500 results.</p>
+          }
+        }
+        @if (studentsFull()) {
+          <p class="caption">{{ maxStudents }} students are chosen, the most a resit can have.</p>
+        }
+        <app-section-state [section]="roster" loading="Loading the classroom's students…" />
+        @if (roster.error()) {
+          <button type="button" class="secondary" (click)="loadRoster()">Try again</button>
+        }
+        @if (roster.ready() && roster.value(); as people) {
+          <ul class="resit-choices" aria-label="Students">
+            @for (student of people; track student.id) {
+              <li>
+                <label class="check">
+                  <input
+                    #studentBox
+                    type="checkbox"
+                    [checked]="students().has(student.id)"
+                    [disabled]="state.busy() || (studentsFull() && !students().has(student.id))"
+                    (change)="toggleStudent(student.id, studentBox.checked)"
+                  />
+                  <span class="resit-choice">
+                    <span>{{ studentName(student) }}</span>
+                    <span class="tag-row">
+                      @if (struggling().has(student.id)) {
+                        <span class="badge badge-warning">Lost marks</span>
+                      }
+                      @if (marksOf(student.id); as marks) {
+                        <span class="caption">{{ marks }}</span>
+                      }
+                    </span>
+                  </span>
+                </label>
+              </li>
+            } @empty {
+              <li class="empty">
+                No students are enrolled in this classroom yet. Enroll them from Students.
+              </li>
+            }
+          </ul>
+        }
+      </fieldset>
+
+      <fieldset class="question-set" id="resit-questions">
+        <legend>2. Questions</legend>
+        <p class="caption">
+          Choose 1 to {{ maxQuestions }}: the original's first, then your bank's, in that order.
+          {{ questionCount() }} chosen.
+          @if (questionsFull()) {
+            That is the most a resit can have.
+          }
+        </p>
+        <h3 class="resit-subheading">From {{ assessment.title }}</h3>
+        <p class="caption">
+          Questions the chosen students lost marks on are ticked. Copies keep their passages.
+        </p>
+        <ul class="resit-choices" aria-label="Questions from the original">
+          @for (q of questions(); track q.id; let i = $index) {
+            <li>
+              <label class="check">
+                <input
+                  #copyBox
+                  type="checkbox"
+                  [checked]="copies().has(q.id)"
+                  [disabled]="state.busy() || (questionsFull() && !copies().has(q.id))"
+                  (change)="toggleCopy(q.id, copyBox.checked)"
+                />
+                <span class="resit-choice">
+                  <span class="bank-prompt">{{ i + 1 }}. {{ q.prompt }}</span>
+                  <span class="caption">
+                    {{ typeName(q.type) }} · {{ marksText(q.points) }} · {{ topicName(q.topic_id) }}
+                  </span>
+                  @if (suggested().has(q.id)) {
+                    <span class="badge badge-warning">Chosen students lost marks</span>
+                  }
+                </span>
+              </label>
+            </li>
+          }
+        </ul>
+
+        <h3 class="resit-subheading">From your bank</h3>
+        <p class="caption">
+          Shown for the topics where the chosen students lost marks. Bank questions keep no source passages or
+          marking points.
+        </p>
+        <div class="resit-bank-filters">
+          <app-field controlId="resit-bank-topic" label="Topic">
+            <select appFieldControl id="resit-bank-topic" formControlName="topic">
+              @for (t of topics(); track t) {
+                <option [value]="t">{{ topicName(t) }}</option>
+              }
+              <option value="">All topics</option>
+            </select>
+          </app-field>
+          @if (single()) {
+            <label class="check">
+              <input type="checkbox" formControlName="hideAnswered" />
+              Hide already answered
+            </label>
+          }
+        </div>
+        @if (single()) {
+          <p class="caption">
+            "Already answered" marks questions {{ chosenStudentName() }} has answered before.
+          </p>
+        }
+        <app-section-state [section]="bank" loading="Loading your bank…" />
+        @if (bank.error()) {
+          <button type="button" class="secondary" (click)="loadBank()">Try again</button>
+        }
+        @if (bank.ready() && bank.value(); as items) {
+          <ul class="resit-choices" aria-label="Bank questions">
+            @for (q of items; track q.id) {
+              <li>
+                <label class="check">
+                  <input
+                    #bankBox
+                    type="checkbox"
+                    [checked]="banked().has(q.id)"
+                    [disabled]="state.busy() || archived(q) || (questionsFull() && !banked().has(q.id))"
+                    [attr.aria-describedby]="archived(q) ? 'resit-archived-' + q.id : null"
+                    (change)="toggleBank(q, bankBox.checked)"
+                  />
+                  <span class="resit-choice">
+                    <span class="bank-prompt">{{ q.prompt }}</span>
+                    <span class="caption">
+                      {{ typeName(q.type) }} · {{ marksText(q.points) }} · {{ topicName(q.topic_id) }}
+                      @if (archived(q)) {
+                        (archived)
+                      }
+                    </span>
+                    @if (single() && q.answered) {
+                      <span class="badge badge-plain">Already answered</span>
+                    }
+                    @if (archived(q)) {
+                      <small class="caption" [id]="'resit-archived-' + q.id"
+                        >Its topic is archived, so it cannot be added.</small
+                      >
+                    }
+                  </span>
+                </label>
+              </li>
+            } @empty {
+              <li class="empty">
+                @if (hideAnswered.value && single()) {
+                  No bank questions here that {{ chosenStudentName() }} has not answered. Show answered ones
+                  or choose another topic.
+                } @else if (topic.value) {
+                  No bank questions on this topic. Choose another topic or All topics.
+                } @else {
+                  Your bank is empty. Save a question to it from an assessment, or from the Question bank
+                  page.
+                }
+              </li>
+            }
+          </ul>
+          <app-pager
+            label="Bank pages"
+            [page]="bank.page()"
+            (pageChange)="bank.page.set($event)"
+            [pageSize]="bank.pageSize"
+            [total]="bank.total()"
+            noun="questions"
+            [disabled]="bank.loading()"
+            (go)="loadBank()"
+          />
+        }
+        @if (banked().size) {
+          <h4 class="resit-subheading">Chosen from your bank</h4>
+          <ol class="fixed-questions">
+            @for (q of bankedList(); track q.id; let i = $index) {
+              <li>
+                <span class="bank-prompt">{{ q.prompt }}</span>
+                <button type="button" class="quiet" [disabled]="state.busy()" (click)="toggleBank(q, false)">
+                  Remove<span class="visually-hidden"> bank question {{ i + 1 }} from the resit</span>
+                </button>
+              </li>
+            }
+          </ol>
+        }
+      </fieldset>
+
+      <fieldset class="question-set" id="resit-name">
+        <legend>3. Title</legend>
+        <app-field
+          controlId="resit-title-input"
+          label="Resit title (optional)"
+          [hint]="'Leave it empty to use “' + defaultTitle() + '”.'"
+        >
+          <input appFieldControl id="resit-title-input" formControlName="title" maxlength="160" />
+        </app-field>
+      </fieldset>
+
+      <app-status [state]="state" />
+      <div class="button-row">
+        <button type="submit" [disabled]="state.busy()">Create resit draft</button>
+      </div>
+    </form>
+  }
+</section>

@@ -227,6 +227,11 @@ export class AssessmentEditorComponent {
   }
 
   /* the editor's heading, which the page header shows. */
+  /* how many students the resit being edited is assigned to. */
+  assignedCount(): number {
+    return this.editing?.assignees?.length ?? 0;
+  }
+
   editorTitle(): string {
     const current = this.editing;
     if (!current) return 'Create an assessment';

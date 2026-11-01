@@ -2459,6 +2459,49 @@ form .editor-bar-actions button {
   padding: 8px 0;
   border-top: 1px solid var(--line);
 }
+/* the resit builder: its students and questions as checkbox lists, one per row. */
+.resit-view {
+  max-width: 960px;
+}
+.resit-choices {
+  list-style: none;
+  margin: 0 0 12px;
+  padding: 0;
+}
+.resit-choices > li {
+  border-top: 1px solid var(--line);
+}
+.resit-choices label.check {
+  align-items: flex-start;
+  padding: 10px 0;
+}
+.resit-choices label.check input {
+  margin-top: 2px;
+}
+.resit-choice {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 4px;
+  min-width: 0;
+}
+.resit-subheading {
+  font-size: var(--text-base);
+  font-weight: 600;
+  margin: 16px 0 4px;
+}
+.resit-bank-filters {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 0 16px;
+}
+.resit-bank-filters app-field {
+  flex: 1 1 240px;
+}
+.resit-bank-filters label.check {
+  margin-bottom: 18px;
+}
 .draft-head {
   display: flex;
   flex-wrap: wrap;

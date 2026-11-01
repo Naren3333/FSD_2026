@@ -145,6 +145,14 @@
                               >{{ submittedBy(item) ? ' of ' : ' ' }}{{ item.title }}</span
                             >
                           </button>
+                          <button
+                            type="button"
+                            class="secondary"
+                            (click)="resitFromList(item)"
+                            [disabled]="state.busy()"
+                          >
+                            Create resit<span class="visually-hidden"> of {{ item.title }}</span>
+                          </button>
                         }
                         <button
                           type="button"
@@ -203,6 +211,13 @@
     [showStatus]="view() === 'edit' && !deleting()"
     (save)="save($event)"
     (cancel)="editing() ? stopEditing() : cancelEdit()"
+  />
+
+  <app-resit-builder
+    [assessmentId]="resitAddress()"
+    [classroomId]="classroomId()"
+    [shown]="view() === 'resit'"
+    (created)="resitCreated($event)"
   />
 
   @if (view() === 'preview') {

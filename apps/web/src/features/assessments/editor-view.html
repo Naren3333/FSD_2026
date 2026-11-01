@@ -48,6 +48,13 @@
       }
     </span>
   </p>
+  @if (editing?.resit_of) {
+    <p class="caption" id="resit-assigned">
+      <span class="badge">Resit</span>
+      Assigned to {{ assignedCount() }} {{ assignedCount() === 1 ? 'student' : 'students' }}: only they can
+      see it.
+    </p>
+  }
 
   <div
     class="editor-layout"

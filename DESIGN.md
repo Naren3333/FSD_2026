@@ -62,6 +62,7 @@ Views are chosen by the address:
 - `?edit=<id>` (or `?edit=new`) is the teacher's editor.
 - `?preview=<id>` is the teacher's preview.
 - `?open=<id>` is a student's assessment. A teacher's `?open=` opens the preview.
+- `?resit=<id>` is the teacher's resit builder for a published assessment.
 - `/question-bank` is the teacher's bank; `?edit=<id>` (or `?edit=new`) is one bank question's form.
 - `/review?assessment=<id>&grade=<id>` is the grading queue with the open grade.
 
@@ -80,6 +81,7 @@ Other pages:
 - Teaching materials has an upload card with a drop zone, above the library table.
 - Curriculum is one column.
 - Question bank is one column: a filter card (prompt search, topic, type), then the questions table (question, type, marks, topic with "(archived)", Edit and a Delete icon button). Its form is the editor's question fields for one question, without marking points or source passages.
+- The resit builder is one column, at most 960px wide: three numbered fieldsets (Students, Questions, Title) of one-per-row checkbox lists, then the primary "Create resit draft". Questions lists the original's, then the bank's with a topic select (and "Hide already answered" with one student chosen), then "Chosen from your bank" with Remove buttons. Suggestion chips are `.badge-warning` "Lost marks" and "Chosen students lost marks"; "Already answered" is `.badge-plain`. The editor shows a "Resit" chip with "Assigned to N students" on a resit.
 - In the editor one question is open at a time: opening or adding a question folds the others, except any with an error, and an assessment opened for editing shows its first question. Each question can still be expanded or collapsed by hand. The outline wraps prompts to two lines, with the full prompt as a tooltip, and the topic select takes the widest column of the question's type, marks and topic row.
 - There is no two-column `.split` layout.
 
