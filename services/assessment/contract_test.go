@@ -1,6 +1,7 @@
 package main
 
 import (
+	"learning/platform"
 	"learning/platform/platformtest"
 	"testing"
 )
@@ -9,7 +10,9 @@ import (
 // integration.py's response checks) describe what it really sends.
 func TestResponsesMatchTheContract(t *testing.T) {
 	for name, value := range map[string]any{
-		"Assessment":         Assessment{},
+		"Assessment":         TeacherAssessment{},
+		"BankQuestion":       BankQuestion{},
+		"BankQuestionPage":   platform.ListPage[BankQuestion]{},
 		"StudentAssessment":  PublicAssessment{},
 		"AssessmentSummary":  Summary{},
 		"AssessmentProgress": Progress{},

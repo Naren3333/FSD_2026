@@ -127,6 +127,11 @@ type Summary struct {
 	Submissions *int `json:"submissions,omitempty"`
 	// any submission, including a removed student's, prevents replacing assessment questions.
 	HasSubmissions *bool `json:"has_submissions,omitempty"`
+	// Resit tells a student it is a resit; ResitOf and AssigneeCount (its assigned students on the roster)
+	// are for the classroom's teacher only (adr 0017).
+	Resit         bool    `json:"resit,omitempty"`
+	ResitOf       *string `json:"resit_of,omitempty"`
+	AssigneeCount *int    `json:"assignee_count,omitempty"`
 }
 
 // details are what a teacher may change after students have submitted: nothing their grades depend on.
@@ -143,6 +148,10 @@ type Progress struct {
 	Submissions int        `json:"submissions"`
 	Status      string     `json:"status"`
 	DueAt       *time.Time `json:"due_at"`
+	// for a resit, the assessment it resits and how many of its assigned students are on the roster: the
+	// number its submissions are out of.
+	ResitOf       *string `json:"resit_of,omitempty"`
+	AssigneeCount *int    `json:"assignee_count,omitempty"`
 }
 
 // submission is one student's answers to an assessment, by question id.
@@ -184,6 +193,55 @@ type PublicAssessment struct {
 	OpensAt    *time.Time       `json:"opens_at"`
 	DueAt      *time.Time       `json:"due_at"`
 	LatePolicy string           `json:"late_policy"`
+	Resit      bool             `json:"resit,omitempty"`
+}
+
+// TeacherQuestion is a question as its teacher sees it and sends it, with the bank question it came from.
+type TeacherQuestion struct {
+	Question
+	BankQuestion string `json:"bank_question_id,omitempty"`
+}
+
+// TeacherAssessment is the teacher's view of an assessment: with each question's bank link, and for a resit
+// the assessment it resits and its assigned students (adr 0017).
+type TeacherAssessment struct {
+	Assessment
+	Questions []TeacherQuestion `json:"questions"`
+	ResitOf   string            `json:"resit_of,omitempty"`
+	Assignees []string          `json:"assignees,omitempty"`
+}
+
+// teacherView is v for its teacher, with links (question id to bank question id).
+func teacherView(v Assessment, links map[string]string) TeacherAssessment {
+	t := TeacherAssessment{Assessment: v, Questions: make([]TeacherQuestion, len(v.Questions)), ResitOf: v.ResitOf, Assignees: v.Assignees}
+	for i, q := range v.Questions {
+		t.Questions[i] = TeacherQuestion{q, links[q.ID]}
+	}
+	return t
+}
+
+// AssessmentInput is what a teacher sends to create or replace an assessment: only what they may set.
+type AssessmentInput struct {
+	Classroom     string            `json:"classroom_id"`
+	Title         string            `json:"title"`
+	Questions     []TeacherQuestion `json:"questions"`
+	Status        string            `json:"status"`
+	OpensAt       *time.Time        `json:"opens_at"`
+	DueAt         *time.Time        `json:"due_at"`
+	LatePolicy    string            `json:"late_policy"`
+	ReleasePolicy string            `json:"release_policy"`
+	AIMarking     bool              `json:"ai_marking"`
+}
+
+// assessment is the input as an assessment, its links declared for owner.
+func (in AssessmentInput) assessment(owner string) Assessment {
+	v := Assessment{Classroom: in.Classroom, Title: in.Title, Status: in.Status, OpensAt: in.OpensAt, DueAt: in.DueAt,
+		LatePolicy: in.LatePolicy, ReleasePolicy: in.ReleasePolicy, AIMarking: in.AIMarking, LinkOwner: owner}
+	for _, q := range in.Questions {
+		v.Questions = append(v.Questions, q.Question)
+		v.BankLinks = append(v.BankLinks, q.BankQuestion)
+	}
+	return v
 }
 
 // fill omitted policies, points, rubric defaults and criterion identifiers.
@@ -377,7 +435,7 @@ func (v Assessment) late(now time.Time) bool { return v.DueAt != nil && now.Afte
 func (v Assessment) closed(now time.Time) bool { return v.late(now) && v.LatePolicy == lateReject }
 
 func (v Assessment) Public() PublicAssessment {
-	p := PublicAssessment{v.ID, v.Classroom, v.Title, []PublicQuestion{}, v.OpensAt, v.DueAt, v.LatePolicy}
+	p := PublicAssessment{v.ID, v.Classroom, v.Title, []PublicQuestion{}, v.OpensAt, v.DueAt, v.LatePolicy, v.Assigned}
 	for _, q := range v.Questions {
 		p.Questions = append(p.Questions, PublicQuestion{q.ID, q.Prompt, q.Type, q.Options, q.MaxLength, q.Points, q.Topic})
 	}

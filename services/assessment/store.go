@@ -55,6 +55,16 @@ type store interface {
 	findSubmission(ctx context.Context, assessment, student string) (OwnSubmission, error)
 	findSaved(ctx context.Context, assessment, student string) (SavedAnswers, error)
 	saveAnswers(ctx context.Context, assessment, student string, answers map[string]string) (time.Time, error)
+	// the question bank and resits (adr 0017).
+	findLinks(ctx context.Context, org, assessment, owner string) (map[string]string, error)
+	createResit(ctx context.Context, org string, v Assessment) error
+	setAssignees(ctx context.Context, org, id string, students, checked []string) error
+	insertBankQuestion(ctx context.Context, org, owner string, q Question, from *bankSource) (string, error)
+	updateBankQuestion(ctx context.Context, org, owner, id string, q Question) error
+	deleteBankQuestion(ctx context.Context, org, owner, id string) error
+	findBankQuestion(ctx context.Context, org, owner, id string) (BankQuestion, error)
+	findBankQuestions(ctx context.Context, org, owner string, ids []string) ([]BankQuestion, error)
+	listBank(ctx context.Context, org, owner string, f bankFilter, window platform.ListWindow) ([]BankQuestion, int, error)
 }
 
 func (p pgStore) findAssessments(ctx context.Context, org string, ids []string) ([]Assessment, error) {
@@ -333,13 +343,16 @@ func (p pgStore) deleteAssessment(ctx context.Context, org, id string, submissio
 // each.
 func (p pgStore) listProgress(ctx context.Context, org, classroomID string, enrolled []string, paging ...platform.ListWindow) ([]Progress, error) {
 	window := platform.Window(paging, 100)
-	rows, err := p.db.Query(ctx, "SELECT a.id,a.title,count(s.id),a.status,a.due_at FROM assessments a LEFT JOIN submissions s ON s.assessment_id=a.id AND s.student_id=ANY($3::text[]) WHERE a.classroom_id=$1 AND a.org_id=$2 GROUP BY a.id ORDER BY a.created_at DESC,a.id DESC OFFSET $4 LIMIT $5", classroomID, org, enrolled, window.Offset, window.Limit)
+	rows, err := p.db.Query(ctx, `SELECT a.id,a.title,count(s.id),a.status,a.due_at,a.resit_of::text,
+		CASE WHEN a.assigned THEN (SELECT count(*) FROM assessment_assignees aa WHERE aa.assessment_id=a.id AND aa.student_id=ANY($3::text[])) END
+		FROM assessments a LEFT JOIN submissions s ON s.assessment_id=a.id AND s.student_id=ANY($3::text[]) WHERE a.classroom_id=$1 AND a.org_id=$2
+		GROUP BY a.id ORDER BY a.created_at DESC,a.id DESC OFFSET $4 LIMIT $5`, classroomID, org, enrolled, window.Offset, window.Limit)
 	if err != nil {
 		return nil, err
 	}
 	return pgx.CollectRows(rows, func(row pgx.CollectableRow) (Progress, error) {
 		var v Progress
-		err := row.Scan(&v.ID, &v.Title, &v.Submissions, &v.Status, &v.DueAt)
+		err := row.Scan(&v.ID, &v.Title, &v.Submissions, &v.Status, &v.DueAt, &v.ResitOf, &v.AssigneeCount)
 		return v, err
 	})
 }
@@ -351,7 +364,9 @@ func (p pgStore) listAssessments(ctx context.Context, org, classroomID, student 
 		a.status,a.opens_at,a.due_at,a.late_policy,jsonb_array_length(a.questions),
 		(SELECT coalesce(sum(coalesce(nullif((q->>'points')::int,0),1)),0) FROM jsonb_array_elements(a.questions) q),
 		CASE WHEN $4 THEN (SELECT count(*) FROM submissions s WHERE s.assessment_id=a.id AND s.student_id=ANY($6::text[])) END,
-		CASE WHEN $4 THEN EXISTS(SELECT 1 FROM submissions s WHERE s.assessment_id=a.id) END
+		CASE WHEN $4 THEN EXISTS(SELECT 1 FROM submissions s WHERE s.assessment_id=a.id) END,
+		a.assigned AND NOT $4, CASE WHEN $4 THEN a.resit_of::text END,
+		CASE WHEN $4 AND a.assigned THEN (SELECT count(*) FROM assessment_assignees aa WHERE aa.assessment_id=a.id AND aa.student_id=ANY($6::text[])) END
 		FROM assessments a WHERE a.classroom_id=$1 AND a.org_id=$2 AND ($4 OR (a.status='published' AND (a.opens_at IS NULL OR a.opens_at<=$5)
 			AND (NOT a.assigned OR EXISTS(SELECT 1 FROM assessment_assignees aa WHERE aa.assessment_id=a.id AND aa.student_id=$3))))
 		ORDER BY a.created_at DESC,a.id DESC OFFSET $7 LIMIT $8`, classroomID, org, student, all, now, enrolled, window.Offset, window.Limit)
@@ -360,7 +375,7 @@ func (p pgStore) listAssessments(ctx context.Context, org, classroomID, student 
 	}
 	return pgx.CollectRows(rows, func(row pgx.CollectableRow) (Summary, error) {
 		var v Summary
-		err := row.Scan(&v.ID, &v.Title, &v.Submitted, &v.Status, &v.OpensAt, &v.DueAt, &v.LatePolicy, &v.Questions, &v.Points, &v.Submissions, &v.HasSubmissions)
+		err := row.Scan(&v.ID, &v.Title, &v.Submitted, &v.Status, &v.OpensAt, &v.DueAt, &v.LatePolicy, &v.Questions, &v.Points, &v.Submissions, &v.HasSubmissions, &v.Resit, &v.ResitOf, &v.AssigneeCount)
 		return v, err
 	})
 }

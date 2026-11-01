@@ -144,7 +144,7 @@ type jsonField struct {
 
 // jsonFields are the fields encoding/json writes for a struct type, embedded structs' included.
 func jsonFields(typ reflect.Type) []jsonField {
-	var fields []jsonField
+	var fields, embedded []jsonField
 	for i := range typ.NumField() {
 		f := typ.Field(i)
 		tag := f.Tag.Get("json")
@@ -153,13 +153,19 @@ func jsonFields(typ reflect.Type) []jsonField {
 		}
 		name, options, _ := strings.Cut(tag, ",")
 		if f.Anonymous && name == "" && f.Type.Kind() == reflect.Struct {
-			fields = append(fields, jsonFields(f.Type)...)
+			embedded = append(embedded, jsonFields(f.Type)...)
 			continue
 		}
 		if name == "" {
 			name = f.Name
 		}
 		fields = append(fields, jsonField{name, !slices.Contains(strings.Split(options, ","), "omitempty"), f.Type})
+	}
+	// as encoding/json does, a field of the struct itself hides an embedded one of the same name.
+	for _, f := range embedded {
+		if !slices.ContainsFunc(fields, func(own jsonField) bool { return own.name == f.name }) {
+			fields = append(fields, f)
+		}
 	}
 	return fields
 }

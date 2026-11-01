@@ -331,7 +331,7 @@ func TestSavingToTheBank(t *testing.T) {
 		t.Fatal(err)
 	}
 	got, err := p.findBankQuestion(ctx, "org", bankOwner, id)
-	if err != nil || got.Question.ID != "" || got.Question.Sources != nil || got.Question.MarkingScheme != nil || got.Question.Prompt != q.Prompt {
+	if err != nil || got.ID != id || got.Prompt != q.Prompt || count(t, p, "SELECT count(*) FROM bank_questions WHERE question ? 'sources' OR question ? 'marking_scheme' OR question->>'id'<>''") != 0 {
 		t.Fatalf("the bank kept passages or an id: %+v %v", got, err)
 	}
 	if _, err = p.findBankQuestion(ctx, "org", otherTeacher, id); !errors.Is(err, platform.ErrNotFound) {
@@ -368,7 +368,7 @@ func TestSavingToTheBank(t *testing.T) {
 	if err = p.updateBankQuestion(ctx, "org", bankOwner, again, q); err != nil {
 		t.Fatal(err)
 	}
-	if got, _ = p.findBankQuestion(ctx, "org", bankOwner, again); got.Question.Prompt != "2 + 2?" || got.Question.Sources != nil {
+	if got, _ = p.findBankQuestion(ctx, "org", bankOwner, again); got.Prompt != "2 + 2?" {
 		t.Fatalf("%+v", got)
 	}
 }

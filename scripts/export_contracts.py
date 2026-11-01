@@ -81,7 +81,12 @@ question_fields = {
     "sources": array(excerpt, 1, 5),
     "origin": {"enum": ["generated"], "description": "Left out for a question the teacher wrote."},
 }
-teacher_question = obj(question_fields, QUESTION_REQUIRED)
+# since adr 0017 a teacher's question names the bank question it came from, when it did.
+BANK_LINK = {
+    **UUID,
+    "description": "The teacher's bank question this one came from or was saved to; left out for none.",
+}
+teacher_question = obj({**question_fields, "bank_question_id": BANK_LINK}, QUESTION_REQUIRED)
 # a criterion's id is assigned by assessment, so a teacher sends criteria without one.
 input_rubric = obj(
     {
@@ -103,6 +108,7 @@ question_input = obj(
             "assessment, which keeps its id and the work students saved on it.",
         },
         "rubric": input_rubric,
+        "bank_question_id": BANK_LINK,
     },
     ["prompt", "type", "topic_id"],
 )
@@ -121,6 +127,7 @@ settings = {
     "release_policy": RELEASE,
     "ai_marking": {"type": "boolean"},
 }
+ASSESSMENT_REQUIRED = ["id", "classroom_id", "title", "questions", *settings, "published_at"]
 assessment = obj(
     {
         "id": UUID,
@@ -129,7 +136,13 @@ assessment = obj(
         "questions": array(teacher_question, 1, 50),
         **settings,
         "published_at": NULLABLE_TIME,
-    }
+        "resit_of": {**UUID, "description": "For a resit, the assessment it resits (adr 0017)."},
+        "assignees": {
+            **array(TEXT, 0, 100),
+            "description": "For a resit, the students it is assigned to; nobody else sees it.",
+        },
+    },
+    ASSESSMENT_REQUIRED,
 )
 assessment_input = obj(
     {
@@ -154,8 +167,17 @@ public_assessment = obj(
         "opens_at": NULLABLE_TIME,
         "due_at": NULLABLE_TIME,
         "late_policy": LATE,
-    }
+        "resit": {"type": "boolean", "description": "Set on a resit assigned to the student."},
+    },
+    ["id", "classroom_id", "title", "questions", "opens_at", "due_at", "late_policy"],
 )
+RESIT_OF = {**UUID, "description": "For a resit, the assessment it resits; for the classroom's teacher only."}
+ASSIGNEE_COUNT = {
+    "type": "integer",
+    "minimum": 0,
+    "description": "For a resit, how many of its assigned students are enrolled: the number its submissions are "
+    "out of. For the classroom's teacher only.",
+}
 assessment_summary = obj(
     {
         "id": UUID,
@@ -179,6 +201,9 @@ assessment_summary = obj(
             "once one has, it can no longer be replaced, and deleting it needs with_submissions=true. For the "
             "classroom's teacher only.",
         },
+        "resit": {"type": "boolean", "description": "Set, for a student, on a resit assigned to them."},
+        "resit_of": RESIT_OF,
+        "assignee_count": ASSIGNEE_COUNT,
     },
     ["id", "title", "submitted", "status", "opens_at", "due_at", "late_policy", "question_count", "points"],
 )
@@ -193,8 +218,67 @@ assessment_progress = obj(
         "submissions": {"type": "integer", "minimum": 0},
         "status": STATUS,
         "due_at": NULLABLE_TIME,
-    }
+        "resit_of": RESIT_OF,
+        "assignee_count": ASSIGNEE_COUNT,
+    },
+    ["id", "title", "submissions", "status", "due_at"],
 )
+# a teacher's question bank and resits (adr 0017). the bank keeps no passages or marking points.
+BANK_FIELDS = [k for k in question_fields if k not in ("sources", "marking_scheme")]
+bank_question = obj(
+    {
+        **{k: question_fields[k] for k in BANK_FIELDS},
+        "id": {**UUID, "description": "The bank question's own id."},
+        "answered": {
+            "type": "boolean",
+            "description": "Whether the student the list was asked about has answered it, in any of the teacher's "
+            "classrooms; only then.",
+        },
+        "created_at": {"type": "string", "format": "date-time"},
+        "updated_at": {"type": "string", "format": "date-time"},
+    },
+    [*QUESTION_REQUIRED, "created_at", "updated_at"],
+)
+bank_question_input = obj(
+    {k: question_input["properties"][k] for k in BANK_FIELDS},
+    ["prompt", "type", "topic_id"],
+)
+bank_question_create = obj(
+    {
+        "question": bank_question_input,
+        "assessment_id": {
+            **UUID,
+            "description": "With question_id: the assessment question to save, and link.",
+        },
+        "question_id": UUID,
+    },
+    [],
+)
+bank_question_create["oneOf"] = [{"required": ["question"]}, {"required": ["assessment_id", "question_id"]}]
+bank_question_page = obj(
+    {"items": array(bank_question, maximum=100), "total": {"type": "integer", "minimum": 0}}
+)
+STUDENT_IDS = array(TEXT, 1, 100)
+resit_request = obj(
+    {
+        "student_ids": STUDENT_IDS,
+        "title": {
+            "type": "string",
+            "maxLength": 160,
+            "description": "Left out: the original's, marked a resit.",
+        },
+        "copy_question_ids": {
+            **array(UUID, 0, 50),
+            "description": "Questions of the original to copy, first.",
+        },
+        "bank_question_ids": {
+            **array(UUID, 0, 50),
+            "description": "Bank questions to add, after the copies.",
+        },
+    },
+    ["student_ids"],
+)
+assignees_request = obj({"student_ids": STUDENT_IDS})
 assessment_details = obj(
     {
         "title": {"type": "string", "minLength": 1, "maxLength": 160},
@@ -657,6 +741,14 @@ operations = {
         ),
         operation("GET", "/v1/assessments/{id}/saved-answers", None, saved_answers),
         operation("PUT", "/v1/assessments/{id}/saved-answers", obj({"answers": ANSWERS}), saved_answers),
+        # a draft resit of a published assessment for chosen students (adr 0017).
+        operation("POST", "/v1/assessments/{id}/resits", resit_request, assessment, 201),
+        # replaces a resit's students; one who has submitted cannot be taken off.
+        operation("PUT", "/v1/assessments/{id}/assignees", assignees_request, assessment),
+        operation("POST", "/v1/bank/questions", bank_question_create, bank_question, 201),
+        operation("GET", "/v1/bank/questions/{id}", None, bank_question),
+        operation("PUT", "/v1/bank/questions/{id}", bank_question_input, bank_question),
+        operation("DELETE", "/v1/bank/questions/{id}", None, None, 204),
     ],
     "grading": [
         # one page of the enrolled students' evaluations, newest first, or of one assessment's, oldest
@@ -754,6 +846,20 @@ operations["assessment"].append(
     )
 )
 
+# a page of the teacher's bank, newest change first, filtered; with classroom_id and student_id (a student on
+# that classroom's roster) each question says whether they answered it.
+bank_list = paged(operation("GET", "/v1/bank/questions", None, bank_question_page), 100, 20)
+bank_list[2]["parameters"] += [
+    {"name": "topic_id", "in": "query", "required": False, "schema": array(UUID)},
+    {"name": "type", "in": "query", "required": False, "schema": QUESTION_TYPES},
+    {"name": "q", "in": "query", "required": False, "schema": {"type": "string", "maxLength": 200}},
+    {"name": "origin", "in": "query", "required": False, "schema": {"enum": ["generated"]}},
+    {"name": "classroom_id", "in": "query", "required": False, "schema": UUID},
+    {"name": "student_id", "in": "query", "required": False, "schema": TEXT},
+    {"name": "exclude_answered", "in": "query", "required": False, "schema": {"type": "boolean"}},
+]
+operations["assessment"].append(bank_list)
+
 # the named schemas of the go services' contracts, under components/schemas.
 NAMES = {
     "ClassroomPage": PAGE_SCHEMAS["identity"],
@@ -794,6 +900,12 @@ NAMES = {
     "SubmissionReceipt": submission_receipt,
     "OwnSubmission": own_submission,
     "SavedAnswers": saved_answers,
+    "BankQuestion": bank_question,
+    "BankQuestionInput": bank_question_input,
+    "BankQuestionCreate": bank_question_create,
+    "BankQuestionPage": bank_question_page,
+    "ResitRequest": resit_request,
+    "AssigneesRequest": assignees_request,
     "Evaluation": evaluation,
     "EvaluationEvidence": evaluation_evidence,
     "EvaluationPage": evaluation_page,

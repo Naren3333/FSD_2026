@@ -24,6 +24,8 @@ type memoryStore struct {
 	saved       map[string]map[string]string
 	events      []map[string]any // what each stored submission would publish, from what the handler passed
 	deleted     []string         // the published assessments whose deletion would be announced
+	bank        map[string]memoryBankQuestion
+	links       map[string]map[string]string // assessment id to question id to bank question id
 }
 
 func (m *memoryStore) findAssessment(_ context.Context, _, id string) (Assessment, error) {
@@ -36,6 +38,7 @@ func (m *memoryStore) findAssessment(_ context.Context, _, id string) (Assessmen
 
 func (m *memoryStore) insertAssessment(_ context.Context, _ string, v Assessment) error {
 	m.assessments[v.ID] = v
+	m.writeLinks(v)
 	return nil
 }
 
@@ -62,6 +65,7 @@ func (m *memoryStore) updateAssessment(_ context.Context, _ string, before, v As
 			return errNotDraft
 		}
 		m.assessments[v.ID] = v
+		m.writeLinks(v)
 		return nil
 	})
 }
@@ -124,7 +128,10 @@ func (m *memoryStore) listAssessments(_ context.Context, _, _, student string, a
 	for _, v := range m.assessments {
 		if all || v.visibleTo(student, now) {
 			_, done := m.submitted[v.ID+"/"+student]
-			summary := Summary{ID: v.ID, Title: v.Title, Submitted: done, Status: v.Status, DueAt: v.DueAt}
+			summary := Summary{ID: v.ID, Title: v.Title, Submitted: done, Status: v.Status, DueAt: v.DueAt, Resit: v.Assigned && !all}
+			if all && v.Assigned {
+				summary.ResitOf, summary.AssigneeCount = &v.ResitOf, enrolledAssignees(v, enrolled)
+			}
 			if all {
 				n, has := 0, false
 				for key := range m.submitted {
@@ -143,6 +150,17 @@ func (m *memoryStore) listAssessments(_ context.Context, _, _, student string, a
 	return result, nil
 }
 
+// enrolledAssignees is how many of v's assigned students are enrolled.
+func enrolledAssignees(v Assessment, enrolled []string) *int {
+	n := 0
+	for _, student := range v.Assignees {
+		if slices.Contains(enrolled, student) {
+			n++
+		}
+	}
+	return &n
+}
+
 func (m *memoryStore) listProgress(_ context.Context, _, _ string, enrolled []string, paging ...platform.ListWindow) ([]Progress, error) {
 	result := []Progress{}
 	for _, v := range m.assessments {
@@ -152,7 +170,11 @@ func (m *memoryStore) listProgress(_ context.Context, _, _ string, enrolled []st
 				n++
 			}
 		}
-		result = append(result, Progress{ID: v.ID, Title: v.Title, Submissions: n, Status: v.Status})
+		progress := Progress{ID: v.ID, Title: v.Title, Submissions: n, Status: v.Status}
+		if v.Assigned {
+			progress.ResitOf, progress.AssigneeCount = &v.ResitOf, enrolledAssignees(v, enrolled)
+		}
+		result = append(result, progress)
 	}
 	return result, nil
 }

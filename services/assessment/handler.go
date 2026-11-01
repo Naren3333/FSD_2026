@@ -43,6 +43,13 @@ func (s server) routes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /v1/assessments/{id}/submission", s.submission)
 	mux.HandleFunc("GET /v1/assessments/{id}/saved-answers", s.saved)
 	mux.HandleFunc("PUT /v1/assessments/{id}/saved-answers", s.save)
+	mux.HandleFunc("POST /v1/assessments/{id}/resits", s.resit)
+	mux.HandleFunc("PUT /v1/assessments/{id}/assignees", s.assignees)
+	mux.HandleFunc("GET /v1/bank/questions", s.bankList)
+	mux.HandleFunc("POST /v1/bank/questions", s.bankCreate)
+	mux.HandleFunc("GET /v1/bank/questions/{id}", s.bankGet)
+	mux.HandleFunc("PUT /v1/bank/questions/{id}", s.bankUpdate)
+	mux.HandleFunc("DELETE /v1/bank/questions/{id}", s.bankDelete)
 }
 
 // batch reads at most 50 snapshots with one sql query and one access check per classroom.
@@ -88,7 +95,7 @@ func (s server) batch(w http.ResponseWriter, r *http.Request) {
 		}
 		switch {
 		case relation == platform.RelationTeacher:
-			result = append(result, item)
+			result = append(result, teacherView(item, nil)) // links only in single reads
 		case item.visibleTo(platform.Actor(r).Subject, s.now()):
 			result = append(result, item.Public())
 		default:
@@ -110,15 +117,7 @@ func (s server) prepare(w http.ResponseWriter, r *http.Request, v *Assessment, b
 		platform.Invalid(w, err.Error())
 		return false
 	}
-	switch checkAll(r, s.topics, v.topicIDs()) {
-	case topicUnauthenticated:
-		platform.Unauthenticated(w, "The access token was not accepted.")
-		return false
-	case topicUnavailable:
-		platform.Unavailable(w, "Curriculum unavailable.")
-		return false
-	case topicInvalid:
-		platform.Error(w, http.StatusUnprocessableEntity, "INVALID_TOPIC", "Every topic must exist in your curriculum.")
+	if !s.topicsExist(w, r, v.topicIDs()) {
 		return false
 	}
 	for i := range v.Questions {
@@ -136,15 +135,32 @@ func (s server) prepare(w http.ResponseWriter, r *http.Request, v *Assessment, b
 	return true
 }
 
+// topicsExist checks ids with curriculum, writing the error when one is not an active topic of the caller's.
+func (s server) topicsExist(w http.ResponseWriter, r *http.Request, ids []string) bool {
+	switch checkAll(r, s.topics, ids) {
+	case topicUnauthenticated:
+		platform.Unauthenticated(w, "The access token was not accepted.")
+		return false
+	case topicUnavailable:
+		platform.Unavailable(w, "Curriculum unavailable.")
+		return false
+	case topicInvalid:
+		platform.Error(w, http.StatusUnprocessableEntity, "INVALID_TOPIC", "Every topic must exist in your curriculum.")
+		return false
+	}
+	return true
+}
+
 func (s server) create(w http.ResponseWriter, r *http.Request) {
 	// the role check comes first so a student is refused before validation; TeacherOf decides below.
 	if !platform.Teacher(w, r) {
 		return
 	}
-	var v Assessment
-	if !platform.Decode(w, r, &v) {
+	var in AssessmentInput
+	if !platform.Decode(w, r, &in) {
 		return
 	}
+	v := in.assessment(platform.Actor(r).Subject)
 	if !platform.ID(v.Classroom) {
 		platform.Invalid(w, "provide a classroom, title, and 1–50 questions")
 		return
@@ -163,7 +179,7 @@ func (s server) create(w http.ResponseWriter, r *http.Request) {
 		platform.Fail(w, err)
 		return
 	}
-	platform.JSON(w, http.StatusCreated, v)
+	s.teacherJSON(w, r, http.StatusCreated, v)
 }
 
 // update replaces an assessment until a student submits it, and publishes a draft when the new version says
@@ -176,10 +192,11 @@ func (s server) update(w http.ResponseWriter, r *http.Request) {
 	if !ok || !platform.TeacherOf(s.access, w, r, existing.Classroom) {
 		return
 	}
-	var v Assessment
-	if !platform.Decode(w, r, &v) {
+	var in AssessmentInput
+	if !platform.Decode(w, r, &in) {
 		return
 	}
+	v := in.assessment(platform.Actor(r).Subject)
 	if v.Classroom != existing.Classroom {
 		platform.Invalid(w, "An assessment cannot move to another classroom.")
 		return
@@ -195,10 +212,11 @@ func (s server) update(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	v.ID, v.CreatedBy = existing.ID, existing.CreatedBy
+	v.Assigned, v.ResitOf, v.Assignees = existing.Assigned, existing.ResitOf, existing.Assignees // set by the server only
 	if !s.changeResult(w, s.store.updateAssessment(r.Context(), platform.Actor(r).Org, existing, v)) {
 		return
 	}
-	platform.JSON(w, http.StatusOK, v)
+	s.teacherJSON(w, r, http.StatusOK, v)
 }
 
 // details changes an assessment's title, due date and late policy.
@@ -240,7 +258,7 @@ func (s server) details(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	v.Title, v.DueAt, v.LatePolicy = d.Title, d.DueAt, d.LatePolicy
-	platform.JSON(w, http.StatusOK, v)
+	s.teacherJSON(w, r, http.StatusOK, v)
 }
 
 func (s server) publish(w http.ResponseWriter, r *http.Request) {
@@ -264,7 +282,7 @@ func (s server) publish(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	v.Status, v.PublishedAt = statusPublished, &now
-	platform.JSON(w, http.StatusOK, v)
+	s.teacherJSON(w, r, http.StatusOK, v)
 }
 
 // remove deletes an assessment.
@@ -310,6 +328,16 @@ func (s server) changeResult(w http.ResponseWriter, err error) bool {
 		return false
 	}
 	return s.draftResult(w, err)
+}
+
+// teacherJSON writes v as its teacher sees it, with the links to the caller's bank questions.
+func (s server) teacherJSON(w http.ResponseWriter, r *http.Request, status int, v Assessment) {
+	links, err := s.store.findLinks(r.Context(), platform.Actor(r).Org, v.ID, platform.Actor(r).Subject)
+	if err != nil {
+		platform.Fail(w, err)
+		return
+	}
+	platform.JSON(w, status, teacherView(v, links))
 }
 
 func notDraft(w http.ResponseWriter) {
@@ -418,7 +446,7 @@ func (s server) get(w http.ResponseWriter, r *http.Request) {
 	// answer keys and rubrics go to the classroom's own teacher only, never on the strength of the token role.
 	switch {
 	case relation == platform.RelationTeacher:
-		platform.JSON(w, http.StatusOK, v)
+		s.teacherJSON(w, r, http.StatusOK, v)
 	case v.visibleTo(platform.Actor(r).Subject, s.now()):
 		platform.JSON(w, http.StatusOK, v.Public())
 	default:

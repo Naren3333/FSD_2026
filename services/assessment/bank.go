@@ -27,14 +27,32 @@ type errAlreadyInBank struct{ id string }
 
 func (e errAlreadyInBank) Error() string { return "already in the bank as " + e.id }
 
-// a bank question is a teacher's question kept for reuse, without an assessment's id, passages or marking
-// points; answered is set when the list was asked about one student.
+// a bank question is a teacher's question kept for reuse, its id the bank's: a question's fields without
+// passages or marking points. answered is set when the list was asked about one student.
 type BankQuestion struct {
-	ID        string    `json:"id"`
-	Question  Question  `json:"question"`
-	Answered  *bool     `json:"answered,omitempty"`
-	CreatedAt time.Time `json:"created_at"`
-	UpdatedAt time.Time `json:"updated_at"`
+	ID              string    `json:"id"`
+	Prompt          string    `json:"prompt"`
+	Type            string    `json:"type"`
+	Options         []string  `json:"options"`
+	Answer          string    `json:"answer"`
+	Tolerance       string    `json:"tolerance"`
+	AcceptedAnswers []string  `json:"accepted_answers,omitempty"`
+	CaseSensitive   bool      `json:"case_sensitive,omitempty"`
+	Rubric          *Rubric   `json:"rubric,omitempty"`
+	MaxLength       int       `json:"max_length,omitempty"`
+	Points          int       `json:"points"`
+	Topic           string    `json:"topic_id"`
+	Origin          string    `json:"origin,omitempty"`
+	Answered        *bool     `json:"answered,omitempty"`
+	CreatedAt       time.Time `json:"created_at"`
+	UpdatedAt       time.Time `json:"updated_at"`
+}
+
+// question is b as an assessment's question, without an id yet.
+func (b BankQuestion) question() Question {
+	return Question{Prompt: b.Prompt, Type: b.Type, Options: b.Options, Answer: b.Answer, Tolerance: b.Tolerance,
+		AcceptedAnswers: b.AcceptedAnswers, CaseSensitive: b.CaseSensitive, Rubric: b.Rubric, MaxLength: b.MaxLength,
+		Points: b.Points, Topic: b.Topic, Origin: b.Origin}
 }
 
 // bankCopy is q as the bank keeps it. passages and marking points quote one classroom's documents, so they
@@ -180,16 +198,27 @@ const bankColumns = "b.id::text,b.question,b.created_at,b.updated_at"
 
 func scanBankQuestion(row pgx.Row, extra ...any) (BankQuestion, error) {
 	var v BankQuestion
+	var id string
 	var data []byte
-	err := row.Scan(append([]any{&v.ID, &data, &v.CreatedAt, &v.UpdatedAt}, extra...)...)
+	err := row.Scan(append([]any{&id, &data, &v.CreatedAt, &v.UpdatedAt}, extra...)...)
 	if err == nil {
-		err = json.Unmarshal(data, &v.Question)
+		err = json.Unmarshal(data, &v)
 	}
+	v.ID = id
 	return v, err
 }
 
 func (p pgStore) findBankQuestion(ctx context.Context, org, owner, id string) (BankQuestion, error) {
 	return scanBankQuestion(p.db.QueryRow(ctx, "SELECT "+bankColumns+" FROM bank_questions b WHERE b.id=$1 AND b.owner_id=$2 AND b.org_id=$3", id, owner, org))
+}
+
+// findBankQuestions is those of ids that are owner's bank questions, in no particular order.
+func (p pgStore) findBankQuestions(ctx context.Context, org, owner string, ids []string) ([]BankQuestion, error) {
+	rows, err := p.db.Query(ctx, "SELECT "+bankColumns+" FROM bank_questions b WHERE b.id=ANY($1::uuid[]) AND b.owner_id=$2 AND b.org_id=$3", ids, owner, org)
+	if err != nil {
+		return nil, err
+	}
+	return pgx.CollectRows(rows, func(row pgx.CollectableRow) (BankQuestion, error) { return scanBankQuestion(row) })
 }
 
 // listBank is a page of owner's bank, newest change first, with the total f matches. "answered" counts a

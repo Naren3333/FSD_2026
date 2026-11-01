@@ -16,6 +16,8 @@ export interface components {
       release_policy: 'on_finalize' | 'manual';
       ai_marking: boolean;
       published_at: string | null;
+      resit_of?: string;
+      assignees?: string[];
     };
     AssessmentDetails: {
       title?: string;
@@ -43,6 +45,8 @@ export interface components {
       submissions: number;
       status: 'draft' | 'published';
       due_at: string | null;
+      resit_of?: string;
+      assignee_count?: number;
     };
     AssessmentSummary: {
       id: string;
@@ -56,6 +60,54 @@ export interface components {
       points: number;
       submissions?: number;
       has_submissions?: boolean;
+      resit?: boolean;
+      resit_of?: string;
+      assignee_count?: number;
+    };
+    AssigneesRequest: {
+      student_ids: string[];
+    };
+    BankQuestion: {
+      id: string;
+      prompt: string;
+      type: 'multiple_choice' | 'numerical' | 'short_answer' | 'free_response';
+      options: string[] | null;
+      answer: string;
+      tolerance: string;
+      accepted_answers?: string[];
+      case_sensitive?: boolean;
+      rubric?: components['schemas']['Rubric'];
+      max_length?: number;
+      points: number;
+      topic_id: string;
+      origin?: 'generated';
+      answered?: boolean;
+      created_at: string;
+      updated_at: string;
+    };
+    BankQuestionCreate: {
+      question?: components['schemas']['BankQuestionInput'];
+      assessment_id?: string;
+      question_id?: string;
+    } & (unknown | unknown);
+    BankQuestionInput: {
+      id?: string;
+      prompt: string;
+      type: 'multiple_choice' | 'numerical' | 'short_answer' | 'free_response';
+      options?: string[] | null;
+      answer?: string;
+      tolerance?: string;
+      accepted_answers?: string[];
+      case_sensitive?: boolean;
+      rubric?: components['schemas']['RubricInput'];
+      max_length?: number;
+      points?: number;
+      topic_id: string;
+      origin?: 'generated';
+    };
+    BankQuestionPage: {
+      items: components['schemas']['BankQuestion'][];
+      total: number;
     };
     Criterion: {
       id: string;
@@ -101,6 +153,7 @@ export interface components {
       marking_scheme?: components['schemas']['Excerpt'][];
       sources?: components['schemas']['Excerpt'][];
       origin?: 'generated';
+      bank_question_id?: string;
     };
     QuestionInput: {
       id?: string;
@@ -118,6 +171,13 @@ export interface components {
       marking_scheme?: components['schemas']['Excerpt'][];
       sources?: components['schemas']['Excerpt'][];
       origin?: 'generated';
+      bank_question_id?: string;
+    };
+    ResitRequest: {
+      student_ids: string[];
+      title?: string;
+      copy_question_ids?: string[];
+      bank_question_ids?: string[];
     };
     Rubric: {
       criteria: components['schemas']['Criterion'][];
@@ -145,6 +205,7 @@ export interface components {
       opens_at: string | null;
       due_at: string | null;
       late_policy: 'accept_flagged' | 'reject';
+      resit?: boolean;
     };
     StudentQuestion: {
       id: string;

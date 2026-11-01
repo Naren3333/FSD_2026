@@ -192,18 +192,33 @@ func TestUnchangedQuestionsKeepTheirIDs(t *testing.T) {
 	}
 }
 
-// the edit as the web app sends it: the stored questions with their ids, which are ignored.
+// an edit sending the stored questions with their ids, which are ignored.
 func TestEditingWithTheQuestionsIDsSentKeepsThem(t *testing.T) {
 	s, v := scheduled(t, "")
 	s.access = platformtest.Access(platform.RelationTeacher)
 	v.Title = "Renamed"
-	body, err := json.Marshal(v)
+	body, err := json.Marshal(inputOf(v))
 	if err != nil {
 		t.Fatal(err)
 	}
 	if got := put(t, s, v.ID, string(body)); got.Questions[0].ID != v.Questions[0].ID || got.Title != "Renamed" {
 		t.Fatalf("%+v", got)
 	}
+	// the server sets an assessment's id and publication; a request naming them is refused (adr 0017).
+	whole, _ := json.Marshal(v)
+	if w := call(t, s, http.MethodPut, "/v1/assessments/"+v.ID, string(whole), "teacher"); w.Code != http.StatusUnprocessableEntity {
+		t.Fatalf("a request with the server's fields: %d", w.Code)
+	}
+}
+
+// inputOf is what a teacher sends to save v as it is.
+func inputOf(v Assessment) AssessmentInput {
+	in := AssessmentInput{Classroom: v.Classroom, Title: v.Title, Status: v.Status, OpensAt: v.OpensAt, DueAt: v.DueAt,
+		LatePolicy: v.LatePolicy, ReleasePolicy: v.ReleasePolicy, AIMarking: v.AIMarking}
+	for _, q := range v.Questions {
+		in.Questions = append(in.Questions, TeacherQuestion{Question: q})
+	}
+	return in
 }
 
 func put(t *testing.T, s server, id, body string) Assessment {
