@@ -198,9 +198,9 @@ export class DashboardComponent {
     return this.metrics().get(studentId)?.get(topicId);
   }
 
-  /* "12 of 20 students submitted" split into what shows ("12 of 20") and the rest, with the share for the bar; just the count when former students' submissions exceed the roster. */
+  /* "12 of 20 students submitted" split into what shows ("12 of 20") and the rest, with the share for the bar; just the count when former students' submissions exceed the roster. a resit counts out of its assigned students (adr 0017). */
   submittedParts(progress: AssessmentProgress): { count: string; rest: string; share: number | null } {
-    const enrolled = this.enrolledTotal();
+    const enrolled = progress.assignee_count ?? this.enrolledTotal();
     if (enrolled !== undefined && progress.submissions <= enrolled)
       return {
         count: `${progress.submissions} of ${enrolled}`,

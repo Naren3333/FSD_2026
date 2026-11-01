@@ -80,7 +80,12 @@ export type AssessmentSettings = Pick<
 /* an assessment as a student gets it (questions, dates and late policy), with the rest of its settings when its teacher reads it. */
 export type Assessment = Omit<Assessments['StudentAssessment'], 'questions'> & {
   questions: Question[];
-} & Partial<Pick<Assessments['Assessment'], 'status' | 'release_policy' | 'ai_marking' | 'published_at'>>;
+} & Partial<
+    Pick<
+      Assessments['Assessment'],
+      'status' | 'release_policy' | 'ai_marking' | 'published_at' | 'resit_of' | 'assignees'
+    >
+  >;
 /* what a teacher sends to create or replace an assessment; assessment assigns the ids. */
 export type NewAssessment = Omit<Assessments['AssessmentInput'], 'questions' | keyof AssessmentSettings> &
   AssessmentSettings & { questions: Omit<Question, 'id'>[] };
@@ -96,6 +101,22 @@ export type SavedAnswers = Assessments['SavedAnswers'];
 export type AssessmentSummary = Assessments['AssessmentSummary'];
 /* how many students have submitted an assessment. */
 export type AssessmentProgress = Assessments['AssessmentProgress'];
+/* a question in the teacher's bank: its own id, no passages or marking points (adr 0017). */
+export type BankQuestion = Assessments['BankQuestion'];
+export type BankQuestionPage = Assessments['BankQuestionPage'];
+/* a question as the bank takes it: without passages or marking points. */
+export type BankQuestionInput = Assessments['BankQuestionInput'];
+/* what a teacher asks for in a resit: its students, and the original's and bank's questions. */
+export type ResitRequest = Assessments['ResitRequest'];
+/* what narrows a page of the teacher's bank; a classroom and student say what that student answered. */
+export interface BankFilter {
+  topicId?: string;
+  type?: QuestionType;
+  text?: string;
+  classroomId?: string;
+  studentId?: string;
+  excludeAnswered?: boolean;
+}
 
 export type CriterionScore = Grading['CriterionScore'];
 /* an ai-suggested mark for a question the teacher marks. */

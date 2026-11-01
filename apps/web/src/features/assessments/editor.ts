@@ -12,6 +12,8 @@ import type {
   Assessment,
   AssessmentDetails,
   AssessmentSettings,
+  BankQuestion,
+  BankQuestionInput,
   Criterion,
   DocumentRecord,
   DraftQuestion,
@@ -60,6 +62,9 @@ export type QuestionForm = FormGroup<{
   /* generated questions: the passages they were drawn from, kept for the teacher (adr 0006). */
   sources: FormControl<Excerpt[]>;
   origin: FormControl<'' | 'generated'>;
+  /* the stored question's id ('' until saved) and the teacher's bank question it came from or was saved to (adr 0017). */
+  id: FormControl<string>;
+  bank_question_id: FormControl<string>;
 }>;
 
 export type AssessmentForm = FormGroup<{
@@ -126,7 +131,7 @@ export function criterionForm(criterion?: Criterion): CriterionForm {
   });
 }
 
-export function questionForm(question?: Omit<Question, 'id'>): QuestionForm {
+export function questionForm(question?: Omit<Question, 'id'> & { id?: string }): QuestionForm {
   const form: QuestionForm = new FormGroup({
     prompt: new FormControl(question?.prompt ?? '', {
       nonNullable: true,
@@ -165,6 +170,8 @@ export function questionForm(question?: Omit<Question, 'id'>): QuestionForm {
     }),
     sources: new FormControl<Excerpt[]>(question?.sources ?? [], { nonNullable: true }),
     origin: new FormControl<'' | 'generated'>(question?.origin ?? '', { nonNullable: true }),
+    id: new FormControl(question?.id ?? '', { nonNullable: true }),
+    bank_question_id: new FormControl(question?.bank_question_id ?? '', { nonNullable: true }),
   });
   applyType(form);
   form.controls.type.valueChanges.subscribe(() => applyType(form));
@@ -360,6 +367,36 @@ export function toAssessment(
   };
 }
 
+/* after a save, each question's stored id and bank link, so saving one to the bank names it as it now is. */
+export function syncSaved(form: AssessmentForm, saved: Assessment): void {
+  form.controls.questions.controls.forEach((q, i) => {
+    const stored = saved.questions[i];
+    if (!stored) return;
+    q.controls.id.setValue(stored.id, { emitEvent: false });
+    q.controls.bank_question_id.setValue(stored.bank_question_id ?? '', { emitEvent: false });
+  });
+}
+
+/* a bank question as the editor adds it: a new question, linked to the bank question. */
+export function fromBank(question: BankQuestion): Omit<Question, 'id'> {
+  const { id, answered, created_at, updated_at, ...rest } = question;
+  void answered;
+  void created_at;
+  void updated_at;
+  return { ...rest, bank_question_id: id };
+}
+
+/* an editor question as the bank keeps it: without passages or marking points, which stay with the assessment. */
+export function forBank(question: QuestionForm): BankQuestionInput {
+  const { marking_scheme, sources, bank_question_id, ...rest }: Omit<Question, 'id'> = toQuestion(
+    question.getRawValue(),
+  );
+  void marking_scheme;
+  void sources;
+  void bank_question_id;
+  return rest;
+}
+
 /* the details the editor describes, which can change after students have submitted. */
 export function toDetails(form: AssessmentForm): AssessmentDetails {
   const v = form.getRawValue();
@@ -374,6 +411,7 @@ function toQuestion(q: ReturnType<QuestionForm['getRawValue']>): Omit<Question, 
     options: [] as string[],
     ...(q.origin ? { origin: q.origin } : {}),
     ...(q.sources.length ? { sources: q.sources } : {}),
+    ...(q.bank_question_id ? { bank_question_id: q.bank_question_id } : {}),
   };
   switch (q.type) {
     case 'multiple_choice':

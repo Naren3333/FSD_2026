@@ -86,6 +86,7 @@ export const ICONS = {
   ],
   logout: ['M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4', 'm16 17 5-5-5-5', 'M21 12H9'],
   clock: [circle(12, 12, 10), 'M12 6v6l4 2'],
+  bookmark: ['m19 21-7-4-7 4V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2v16z'],
 } satisfies Record<string, string[]>;
 
 export type IconName = keyof typeof ICONS;

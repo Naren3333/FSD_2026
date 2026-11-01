@@ -1,6 +1,7 @@
-import { Component, EventEmitter, Input, Output, inject, signal } from '@angular/core';
+import { Component, EventEmitter, Input, Output, ViewChild, inject, signal } from '@angular/core';
 import { FormArray, FormGroup, ReactiveFormsModule, type AbstractControl } from '@angular/forms';
 import { RouterLink } from '@angular/router';
+import { AssessmentApi } from '../../api/clients';
 import type { Assessment, DocumentRecord, Excerpt, Question, Topic } from '../../api/models';
 import { CurriculumNames } from '../../core/curriculum-names';
 import { ActionState } from '../../shared/action-state';
@@ -16,6 +17,7 @@ import {
   MAX_QUESTIONS,
   criterionForm,
   excerptLabel,
+  forBank,
   markWrittenBy,
   marksText,
   parseLevels,
@@ -27,6 +29,7 @@ import {
   type AssessmentForm,
   type QuestionForm,
 } from './editor';
+import { BankPickerComponent } from './bank-picker';
 import { QuestionGeneratorComponent } from './generator';
 import { MarkingGuidanceComponent } from './guidance';
 import { MarkingPointsComponent } from './marking-points';
@@ -49,11 +52,14 @@ import { dateTime } from '../../shared/format';
     MarkingPointsComponent,
     QuestionGeneratorComponent,
     MarkingGuidanceComponent,
+    BankPickerComponent,
   ],
   templateUrl: './editor-view.html',
 })
 export class AssessmentEditorComponent {
   private readonly curriculum = inject(CurriculumNames);
+  private readonly assessmentApi = inject(AssessmentApi);
+  @ViewChild(BankPickerComponent) picker?: BankPickerComponent;
   @Input({ required: true }) form!: AssessmentForm;
   @Input({ required: true }) state!: ActionState;
   @Input({ required: true }) classroomId = '';
@@ -124,6 +130,56 @@ export class AssessmentEditorComponent {
         (kept === question
           ? ''
           : ` Its marking points were left out: the assessment has ${MAX_ASSESSMENT_EXCERPTS} marking points already.`),
+    );
+  }
+
+  /* adds a copy of a bank question, in place of the editor's one question if the teacher has not started it. */
+  addFromBank(question: Omit<Question, 'id'>): void {
+    const replace = this.questions.length === 1 && untouched(this.questions.at(0));
+    if (!replace && this.questions.length >= MAX_QUESTIONS) return;
+    const form = questionForm(question);
+    if (replace) this.questions.setControl(0, form);
+    else this.questions.push(form);
+    this.form.markAsDirty();
+    this.state.message.set(`Bank question added as question ${replace ? 1 : this.questions.length}.`);
+  }
+
+  /* whether a question can be saved to the bank at all: one already saved with the assessment. */
+  canOfferBank(question: QuestionForm): boolean {
+    return !!this.editing && !!question.controls.id.value;
+  }
+
+  /* saving to the bank names the question as stored, so it waits for unsaved changes to be saved. */
+  canBank(question: QuestionForm): boolean {
+    return this.canOfferBank(question) && !this.form.dirty;
+  }
+
+  /* saves the question to the bank and links it, or updates the bank question it is already linked to. */
+  saveToBank(question: QuestionForm, index: number): void {
+    const editing = this.editing;
+    if (!editing || !this.canBank(question)) return;
+    const linked = question.controls.bank_question_id.value;
+    void this.state.run(
+      async () => {
+        if (linked) {
+          await this.assessmentApi.updateBankQuestion(linked, forBank(question));
+          return;
+        }
+        const saved = await this.assessmentApi.saveToBank(editing.id, question.controls.id.value);
+        question.controls.bank_question_id.setValue(saved.id, { emitEvent: false });
+      },
+      linked
+        ? `The bank copy of question ${index + 1} is updated.`
+        : `Question ${index + 1} is saved to your bank.`,
+    );
+  }
+
+  /* keeps another copy of an already linked question in the bank; the link stays as it was. */
+  saveAsNew(question: QuestionForm, index: number): void {
+    if (!this.canBank(question)) return;
+    void this.state.run(
+      async () => void (await this.assessmentApi.addToBank(forBank(question))),
+      `A new copy of question ${index + 1} is saved to your bank.`,
     );
   }
 
@@ -278,8 +334,29 @@ export class AssessmentEditorComponent {
       this.closeGenerator();
       return;
     }
+    // one panel at a time, beside the form.
+    this.bankOpen.set(false);
     this.generatorOpen.set(true);
     this.revealAndFocus('generator-heading');
+  }
+
+  /* the bank panel, which reads the bank the first time it opens. */
+  readonly bankOpen = signal(false);
+
+  toggleBank(): void {
+    if (this.bankOpen()) {
+      this.closeBank();
+      return;
+    }
+    this.generatorOpen.set(false);
+    this.bankOpen.set(true);
+    this.picker?.opened();
+    this.revealAndFocus('bank-heading');
+  }
+
+  closeBank(): void {
+    this.bankOpen.set(false);
+    this.revealAndFocus('bank-toggle');
   }
 
   closeGenerator(): void {

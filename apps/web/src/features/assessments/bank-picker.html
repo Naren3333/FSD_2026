@@ -1,0 +1,80 @@
+<div class="bank-picker">
+  <p class="caption">
+    Add a copy of a question from your bank. Changing the copy here leaves your bank as it is. Bank questions
+    keep no source passages or marking points.
+  </p>
+  <form class="bank-search" novalidate (ngSubmit)="search()">
+    <app-field controlId="bank-search-text" label="Search prompts">
+      <input appFieldControl id="bank-search-text" type="search" [formControl]="text" maxlength="200" />
+    </app-field>
+    <app-field controlId="bank-search-topic" label="Topic">
+      <select appFieldControl id="bank-search-topic" [formControl]="topic">
+        <option value="">Any topic</option>
+        @for (t of topics(); track t.id) {
+          <option [value]="t.id">{{ t.name }}</option>
+        }
+      </select>
+    </app-field>
+    <app-field controlId="bank-search-type" label="Question type">
+      <select appFieldControl id="bank-search-type" [formControl]="type">
+        <option value="">Any type</option>
+        @for (t of types; track t.value) {
+          <option [value]="t.value">{{ t.label }}</option>
+        }
+      </select>
+    </app-field>
+    <button type="submit" class="secondary" [disabled]="questions.loading()">Search bank</button>
+  </form>
+
+  <app-section-state [section]="questions" loading="Loading your bank…" />
+  @if (questions.ready() && questions.value(); as items) {
+    @if (!room) {
+      <p class="caption">The assessment has 50 questions, the most it can hold.</p>
+    }
+    <ul class="bank-results" aria-label="Bank questions">
+      @for (q of items; track q.id) {
+        <li class="record">
+          <span class="bank-prompt">{{ q.prompt }}</span>
+          <span class="caption">
+            {{ typeName(q.type) }} · {{ marksText(q.points) }} · {{ topicName(q.topic_id) }}
+            @if (archived(q)) {
+              (archived)
+            }
+          </span>
+          <button
+            type="button"
+            class="secondary"
+            [disabled]="disabled || !room || archived(q)"
+            [attr.aria-describedby]="archived(q) ? 'bank-archived-' + q.id : null"
+            (click)="choose(q)"
+          >
+            <app-icon name="plus" />Add<span class="visually-hidden"> {{ q.prompt }}</span>
+          </button>
+          @if (archived(q)) {
+            <small class="caption" [id]="'bank-archived-' + q.id"
+              >Its topic is archived, so it cannot be added.</small
+            >
+          }
+        </li>
+      } @empty {
+        <li class="empty">
+          @if (text.value || topic.value || type.value) {
+            No bank questions match. Clear the search to see all of them.
+          } @else {
+            Your bank is empty. Save a question to it from an assessment you have saved.
+          }
+        </li>
+      }
+    </ul>
+    <app-pager
+      label="Bank pages"
+      [page]="questions.page()"
+      (pageChange)="questions.page.set($event)"
+      [pageSize]="questions.pageSize"
+      [total]="questions.total()"
+      noun="questions"
+      [disabled]="questions.loading()"
+      (go)="load()"
+    />
+  }
+</div>

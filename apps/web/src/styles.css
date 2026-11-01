@@ -2423,6 +2423,42 @@ form .editor-bar-actions button {
   font-weight: 600;
   margin: 0;
 }
+/* the question bank (adr 0017): the editor's bank panel and each question's save-to-bank actions. */
+.bank-search {
+  display: grid;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+.bank-search button {
+  justify-self: start;
+}
+.bank-results {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.bank-prompt {
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+.bank-actions {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+.fixed-questions {
+  margin: 0;
+  padding-left: 20px;
+}
+.fixed-questions li {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 4px 12px;
+  padding: 8px 0;
+  border-top: 1px solid var(--line);
+}
 .draft-head {
   display: flex;
   flex-wrap: wrap;

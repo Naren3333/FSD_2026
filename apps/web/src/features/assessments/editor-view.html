@@ -15,8 +15,21 @@
       >
         <app-icon name="sparkles" />Generate questions from teaching materials
       </button>
+      <button
+        type="button"
+        class="secondary"
+        id="bank-toggle"
+        aria-controls="bank-panel"
+        [attr.aria-expanded]="bankOpen()"
+        (click)="toggleBank()"
+      >
+        <app-icon name="bookmark" />Add from your bank
+      </button>
     }
   </app-page-header>
+  @if (editing && !detailsOnly && form.dirty) {
+    <p class="caption" id="bank-save-first">Save your changes before saving a question to your bank.</p>
+  }
   <p class="caption editor-caption">
     @if (editing) {
       <span class="badge" [class.badge-plain]="!editingPublished">
@@ -39,7 +52,7 @@
   <div
     class="editor-layout"
     [class.has-outline]="!detailsOnly"
-    [class.with-panel]="generatorOpen() && !detailsOnly"
+    [class.with-panel]="(generatorOpen() || bankOpen()) && !detailsOnly"
   >
     @if (!detailsOnly) {
       <nav class="editor-outline" aria-label="Questions">
@@ -91,6 +104,25 @@
           (keep)="addGenerated($event)"
         />
       </aside>
+
+      <aside
+        id="bank-panel"
+        class="panel generator-panel"
+        aria-labelledby="bank-heading"
+        [hidden]="!bankOpen()"
+      >
+        <div class="generator-panel-head">
+          <h3 id="bank-heading" tabindex="-1">Add from your bank</h3>
+          <button type="button" class="quiet" (click)="closeBank()">
+            Close<span class="visually-hidden"> your bank</span>
+          </button>
+        </div>
+        <app-bank-picker
+          [room]="questions.length < maxQuestions"
+          [disabled]="state.busy()"
+          (add)="addFromBank($event)"
+        />
+      </aside>
     }
 
     <form
@@ -132,6 +164,34 @@
                   {{ isCollapsed(question) ? 'Expand' : 'Collapse'
                   }}<span class="visually-hidden"> question {{ i + 1 }}</span>
                 </button>
+
+                @if (canOfferBank(question)) {
+                  <span class="bank-actions">
+                    <button
+                      type="button"
+                      class="quiet"
+                      [disabled]="!canBank(question) || state.busy()"
+                      [attr.aria-describedby]="form.dirty ? 'bank-save-first' : null"
+                      (click)="saveToBank(question, i)"
+                    >
+                      <app-icon name="bookmark" />{{
+                        question.controls.bank_question_id.value ? 'Update bank copy' : 'Save to bank'
+                      }}<span class="visually-hidden"> question {{ i + 1 }}</span>
+                    </button>
+                    @if (question.controls.bank_question_id.value) {
+                      <button
+                        type="button"
+                        class="quiet"
+                        [disabled]="!canBank(question) || state.busy()"
+                        (click)="saveAsNew(question, i)"
+                      >
+                        Save as new<span class="visually-hidden">
+                          bank question from question {{ i + 1 }}</span
+                        >
+                      </button>
+                    }
+                  </span>
+                }
                 @if (questions.length > 1) {
                   <button
                     type="button"
@@ -444,6 +504,52 @@
             <app-icon name="plus" />Add question
           </button>
         }
+      } @else {
+        <section class="panel editor-card" aria-labelledby="fixed-questions-title">
+          <h3 id="fixed-questions-title">Questions</h3>
+          <p class="caption">
+            Its questions stay as they are. You can still save any of them to your bank to use again.
+          </p>
+          @if (form.dirty) {
+            <p class="caption" id="bank-save-first">
+              Save your changes before saving a question to your bank.
+            </p>
+          }
+          <ol class="fixed-questions">
+            @for (question of questions.controls; track question; let i = $index) {
+              <li>
+                <span>{{ promptLine(question) }}</span>
+                @if (canOfferBank(question)) {
+                  <span class="bank-actions">
+                    <button
+                      type="button"
+                      class="quiet"
+                      [disabled]="!canBank(question) || state.busy()"
+                      [attr.aria-describedby]="form.dirty ? 'bank-save-first' : null"
+                      (click)="saveToBank(question, i)"
+                    >
+                      <app-icon name="bookmark" />{{
+                        question.controls.bank_question_id.value ? 'Update bank copy' : 'Save to bank'
+                      }}<span class="visually-hidden"> question {{ i + 1 }}</span>
+                    </button>
+                    @if (question.controls.bank_question_id.value) {
+                      <button
+                        type="button"
+                        class="quiet"
+                        [disabled]="!canBank(question) || state.busy()"
+                        (click)="saveAsNew(question, i)"
+                      >
+                        Save as new<span class="visually-hidden">
+                          bank question from question {{ i + 1 }}</span
+                        >
+                      </button>
+                    }
+                  </span>
+                }
+              </li>
+            }
+          </ol>
+        </section>
       }
 
       <fieldset class="question-set" id="schedule-grading">

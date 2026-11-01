@@ -69,6 +69,10 @@ function setup(
     get: vi.fn((id: string) =>
       Promise.resolve(id === open.id ? open : { ...open, id, title: 'Other ' + id }),
     ),
+    /* the editor's own read, with bank links; the same fake read here. */
+    editable(id: string) {
+      return this.get(id);
+    },
     saved: vi.fn(() => Promise.resolve({ answers: saved, saved_at: null })),
     save: vi.fn((_id: string, answers: Record<string, string>) =>
       Promise.resolve({ answers, saved_at: '2026-10-17T02:00:00Z' }),

@@ -61,6 +61,9 @@
                         @if (item.status === 'draft') {
                           <span class="badge badge-plain">Draft</span>
                         }
+                        @if (item.resit_of) {
+                          <span class="badge">Resit</span>
+                        }
                       </span>
                       @if (item.status === 'published' && submittedBy(item)) {
                         <small class="caption">
@@ -88,7 +91,11 @@
                     </td>
                     <td data-label="Submitted">
                       @if (item.status === 'published' && item.submissions !== undefined) {
-                        {{ item.submissions }} submitted
+                        @if (item.assignee_count !== undefined) {
+                          {{ item.submissions }} of {{ item.assignee_count }} assigned submitted
+                        } @else {
+                          {{ item.submissions }} submitted
+                        }
                       } @else {
                         <span aria-hidden="true">–</span
                         ><span class="visually-hidden">{{
@@ -246,6 +253,9 @@
         <article class="record">
           <strong>{{ item.title }}</strong>
           <span class="tag-row">
+            @if (item.resit) {
+              <span class="badge">Resit</span>
+            }
             @if (item.submitted) {
               <span class="badge">Submitted</span>
             }

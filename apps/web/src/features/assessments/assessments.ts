@@ -28,6 +28,7 @@ import {
   clearForm,
   fillForm,
   marksText,
+  syncSaved,
   teacherMarked,
   toAssessment,
   toDetails,
@@ -409,6 +410,8 @@ export class AssessmentsComponent {
         this.leaveEditor(true);
       } else {
         this.editing.set(saved);
+        // a draft's questions get new ids on every save; saving one to the bank names it as it now is.
+        syncSaved(this.form, saved);
         this.form.markAsPristine();
         // the new draft's own address, in place of the new assessment's.
         if (!editing) void this.showEditor(saved.id, true);
@@ -445,7 +448,8 @@ export class AssessmentsComponent {
     }
     const classroomId = this.classroomId();
     return this.state.run(async () => {
-      const assessment = await this.assessmentApi.get(item.id);
+      // read on its own, so each question carries its bank link.
+      const assessment = await this.assessmentApi.editable(item.id);
       // know which of its topics are archived; without the curriculum, the server still refuses one.
       await this.curriculum.need(assessment.questions.map((q) => q.topic_id)).catch(() => undefined);
       // the user may have moved to another classroom while the assessment loaded.

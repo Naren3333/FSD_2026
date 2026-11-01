@@ -10,6 +10,10 @@ import type {
   AssessmentDetails,
   AssessmentProgress,
   AssessmentSummary,
+  BankFilter,
+  BankQuestion,
+  BankQuestionInput,
+  BankQuestionPage,
   ChatMessage,
   ClassPerformance,
   Classroom,
@@ -30,6 +34,7 @@ import type {
   OwnSubmission,
   Performance,
   Profile,
+  ResitRequest,
   SavedAnswers,
   StreamEvent,
   Student,
@@ -317,6 +322,59 @@ export class AssessmentApi {
       method: 'POST',
       body: { answers },
     });
+  }
+
+  /* the teacher's own copy, read on its own (never batched), so each question carries its bank link. */
+  editable(assessmentId: string): Promise<Assessment> {
+    return this.gateway.request('assessment', `/assessments/${id(assessmentId)}`);
+  }
+  /* a draft resit of a published assessment for chosen students (adr 0017). */
+  createResit(assessmentId: string, request: ResitRequest): Promise<Assessment> {
+    return this.gateway.request('assessment', `/assessments/${id(assessmentId)}/resits`, {
+      method: 'POST',
+      body: request,
+    });
+  }
+  /* replaces a resit's students; one who has submitted stays. */
+  setAssignees(assessmentId: string, studentIds: string[]): Promise<Assessment> {
+    return this.gateway.request('assessment', `/assessments/${id(assessmentId)}/assignees`, {
+      method: 'PUT',
+      body: { student_ids: studentIds },
+    });
+  }
+
+  /* one page of the teacher's bank, newest change first. */
+  bankPage(filter: BankFilter, offset: number, limit: number): Promise<BankQuestionPage> {
+    const query = new URLSearchParams({ offset: String(offset), limit: String(limit) });
+    if (filter.topicId) query.set('topic_id', filter.topicId);
+    if (filter.type) query.set('type', filter.type);
+    if (filter.text?.trim()) query.set('q', filter.text.trim());
+    if (filter.classroomId && filter.studentId) {
+      query.set('classroom_id', filter.classroomId);
+      query.set('student_id', filter.studentId);
+      if (filter.excludeAnswered) query.set('exclude_answered', 'true');
+    }
+    return this.gateway.request('assessment', `/bank/questions?${query.toString()}`);
+  }
+  /* saves an assessment's question to the teacher's bank and links the two. */
+  saveToBank(assessmentId: string, questionId: string): Promise<BankQuestion> {
+    return this.gateway.request('assessment', '/bank/questions', {
+      method: 'POST',
+      body: { assessment_id: assessmentId, question_id: questionId },
+    });
+  }
+  /* keeps a question the teacher wrote, or a copy of one, in their bank. */
+  addToBank(question: BankQuestionInput): Promise<BankQuestion> {
+    return this.gateway.request('assessment', '/bank/questions', { method: 'POST', body: { question } });
+  }
+  updateBankQuestion(bankQuestionId: string, question: BankQuestionInput): Promise<BankQuestion> {
+    return this.gateway.request('assessment', `/bank/questions/${id(bankQuestionId)}`, {
+      method: 'PUT',
+      body: question,
+    });
+  }
+  removeBankQuestion(bankQuestionId: string): Promise<void> {
+    return this.gateway.request('assessment', `/bank/questions/${id(bankQuestionId)}`, { method: 'DELETE' });
   }
 }
 
