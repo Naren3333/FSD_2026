@@ -122,7 +122,7 @@ func (m *memoryStore) deleteAssessment(_ context.Context, _, id string, submissi
 func (m *memoryStore) listAssessments(_ context.Context, _, _, student string, all bool, enrolled []string, now time.Time, paging ...platform.ListWindow) ([]Summary, error) {
 	result := []Summary{}
 	for _, v := range m.assessments {
-		if all || v.visibleToStudents(now) {
+		if all || v.visibleTo(student, now) {
 			_, done := m.submitted[v.ID+"/"+student]
 			summary := Summary{ID: v.ID, Title: v.Title, Submitted: done, Status: v.Status, DueAt: v.DueAt}
 			if all {
@@ -164,7 +164,7 @@ func (m *memoryStore) insertSubmission(_ context.Context, v Assessment, sub Subm
 		return false, false, platform.ErrNotFound
 	case !sameMarking(current, v):
 		return false, false, errAssessmentChanged
-	case !current.visibleToStudents(sub.SubmittedAt):
+	case !current.visibleTo(sub.Student, sub.SubmittedAt):
 		return false, false, platform.ErrNotFound
 	case current.closed(sub.SubmittedAt):
 		return false, false, errClosed
@@ -836,8 +836,8 @@ func TestAnUpdateChecksItsTopics(t *testing.T) {
 	}
 }
 
-func (m *memoryStore) countAssessments(ctx context.Context, org, classroom string, teacher bool, now time.Time) (int, error) {
-	items, err := m.listAssessments(ctx, org, classroom, "", teacher, nil, now)
+func (m *memoryStore) countAssessments(ctx context.Context, org, classroom, student string, teacher bool, now time.Time) (int, error) {
+	items, err := m.listAssessments(ctx, org, classroom, student, teacher, nil, now)
 	return len(items), err
 }
 

@@ -42,6 +42,10 @@ func purgeUser(ctx context.Context, tx pgx.Tx, event platform.Event) error {
 		"INSERT INTO deleted_users(user_id,org_id) VALUES($1,$2) ON CONFLICT DO NOTHING",
 		"DELETE FROM saved_answers WHERE student_id=$1 AND assessment_id IN (SELECT id FROM assessments WHERE org_id=$2)",
 		"DELETE FROM submissions WHERE student_id=$1 AND assessment_id IN (SELECT id FROM assessments WHERE org_id=$2)",
+		// last, in the order assignee removal deletes: an empty list hides a resit from everyone (adr 0017).
+		"DELETE FROM assessment_assignees WHERE student_id=$1 AND assessment_id IN (SELECT id FROM assessments WHERE org_id=$2)",
+		// a teacher's bank; adr 0011 already had them delete their classrooms.
+		"DELETE FROM bank_questions WHERE owner_id=$1 AND org_id=$2",
 	}
 	if err = platform.ExecAll(ctx, tx, statements, v.User, v.Org); err != nil {
 		return err

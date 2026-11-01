@@ -1,6 +1,7 @@
 package main
 
 import (
+	"cmp"
 	"context"
 	"encoding/json"
 	"errors"
@@ -33,7 +34,8 @@ var errClassroomPurged = errors.New("the classroom was deleted")
 // store is a classroom's assessments and its students' submissions and saved work.
 type store interface {
 	findAssessments(ctx context.Context, org string, ids []string) ([]Assessment, error)
-	countAssessments(ctx context.Context, org, classroom string, teacher bool, now time.Time) (int, error)
+	// countAssessments counts what listAssessments lists: everything for a teacher, or what student may see.
+	countAssessments(ctx context.Context, org, classroom, student string, teacher bool, now time.Time) (int, error)
 	findAssessment(ctx context.Context, org, id string) (Assessment, error)
 	insertAssessment(ctx context.Context, org string, v Assessment) error
 	// replace an unchanged, unsubmitted assessment without reverting publication.
@@ -60,22 +62,69 @@ func (p pgStore) findAssessments(ctx context.Context, org string, ids []string) 
 	if err != nil {
 		return nil, err
 	}
-	return pgx.CollectRows(rows, func(row pgx.CollectableRow) (Assessment, error) { return scanAssessment(row) })
+	items, err := pgx.CollectRows(rows, func(row pgx.CollectableRow) (Assessment, error) { return scanAssessment(row) })
+	if err != nil {
+		return nil, err
+	}
+	return items, p.loadAssignees(ctx, items)
 }
 
 // pgStore is the store in the service's own postgres database.
 type pgStore struct{ db *pgxpool.Pool }
 
-const assessmentColumns = "id,classroom_id,title,questions,status,opens_at,due_at,late_policy,release_policy,ai_marking,published_at,coalesce(created_by,'')"
+const assessmentColumns = "id,classroom_id,title,questions,status,opens_at,due_at,late_policy,release_policy,ai_marking,published_at,coalesce(created_by,''),assigned,coalesce(resit_of::text,'')"
 
 func scanAssessment(row pgx.Row) (Assessment, error) {
 	var v Assessment
 	var data []byte
-	err := row.Scan(&v.ID, &v.Classroom, &v.Title, &data, &v.Status, &v.OpensAt, &v.DueAt, &v.LatePolicy, &v.ReleasePolicy, &v.AIMarking, &v.PublishedAt, &v.CreatedBy)
+	err := row.Scan(&v.ID, &v.Classroom, &v.Title, &data, &v.Status, &v.OpensAt, &v.DueAt, &v.LatePolicy, &v.ReleasePolicy, &v.AIMarking, &v.PublishedAt, &v.CreatedBy, &v.Assigned, &v.ResitOf)
 	if err == nil {
 		v.Questions, err = decodeQuestions(data)
 	}
 	return v, err
+}
+
+// loadAssignees fills in the assigned students of the assigned assessments among items, in one query.
+func (p pgStore) loadAssignees(ctx context.Context, items []Assessment) error {
+	var ids []string
+	for i := range items {
+		if items[i].Assigned {
+			items[i].Assignees = []string{}
+			ids = append(ids, items[i].ID)
+		}
+	}
+	if len(ids) == 0 {
+		return nil
+	}
+	rows, err := p.db.Query(ctx, "SELECT assessment_id::text,student_id FROM assessment_assignees WHERE assessment_id=ANY($1::uuid[]) ORDER BY student_id", ids)
+	if err != nil {
+		return err
+	}
+	pairs, err := pgx.CollectRows(rows, func(row pgx.CollectableRow) ([2]string, error) {
+		var pair [2]string
+		err := row.Scan(&pair[0], &pair[1])
+		return pair, err
+	})
+	if err != nil {
+		return err
+	}
+	for _, pair := range pairs {
+		for i := range items {
+			if items[i].ID == pair[0] {
+				items[i].Assignees = append(items[i].Assignees, pair[1])
+			}
+		}
+	}
+	return nil
+}
+
+// onList reports, in tx after the caller has locked the assessment's row, whether student may answer it: it
+// is for the whole class or they are assigned. a separate statement, so it sees a removal committed while
+// the lock was awaited.
+func onList(ctx context.Context, tx pgx.Tx, assessment, student string) (bool, error) {
+	var ok bool
+	err := tx.QueryRow(ctx, "SELECT NOT assigned OR EXISTS(SELECT 1 FROM assessment_assignees WHERE assessment_id=$1 AND student_id=$2) FROM assessments WHERE id=$1", assessment, student).Scan(&ok)
+	return ok, err
 }
 
 // decodeQuestions reads stored questions.
@@ -93,7 +142,13 @@ func decodeQuestions(data []byte) ([]Question, error) {
 }
 
 func (p pgStore) findAssessment(ctx context.Context, org, id string) (Assessment, error) {
-	return scanAssessment(p.db.QueryRow(ctx, "SELECT "+assessmentColumns+" FROM assessments WHERE id=$1 AND org_id=$2", id, org))
+	v, err := scanAssessment(p.db.QueryRow(ctx, "SELECT "+assessmentColumns+" FROM assessments WHERE id=$1 AND org_id=$2", id, org))
+	if err != nil {
+		return v, err
+	}
+	items := []Assessment{v}
+	err = p.loadAssignees(ctx, items)
+	return items[0], err
 }
 
 func (p pgStore) insertAssessment(ctx context.Context, org string, v Assessment) error {
@@ -122,7 +177,31 @@ func (p pgStore) insertAssessment(ctx context.Context, org string, v Assessment)
 		v.ID, v.Classroom, org, v.Title, data, v.Status, v.OpensAt, v.DueAt, v.LatePolicy, v.ReleasePolicy, v.AIMarking, v.PublishedAt, v.CreatedBy); err != nil {
 		return err
 	}
+	if err = writeLinks(ctx, tx, org, v); err != nil {
+		return err
+	}
 	return tx.Commit(ctx)
+}
+
+// writeLinks replaces the assessment's links with v.BankLinks, keeping only those naming a bank question of
+// v.LinkOwner (adr 0017). a link only drives its owner's own hints, so nothing else is checked.
+func writeLinks(ctx context.Context, tx pgx.Tx, org string, v Assessment) error {
+	if _, err := tx.Exec(ctx, "DELETE FROM question_bank_links WHERE assessment_id=$1", v.ID); err != nil {
+		return err
+	}
+	var questions, banks []string
+	for i, bank := range v.BankLinks {
+		if i < len(v.Questions) && platform.ID(bank) {
+			questions, banks = append(questions, v.Questions[i].ID), append(banks, bank)
+		}
+	}
+	if len(banks) == 0 {
+		return nil
+	}
+	_, err := tx.Exec(ctx, `INSERT INTO question_bank_links(assessment_id,question_id,bank_question_id)
+		SELECT $1,l.question,l.bank FROM unnest($2::uuid[],$3::uuid[]) AS l(question,bank)
+		JOIN bank_questions b ON b.id=l.bank AND b.owner_id=$4 AND b.org_id=$5 ON CONFLICT DO NOTHING`, v.ID, questions, banks, v.LinkOwner, org)
+	return err
 }
 
 // lockedAssessment is what a change under changeLocked knows of the assessment it locked.
@@ -175,6 +254,9 @@ func (p pgStore) updateAssessment(ctx context.Context, org string, before, v Ass
 			v.ID, org, v.Title, data, v.Status, v.OpensAt, v.DueAt, v.LatePolicy, v.ReleasePolicy, v.AIMarking, v.PublishedAt)
 		if err == nil && result.RowsAffected() == 0 {
 			err = errNotDraft
+		}
+		if err == nil {
+			err = writeLinks(ctx, tx, org, v) // a draft's questions have new ids, so its links are written again
 		}
 		if err != nil || a.status != statusPublished || sameTime(current.DueAt, v.DueAt) {
 			return err // nobody has submitted it, so no late flag here changes; a draft's due date nobody else knows
@@ -270,7 +352,8 @@ func (p pgStore) listAssessments(ctx context.Context, org, classroomID, student 
 		(SELECT coalesce(sum(coalesce(nullif((q->>'points')::int,0),1)),0) FROM jsonb_array_elements(a.questions) q),
 		CASE WHEN $4 THEN (SELECT count(*) FROM submissions s WHERE s.assessment_id=a.id AND s.student_id=ANY($6::text[])) END,
 		CASE WHEN $4 THEN EXISTS(SELECT 1 FROM submissions s WHERE s.assessment_id=a.id) END
-		FROM assessments a WHERE a.classroom_id=$1 AND a.org_id=$2 AND ($4 OR (a.status='published' AND (a.opens_at IS NULL OR a.opens_at<=$5)))
+		FROM assessments a WHERE a.classroom_id=$1 AND a.org_id=$2 AND ($4 OR (a.status='published' AND (a.opens_at IS NULL OR a.opens_at<=$5)
+			AND (NOT a.assigned OR EXISTS(SELECT 1 FROM assessment_assignees aa WHERE aa.assessment_id=a.id AND aa.student_id=$3))))
 		ORDER BY a.created_at DESC,a.id DESC OFFSET $7 LIMIT $8`, classroomID, org, student, all, now, enrolled, window.Offset, window.Limit)
 	if err != nil {
 		return nil, err
@@ -309,6 +392,10 @@ func (p pgStore) insertSubmission(ctx context.Context, v Assessment, sub Submiss
 	// the teacher may have just moved its opening later: until then students cannot see it.
 	if !current.visibleToStudents(sub.SubmittedAt) {
 		return false, false, platform.ErrNotFound
+	}
+	// and the teacher may have just taken them off a resit's list.
+	if assigned, err := onList(ctx, tx, v.ID, sub.Student); err != nil || !assigned {
+		return false, false, cmp.Or(err, platform.ErrNotFound)
 	}
 	// against the due date and late policy as they are now, should the teacher have just changed them.
 	if current.closed(sub.SubmittedAt) {
@@ -405,6 +492,9 @@ func (p pgStore) saveAnswers(ctx context.Context, assessment, student string, an
 	if err = tx.QueryRow(ctx, "SELECT 1 FROM assessments WHERE id=$1 FOR SHARE", assessment).Scan(&exists); err != nil {
 		return time.Time{}, err // platform.ErrNotFound when it is gone
 	}
+	if assigned, err := onList(ctx, tx, assessment, student); err != nil || !assigned {
+		return time.Time{}, cmp.Or(err, platform.ErrNotFound)
+	}
 	var at time.Time
 	err = tx.QueryRow(ctx, `INSERT INTO saved_answers(assessment_id,student_id,answers) SELECT $1,$2,$3
 		WHERE NOT EXISTS(SELECT 1 FROM submissions WHERE assessment_id=$1 AND student_id=$2)
@@ -418,8 +508,9 @@ func (p pgStore) saveAnswers(ctx context.Context, assessment, student string, an
 	return at, err
 }
 
-func (p pgStore) countAssessments(ctx context.Context, org, classroom string, teacher bool, now time.Time) (int, error) {
+func (p pgStore) countAssessments(ctx context.Context, org, classroom, student string, teacher bool, now time.Time) (int, error) {
 	var total int
-	err := p.db.QueryRow(ctx, `SELECT count(*) FROM assessments WHERE org_id=$1 AND classroom_id=$2 AND ($3 OR (status='published' AND (opens_at IS NULL OR opens_at<=$4)))`, org, classroom, teacher, now).Scan(&total)
+	err := p.db.QueryRow(ctx, `SELECT count(*) FROM assessments a WHERE org_id=$1 AND classroom_id=$2 AND ($3 OR (status='published' AND (opens_at IS NULL OR opens_at<=$4)
+		AND (NOT assigned OR EXISTS(SELECT 1 FROM assessment_assignees aa WHERE aa.assessment_id=a.id AND aa.student_id=$5))))`, org, classroom, teacher, now, student).Scan(&total)
 	return total, err
 }

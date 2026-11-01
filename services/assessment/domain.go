@@ -101,6 +101,15 @@ type Assessment struct {
 	PublishedAt   *time.Time `json:"published_at"`
 	// CreatedBy is the teacher who created it; their daily ai allowance pays for its ai marking (adr 0003).
 	CreatedBy string `json:"-"`
+	// Assigned, fixed when it is created, makes it visible only to the students in Assignees (adr 0017);
+	// ResitOf is the assessment it resits. Only the server sets them.
+	Assigned  bool     `json:"-"`
+	ResitOf   string   `json:"-"`
+	Assignees []string `json:"-"`
+	// BankLinks, index-aligned with Questions, names the bank question each came from ("" for none), for the
+	// teacher in LinkOwner; a store write replaces the assessment's links with them.
+	BankLinks []string `json:"-"`
+	LinkOwner string   `json:"-"`
 }
 
 // summary is an assessment in a classroom's list, with whether the caller has submitted it.
@@ -352,6 +361,12 @@ func (v Assessment) topicIDs() []string {
 // visibleToStudents reports whether students may see and answer it: published, and open.
 func (v Assessment) visibleToStudents(now time.Time) bool {
 	return v.Status == statusPublished && (v.OpensAt == nil || !v.OpensAt.After(now))
+}
+
+// visibleTo reports whether student may see and answer it: open to students and, when it is assigned, on
+// its list. an assigned assessment with an empty list is visible to nobody.
+func (v Assessment) visibleTo(student string, now time.Time) bool {
+	return v.visibleToStudents(now) && (!v.Assigned || slices.Contains(v.Assignees, student))
 }
 
 // late reports whether a submission now is after the due date.

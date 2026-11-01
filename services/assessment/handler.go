@@ -89,7 +89,7 @@ func (s server) batch(w http.ResponseWriter, r *http.Request) {
 		switch {
 		case relation == platform.RelationTeacher:
 			result = append(result, item)
-		case item.visibleToStudents(s.now()):
+		case item.visibleTo(platform.Actor(r).Subject, s.now()):
 			result = append(result, item.Public())
 		default:
 			platform.NotFound(w, "Assessment not found.")
@@ -348,7 +348,7 @@ func (s server) list(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if len(paging) > 0 {
-		total, err := s.store.countAssessments(r.Context(), actor.Org, id, teacher, s.now())
+		total, err := s.store.countAssessments(r.Context(), actor.Org, id, actor.Subject, teacher, s.now())
 		if err != nil {
 			platform.Fail(w, err)
 			return
@@ -384,7 +384,7 @@ func (s server) progress(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if len(paging) > 0 {
-		total, err := s.store.countAssessments(r.Context(), platform.Actor(r).Org, id, true, s.now())
+		total, err := s.store.countAssessments(r.Context(), platform.Actor(r).Org, id, "", true, s.now())
 		if err != nil {
 			platform.Fail(w, err)
 			return
@@ -419,7 +419,7 @@ func (s server) get(w http.ResponseWriter, r *http.Request) {
 	switch {
 	case relation == platform.RelationTeacher:
 		platform.JSON(w, http.StatusOK, v)
-	case v.visibleToStudents(s.now()):
+	case v.visibleTo(platform.Actor(r).Subject, s.now()):
 		platform.JSON(w, http.StatusOK, v.Public())
 	default:
 		platform.NotFound(w, "Assessment not found.")
@@ -437,7 +437,7 @@ func (s server) forStudent(w http.ResponseWriter, r *http.Request) (Assessment, 
 	if !ok || !platform.Access(s.access, w, r, v.Classroom, c.Subject) {
 		return v, false
 	}
-	if !v.visibleToStudents(s.now()) {
+	if !v.visibleTo(c.Subject, s.now()) {
 		platform.NotFound(w, "Assessment not found.")
 		return v, false
 	}
