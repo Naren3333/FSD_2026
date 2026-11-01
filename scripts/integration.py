@@ -869,6 +869,173 @@ def marking(u: Users, room_id: str, late: Late) -> None:
     assert (part["attempted"], part["correct"], part["marks_awarded"], part["marks_possible"]) == (2, 1, 5, 7)
 
 
+def fresh_person(role: str) -> tuple[httpx.Client, str, str]:
+    """a new local person with `role`, signed in, with their account id and username."""
+    username, password = f"{role}-{uuid4().hex[:8]}", uuid4().hex
+    with admin_client() as admin:
+        ensure_person(admin, username, "Fresh", role.title(), password, role=role)
+    client = httpx.Client(
+        base_url=BASE, headers={"Authorization": "Bearer " + password_token(username, password)}, timeout=25
+    )
+    return client, str(UUID(request(client, "POST", "/identity/me", json={})["id"])), username
+
+
+def delete_me(client: httpx.Client, user_id: str) -> None:
+    """the person deletes their own account and assessment purges it."""
+    client.request("DELETE", "/identity/me").raise_for_status()
+    tombstone = f"SELECT count(*) FROM deleted_users WHERE user_id='{UUID(user_id)}'"
+    eventually(functools.partial(sql_value, "assessment", tombstone), lambda v: v == "1", "assessment purge")
+
+
+@dataclass
+class Resit:
+    original: dict[str, Any]
+    resit: dict[str, Any]
+    student: httpx.Client  # the one student it is assigned to
+    student_id: str
+    banked: str  # the bank question saved from the original
+
+
+def bank_and_resits(u: Users, room_id: str) -> None:
+    """a teacher's question bank and a resit only its assigned student sees, graded and counted (adr 0017)."""
+    r = bank_and_resit(u, room_id)
+    unassigned_student(u, room_id, r)
+    assigned_student(u, room_id, r)
+    resit_purges(u, room_id, r)
+    # the later steps expect the classroom's one original student.
+    request(u.teacher, "DELETE", f"/identity/classrooms/{room_id}/enrollments/{r.student_id}")
+
+
+def bank_and_resit(u: Users, room_id: str) -> Resit:
+    """saves a question to the bank, says what a student answered, and makes a resit from both."""
+    topic = new_topic(u.teacher, "Integration resits")
+    numeric = {"type": "numerical", "options": [], "tolerance": "0", "topic_id": topic["id"]}
+    original = request(
+        u.teacher, "POST", "/assessment/assessments", 201,
+        json={"classroom_id": room_id, "title": "Resit me", "questions": [{**numeric, "prompt": "2 + 2?", "answer": "4"}]},
+    )  # fmt: skip
+    question = original["questions"][0]["id"]
+    save = {"assessment_id": original["id"], "question_id": question}
+    banked = request(u.teacher, "POST", "/assessment/bank/questions", 201, json=save)
+    assert banked["prompt"] == "2 + 2?" and banked["id"] != question, banked
+    assert (
+        request(u.teacher, "POST", "/assessment/bank/questions", 409, json=save)["error"]["code"]
+        == "ALREADY_IN_BANK"
+    )
+    request(u.other, "GET", f"/assessment/bank/questions/{banked['id']}", 404)
+    request(u.student, "GET", "/assessment/bank/questions", 403)
+    linked = request(u.teacher, "GET", f"/assessment/assessments/{original['id']}")
+    assert linked["questions"][0]["bank_question_id"] == banked["id"], linked
+    written = request(
+        u.teacher, "POST", "/assessment/bank/questions", 201,
+        json={"question": {**numeric, "prompt": "3 + 3?", "answer": "6"}},
+    )  # fmt: skip
+    # the student the resit is for answered the original, wrongly; the classroom's other student did not.
+    student, student_id, username = fresh_person("student")
+    request(u.teacher, "POST", f"/identity/classrooms/{room_id}/enrollments", json={"username": username})
+    request(
+        student, "POST", f"/assessment/assessments/{original['id']}/submissions", 201,
+        json={"answers": {question: "5"}},
+    )  # fmt: skip
+    asked = (
+        f"/assessment/bank/questions?classroom_id={room_id}&student_id={student_id}&topic_id={topic['id']}"
+    )
+    answered = {q["id"]: q["answered"] for q in request(u.teacher, "GET", asked)["items"]}
+    assert answered == {banked["id"]: True, written["id"]: False}, answered
+    left = request(u.teacher, "GET", asked + "&exclude_answered=true")
+    assert [q["id"] for q in left["items"]] == [written["id"]] and left["total"] == 1, left
+    request(u.other, "GET", asked, 403)
+    request(u.teacher, "GET", f"/assessment/bank/questions?classroom_id={room_id}&student_id={uuid4()}", 404)
+    body = {
+        "student_ids": [student_id],
+        "copy_question_ids": [question],
+        "bank_question_ids": [written["id"]],
+    }
+    resits = f"/assessment/assessments/{original['id']}/resits"
+    request(u.student, "POST", resits, 403, json=body)
+    request(u.teacher, "POST", resits, 422, json={**body, "student_ids": [str(uuid4())]})
+    resit = request(u.teacher, "POST", resits, 201, json=body)
+    assert (
+        resit["status"] == "draft"
+        and resit["resit_of"] == original["id"]
+        and resit["assignees"] == [student_id]
+    ), resit
+    assert [q["bank_question_id"] for q in resit["questions"]] == [banked["id"], written["id"]], resit
+    request(u.teacher, "POST", f"/assessment/assessments/{resit['id']}/publish")
+    return Resit(original, resit, student, student_id, banked["id"])
+
+
+def unassigned_student(u: Users, room_id: str, r: Resit) -> None:
+    """the classroom's other student reaches the resit through no path."""
+    path = f"/assessment/assessments/{r.resit['id']}"
+    answers = {"answers": {q["id"]: "1" for q in r.resit["questions"]}}
+    request(u.student, "GET", path, 404)
+    request(u.student, "POST", "/assessment/assessments/batch", 404, json={"ids": [r.resit["id"]]})
+    request(u.student, "POST", f"{path}/submissions", 404, json=answers)
+    request(u.student, "GET", f"{path}/submission", 404)
+    request(u.student, "GET", f"{path}/saved-answers", 404)
+    request(u.student, "PUT", f"{path}/saved-answers", 404, json=answers)
+    listed = request(u.student, "GET", f"/assessment/assessments?classroom_id={room_id}")
+    assert r.resit["id"] not in [a["id"] for a in listed], listed
+    page = request(u.student, "GET", f"/assessment/assessments/page?classroom_id={room_id}&limit=100")
+    assert page["total"] == len(listed), page
+
+
+def assigned_student(u: Users, room_id: str, r: Resit) -> None:
+    """the assigned student sees it as a resit and submits it; grading grades it once, even replayed, and analytics counts it once finalized."""
+    listed = request(r.student, "GET", f"/assessment/assessments?classroom_id={room_id}")
+    assert [a.get("resit") for a in listed if a["id"] == r.resit["id"]] == [True], listed
+    answers = {"answers": {q["id"]: a for q, a in zip(r.resit["questions"], ["4", "6"], strict=True)}}
+    submission = request(
+        r.student, "POST", f"/assessment/assessments/{r.resit['id']}/submissions", 201, json=answers
+    )
+    grades = f"/grading/evaluations?classroom_id={room_id}&assessment_id={r.resit['id']}"
+    grade = eventually(lambda: request(u.teacher, "GET", grades), lambda p: p["total"] == 1, "resit grading")
+    duplicate = replay("assessment", "assessment.submitted.v4", submission["id"], fresh_id=True)
+    eventually(lambda: inbox_has("grading", duplicate), bool, "replayed resit submission")
+    assert request(u.teacher, "GET", grades)["total"] == 1
+    finalize = f"/grading/evaluations/{grade['evaluations'][0]['id']}/finalize"
+    request(u.teacher, "POST", finalize, json={"reason": "Integration resit", "overrides": {}})
+    performance = f"/analytics/performance/{r.student_id}?classroom_id={room_id}"
+    counted = eventually(
+        lambda: request(u.teacher, "GET", performance), lambda p: len(p["topics"]) == 1, "resit analytics"
+    )
+    assert counted["topics"][0]["attempted"] == 2 and counted["topics"][0]["correct"] == 2, counted
+    progress = request(u.teacher, "GET", f"/assessment/assessments/progress?classroom_id={room_id}")
+    row = next(a for a in progress if a["id"] == r.resit["id"])
+    assert row["resit_of"] == r.original["id"] and row["assignee_count"] == 1 and row["submissions"] == 1, row
+    taken_off = request(
+        u.teacher,
+        "PUT",
+        f"/assessment/assessments/{r.resit['id']}/assignees",
+        409,
+        json={"student_ids": [u.student_id]},
+    )
+    assert taken_off["error"]["code"] == "HAS_SUBMISSIONS", taken_off
+
+
+def resit_purges(u: Users, room_id: str, r: Resit) -> None:
+    """a deleted student leaves a resit's list, which then hides it from everyone; a deleted teacher's bank goes."""
+    leaving, leaving_id, username = fresh_person("student")
+    request(u.teacher, "POST", f"/identity/classrooms/{room_id}/enrollments", json={"username": username})
+    body = {"student_ids": [leaving_id], "copy_question_ids": [r.original["questions"][0]["id"]]}
+    resit = request(u.teacher, "POST", f"/assessment/assessments/{r.original['id']}/resits", 201, json=body)
+    request(u.teacher, "POST", f"/assessment/assessments/{resit['id']}/publish")
+    delete_me(leaving, leaving_id)
+    assigned = f"SELECT count(*) FROM assessment_assignees WHERE assessment_id='{UUID(resit['id'])}'"
+    assert sql_value("assessment", assigned) == "0"
+    request(u.student, "GET", f"/assessment/assessments/{resit['id']}", 404)
+    assert "assignees" not in request(u.teacher, "GET", f"/assessment/assessments/{resit['id']}")
+
+    teacher, teacher_id, _ = fresh_person("teacher")
+    question = {k: v for k, v in r.original["questions"][0].items() if k not in ("id", "bank_question_id")}
+    request(teacher, "POST", "/assessment/bank/questions", 201, json={"question": question})
+    owned = f"SELECT count(*) FROM bank_questions WHERE owner_id='{teacher_id}'"
+    assert sql_value("assessment", owned) == "1"
+    delete_me(teacher, teacher_id)
+    assert sql_value("assessment", owned) == "0"
+
+
 def unenroll(u: Users, room_id: str) -> None:
     """removing a student keeps their grades but ends their access to the classroom."""
     room = str(UUID(room_id))  # returned by a verified api
@@ -1032,6 +1199,8 @@ def delete_classroom(u: Users, room_id: str, graded: Graded) -> None:
     )
     for service, sql in kept.items():
         assert sql_value(service, sql) == "0", service
+    banked = f"SELECT count(*) FROM bank_questions WHERE owner_id='{UUID(u.teacher_id)}'"
+    assert sql_value("assessment", banked) != "0", "the bank went with the classroom"
 
 
 def databases() -> None:
@@ -1047,7 +1216,7 @@ def databases() -> None:
     for service, expected in [
         ("content", "1,2,3,4,5,6"),
         ("identity", "1,2,3,4,5,6,7,8"),
-        ("assessment", "1,2,3,4,5"),
+        ("assessment", "1,2,3,4,5,6"),
         ("grading", "1,2,3,4,5,6,7,8"),
         ("analytics", "1,2,3,4,5,6,7"),
         ("curriculum", "1,2"),
@@ -1163,7 +1332,7 @@ def main() -> None:
         remove_leftovers()
     print(f"Finished in {time.monotonic() - started:.0f}s{' with live AI' if LIVE_AI else ''}.")
     print(
-        "PASS: gateway auth, classroom isolation, enrollment by username, rosters, the school's student list, unenrollment, account deletion and its cross-service purge, classroom deletion and its cross-service purge, deleting a graded assessment with its grades, curriculum, "
+        "PASS: gateway auth, classroom isolation, enrollment by username, rosters, the school's student list, unenrollment, account deletion and its cross-service purge, classroom deletion and its cross-service purge, deleting a graded assessment with its grades, the question bank and resits for assigned students only, curriculum, "
         "S3 upload/extraction, PDF indexing jobs, document deletion, search access, chat threads and streaming, "
         "teacher-only question generation and marking guidance, "
         "AI spend allowance, answer-key secrecy, submissions, draft grading, teacher finalization, students' own "
@@ -1189,6 +1358,7 @@ def run() -> None:
     step("Performance interpretation", lambda: performance_interpretation(users, room_id))
     late = step("Assessment lifecycle", lambda: lifecycle(users, room_id))
     step("Marking and release", lambda: marking(users, room_id, late))
+    step("Question bank and resits", lambda: bank_and_resits(users, room_id))
     step("Unenrollment", lambda: unenroll(users, room_id))
     step("Deleting an account", lambda: delete_account(users, room_id))
     step("Deleting a graded assessment", lambda: delete_graded_assessment(users, room_id, late))
