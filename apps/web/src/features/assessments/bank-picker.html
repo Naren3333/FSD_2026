@@ -3,7 +3,7 @@
     Add a copy of a question from your bank. Changing the copy here leaves your bank as it is. Bank questions
     keep no source passages or marking points.
   </p>
-  <form class="bank-search" novalidate (ngSubmit)="search()">
+  <form class="bank-search" novalidate [formGroup]="filters" (ngSubmit)="search()">
     <app-field controlId="bank-search-text" label="Search prompts">
       <input appFieldControl id="bank-search-text" type="search" [formControl]="text" maxlength="200" />
     </app-field>

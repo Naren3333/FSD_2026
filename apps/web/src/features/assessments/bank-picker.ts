@@ -1,5 +1,5 @@
 import { Component, EventEmitter, Input, Output, inject } from '@angular/core';
-import { FormControl, ReactiveFormsModule } from '@angular/forms';
+import { FormControl, FormGroup, ReactiveFormsModule } from '@angular/forms';
 import { AssessmentApi } from '../../api/clients';
 import type { BankQuestion, Question, QuestionType } from '../../api/models';
 import { CurriculumNames } from '../../core/curriculum-names';
@@ -45,6 +45,8 @@ export class BankPickerComponent {
   readonly text = new FormControl('', { nonNullable: true });
   readonly topic = new FormControl('', { nonNullable: true });
   readonly type = new FormControl<'' | QuestionType>('', { nonNullable: true });
+  /* the search form's group, so submitting it searches rather than reloading the page. */
+  readonly filters = new FormGroup({ text: this.text, topic: this.topic, type: this.type });
   readonly questions = new PagedSection<BankQuestion>();
   private read = false;
 

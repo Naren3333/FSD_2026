@@ -1,0 +1,434 @@
+<section class="bank-list" [hidden]="view() !== 'list'" aria-labelledby="bank-page-title">
+  <app-page-header
+    title="Question bank"
+    headingId="bank-page-title"
+    subtitle="Your own questions to reuse in any of your assessments. Only you can see them."
+  >
+    <app-refresh-button
+      label="Refresh question bank"
+      [busy]="questions.loading()"
+      [disabled]="state.busy()"
+      (refresh)="load()"
+    />
+    <button type="button" id="new-question" (click)="newQuestion()">
+      <app-icon name="plus" />New question
+    </button>
+  </app-page-header>
+
+  @if (form().dirty && editKey()) {
+    <p class="unsaved-notice">
+      <app-icon name="edit" />
+      <span>
+        You have unsaved changes to {{ unsavedName() }}.
+        <a [routerLink]="[]" [queryParams]="{ edit: editKey() }">Continue editing</a>
+      </span>
+    </p>
+  }
+
+  <section class="panel bank-filters" aria-label="Filter your bank">
+    <form id="bank-filters" class="filter-row" novalidate [formGroup]="filters" (ngSubmit)="search()">
+      <app-field controlId="bank-filter-text" label="Search prompts">
+        <input appFieldControl id="bank-filter-text" type="search" formControlName="text" maxlength="200" />
+      </app-field>
+      <app-field controlId="bank-filter-topic" label="Topic">
+        <select appFieldControl id="bank-filter-topic" formControlName="topic">
+          <option value="">Any topic</option>
+          @for (t of topics(); track t.id) {
+            <option [value]="t.id">{{ t.name }}</option>
+          }
+        </select>
+      </app-field>
+      <app-field controlId="bank-filter-type" label="Question type">
+        <select appFieldControl id="bank-filter-type" formControlName="type">
+          <option value="">Any type</option>
+          @for (t of types; track t.value) {
+            <option [value]="t.value">{{ t.label }}</option>
+          }
+        </select>
+      </app-field>
+      <div class="button-row">
+        <button type="submit" class="secondary" [disabled]="questions.loading()">Search bank</button>
+        @if (filtered()) {
+          <button type="button" class="quiet" [disabled]="questions.loading()" (click)="clearFilters()">
+            Clear filters
+          </button>
+        }
+      </div>
+    </form>
+    <app-section-state [section]="topicsState" loading="Loading topics…" />
+  </section>
+
+  <section class="panel library" aria-labelledby="bank-title">
+    <div class="panel-heading">
+      <h3 id="bank-title" tabindex="-1">Your questions</h3>
+      <p class="caption">20 questions per page</p>
+    </div>
+    <app-section-state [section]="questions" loading="Loading your bank…" />
+    @if (questions.ready() && questions.value(); as items) {
+      @if (items.length) {
+        <div class="table-scroll">
+          <table class="stack-table bank-table">
+            <caption class="visually-hidden">
+              Your bank questions
+            </caption>
+            <thead>
+              <tr>
+                <th scope="col">Question</th>
+                <th scope="col">Type</th>
+                <th scope="col">Marks</th>
+                <th scope="col">Topic</th>
+                <th scope="col"><span class="visually-hidden">Actions</span></th>
+              </tr>
+            </thead>
+            <tbody>
+              @for (q of items; track q.id) {
+                <tr class="record">
+                  <th scope="row" class="bank-prompt-cell">
+                    <span class="bank-prompt">{{ q.prompt }}</span>
+                    @if (q.origin === 'generated') {
+                      <span class="badge ai-chip"><app-icon name="sparkles" [size]="14" />AI-written</span>
+                    }
+                  </th>
+                  <td data-label="Type" class="type-cell">{{ typeName(q.type) }}</td>
+                  <td data-label="Marks" class="type-cell">{{ marksText(q.points) }}</td>
+                  <td data-label="Topic" class="bank-topic-cell">
+                    {{ topicName(q.topic_id) }}
+                    @if (archived(q.topic_id)) {
+                      (archived)
+                      <small class="caption"
+                        >Its topic is archived, so it cannot be added to an assessment.</small
+                      >
+                    }
+                  </td>
+                  <td class="actions-cell">
+                    <span class="row-actions">
+                      <button
+                        type="button"
+                        class="secondary"
+                        [id]="'edit-' + q.id"
+                        [disabled]="state.busy()"
+                        (click)="edit(q)"
+                      >
+                        <app-icon name="edit" />Edit<span class="visually-hidden"> {{ q.prompt }}</span>
+                      </button>
+                      <button
+                        type="button"
+                        class="icon-button"
+                        [disabled]="state.busy() || deleteState.busy()"
+                        [attr.aria-label]="'Delete ' + q.prompt"
+                        title="Delete bank question"
+                        (click)="confirmDelete(q)"
+                      >
+                        <app-icon name="trash" />
+                      </button>
+                    </span>
+                  </td>
+                </tr>
+              }
+            </tbody>
+          </table>
+        </div>
+      } @else if (filtered()) {
+        <p class="empty">No bank questions match. Clear the filters to see all of them.</p>
+      } @else {
+        <p class="empty">
+          Your bank is empty. Choose Save to bank on a question of an assessment you have saved, or choose New
+          question to write one here.
+        </p>
+      }
+    }
+    <app-pager
+      label="Question bank pages"
+      [page]="questions.page()"
+      (pageChange)="questions.page.set($event)"
+      [pageSize]="questions.pageSize"
+      [total]="questions.total()"
+      noun="questions"
+      [disabled]="questions.loading() || state.busy()"
+      (go)="readPage()"
+    />
+  </section>
+</section>
+
+<section class="bank-edit" [hidden]="view() !== 'edit'" aria-labelledby="bank-form-title">
+  <a class="back-link" routerLink="/question-bank">
+    <app-icon name="chevron-left" />
+    <span><span class="visually-hidden">Back to </span>Question bank</span>
+  </a>
+  <app-page-header
+    [title]="editKey() === 'new' ? 'New bank question' : 'Edit bank question'"
+    headingId="bank-form-title"
+    subtitle="Bank questions keep no source passages or marking points. Changing one here leaves assessments that use a copy as they are."
+  />
+  @if (editKey() !== 'new') {
+    <app-section-state [section]="opened" loading="Loading the question…" />
+  }
+  @if (editKey() === 'new' || (opened.ready() && opened.value())) {
+    @let question = form();
+    <form id="bank-form" class="editor-form" novalidate [formGroup]="question" (ngSubmit)="save()">
+      <div class="panel editor-card">
+        <app-field controlId="bank-question-prompt" label="Question" [control]="question.controls.prompt">
+          <textarea
+            appFieldControl
+            id="bank-question-prompt"
+            formControlName="prompt"
+            rows="3"
+            maxlength="2000"
+          ></textarea>
+        </app-field>
+        <div class="field-row question-meta">
+          <app-field controlId="bank-question-type" label="Question type">
+            <select appFieldControl id="bank-question-type" formControlName="type">
+              @for (t of types; track t.value) {
+                <option [value]="t.value">{{ t.label }}</option>
+              }
+            </select>
+          </app-field>
+          @if (question.controls.type.value === 'free_response') {
+            <app-field
+              controlId="bank-question-points"
+              label="Marks"
+              hint="The rubric's top levels added up."
+            >
+              <input appFieldControl id="bank-question-points" [value]="rubricPoints(question)" readonly />
+            </app-field>
+          } @else {
+            <app-field
+              controlId="bank-question-points"
+              label="Marks"
+              hint="1–100."
+              error="Give 1–100 marks."
+              [control]="question.controls.points"
+            >
+              <input
+                appFieldControl
+                id="bank-question-points"
+                type="number"
+                min="1"
+                max="100"
+                formControlName="points"
+              />
+            </app-field>
+          }
+          <app-field
+            controlId="bank-question-topic"
+            label="Curriculum topic"
+            [error]="
+              question.controls.topic_id.hasError('archived') ||
+              question.controls.topic_id.hasError('invalid')
+                ? 'This topic is archived. Choose an active topic.'
+                : 'This field is required.'
+            "
+            [control]="question.controls.topic_id"
+          >
+            <select appFieldControl id="bank-question-topic" formControlName="topic_id">
+              <option value="">Choose a topic</option>
+              @if (archived(question.controls.topic_id.value)) {
+                <option [value]="question.controls.topic_id.value" disabled>
+                  {{ topicName(question.controls.topic_id.value) }} (archived)
+                </option>
+              }
+              @for (t of topics(); track t.id) {
+                <option [value]="t.id">{{ t.name }}</option>
+              }
+            </select>
+          </app-field>
+        </div>
+        @switch (question.controls.type.value) {
+          @case ('multiple_choice') {
+            <app-field
+              controlId="bank-question-options"
+              label="Answer options"
+              hint="One option per line; 2–8 unique options."
+              error="Give 2–8 unique options, one per line."
+              [control]="question.controls.options"
+            >
+              <textarea
+                appFieldControl
+                id="bank-question-options"
+                formControlName="options"
+                rows="4"
+              ></textarea>
+            </app-field>
+            <app-field
+              controlId="bank-question-key"
+              label="Correct answer"
+              hint="Use the exact option text."
+              [control]="question.controls.answer"
+            >
+              <input appFieldControl id="bank-question-key" formControlName="answer" />
+            </app-field>
+          }
+          @case ('numerical') {
+            <div class="field-row">
+              <app-field
+                controlId="bank-question-key"
+                label="Correct answer"
+                [control]="question.controls.answer"
+              >
+                <input appFieldControl id="bank-question-key" formControlName="answer" inputmode="decimal" />
+              </app-field>
+              <app-field
+                controlId="bank-question-tolerance"
+                label="Numerical tolerance"
+                hint="Use 0 for an exact match."
+              >
+                <input
+                  appFieldControl
+                  id="bank-question-tolerance"
+                  formControlName="tolerance"
+                  inputmode="decimal"
+                />
+              </app-field>
+            </div>
+          }
+          @case ('short_answer') {
+            <app-field
+              controlId="bank-question-accepted"
+              label="Accepted answers"
+              hint="One per line. A matching answer gets full marks; any other answer comes to you to mark."
+              error="Give 1–20 accepted answers, one per line."
+              [control]="question.controls.accepted"
+            >
+              <textarea
+                appFieldControl
+                id="bank-question-accepted"
+                formControlName="accepted"
+                rows="3"
+              ></textarea>
+            </app-field>
+            <label class="check">
+              <input type="checkbox" formControlName="case_sensitive" />
+              Capital letters must match
+            </label>
+          }
+          @case ('free_response') {
+            <app-field
+              controlId="bank-question-length"
+              label="Longest answer, in characters"
+              hint="Up to 20,000."
+              error="Allow 1–20,000 characters."
+              [control]="question.controls.max_length"
+            >
+              <input
+                appFieldControl
+                id="bank-question-length"
+                type="number"
+                min="1"
+                max="20000"
+                formControlName="max_length"
+              />
+            </app-field>
+            <div class="rubric" formArrayName="criteria">
+              <h4>Rubric</h4>
+              @for (criterion of question.controls.criteria.controls; track criterion; let c = $index) {
+                <div class="criterion" [formGroupName]="c">
+                  <app-field
+                    [controlId]="'bank-question-criterion-' + c + '-title'"
+                    [label]="'Criterion ' + (c + 1)"
+                    [control]="criterion.controls.title"
+                  >
+                    <input
+                      appFieldControl
+                      [id]="'bank-question-criterion-' + c + '-title'"
+                      formControlName="title"
+                      maxlength="200"
+                    />
+                  </app-field>
+                  <app-field
+                    [controlId]="'bank-question-criterion-' + c + '-levels'"
+                    [label]="'Criterion ' + (c + 1) + ' levels'"
+                    hint='One level per line, as "points: what work at this level shows". 2–6 levels.'
+                    error='Give 2–6 levels, one per line, as "points: description", each with its own points from 0 to 100.'
+                    [control]="criterion.controls.levels"
+                  >
+                    <textarea
+                      appFieldControl
+                      [id]="'bank-question-criterion-' + c + '-levels'"
+                      formControlName="levels"
+                      rows="4"
+                    ></textarea>
+                  </app-field>
+                  @let levels = parseLevels(criterion.controls.levels.value);
+                  @if (levels?.length) {
+                    <details class="rubric-read">
+                      <summary>Check how the rubric was read</summary>
+                      <table class="levels-table">
+                        <caption class="visually-hidden">
+                          How criterion
+                          {{
+                            c + 1
+                          }}'s levels were read
+                        </caption>
+                        <thead>
+                          <tr>
+                            <th scope="col">Points</th>
+                            <th scope="col">What work at this level shows</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          @for (level of levels; track $index) {
+                            <tr>
+                              <td>{{ level.points }}</td>
+                              <td>{{ level.descriptor }}</td>
+                            </tr>
+                          }
+                        </tbody>
+                      </table>
+                    </details>
+                  }
+                  @if (question.controls.criteria.length > 1) {
+                    <button type="button" class="quiet" (click)="removeCriterion(c)">
+                      Remove criterion {{ c + 1 }}
+                    </button>
+                  }
+                </div>
+              }
+              @if (question.controls.criteria.length < maxCriteria) {
+                <button type="button" class="secondary" (click)="addCriterion()">Add criterion</button>
+              }
+            </div>
+            <app-field
+              controlId="bank-question-model"
+              label="Model answer (optional)"
+              hint="For you and AI suggestions only; students never see it."
+            >
+              <textarea
+                appFieldControl
+                id="bank-question-model"
+                formControlName="model_answer"
+                rows="4"
+                maxlength="5000"
+              ></textarea>
+            </app-field>
+          }
+        }
+      </div>
+      <div class="button-row">
+        <button [disabled]="state.busy()">{{ editKey() === 'new' ? 'Add to bank' : 'Save question' }}</button>
+        <button type="button" class="quiet" [disabled]="state.busy()" (click)="cancel()">
+          {{ question.dirty ? 'Discard changes' : 'Cancel' }}
+        </button>
+      </div>
+    </form>
+  }
+</section>
+<app-status [state]="state" />
+
+<app-confirm-dialog
+  #deleteDialog
+  dialogId="delete-bank-question"
+  tone="danger"
+  heading="Delete this bank question?"
+  confirmLabel="Delete question"
+  [state]="deleteState"
+  (confirm)="remove()"
+  (closed)="closeDelete()"
+>
+  @if (deleting(); as q) {
+    <p>
+      “{{ q.prompt }}” is deleted from your bank for good. Assessments that already use a copy of it keep
+      theirs, unchanged. This cannot be undone.
+    </p>
+  }
+</app-confirm-dialog>

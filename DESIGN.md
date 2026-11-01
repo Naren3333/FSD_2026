@@ -19,7 +19,7 @@ Students start on Home. On wide screens the to-do list sits on the left and ever
 - The sidebar is 232px wide (`styles.css:401`). It holds the brand, the "Current classroom" select, grouped navigation with an icon per item, the shell's status line and the account block (name, role, Profile link, Sign out). Students also get a "Refresh classrooms" icon button beside the select.
 - The current item has the `--navy-2` fill and a 3px `--accent` bar on its left. Grading review shows a count badge of drafts waiting, with hidden text "N grades to review".
 - Navigation groups, in order (`apps/web/src/app.routes.ts`):
-  - Teacher: Class dashboard; **Teach**: Assessments, Teaching materials, Students, Curriculum; **Review**: Grading review, Learning performance; **Assistant**: Ask the materials; **Setup**: Classrooms.
+  - Teacher: Class dashboard; **Teach**: Assessments, Question bank, Teaching materials, Students, Curriculum; **Review**: Grading review, Learning performance; **Assistant**: Ask the materials; **Setup**: Classrooms.
   - Student: Home; **My work**: Assessments, My results, My progress; **Learn**: Teaching materials, Ask the materials.
 - The classroom choice is remembered per user in this browser (`apps/web/src/core/classroom-context.ts`). If the saved classroom is gone, or storage is blocked, the first classroom in the list is chosen.
 - A 56px sticky top bar (`styles.css:619`) holds the AI meter pill on the right.
@@ -62,6 +62,7 @@ Views are chosen by the address:
 - `?edit=<id>` (or `?edit=new`) is the teacher's editor.
 - `?preview=<id>` is the teacher's preview.
 - `?open=<id>` is a student's assessment. A teacher's `?open=` opens the preview.
+- `/question-bank` is the teacher's bank; `?edit=<id>` (or `?edit=new`) is one bank question's form.
 - `/review?assessment=<id>&grade=<id>` is the grading queue with the open grade.
 
 Back and Forward move between views.
@@ -78,6 +79,7 @@ Other pages:
 - Classrooms is a create form above a grid of cards.
 - Teaching materials has an upload card with a drop zone, above the library table.
 - Curriculum is one column.
+- Question bank is one column: a filter card (prompt search, topic, type), then the questions table (question, type, marks, topic with "(archived)", Edit and a Delete icon button). Its form is the editor's question fields for one question, without marking points or source passages.
 - In the editor one question is open at a time: opening or adding a question folds the others, except any with an error, and an assessment opened for editing shows its first question. Each question can still be expanded or collapsed by hand. The outline wraps prompts to two lines, with the full prompt as a tooltip, and the topic select takes the widest column of the question's type, marks and topic row.
 - There is no two-column `.split` layout.
 

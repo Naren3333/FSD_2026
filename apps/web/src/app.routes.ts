@@ -47,6 +47,14 @@ export const SECTIONS: WorkspaceSection[] = [
     load: () => import('./features/assessments/assessments').then((m) => m.AssessmentsComponent),
   },
   {
+    path: 'question-bank',
+    label: 'Question bank',
+    teacherOnly: true,
+    icon: 'bookmark',
+    group: 'Teach',
+    load: () => import('./features/bank/bank').then((m) => m.QuestionBankComponent),
+  },
+  {
     path: 'materials',
     label: 'Teaching materials',
     icon: 'materials',

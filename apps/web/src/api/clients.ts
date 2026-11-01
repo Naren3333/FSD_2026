@@ -356,6 +356,10 @@ export class AssessmentApi {
     }
     return this.gateway.request('assessment', `/bank/questions?${query.toString()}`);
   }
+  /* one of the teacher's bank questions. */
+  bankQuestion(bankQuestionId: string): Promise<BankQuestion> {
+    return this.gateway.request('assessment', `/bank/questions/${id(bankQuestionId)}`);
+  }
   /* saves an assessment's question to the teacher's bank and links the two. */
   saveToBank(assessmentId: string, questionId: string): Promise<BankQuestion> {
     return this.gateway.request('assessment', '/bank/questions', {

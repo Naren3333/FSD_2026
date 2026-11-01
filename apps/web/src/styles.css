@@ -3008,6 +3008,33 @@ form .marking-bar-actions button {
   white-space: nowrap;
 }
 
+/* the question bank page (adr 0017): filters above the teacher's questions; each question's form reuses the editor's. */
+.bank-filters {
+  margin-bottom: 16px;
+}
+/* the search box and selects one height, and the buttons level with them rather than with the hint line under each field. */
+.bank-filters input,
+.bank-filters select {
+  height: 44px;
+}
+.bank-filters input[type='search'] {
+  appearance: none;
+}
+.bank-filters .filter-row > .button-row {
+  margin-bottom: 24px;
+}
+.bank-table tbody th {
+  font-weight: 400;
+}
+.bank-prompt-cell .badge {
+  margin-left: 8px;
+}
+.bank-topic-cell small {
+  display: block;
+  max-width: 20rem;
+  margin-top: 4px;
+}
+
 /* curriculum: the add form, then active and archived topics, in one column. */
 .topic-add {
   margin-bottom: 24px;
