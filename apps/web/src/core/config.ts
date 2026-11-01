@@ -9,10 +9,10 @@ export interface AppConfig {
   requestTimeout: number;
 }
 
-/* the local docker compose development stack (docker-compose.yml) on its default ports. */
+/* the local docker compose development stack (docker-compose.yml) behind its edge. */
 export const LOCAL_CONFIG: AppConfig = {
-  gatewayUrl: 'http://localhost:8000',
-  keycloak: { url: 'http://localhost:8081', realm: 'learning', clientId: 'learning-web' },
+  gatewayUrl: 'https://app.localhost',
+  keycloak: { url: 'https://auth.localhost', realm: 'learning', clientId: 'learning-web' },
   requestTimeout: 20_000,
 };
 

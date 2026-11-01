@@ -21,7 +21,56 @@ x-python-healthcheck: &python-healthcheck
   start_period: 180s
   start_interval: 3s
   retries: 3
+# every container gets a cpu and memory limit, as a cloud task or pod would, so throttling and out-of-memory
+# kills show up locally. docker-compose.scale.yml lowers the cpu of its replicas.
+x-go-limits: &go-limits
+  resources:
+    limits:
+      cpus: '1'
+      memory: 256M
+x-python-limits: &python-limits
+  resources:
+    limits:
+      cpus: '1'
+      memory: 512M
+x-job-limits: &job-limits
+  resources:
+    limits:
+      cpus: '1'
+      memory: 512M
 services:
+  # the one public entry point, as a cloud load balancer would be: it ends tls and routes the app, /api and
+  # sign-in by host and path (infra/edge/Caddyfile).
+  edge:
+    image: caddy:2.10.2-alpine
+    restart: unless-stopped
+    ports:
+    - 127.0.0.1:${EDGE_PORT:-443}:443
+    volumes:
+    - ./infra/edge/Caddyfile:/etc/caddy/Caddyfile:ro
+    # caddy's local certificate authority, kept so the browser trusts it across restarts.
+    - edge-data:/data
+    depends_on:
+    - web
+    - kong
+    - keycloak
+    networks: [edge]
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 128M
+    healthcheck:
+      # a port check: caddy's admin api would log every probe.
+      test:
+      - CMD
+      - nc
+      - -z
+      - 127.0.0.1
+      - '443'
+      interval: 10s
+      timeout: 3s
+      retries: 10
   postgres:
     # postgres 17 with pgvector, for content's chunk embeddings
     image: pgvector/pgvector:0.8.1-pg17
@@ -32,6 +81,12 @@ services:
     - postgres-data:/var/lib/postgresql/data
     # the test stack (scripts/stack_tests.py) reads its own first-start files from LOCAL_CONFIG_DIR.
     - ${LOCAL_CONFIG_DIR:-./.local}/postgres-init.sql:/docker-entrypoint-initdb.d/01-services.sql:ro
+    networks: [data]
+    deploy:
+      resources:
+        limits:
+          cpus: '2'
+          memory: 1G
     healthcheck:
       test:
       - CMD-SHELL
@@ -40,23 +95,62 @@ services:
       interval: 5s
       timeout: 3s
       retries: 20
+  # moves a realm that keycloak's development mode kept in its h2 file into postgresql, once, keeping every
+  # user's id (infra/keycloak/migrate.sh).
+  keycloak-migrate:
+    image: quay.io/keycloak/keycloak:26.3.3
+    entrypoint:
+    - /bin/bash
+    - /migrate.sh
+    environment: &keycloak-db
+      KC_DB: postgres
+      KC_DB_URL: jdbc:postgresql://postgres:5432/keycloak
+      KC_DB_USERNAME: keycloak
+      KC_DB_PASSWORD: ${KEYCLOAK_DB_PASSWORD:?Run scripts/upgrade_local.py}
+    volumes:
+    - ./infra/keycloak/migrate.sh:/migrate.sh:ro
+    - keycloak-data:/opt/keycloak/data
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks: [data]
+    deploy:
+      resources:
+        limits:
+          cpus: '2'
+          memory: 1G
   keycloak:
     image: quay.io/keycloak/keycloak:26.3.3
     restart: unless-stopped
     command:
-    - start-dev
+    - start
     - --import-realm
     environment:
+      <<: *keycloak-db
       KC_BOOTSTRAP_ADMIN_USERNAME: admin
       KC_BOOTSTRAP_ADMIN_PASSWORD: ${KEYCLOAK_ADMIN_PASSWORD:?Run scripts/setup.py or scripts/upgrade_local.py}
-      KC_HOSTNAME: http://localhost:${KEYCLOAK_PORT:-8081}
+      # the public url behind the edge; tokens carry it as their issuer.
+      KC_HOSTNAME: ${AUTH_URL:-https://auth.localhost}
       KC_HOSTNAME_BACKCHANNEL_DYNAMIC: 'true'
+      # tls ends at the edge, so keycloak serves http and reads the edge's forwarded headers.
+      KC_HTTP_ENABLED: 'true'
+      KC_PROXY_HEADERS: xforwarded
       KC_HEALTH_ENABLED: 'true'
+    # direct access for the local scripts and tests, as an operator's private network would give.
     ports:
     - 127.0.0.1:${KEYCLOAK_PORT:-8081}:8080
     volumes:
     - ${LOCAL_CONFIG_DIR:-./.local}/learning-realm.json:/opt/keycloak/data/import/learning-realm.json:ro
     - keycloak-data:/opt/keycloak/data
+    depends_on:
+      keycloak-migrate:
+        condition: service_completed_successfully
+    networks: [edge, app, data]
+    deploy:
+      resources:
+        limits:
+          cpus: '2'
+          memory: 1536M
     healthcheck:
       # the image has no curl or wget: ask the management port's readiness check with bash's /dev/tcp and
       # read the status code from the response's first line.
@@ -70,7 +164,7 @@ services:
         read -r _ code _ <&3 && [ "$$code" = 200 ]
       interval: 5s
       timeout: 5s
-      start_period: 30s
+      start_period: 60s
       retries: 60
   kafka:
     image: apache/kafka:4.1.2
@@ -89,8 +183,16 @@ services:
       KAFKA_AUTO_CREATE_TOPICS_ENABLE: 'false'
       KAFKA_LOG_RETENTION_HOURS: 720
       KAFKA_LOG_DIRS: /var/lib/kafka/data
+      # the jvm heap stays under the container's memory limit, leaving room for the page cache.
+      KAFKA_HEAP_OPTS: -Xms512m -Xmx512m
     volumes:
     - kafka-data:/var/lib/kafka/data
+    networks: [data]
+    deploy:
+      resources:
+        limits:
+          cpus: '1'
+          memory: 1G
     healthcheck:
       # each check starts a jvm, so once kafka is up it is checked only every minute.
       test:
@@ -106,6 +208,8 @@ services:
     depends_on:
       kafka:
         condition: service_healthy
+    networks: [data]
+    deploy: *job-limits
     entrypoint:
     - /bin/sh
     - -ec
@@ -143,6 +247,12 @@ services:
       exec weed server -dir=/data -s3 -s3.port=8333 -s3.config=/tmp/s3.json
     volumes:
     - seaweedfs-data:/data
+    networks: [data]
+    deploy:
+      resources:
+        limits:
+          cpus: '1'
+          memory: 512M
     healthcheck:
       test:
       - CMD-SHELL
@@ -155,6 +265,8 @@ services:
     depends_on:
       seaweedfs:
         condition: service_healthy
+    networks: [data]
+    deploy: *job-limits
     entrypoint:
     - /bin/sh
     - -ec
@@ -168,12 +280,14 @@ services:
       keycloak:
         condition: service_healthy
     environment:
-      # the issuer kong accepts and the origin it allows, on the ports this stack publishes.
-      KEYCLOAK_ISSUER: http://localhost:${KEYCLOAK_PORT:-8081}/realms/learning
-      WEB_ORIGIN: http://localhost:${WEB_PORT:-4200}
+      # the issuer kong accepts and the origin it allows, at the public urls behind the edge.
+      KEYCLOAK_ISSUER: ${AUTH_URL:-https://auth.localhost}/realms/learning
+      WEB_ORIGIN: ${APP_URL:-https://app.localhost}
     volumes:
     - ./infra/kong/bootstrap.py:/bootstrap.py:ro
     - kong-config:/output
+    networks: [app]
+    deploy: *job-limits
     command:
     - python
     - /bootstrap.py
@@ -217,14 +331,23 @@ services:
       KONG_ADMIN_LISTEN: 'off'
       KONG_PROXY_ACCESS_LOG: 'off'
       KONG_PROXY_ERROR_LOG: /dev/stderr
+      # one nginx worker per host cpu otherwise, each with its own memory, whatever the cpu limit.
+      KONG_NGINX_WORKER_PROCESSES: '2'
       KONG_DNS_VALID_TTL: '5'  # re-resolve services every 5 s, so a recreated container is found without restarting kong
       # never route to a cached address after it expires; a restarted container's old ip may now belong to another
       # service.
       KONG_DNS_STALE_TTL: '0'
+    # direct access for the local scripts and tests, as an operator's private network would give.
     ports:
     - 127.0.0.1:${KONG_PORT:-8000}:8000
     volumes:
     - kong-config:/config:ro
+    networks: [edge, app]
+    deploy:
+      resources:
+        limits:
+          cpus: '1'
+          memory: 512M
     healthcheck:
       test:
       - CMD
@@ -238,7 +361,7 @@ services:
       context: .
       dockerfile: services/identity/Dockerfile
     environment:
-      OIDC_ISSUER: http://localhost:${KEYCLOAK_PORT:-8081}/realms/learning
+      OIDC_ISSUER: ${AUTH_URL:-https://auth.localhost}/realms/learning
       OIDC_JWKS_URL: http://keycloak:8080/realms/learning/protocol/openid-connect/certs
       OIDC_AUDIENCE: learning
       DATABASE_URL: postgresql://identity:${IDENTITY_DB_PASSWORD:?Run scripts/setup.py or scripts/upgrade_local.py}@postgres:5432/identity?sslmode=disable
@@ -255,8 +378,11 @@ services:
         condition: service_healthy
       kafka-init:
         condition: service_completed_successfully
+    networks: [app, data]
+    deploy: *go-limits
     init: true
-    restart: on-failure:3
+    # restarts without limit, as an orchestrator would, so the stack heals after a dependency outage.
+    restart: unless-stopped
     stop_grace_period: 45s
     healthcheck: *go-healthcheck
   curriculum:
@@ -264,7 +390,7 @@ services:
       context: .
       dockerfile: services/curriculum/Dockerfile
     environment:
-      OIDC_ISSUER: http://localhost:${KEYCLOAK_PORT:-8081}/realms/learning
+      OIDC_ISSUER: ${AUTH_URL:-https://auth.localhost}/realms/learning
       OIDC_JWKS_URL: http://keycloak:8080/realms/learning/protocol/openid-connect/certs
       OIDC_AUDIENCE: learning
       DATABASE_URL: postgresql://curriculum:${CURRICULUM_DB_PASSWORD:?Run scripts/setup.py or scripts/upgrade_local.py}@postgres:5432/curriculum?sslmode=disable
@@ -276,8 +402,10 @@ services:
         condition: service_started
       postgres:
         condition: service_healthy
+    networks: [app, data]
+    deploy: *go-limits
     init: true
-    restart: on-failure:3
+    restart: unless-stopped
     stop_grace_period: 45s
     healthcheck: *go-healthcheck
   content:
@@ -285,7 +413,7 @@ services:
       context: .
       dockerfile: services/content/Dockerfile
     environment:
-      OIDC_ISSUER: http://localhost:${KEYCLOAK_PORT:-8081}/realms/learning
+      OIDC_ISSUER: ${AUTH_URL:-https://auth.localhost}/realms/learning
       OIDC_JWKS_URL: http://keycloak:8080/realms/learning/protocol/openid-connect/certs
       OIDC_AUDIENCE: learning
       DATABASE_URL: postgresql://content:${CONTENT_DB_PASSWORD:?Run scripts/setup.py or scripts/upgrade_local.py}@postgres:5432/content?sslmode=disable
@@ -312,8 +440,15 @@ services:
         condition: service_completed_successfully
       storage-init:
         condition: service_completed_successfully
+    networks: [app, data]
+    # uploads of up to 50 MiB pass through it.
+    deploy:
+      resources:
+        limits:
+          cpus: '1'
+          memory: 512M
     init: true
-    restart: on-failure:3
+    restart: unless-stopped
     stop_grace_period: 45s
     healthcheck: *go-healthcheck
   assessment:
@@ -321,7 +456,7 @@ services:
       context: .
       dockerfile: services/assessment/Dockerfile
     environment:
-      OIDC_ISSUER: http://localhost:${KEYCLOAK_PORT:-8081}/realms/learning
+      OIDC_ISSUER: ${AUTH_URL:-https://auth.localhost}/realms/learning
       OIDC_JWKS_URL: http://keycloak:8080/realms/learning/protocol/openid-connect/certs
       OIDC_AUDIENCE: learning
       DATABASE_URL: postgresql://assessment:${ASSESSMENT_DB_PASSWORD:?Run scripts/setup.py or scripts/upgrade_local.py}@postgres:5432/assessment?sslmode=disable
@@ -337,8 +472,10 @@ services:
         condition: service_healthy
       kafka-init:
         condition: service_completed_successfully
+    networks: [app, data]
+    deploy: *go-limits
     init: true
-    restart: on-failure:3
+    restart: unless-stopped
     stop_grace_period: 45s
     healthcheck: *go-healthcheck
   grading:
@@ -346,7 +483,7 @@ services:
       context: .
       dockerfile: services/grading/Dockerfile
     environment:
-      OIDC_ISSUER: http://localhost:${KEYCLOAK_PORT:-8081}/realms/learning
+      OIDC_ISSUER: ${AUTH_URL:-https://auth.localhost}/realms/learning
       OIDC_JWKS_URL: http://keycloak:8080/realms/learning/protocol/openid-connect/certs
       OIDC_AUDIENCE: learning
       DATABASE_URL: postgresql://grading:${GRADING_DB_PASSWORD:?Run scripts/setup.py or scripts/upgrade_local.py}@postgres:5432/grading?sslmode=disable
@@ -366,8 +503,10 @@ services:
         condition: service_healthy
       kafka-init:
         condition: service_completed_successfully
+    networks: [app, data]
+    deploy: *go-limits
     init: true
-    restart: on-failure:3
+    restart: unless-stopped
     stop_grace_period: 45s
     healthcheck: *go-healthcheck
   analytics:
@@ -375,7 +514,7 @@ services:
       context: .
       dockerfile: services/analytics/Dockerfile
     environment:
-      OIDC_ISSUER: http://localhost:${KEYCLOAK_PORT:-8081}/realms/learning
+      OIDC_ISSUER: ${AUTH_URL:-https://auth.localhost}/realms/learning
       OIDC_JWKS_URL: http://keycloak:8080/realms/learning/protocol/openid-connect/certs
       OIDC_AUDIENCE: learning
       DATABASE_URL: postgresql://analytics:${ANALYTICS_DB_PASSWORD:?Run scripts/setup.py or scripts/upgrade_local.py}@postgres:5432/analytics?sslmode=disable
@@ -392,8 +531,10 @@ services:
         condition: service_healthy
       kafka-init:
         condition: service_completed_successfully
+    networks: [app, data]
+    deploy: *python-limits
     init: true
-    restart: on-failure:3
+    restart: unless-stopped
     stop_grace_period: 45s
     healthcheck: *python-healthcheck
   ai-core:
@@ -401,7 +542,7 @@ services:
       context: .
       dockerfile: services/ai-core/Dockerfile
     environment:
-      OIDC_ISSUER: http://localhost:${KEYCLOAK_PORT:-8081}/realms/learning
+      OIDC_ISSUER: ${AUTH_URL:-https://auth.localhost}/realms/learning
       OIDC_JWKS_URL: http://keycloak:8080/realms/learning/protocol/openid-connect/certs
       OIDC_AUDIENCE: learning
       # provider keys exist only in ai-core (adr 0002).
@@ -432,8 +573,15 @@ services:
         condition: service_started
       postgres:
         condition: service_healthy
+    networks: [app, data]
+    # pdf extraction and page rendering for ingest.
+    deploy:
+      resources:
+        limits:
+          cpus: '2'
+          memory: 2G
     init: true
-    restart: on-failure:3
+    restart: unless-stopped
     stop_grace_period: 45s
     healthcheck: *python-healthcheck
   question-generation-agent:
@@ -441,7 +589,7 @@ services:
       context: .
       dockerfile: services/question-generation-agent/Dockerfile
     environment:
-      OIDC_ISSUER: http://localhost:${KEYCLOAK_PORT:-8081}/realms/learning
+      OIDC_ISSUER: ${AUTH_URL:-https://auth.localhost}/realms/learning
       OIDC_JWKS_URL: http://keycloak:8080/realms/learning/protocol/openid-connect/certs
       OIDC_AUDIENCE: learning
       # stateless (adr 0006).
@@ -458,8 +606,11 @@ services:
     depends_on:
       keycloak:
         condition: service_started
+    # agents reach only the applications' apis, never a database or the broker.
+    networks: [app]
+    deploy: *python-limits
     init: true
-    restart: on-failure:3
+    restart: unless-stopped
     stop_grace_period: 45s
     healthcheck: *python-healthcheck
   student-performance-agent:
@@ -467,7 +618,7 @@ services:
       context: .
       dockerfile: services/student-performance-agent/Dockerfile
     environment:
-      OIDC_ISSUER: http://localhost:${KEYCLOAK_PORT:-8081}/realms/learning
+      OIDC_ISSUER: ${AUTH_URL:-https://auth.localhost}/realms/learning
       OIDC_JWKS_URL: http://keycloak:8080/realms/learning/protocol/openid-connect/certs
       OIDC_AUDIENCE: learning
       # stateless; reads with the teacher's token, never content or a database (adr 0014).
@@ -483,8 +634,10 @@ services:
     depends_on:
       keycloak:
         condition: service_started
+    networks: [app]
+    deploy: *python-limits
     init: true
-    restart: on-failure:3
+    restart: unless-stopped
     stop_grace_period: 45s
     healthcheck: *python-healthcheck
   question-chatbot-agent:
@@ -492,7 +645,7 @@ services:
       context: .
       dockerfile: services/question-chatbot-agent/Dockerfile
     environment:
-      OIDC_ISSUER: http://localhost:${KEYCLOAK_PORT:-8081}/realms/learning
+      OIDC_ISSUER: ${AUTH_URL:-https://auth.localhost}/realms/learning
       OIDC_JWKS_URL: http://keycloak:8080/realms/learning/protocol/openid-connect/certs
       OIDC_AUDIENCE: learning
       # threads and messages only (adr 0002).
@@ -518,8 +671,11 @@ services:
         condition: service_healthy
       kafka-init:
         condition: service_completed_successfully
+    # its own threads database and the classroom-deletion topic (adr 0002).
+    networks: [app, data]
+    deploy: *python-limits
     init: true
-    restart: on-failure:3
+    restart: unless-stopped
     stop_grace_period: 45s
     healthcheck: *python-healthcheck
   web:
@@ -528,14 +684,25 @@ services:
       dockerfile: apps/web/Dockerfile
     environment:
       # served to the app as /config.json and allowed by its content-security-policy (apps/web/nginx.conf).
-      GATEWAY_URL: http://localhost:${KONG_PORT:-8000}
-      KEYCLOAK_URL: http://localhost:${KEYCLOAK_PORT:-8081}
-    ports:
-    - 127.0.0.1:${WEB_PORT:-4200}:8080
+      GATEWAY_URL: ${APP_URL:-https://app.localhost}
+      KEYCLOAK_URL: ${AUTH_URL:-https://auth.localhost}
     depends_on:
       kong:
         condition: service_healthy
+    networks: [edge]
+    deploy:
+      resources:
+        limits:
+          cpus: '0.25'
+          memory: 128M
     restart: unless-stopped
+# edge: the public entry and what it routes to. app: the applications and identity provider. data: the
+# databases, broker and object store, reachable only from the containers attached to it and with no route out.
+networks:
+  edge: {}
+  app: {}
+  data:
+    internal: true
 volumes:
   postgres-data: {}
   keycloak-data: {}
@@ -543,4 +710,4 @@ volumes:
   seaweedfs-data: {}
   ai-core-cache: {}
   kong-config: {}
-
+  edge-data: {}

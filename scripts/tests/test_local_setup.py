@@ -4,6 +4,7 @@ import json
 import re
 import subprocess
 from pathlib import Path
+from typing import Any
 
 import bootstrap
 import httpx
@@ -12,6 +13,7 @@ import pytest
 import setup
 import upgrade_local
 import wait_ready
+import yaml
 from setup import generate_secrets
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -39,7 +41,8 @@ def test_no_unguarded_secret_in_compose() -> None:
         "OPENAI_API_KEY",
         "VOYAGE_API_KEY",
         "ANALYTICS_KAFKA_GROUP",
-        *("KONG_PORT", "KEYCLOAK_PORT", "WEB_PORT"),  # the published ports, which the test stack moves
+        *("KONG_PORT", "KEYCLOAK_PORT", "EDGE_PORT"),  # the published ports, which the test stack moves
+        *("APP_URL", "AUTH_URL"),  # the public urls behind the edge, which the test stack moves too
         "LOCAL_CONFIG_DIR",  # the test stack's own first-start files
         *("GO_DB_POOL_MAX", "PYTHON_DB_POOL_MAX", "DB_POOL_MIN"),
         *("SELECTIVE_VISION", "CHUNK_TOKENS", "CHUNK_OVERLAP", "SLIDE_CHUNKS"),
@@ -177,18 +180,20 @@ def test_upgrade_updates_the_web_client() -> None:
     old = {
         "id": "w",
         "clientId": "learning-web",
-        "redirectUris": [f"{setup.WEB_ORIGIN}/*", f"{setup.TEST_WEB_ORIGIN}/*"],
-        "webOrigins": [setup.WEB_ORIGIN, setup.TEST_WEB_ORIGIN],
+        "redirectUris": ["http://localhost:4200/*", f"{setup.TEST_WEB_ORIGIN}/*", "https://kept.test/*"],
+        "webOrigins": ["http://localhost:4200", setup.TEST_WEB_ORIGIN],
         "attributes": {"pkce.code.challenge.method": "S256", "kept": "1"},
     }
-    updated = upgrade_local.updated_web_client(old, development=True)
-    assert updated["redirectUris"] == [f"{setup.WEB_ORIGIN}/*"]
+    updated = upgrade_local.updated_web_client(old, setup.WEB_ORIGIN)
+    assert updated["redirectUris"] == ["https://kept.test/*", f"{setup.WEB_ORIGIN}/*"]
     assert updated["webOrigins"] == [setup.WEB_ORIGIN]
     assert updated["attributes"] == {**setup.WEB_ATTRIBUTES, "kept": "1"}
     # running again changes nothing.
-    assert upgrade_local.updated_web_client(updated, development=True) == updated
-    # the test stack's own realm keeps its origin.
-    assert upgrade_local.updated_web_client(old, development=False)["webOrigins"] == old["webOrigins"]
+    assert upgrade_local.updated_web_client(updated, setup.WEB_ORIGIN) == updated
+    # the test stack's own realm keeps only its origin.
+    test = upgrade_local.updated_web_client(old, setup.TEST_WEB_ORIGIN)
+    assert test["webOrigins"] == [setup.TEST_WEB_ORIGIN]
+    assert test["redirectUris"] == [f"{setup.TEST_WEB_ORIGIN}/*", "https://kept.test/*"]
 
 
 class FakeKeycloak:
@@ -246,3 +251,27 @@ def test_upgrade_assigns_the_ai_client_role_to_existing_clients(monkeypatch: pyt
     upgrade_local.add_missing_clients(generate_secrets())
     assert keycloak.created == setup.AI_CLIENTS[1:]
     assert keycloak.mappings == {(f"account-id-{client}", "ai-client") for client in setup.AI_CLIENTS}
+
+
+def compose_services() -> dict[str, Any]:
+    services: dict[str, Any] = yaml.safe_load(COMPOSE)["services"]
+    return services
+
+
+def test_only_data_owners_reach_the_data_network() -> None:
+    """the data network has no route out, and agents without a database reach only the applications' apis (agents have no direct access to business databases)."""
+    networks = yaml.safe_load(COMPOSE)["networks"]
+    assert networks["data"] == {"internal": True}
+    services = compose_services()
+    for agent in ["question-generation-agent", "student-performance-agent"]:
+        assert services[agent]["networks"] == ["app"], agent
+    assert "data" not in services["web"]["networks"] and "data" not in services["kong"]["networks"]
+    assert "data" not in services["edge"]["networks"]
+
+
+def test_every_container_has_limits_and_long_running_ones_restart() -> None:
+    """as a cloud task or pod would: a memory limit on everything, and restarts without a retry cap."""
+    for name, service in compose_services().items():
+        assert service["deploy"]["resources"]["limits"]["memory"], name
+        one_shot = name.endswith(("-init", "-migrate", "-config"))
+        assert service.get("restart") == (None if one_shot else "unless-stopped"), name

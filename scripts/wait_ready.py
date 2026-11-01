@@ -1,14 +1,15 @@
-"""probe all ten applications from their private network, then the public kong and keycloak ports, with bounded startup wait."""
+"""probe all ten applications from their private network, then the public kong, keycloak and edge ports, with bounded startup wait."""
 
 import argparse
 import json
+import ssl
 import subprocess
 import time
 import urllib.error
 import urllib.request
 from collections.abc import Callable
 
-from local_stack import KEYCLOAK_PORT, KONG_PORT, ROOT
+from local_stack import EDGE_PORT, KEYCLOAK_PORT, KONG_PORT, ROOT
 
 TIMEOUT = 180  # seconds for both phases together, unless --timeout says otherwise
 SERVICES = [
@@ -24,11 +25,15 @@ SERVICES = [
     "question-chatbot-agent",
 ]
 # what the tests and the browser call from the host, on the ports docker-compose.yml publishes for this
-# stack.
+# stack: kong and keycloak directly, and the gateway and sign-in through the edge by host name.
 PUBLIC = {
-    "kong": (f"http://127.0.0.1:{KONG_PORT}/api/identity/classrooms", 401),
-    "keycloak": (f"http://127.0.0.1:{KEYCLOAK_PORT}/realms/learning", 200),
+    "kong": (f"http://127.0.0.1:{KONG_PORT}/api/identity/classrooms", 401, None),
+    "keycloak": (f"http://127.0.0.1:{KEYCLOAK_PORT}/realms/learning", 200, None),
+    "edge": (f"https://127.0.0.1:{EDGE_PORT}/api/identity/classrooms", 401, "app.localhost"),
+    "edge sign-in": (f"https://127.0.0.1:{EDGE_PORT}/realms/learning", 200, "auth.localhost"),
 }
+# the edge's certificate comes from its own local authority, which only the browser is asked to trust.
+EDGE_TLS = ssl._create_unverified_context()
 # runs inside the analytics container, on the private network, and prints each service's readiness status.
 PROBE = f"""
 import json, urllib.request
@@ -43,9 +48,10 @@ print(json.dumps(result))
 """
 
 
-def status(url: str) -> int:
+def status(url: str, host: str | None = None) -> int:
+    request = urllib.request.Request(url, headers={"Host": host} if host else {})
     try:
-        with urllib.request.urlopen(url, timeout=3) as response:
+        with urllib.request.urlopen(request, timeout=3, context=EDGE_TLS if host else None) as response:
             return response.status
     except urllib.error.HTTPError as error:
         return error.code
@@ -71,7 +77,7 @@ def applications_ready() -> bool:
 
 
 def public_ports_ready() -> bool:
-    return all(status(url) == expected for url, expected in PUBLIC.values())
+    return all(status(url, host) == expected for url, expected, host in PUBLIC.values())
 
 
 def wait(ready: Callable[[], bool], deadline: float) -> bool:
@@ -93,9 +99,9 @@ def main() -> None:
         raise SystemExit(f"Applications did not become ready within {timeout} seconds")
     print("PASS: all ten applications ready")
     if not wait(public_ports_ready, deadline):
-        states = ", ".join(f"{name} {status(url)}" for name, (url, _) in PUBLIC.items())
-        raise SystemExit(f"Kong or Keycloak did not answer within {timeout} seconds: {states}")
-    print("PASS: Kong and Keycloak answer on their public ports")
+        states = ", ".join(f"{name} {status(url, host)}" for name, (url, _, host) in PUBLIC.items())
+        raise SystemExit(f"Kong, Keycloak or the edge did not answer within {timeout} seconds: {states}")
+    print("PASS: Kong, Keycloak and the edge answer on their public ports")
 
 
 if __name__ == "__main__":

@@ -1,0 +1,25 @@
+# the stack's public entry point, as a cloud load balancer would be: tls ends here and requests are routed
+# by host and path. browsers resolve *.localhost to this computer.
+{
+	# a request without sni (a script calling 127.0.0.1) gets the app's certificate.
+	default_sni app.localhost
+	# only https is published, so nothing listens for plain-http redirects.
+	auto_https disable_redirects
+}
+
+# the web app and, on the same origin, the gateway.
+app.localhost {
+	tls internal
+	handle /api/* {
+		reverse_proxy kong:8000
+	}
+	handle {
+		reverse_proxy web:8080
+	}
+}
+
+# sign-in.
+auth.localhost {
+	tls internal
+	reverse_proxy keycloak:8080
+}

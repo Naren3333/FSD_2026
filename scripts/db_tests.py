@@ -7,7 +7,9 @@ from local_stack import ROOT, env, project, psql_value
 from setup import password_key
 
 GO_IMAGE = "golang:1.25.7-alpine"
-NETWORK = f"{project()}_default"
+# the databases' network, which has no route out, and the applications', for downloading go modules
+# (docker-compose.yml).
+NETWORKS = [f"{project()}_data", f"{project()}_app"]
 PYTEST = "pytest==8.4.1"  # the version in requirements-dev.lock
 
 # go module directory, its tests' environment variable, the role owning its scratch database, extensions.
@@ -37,7 +39,7 @@ def go_suite(module: str, variable: str, owner: str, extensions: tuple[str, ...]
     url = scratch_database(module.rsplit("/", 1)[-1], owner, *extensions)
     command = [
         "docker", "run", "--rm",
-        "--network", NETWORK,
+        *(f"--network={network}" for network in NETWORKS),
         "-e", variable,
         "-e", "GOFLAGS=-buildvcs=false",
         "-e", "GOCACHE=/go/cache",

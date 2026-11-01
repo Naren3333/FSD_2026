@@ -654,6 +654,7 @@ main {
 .workspace-content {
   padding: 0 32px 40px;
   max-width: 1600px;
+  margin-inline: auto;
 }
 .drawer-backdrop {
   display: none;

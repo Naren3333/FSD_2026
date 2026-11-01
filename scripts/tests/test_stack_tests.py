@@ -31,12 +31,13 @@ def test_project_names_match_compose_and_the_browser_tests() -> None:
 
 
 def test_the_browser_tests_require_the_test_ports() -> None:
-    """the browser tests' guard names the same test ports as local_stack, so the project name alone is not enough."""
+    """the browser tests' guard names the same test ports and app url as local_stack, so the project name alone is not enough."""
     playwright = (ROOT / "apps/web/playwright.config.ts").read_text(encoding="utf-8")
-    ports = re.search(r"const TEST_PORTS: Record<string, string> = \{(.*)\};", playwright)
-    assert ports, "playwright.config.ts lost its TEST_PORTS"
-    assert dict(re.findall(r"(\w+): '(\d+)'", ports[1])) == local_stack.TEST_PORTS
-    assert "process.env[name] !== TEST_PORTS[name]" in playwright
+    stack = re.search(r"const TEST_STACK: Record<string, string> = \{(.*?)\};", playwright, re.DOTALL)
+    assert stack, "playwright.config.ts lost its TEST_STACK"
+    expected = {**local_stack.TEST_PORTS, "APP_URL": local_stack.TEST_URLS["APP_URL"]}
+    assert dict(re.findall(r"(\w+): '([^']+)'", stack[1])) == expected
+    assert "process.env[name] !== TEST_STACK[name]" in playwright
 
 
 def test_data_writing_scripts_refuse_the_development_stack(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -78,12 +79,20 @@ def test_the_test_stack_publishes_its_own_ports() -> None:
     """every published port and every url the stack hands out follows the port variables, and the test stack's differ from the development stack's defaults, so both run at once."""
     compose = (ROOT / "docker-compose.yml").read_text(encoding="utf-8")
     published = re.findall(r"^    - 127\.0\.0\.1:(\S+):\d+$", compose, re.MULTILINE)
-    assert published == ["${KEYCLOAK_PORT:-8081}", "${KONG_PORT:-8000}", "${WEB_PORT:-4200}"]
-    assert re.findall(r"http://localhost:(\d+)", compose) == []
-    defaults = {"KONG_PORT": "8000", "KEYCLOAK_PORT": "8081", "WEB_PORT": "4200"}
+    assert published == ["${EDGE_PORT:-443}", "${KEYCLOAK_PORT:-8081}", "${KONG_PORT:-8000}"]
+    assert re.findall(r"https?://localhost", compose) == []
+    defaults = {"KONG_PORT": "8000", "KEYCLOAK_PORT": "8081", "EDGE_PORT": "443"}
     assert local_stack.TEST_PORTS.keys() == defaults.keys()
     assert set(local_stack.TEST_PORTS.values()).isdisjoint(defaults.values())
-    assert f"http://localhost:{local_stack.TEST_PORTS['WEB_PORT']}" == setup.TEST_WEB_ORIGIN
+    # the public urls compose hands out default to the development edge's, and the test stack's carry its port.
+    assert "${APP_URL:-" + setup.WEB_ORIGIN + "}" in compose
+    assert "${AUTH_URL:-https://auth.localhost}" in compose
+    edge = local_stack.TEST_PORTS["EDGE_PORT"]
+    assert {
+        "APP_URL": setup.TEST_WEB_ORIGIN,
+        "AUTH_URL": f"https://auth.localhost:{edge}",
+    } == local_stack.TEST_URLS
+    assert f"https://app.localhost:{edge}" == setup.TEST_WEB_ORIGIN
 
 
 def test_each_stack_realm_allows_only_its_own_web_origin() -> None:
@@ -108,9 +117,11 @@ def test_scripts_follow_the_port_variables(monkeypatch: pytest.MonkeyPatch) -> N
         assert stack.BASE == "http://127.0.0.1:18000/api"
         assert stack.TOKEN_URL.startswith("http://127.0.0.1:18081/realms/learning/")
         ready = importlib.reload(wait_ready)
-        assert [url for url, _ in ready.PUBLIC.values()] == [
+        assert [url for url, _, _ in ready.PUBLIC.values()] == [
             "http://127.0.0.1:18000/api/identity/classrooms",
             "http://127.0.0.1:18081/realms/learning",
+            "https://127.0.0.1:18443/api/identity/classrooms",
+            "https://127.0.0.1:18443/realms/learning",
         ]
     finally:
         monkeypatch.undo()
@@ -143,7 +154,7 @@ def test_fresh_volumes_get_every_database_and_client(monkeypatch: pytest.MonkeyP
     stack_tests.refresh_local_files()
     local = tmp_path / stack_tests.TEST_LOCAL_CONFIG_DIR
     sql = (local / "postgres-init.sql").read_text(encoding="utf-8")
-    assert all(f"CREATE DATABASE {name} OWNER {name};" in sql for name in setup.SERVICES)
+    assert all(f"CREATE DATABASE {name} OWNER {name};" in sql for name in setup.DATABASES)
     realm = json.loads((local / "learning-realm.json").read_text(encoding="utf-8"))
     assert realm == setup.realm(values, setup.TEST_WEB_ORIGIN)
     assert not (tmp_path / ".local/learning-realm.json").exists()

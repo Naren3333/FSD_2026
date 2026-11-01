@@ -18,6 +18,7 @@ services:
   k6:
     image: grafana/k6:1.0.0
     profiles: [load]
+    networks: [app]
     environment:
       BASE_URL: http://kong:8000/api
     volumes:

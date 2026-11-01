@@ -30,7 +30,7 @@ from local_stack import (
     require_test_stack,
     sse_events,
 )
-from setup import AI_CLIENTS, SERVICES, client_secret_key
+from setup import AI_CLIENTS, DATABASES, SERVICES, client_secret_key
 
 # gateway path → contract file
 CONTRACTS = {
@@ -1035,9 +1035,9 @@ def delete_classroom(u: Users, room_id: str, graded: Graded) -> None:
 
 
 def databases() -> None:
-    """each service's database user is refused by the others, and migrations and pgvector are in place."""
+    """each service's database user is refused by the others and by keycloak's, and migrations and pgvector are in place."""
     for user in SERVICES:
-        for database in SERVICES:
+        for database in DATABASES:
             if user != database:
                 isolation = psql("SELECT 1", database=database, user=user, check=False)
                 refused = isolation.returncode != 0 and "permission denied" in isolation.stderr.lower()

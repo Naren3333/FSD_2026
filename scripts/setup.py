@@ -2,6 +2,7 @@
 
 import json
 import secrets
+import uuid
 from pathlib import Path
 from typing import Any
 
@@ -9,6 +10,8 @@ ROOT = Path(__file__).resolve().parents[1]
 # one database and role per service that owns data. chatbot is question-chatbot-agent's (adr 0002); aicore
 # is ai-core's usage ledger (adr 0003).
 SERVICES = ["identity", "curriculum", "content", "assessment", "grading", "analytics", "chatbot", "aicore"]
+# keycloak's own database, beside the services' (it is infrastructure, not a business application).
+DATABASES = [*SERVICES, "keycloak"]
 # private ai callers use service accounts with the required client role.
 AI_CLIENTS = [
     "content-indexer",
@@ -27,9 +30,17 @@ PEOPLE = [
     ("other-teacher", "teacher", "OTHER_TEACHER_PASSWORD"),
 ]
 ORG = "local-school"
-WEB_ORIGIN = "http://localhost:4200"
-# the disposable test stack's web app (scripts/stack_tests.py).
-TEST_WEB_ORIGIN = "http://localhost:14200"
+# the web app behind the edge (infra/edge/Caddyfile), and the disposable test stack's (scripts/stack_tests.py).
+WEB_ORIGIN = "https://app.localhost"
+TEST_WEB_ORIGIN = "https://app.localhost:18443"
+# origins that older realm imports listed before the edge served the app.
+LEGACY_WEB_ORIGINS = ["http://localhost:4200", "http://localhost:14200"]
+# seeded accounts get fixed ids, so the tokens' subject is the same in every fresh realm.
+USER_IDS = uuid.UUID("6b1f3c1e-6f7a-4c39-9d43-3a8f1f2b7c11")
+
+
+def user_id(username: str) -> str:
+    return str(uuid.uuid5(USER_IDS, username))
 
 
 def client_secret_key(client: str) -> str:
@@ -50,7 +61,7 @@ def generate_secrets() -> dict[str, str]:
         "S3_CONTENT_PASSWORD",
         *(client_secret_key(c) for c in AI_CLIENTS),
         client_secret_key(ACCOUNTS_CLIENT),
-        *(password_key(s) for s in SERVICES),
+        *(password_key(s) for s in DATABASES),
     ]
     values = {key: secrets.token_hex(20) for key in keys}
     values["S3_ROOT_USER"] = "local-admin"
@@ -59,9 +70,9 @@ def generate_secrets() -> dict[str, str]:
 
 
 def postgres_init(values: dict[str, str]) -> str:
-    """each service gets its own login role and database; no one else may connect to it."""
+    """each service, and keycloak, gets its own login role and database; no one else may connect to it."""
     sql = []
-    for name in SERVICES:
+    for name in DATABASES:
         password = values[password_key(name)]
         sql += [
             f"CREATE ROLE {name} LOGIN PASSWORD '{password}';",
@@ -75,6 +86,7 @@ def postgres_init(values: dict[str, str]) -> str:
 
 def person(username: str, role: str, password: str) -> dict[str, Any]:
     return {
+        "id": user_id(username),
         "username": username,
         "enabled": True,
         "emailVerified": True,
@@ -89,6 +101,7 @@ def person(username: str, role: str, password: str) -> dict[str, Any]:
 
 def service_account(client: str) -> dict[str, Any]:
     return {
+        "id": user_id(f"service-account-{client}"),
         "username": f"service-account-{client}",
         "enabled": True,
         "serviceAccountClientId": client,
@@ -200,6 +213,7 @@ def realm(values: dict[str, str], web_origin: str = WEB_ORIGIN) -> dict[str, Any
     owner, role = ACCOUNTS_ROLE
     users.append(
         {
+            "id": user_id(f"service-account-{ACCOUNTS_CLIENT}"),
             "username": f"service-account-{ACCOUNTS_CLIENT}",
             "enabled": True,
             "serviceAccountClientId": ACCOUNTS_CLIENT,
@@ -209,7 +223,9 @@ def realm(values: dict[str, str], web_origin: str = WEB_ORIGIN) -> dict[str, Any
     return {
         "realm": "learning",
         "enabled": True,
-        "sslRequired": "none",
+        # https except from private addresses: the browser comes through the edge, the services and scripts
+        # from the compose networks and this computer.
+        "sslRequired": "external",
         "registrationAllowed": False,
         "roles": {"realm": [{"name": r} for r in ["teacher", "student", "ai-client"]]},
         "users": users,

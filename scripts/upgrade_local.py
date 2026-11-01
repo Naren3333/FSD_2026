@@ -10,10 +10,12 @@ from setup import (
     ACCOUNTS_CLIENT,
     ACCOUNTS_ROLE,
     AI_CLIENTS,
+    DATABASES,
+    LEGACY_WEB_ORIGINS,
     PEOPLE,
-    SERVICES,
     TEST_WEB_ORIGIN,
     WEB_ATTRIBUTES,
+    WEB_ORIGIN,
     accounts_client,
     client_secret_key,
     generate_secrets,
@@ -49,7 +51,7 @@ def add_missing_secrets(env_path: Path) -> dict[str, str]:
 
 
 def add_missing_databases(env: dict[str, str]) -> None:
-    for name in SERVICES:
+    for name in DATABASES:
         if psql_value(f"SELECT count(*) FROM pg_roles WHERE rolname='{name}'") == "0":
             psql_value(f"CREATE ROLE {name} LOGIN PASSWORD '{env[password_key(name)]}'")
             print(f"Created role {name}")
@@ -91,28 +93,30 @@ def add_missing_accounts_client(env: dict[str, str]) -> None:
 
 
 def update_web_client() -> None:
-    """update browser-client attributes while keeping test origins out of the development realm."""
+    """give the browser client setup.py's attributes and this stack's web origin behind the edge, dropping the origins it no longer serves."""
     with admin_client() as admin:
         found = check(admin.get("/clients", params={"clientId": "learning-web"})).json()
         if not found:
             return
         client = found[0]
-        changed = updated_web_client(client, development=TEST_PORTS["KEYCLOAK_PORT"] != KEYCLOAK_PORT)
+        development = TEST_PORTS["KEYCLOAK_PORT"] != KEYCLOAK_PORT
+        changed = updated_web_client(client, WEB_ORIGIN if development else TEST_WEB_ORIGIN)
         if changed != client:
             check(admin.put(f"/clients/{client['id']}", json=changed))
             print("Updated Keycloak client learning-web")
 
 
-def updated_web_client(client: dict[str, Any], *, development: bool) -> dict[str, Any]:
-    """the learning-web client with setup.py's attributes and, for the development stack, without the test stack's web origin."""
-    updated = {**client, "attributes": {**(client.get("attributes") or {}), **WEB_ATTRIBUTES}}
-    if development:
-        test_uri = f"{TEST_WEB_ORIGIN}/*"
-        updated["redirectUris"] = [uri for uri in client.get("redirectUris") or [] if uri != test_uri]
-        updated["webOrigins"] = [
-            origin for origin in client.get("webOrigins") or [] if origin != TEST_WEB_ORIGIN
-        ]
-    return updated
+def updated_web_client(client: dict[str, Any], web_origin: str) -> dict[str, Any]:
+    """the learning-web client with setup.py's attributes, allowing `web_origin` and no other stack's or older origin."""
+    dropped = {*LEGACY_WEB_ORIGINS, WEB_ORIGIN, TEST_WEB_ORIGIN} - {web_origin}
+    redirects = [uri for uri in client.get("redirectUris") or [] if uri.removesuffix("/*") not in dropped]
+    origins = [origin for origin in client.get("webOrigins") or [] if origin not in dropped]
+    return {
+        **client,
+        "attributes": {**(client.get("attributes") or {}), **WEB_ATTRIBUTES},
+        "redirectUris": redirects if f"{web_origin}/*" in redirects else [*redirects, f"{web_origin}/*"],
+        "webOrigins": origins if web_origin in origins else [*origins, web_origin],
+    }
 
 
 def ensure_client(admin: "httpx.Client", client: str, representation: Callable[[], dict[str, Any]]) -> bool:
@@ -147,7 +151,9 @@ def main() -> None:
     add_missing_clients(env)
     add_missing_accounts_client(env)
     update_web_client()
-    print("Local setup is up to date. Run: docker compose up -d --build")
+    # keycloak-migrate copies a development-mode realm out of keycloak's h2 file, which keycloak must not hold
+    # open meanwhile (infra/keycloak/migrate.sh).
+    print("Local setup is up to date. Run: docker compose stop keycloak, then docker compose up -d --build")
 
 
 if __name__ == "__main__":

@@ -8,7 +8,7 @@ import sys
 import time
 from pathlib import Path
 
-from local_stack import ROOT, TEST_PORTS, TEST_PROJECT, env
+from local_stack import ROOT, TEST_PORTS, TEST_PROJECT, TEST_URLS, env
 from setup import TEST_WEB_ORIGIN, postgres_init, realm
 
 # each suite's command and working directory, in the order they run.
@@ -32,6 +32,7 @@ TEST_ENV = {
     **os.environ,
     "COMPOSE_PROJECT_NAME": TEST_PROJECT,
     **TEST_PORTS,
+    **TEST_URLS,
     "LOCAL_CONFIG_DIR": f"./{TEST_LOCAL_CONFIG_DIR}",
 }
 

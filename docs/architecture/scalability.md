@@ -19,6 +19,7 @@ separate concern, covered in `docs/development/handover.md`, not here.
 | Background jobs are leased | Content's indexing jobs and Grading's AI marking jobs are leased with `FOR UPDATE SKIP LOCKED` and a lease time, so replicas take different jobs and a job whose replica died is taken over when its lease expires. | `services/content/index.go`, `services/grading/marker.go` |
 | Replicas can start together | Migrations run under a PostgreSQL advisory lock, so only one replica applies them. | `packages/platform/migrate.go`, `learning_transport/db.py` |
 | Replicas can stop cleanly | On SIGTERM a Go service stops taking requests, finishes those in flight and stops its workers; ai-core waits for ledger writes. | `packages/platform/app.go` |
+| Each container is a fixed slice | Every container has CPU and memory limits, as a cloud task or pod would, and the long-running ones restart without a retry cap. | `docker-compose.yml` (`deploy.resources`) |
 | Load per replica is bounded | Database pools use validated DB_POOL_MAX/DB_POOL_MIN (Go default 10, Python default 8); each Python replica has at most 100 requests in flight; Kong limits each signed-in session to 120 requests a minute. | `packages/platform/db.go`, the Python Dockerfiles, `infra/kong/bootstrap.py` |
 | Services fail independently | Each service owns its database and reaches others only through their APIs or events, so a slow or failed consumer delays its own work without blocking the services that publish to it. | `docs/architecture/system.md` |
 
@@ -84,8 +85,8 @@ What it shows, and what it does not:
 - **Failover waits for Kafka's session timeout.** A replica that dies without leaving the group keeps its partitions
   until the group's session timeout (kafka-go's default, 30 s) expires; only then does another replica take them, so
   that share of the work is late, not lost.
-- **One Kong and one Keycloak.** Kong's rate limit is counted per Kong node (`policy: local`); Keycloak runs
-  `start-dev`.
+- **One edge, one Kong and one Keycloak.** Kong's rate limit is counted per Kong node (`policy: local`). Keycloak
+  runs in production mode on its own PostgreSQL database, so further nodes could share it, but only one runs.
 - **Operational caches are local.** Content coalesces identical embedding misses within one replica; ai-core's
   disk caches and coalescing are optimizations, not shared authorities. Replicas may duplicate a cache miss.
   AI allowance reservations and user concurrency are serialized in ai-core's PostgreSQL database across replicas.

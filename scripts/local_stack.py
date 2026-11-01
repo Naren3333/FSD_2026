@@ -8,7 +8,7 @@ from functools import cache
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-from setup import ORG
+from setup import ORG, TEST_WEB_ORIGIN
 
 if TYPE_CHECKING:
     import httpx
@@ -46,6 +46,7 @@ def published_port(name: str, default: str) -> str:
 # .env names others (scripts/stack_tests.py sets TEST_PORTS for the test stack).
 KONG_PORT = published_port("KONG_PORT", "8000")
 KEYCLOAK_PORT = published_port("KEYCLOAK_PORT", "8081")
+EDGE_PORT = published_port("EDGE_PORT", "443")
 BASE = f"http://127.0.0.1:{KONG_PORT}/api"
 KEYCLOAK = f"http://127.0.0.1:{KEYCLOAK_PORT}"
 TOKEN_URL = f"{KEYCLOAK}/realms/learning/protocol/openid-connect/token"
@@ -54,7 +55,9 @@ PSQL_TIMEOUT = 90  # seconds
 # compose projects of docker-compose.yml.
 DEV_PROJECT = "learning-foundation"
 TEST_PROJECT = "learning-test"
-TEST_PORTS = {"KONG_PORT": "18000", "KEYCLOAK_PORT": "18081", "WEB_PORT": "14200"}
+TEST_PORTS = {"KONG_PORT": "18000", "KEYCLOAK_PORT": "18081", "EDGE_PORT": "18443"}
+# the test stack's public urls behind its edge, which docker-compose.yml reads as APP_URL and AUTH_URL.
+TEST_URLS = {"APP_URL": TEST_WEB_ORIGIN, "AUTH_URL": f"https://auth.localhost:{TEST_PORTS['EDGE_PORT']}"}
 
 
 @cache

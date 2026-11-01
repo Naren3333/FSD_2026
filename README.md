@@ -12,7 +12,7 @@ docker compose up -d --build
 python scripts/wait_ready.py
 ```
 
-Open [localhost:4200](http://localhost:4200) once `wait_ready.py` passes. The first build may take several minutes.
+Open [app.localhost](https://app.localhost) once `wait_ready.py` passes. The first build may take several minutes. The stack's edge (`infra/edge/Caddyfile`) serves the app, the gateway (`/api`) and sign-in ([auth.localhost](https://auth.localhost)) over HTTPS, with certificates from its own local authority. Trust it once so the browser accepts them: copy it out with `docker compose cp edge:/data/caddy/pki/authorities/local/root.crt .local/edge-root.crt` and, on Windows, run `certutil -user -addstore Root .local/edge-root.crt` (on macOS, `sudo security add-trusted-cert -d -r trustRoot -k /Library/Keychains/System.keychain .local/edge-root.crt`). The authority lives in the `edge-data` volume, so this is needed again only if that volume is removed.
 
 If your `.env` was made by an older `setup.py` (Compose then stops with "Run scripts/setup.py or scripts/upgrade_local.py"), run `python scripts/upgrade_local.py`: it adds the missing values to `.env` without changing existing ones, and with the stack up it also adds new databases and Keycloak clients. See [operations](docs/development/operations.md).
 
