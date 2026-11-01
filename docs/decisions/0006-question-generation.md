@@ -37,4 +37,4 @@ A teacher who has uploaded a classroom's PDFs still writes every question, accep
 
 - An existing local setup needs `python scripts/upgrade_local.py` (adds `QUESTION_GENERATION_AGENT_CLIENT_SECRET` and the Keycloak client), then `docker compose up -d --build` and `docker compose restart kong` for the new route.
 - Without provider keys, generation answers `503 SEARCH_UNAVAILABLE` or `AI_PROVIDER_NOT_CONFIGURED`; the editor shows the message.
-- Not built yet: numerical questions, a question bank (it will reuse `sources` and `origin`), student self-practice, and measuring how many generated questions teachers keep. The relevance floor needs calibrating with real documents.
+- Not built yet: numerical questions, student self-practice, and measuring how many generated questions teachers keep. The relevance floor needs calibrating with real documents. The question bank came in ADR 0017: it keeps `origin` but not `sources`, which stay with their classroom's assessments.
