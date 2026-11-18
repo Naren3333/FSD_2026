@@ -128,7 +128,10 @@
         @for (line of roundLines(); track $index) {
           <p class="caption">{{ line }}</p>
         }
-        <p class="caption">{{ modelCalls() }} AI {{ modelCalls() === 1 ? 'call' : 'calls' }} in total.</p>
+        <p class="caption">
+          {{ modelCalls() }} inference {{ modelCalls() === 1 ? 'request' : 'requests' }} attempted, including
+          failures and refusals.
+        </p>
       </details>
     }
     @if (!room) {
