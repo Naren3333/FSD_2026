@@ -2,6 +2,7 @@
 
 import asyncio
 import math
+from contextlib import AsyncExitStack
 
 from learning_transport.metrics import increment
 
@@ -14,8 +15,10 @@ async def embed(texts: list[str], tally: openai_client.Tally) -> list[list[float
     settings = get_settings()
     root = settings.cache_dir / "embeddings-v1"
     names = [local_cache.key(f"{settings.embedding_model}|1536|{text}".encode()) for text in texts]
-    batch_key = local_cache.key("|".join(names).encode())
-    async with local_cache.singleflight("embeddings:" + batch_key):
+    async with AsyncExitStack() as locks:
+        # sorted input locks prevent overlapping batches from duplicating work or deadlocking.
+        for name in sorted(set(names)):
+            await locks.enter_async_context(local_cache.singleflight("embedding:" + name))
         saved: dict[str, list[float]] = {}
         for name in dict.fromkeys(names):
             value = await asyncio.to_thread(local_cache.read, root / f"{name}.json")
