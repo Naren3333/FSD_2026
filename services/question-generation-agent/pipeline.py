@@ -25,6 +25,7 @@ from contracts import (
     Round,
 )
 from prompts import Passage
+from upstream import SearchPassage
 
 log = logging.getLogger("question-generation-agent.pipeline")
 
@@ -76,16 +77,16 @@ def _round(
     )
 
 
-def passages_of(results: list[dict[str, Any]], floor: float) -> list[Passage]:
+def passages_of(results: list[SearchPassage], floor: float) -> list[Passage]:
     """the reranked search results at or above the relevance floor, as numbered passages; none when the best is below it, since then the documents say too little about the request. a weaker passage is left out so no draft rests on it."""
-    results = [r for r in results if float(r.get("score", 0)) >= floor and r["content"].strip()]
+    results = [r for r in results if r["score"] >= floor and r["content"].strip()]
     return [
         Passage(
             i,
             r["chunk_id"],
             r["document_id"],
             r.get("title") or "",
-            int(r.get("page_start") or 1) if r.get("source", "pdf") in ("pdf", "vision") else None,
+            (r.get("page_start") or 1) if r.get("source", "pdf") in ("pdf", "vision") else None,
             r["content"],
             r.get("section_path"),
             r.get("source", "pdf"),
@@ -250,8 +251,11 @@ class Pipeline:
         schema: dict[str, Any],
         name: str,
         deadline: float | None = None,
+        run: Run | None = None,
     ) -> str:
         """one model call; with a deadline it is cut off then (OUT_OF_TIME, not a failure to report, only the end of the retries), so the request ends before the gateway gives up."""
+        if run is not None:
+            run.calls += 1
         return await self.services.generate(
             messages, tokens, schema, name, self.correlation, billed(self.claims), deadline
         )
@@ -287,6 +291,7 @@ class Pipeline:
                 prompts.generation_schema(request.question_types),
                 "questions.generated",
                 job.deadline if n > 0 else None,
+                run,
             )
         except UpstreamError as e:
             log.warning("generation_failed", extra={"error": str(e), "round": n})
@@ -294,7 +299,6 @@ class Pipeline:
                 raise refused(e) from None
             run.stop_error = None if e.code == OUT_OF_TIME else e
             return None
-        run.calls += 1
         return output
 
     async def _check_and_review(
@@ -386,8 +390,8 @@ class Pipeline:
             prompts.review_schema(),
             "questions.reviewed",
             deadline,
+            run,
         )
-        run.calls += 1
         return review.verdicts(output, len(kept))
 
     async def guidance(self, body: GuidanceRequest) -> Guidance:

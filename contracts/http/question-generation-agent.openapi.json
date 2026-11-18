@@ -590,7 +590,9 @@
           },
           "model_calls": {
             "type": "integer",
+            "minimum": 0.0,
             "title": "Model Calls",
+            "description": "Workflow inference requests attempted, including failed or refused requests; not provider attempts or cost.",
             "default": 0
           },
           "requires_teacher_review": {

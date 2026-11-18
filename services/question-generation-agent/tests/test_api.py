@@ -287,3 +287,14 @@ def test_ready():
     import main
 
     assert TestClient(main.app).get("/health/ready").json() == {"status": "ready"}
+
+
+@pytest.mark.parametrize(
+    "changes", [{"score": True}, {"page_start": "3"}, {"title": 42}, {"section_path": []}]
+)
+def test_invalid_passage_metadata_is_rejected_before_inference(api, fakes: Fakes, changes):
+    fakes.results[0].update(changes)
+    response = api.post(GENERATE, json=BODY, headers=as_user())
+    assert response.status_code == 503
+    assert response.json()["error"]["code"] == "SEARCH_UNAVAILABLE"
+    assert not fakes.calls("/v1/inference")

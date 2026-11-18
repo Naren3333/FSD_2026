@@ -150,7 +150,11 @@ class GenerateResponse(Contract):
     returned: int
     dropped: dict[str, int]  # questions the checks or the reviewer refused, by reason
     rounds: list[Round] = Field(default_factory=list)
-    model_calls: int = 0
+    model_calls: int = Field(
+        default=0,
+        ge=0,
+        description="Workflow inference requests attempted, including failed or refused requests; not provider attempts or cost.",
+    )
     requires_teacher_review: Literal[True] = True
 
 

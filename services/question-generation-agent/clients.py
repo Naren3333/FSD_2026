@@ -1,13 +1,13 @@
 """share authenticated retrieval and inference clients."""
 
 from dataclasses import dataclass
-from typing import Any
 
 import httpx
 from learning_transport import Claims, UpstreamError
 from learning_transport.agents import AgentClients, billed_to
 
 from config import Settings
+from upstream import SearchPassage, read_passages
 
 TOPIC_TIMEOUT = 5.0
 SEARCH_TIMEOUT = 15.0
@@ -57,7 +57,7 @@ class Services(AgentClients):
     async def search(
         self, authorization: str, classroom_id: str, query: str, document_ids: list[str], top_k: int,
         correlation: str,
-    ) -> tuple[list[dict[str, Any]], bool]:  # fmt: skip
+    ) -> tuple[list[SearchPassage], bool]:  # fmt: skip
         """the chosen documents' passages that best match the query, reranked, and whether the rerank fell back (then `score` is an rrf score, not comparable to the relevance floor)."""
         body = {
             "classroom_id": classroom_id,
@@ -67,4 +67,5 @@ class Services(AgentClients):
             "top_k": top_k,
             "rerank": True,
         }
-        return await self.search_content(authorization, body, correlation, SEARCH_TIMEOUT)
+        results, fallback = await self.search_content(authorization, body, correlation, SEARCH_TIMEOUT)
+        return read_passages(results), fallback

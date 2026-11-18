@@ -154,7 +154,7 @@ def test_no_call_starts_after_the_deadline(api, fakes: Fakes):
     data = ask(api, count=2).json()
     sent(fakes, GEN)
     assert statuses(data) == [("not_reviewed", 0)] * 2
-    assert data["model_calls"] == 1 and len(data["rounds"]) == 1
+    assert data["model_calls"] == 2 and len(data["rounds"]) == 1
 
 
 def test_calls_after_the_first_generation_are_cut_off_at_the_deadline(api, fakes: Fakes):
@@ -183,7 +183,7 @@ def test_a_review_stopped_by_the_allowance_still_returns_the_drafts(api, fakes: 
     assert resp.status_code == 200
     data = resp.json()
     sent(fakes, GEN, REV)
-    assert statuses(data) == [("not_reviewed", 0)] * 2 and data["model_calls"] == 1
+    assert statuses(data) == [("not_reviewed", 0)] * 2 and data["model_calls"] == 2
 
 
 def test_the_first_generate_call_stopped_by_the_allowance_is_still_a_429(api, fakes: Fakes):
@@ -201,7 +201,7 @@ def test_a_failed_retry_keeps_what_was_accepted(api, fakes: Fakes):
     assert resp.status_code == 200
     data = resp.json()
     sent(fakes, GEN, REV, GEN)
-    assert data["returned"] == 1 and data["dropped"] == {"WRONG_KEY": 1} and data["model_calls"] == 2
+    assert data["returned"] == 1 and data["dropped"] == {"WRONG_KEY": 1} and data["model_calls"] == 3
 
 
 def test_a_retry_stopped_by_the_allowance_with_nothing_accepted_is_a_429(api, fakes: Fakes):
