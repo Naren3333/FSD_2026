@@ -2,6 +2,7 @@
 
 import asyncio
 from collections.abc import Awaitable, Callable
+from dataclasses import dataclass
 from typing import Any
 
 import httpx
@@ -22,6 +23,12 @@ EVALUATION_PAGES = 5
 BATCH = 50
 CLASS_PAGE = 50
 CLASS_PAGES = 4  # the class comparison reads at most 200 students
+
+
+@dataclass(frozen=True)
+class ClassSample:
+    students: list[Any]
+    total: int
 
 
 def billed(claims: Claims) -> dict[str, str]:
@@ -139,19 +146,36 @@ class Services(AgentClients):
     async def topic_names(self, authorization: str, ids: list[str], correlation: str) -> dict[str, str]:
         """each topic's name, archived ones included; a topic curriculum no longer has is left out."""
 
-        async def name(topic: str) -> tuple[str, str | None]:
-            url = f"{self.settings.curriculum_url}/v1/topics/{topic}"
+        found: dict[str, str] = {}
+        unique = list(dict.fromkeys(ids))
+        for start in range(0, len(unique), BATCH):
+            chunk = unique[start : start + BATCH]
             try:
-                data = await self._get("curriculum", url, authorization, correlation)
-            except UpstreamError as e:
-                if e.status == 404:
-                    return topic, None
-                raise
-            value = data.get("name") if isinstance(data, dict) else None
-            return topic, value if isinstance(value, str) and value else None
-
-        pairs = await bounded(name, ids)
-        return {topic: value for topic, value in pairs if value}
+                response = await self.http.post(
+                    f"{self.settings.curriculum_url}/v1/topics/batch",
+                    json={"ids": chunk},
+                    headers={"Authorization": authorization, "X-Correlation-ID": correlation},
+                    timeout=READ_TIMEOUT,
+                )
+            except httpx.HTTPError:
+                raise UpstreamError("curriculum", 0) from None
+            if response.status_code != 200:
+                raise upstream_error("curriculum", response)
+            try:
+                items = response.json()
+            except ValueError:
+                raise UpstreamError("curriculum", 502) from None
+            if not isinstance(items, list) or not all(
+                isinstance(item, dict)
+                and isinstance(item.get("id"), str)
+                and item["id"] in chunk
+                and isinstance(item.get("name"), str)
+                and item["name"]
+                for item in items
+            ):
+                raise UpstreamError("curriculum", 502)
+            found.update({item["id"]: item["name"] for item in items})
+        return found
 
     async def prerequisites(self, authorization: str, topic: str, correlation: str) -> list[dict[str, str]]:
         """the topic's active prerequisites, by id and name."""
@@ -165,7 +189,7 @@ class Services(AgentClients):
             if isinstance(t, dict) and isinstance(t.get("id"), str) and isinstance(t.get("name"), str)
         ]
 
-    async def class_performance(self, authorization: str, classroom: str, correlation: str) -> list[Any]:
+    async def class_performance(self, authorization: str, classroom: str, correlation: str) -> ClassSample:
         """the topic summaries of the classroom's students, its first 200 in roster order."""
 
         async def page(n: int) -> tuple[list[Any], int]:
@@ -179,18 +203,25 @@ class Services(AgentClients):
                 limit=CLASS_PAGE,
             )
             batch = data.get("students") if isinstance(data, dict) else None
-            if not isinstance(batch, list) or not all(isinstance(s, dict) for s in batch):
+            if not isinstance(batch, list) or not all(
+                isinstance(s, dict) and isinstance(s.get("student_id"), str) for s in batch
+            ):
                 raise UpstreamError("analytics", 502)
-            return batch, int(data.get("total") or 0)
+            total = data.get("total")
+            if not isinstance(total, int) or isinstance(total, bool) or total < len(batch):
+                raise UpstreamError("analytics", 502)
+            return batch, total
 
         # the first page gives the total; the rest are read side by side.
         students, total = await page(0)
         if not students:
-            return students
+            return ClassSample(students, total)
         pages = min(CLASS_PAGES, -(-total // CLASS_PAGE))
-        for batch, _ in await gather_all(*(page(n) for n in range(1, pages))):
+        for batch, population in await gather_all(*(page(n) for n in range(1, pages))):
             students += batch
-        return students
+            total = max(total, population)
+        unique = {s["student_id"]: s for s in students}
+        return ClassSample(list(unique.values()), total)
 
 
 async def bounded[T, R](read: Callable[[T], Awaitable[R]], items: list[T]) -> list[R]:

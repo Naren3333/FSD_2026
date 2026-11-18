@@ -213,6 +213,23 @@ const draft: Interpretation = {
 };
 
 describe('performance interpretation', () => {
+  it('labels a partial roster comparison for the teacher', async () => {
+    const page = render(
+      Promise.resolve([ana]),
+      Promise.resolve(evidence([halves])),
+      's1',
+      undefined,
+      async () => ({
+        ...draft,
+        class_comparison_scope: { population: 249, compared: 199, partial: true, selection: 'roster_order' },
+      }),
+    );
+    await page.settle();
+    page.click('#interpret-button');
+    await page.settle();
+    expect(page.text()).toContain('199 of 249 classmates');
+    expect(page.text()).toContain('It may not represent the whole class.');
+  });
   it('offers the teacher an interpretation once the student’s evidence is on show', async () => {
     const page = render(Promise.resolve([ana]), Promise.resolve(evidence([halves])), 's1', undefined, () =>
       Promise.resolve(draft),

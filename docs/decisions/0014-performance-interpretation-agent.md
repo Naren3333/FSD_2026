@@ -15,7 +15,7 @@ Teachers see each student's topic accuracy under Learning performance, but turni
 - Then up to five model turns (`PERFORMANCE_MAX_TURNS`). Each is one structured ai-core `generate` call as the `student-performance-agent` service account, billed to the teacher (ADR 0003). A turn either calls up to three tools or reports; the last turn, or any turn after two minutes (`PERFORMANCE_DEADLINE`), may only report. Every call ends within four minutes of the request (`PERFORMANCE_BUDGET`), a tool turn and its tools a minute before that, so the report always has time inside Kong's five. A turn's tools run side by side. The tools are read-only:
   - `read_answers` shows one result's questions (lost marks first, at most eight) with the prompt, expected answer, the student's answer, the rubric scores and the teacher's feedback.
   - `prerequisites` reads a topic's prerequisites from Curriculum with the student's evidence on each.
-  - `class_comparison` pools the rest of the class's released topic accuracy from Analytics (its first 200 students, the student left out) next to the student's.
+  - `class_comparison` pools the rest of the class's released topic accuracy from Analytics (its first 200 students in roster order, the student left out) next to the student's. The tool and response carry the population, compared count and partial flag. Partial comparisons are labelled in the teacher's draft and cannot support class-wide claims.
 - The model refers to results, questions and topics by short references (`R1`, `E1`, `T1`) the agent assigns; it never sees or writes ids. Each turn's reply schema lists the question references a report may cite as evidence and the topic references it may recommend (up to 250 of each; beyond that they are plain strings and only the checks hold them), so the model cannot cite a result or a topic as an observation's evidence. Added 2026-10-27, after the agent eval found strong students' reports refused because every observation cited `R` or `T` references. A refused tool call (an unknown reference, a repeat, an unknown tool) or a failed one is told to the model and shown to the teacher, and the loop goes on.
 - The agent does not search Content or call the chatbot: it reads only assessment, grading, analytics and curriculum data. Linking an observation to teaching material is left for later, once the retrieval work settles.
 
@@ -26,6 +26,8 @@ Teachers see each student's topic accuracy under Learning performance, but turni
 - When no observation survives, the request fails with `422 INTERPRETATION_REJECTED`. The response lists the cited questions (assessment title, prompt, marks), every tool step with its reason and outcome, the number of model turns, and what was dropped by reason. It is marked `requires_teacher_review` and nothing is saved.
 
 **The page keeps the teacher in charge.** Learning performance shows "Interpret results" once a teacher has opened a student's evidence. The draft shows each statement with the questions it rests on, and "How the agent worked" lists the agent's steps. Students do not see it.
+
+The absolute request budget also covers classroom authorization and opening reads; expiration cancels that work. Topic names are read through Curriculum in batches of up to 50 ids, scoped to the caller's organization and including archived names. Missing topics are omitted.
 
 ## Consequences
 

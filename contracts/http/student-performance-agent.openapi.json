@@ -152,6 +152,38 @@
   },
   "components": {
     "schemas": {
+      "ClassComparisonScope": {
+        "properties": {
+          "population": {
+            "type": "integer",
+            "minimum": 0.0,
+            "title": "Population"
+          },
+          "compared": {
+            "type": "integer",
+            "minimum": 0.0,
+            "title": "Compared"
+          },
+          "partial": {
+            "type": "boolean",
+            "title": "Partial"
+          },
+          "selection": {
+            "type": "string",
+            "const": "roster_order",
+            "title": "Selection",
+            "default": "roster_order"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "population",
+          "compared",
+          "partial"
+        ],
+        "title": "ClassComparisonScope"
+      },
       "ErrorBody": {
         "properties": {
           "code": {
@@ -364,6 +396,16 @@
             },
             "type": "object",
             "title": "Dropped"
+          },
+          "class_comparison_scope": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ClassComparisonScope"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "requires_teacher_review": {
             "type": "boolean",

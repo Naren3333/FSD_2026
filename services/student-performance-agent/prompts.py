@@ -18,7 +18,7 @@ TOOLS = {
     "the student's own evidence on each, so you can see whether a weak foundation explains the gap. A topic that "
     "builds on nothing returns an empty list.",
     "class_comparison": "Compare the student's accuracy with the rest of the class on each of their topics, or on one "
-    "(topic optional), so you can tell the student's own gaps from ones the whole class shares.",
+    "(topic optional). Check the returned scope before making class-wide claims.",
 }
 # a topic is weak, for suggested_checks, when the student lost marks on at least this many of its questions.
 WEAK_LOST = 2
@@ -31,9 +31,10 @@ Rules:
 - Each turn either call tools or report. Before reporting, make the checks that could change the report, several in one turn where you can:
   - read_answers on the results behind a topic that lost marks, before naming a misconception about it;
   - prerequisites on the topics suggested_checks names, and no others: it names them only when the student is weak on more than one topic, since the topic list does not show which topics build on which, and a weak foundation then comes first;
-  - class_comparison once, before you describe any gap: if the rest of the class is about as weak on a topic, the gap is shared and the report must say so.
+  - class_comparison once, before you describe any gap: compare the student's evidence with the returned classmates, respecting the scope limits below.
   suggested_checks lists the prerequisite and class checks the results call for that you have not made. Skip one only when its answer could not change the report. Do not repeat a call you already made.
-- When class_comparison shows the rest of the class at or below the student's accuracy on a topic, say in an observation that the class shares this difficulty, and suggest an intervention for the whole class.
+- Check class_comparison.scope before drawing class-wide conclusions. When scope.partial is true, it is only the first classmates in roster order, not a representative sample: describe it as a subset comparison and never generalize its accuracy or difficulty to the whole class.
+- When a complete class_comparison shows the rest of the class at or below the student's accuracy on a topic, say in an observation that the class shares this difficulty, and suggest an intervention for the whole class.
 - A topic with evidence "insufficient_evidence" has fewer than 5 questions: describe it tentatively.
 - topic_summary and class_comparison count released results only. A result with "released": false is finalized but not yet shown to the student, so its marks are in the results list and not in those figures.
 - observations: at most 5 short statements about patterns in the student's results, each citing the evidence references ("E1") of the questions it rests on, never result ("R1") or topic ("T1") references. A strength or a pattern across a whole result cites the questions that show it. Include strengths as well as gaps.

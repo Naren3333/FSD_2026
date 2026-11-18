@@ -39,6 +39,21 @@ func newMemoryStore() *memoryStore {
 
 var errDown = errors.New("connection refused")
 
+func (m *memoryStore) findTopics(_ context.Context, _ string, ids []string) ([]Topic, error) {
+	if m.broken {
+		return nil, errDown
+	}
+	items := []Topic{}
+	for _, id := range ids {
+		if topic, ok := m.topics[id]; ok {
+			items = append(items, topic)
+		} else if topic, ok := m.archived[id]; ok {
+			items = append(items, topic)
+		}
+	}
+	return items, nil
+}
+
 func (m *memoryStore) listTopics(_ context.Context, _ string, archived bool, paging ...platform.ListWindow) ([]Topic, error) {
 	from := m.topics
 	if archived {
@@ -305,4 +320,16 @@ func TestPrerequisitesAreListedAndOnlyATeacherRemovesThem(t *testing.T) {
 func (m *memoryStore) countTopics(ctx context.Context, org string, archived bool) (int, error) {
 	items, err := m.listTopics(ctx, org, archived)
 	return len(items), err
+}
+
+func TestTopicBatchIncludesArchivedAndRejectsInvalidRequests(t *testing.T) {
+	store := newMemoryStore()
+	store.archived[topicB] = store.topics[topicB]
+	delete(store.topics, topicB)
+	run(t, store,
+		step{"archived name", http.MethodPost, "/v1/topics/batch", `{"ids":["` + topicB + `"]}`, "teacher", http.StatusOK, "Compare fractions"},
+		step{"missing topic", http.MethodPost, "/v1/topics/batch", `{"ids":["00000000-0000-4000-8000-000000000001"]}`, "student", http.StatusOK, "[]"},
+		step{"empty batch", http.MethodPost, "/v1/topics/batch", `{"ids":[]}`, "teacher", http.StatusUnprocessableEntity, ""},
+		step{"invalid id", http.MethodPost, "/v1/topics/batch", `{"ids":["bad"]}`, "teacher", http.StatusUnprocessableEntity, ""},
+	)
 }

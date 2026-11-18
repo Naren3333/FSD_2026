@@ -62,7 +62,7 @@ def test_the_agent_investigates_then_reports_on_the_evidence(api, fakes: Fakes):
         "/v1/evaluations",
         f"/v1/performance/{STUDENT}",
         "/v1/assessments/batch",
-        f"/v1/topics/{LOOPS}",
+        "/v1/topics/batch",
     ):
         assert fakes.headers(path)[0]["authorization"] == "Bearer t1", path
     # each turn is one structured call, as the agent, paid by the teacher.
@@ -106,6 +106,7 @@ def test_the_last_turn_must_report(api, fakes: Fakes):
     comparison = fakes.task(2)["tool_history"][0]["output"]
     # the student is left out of the class figure, so it is the rest of the class's alone.
     assert comparison == {
+        "scope": {"population": 1, "compared": 1, "partial": False, "selection": "roster_order"},
         "students_compared": 1,
         "topics": [
             {"topic": "T1", "student_accuracy": 0.5, "class_accuracy": 1.0, "students_with_evidence": 1}
@@ -450,3 +451,40 @@ def test_running_out_of_time_for_the_report_says_so(api, fakes: Fakes):
     resp = api.post(PATH, json=BODY, headers=as_user())
     assert resp.status_code == 503 and resp.json()["error"]["code"] == "OUT_OF_TIME"
     assert fakes.calls("/v1/inference") == []
+
+
+def test_large_class_comparison_is_explicitly_partial(api, fakes: Fakes):
+    fakes.class_students = [{"student_id": STUDENT, "topics": fakes.summary}] + [
+        {"student_id": f"peer-{n}", "topics": []} for n in range(249)
+    ]
+    fakes.replies = [reply(tools(call("class_comparison"))), reply(done(possible_misconceptions=[]))]
+    response = api.post(PATH, json=BODY, headers=as_user())
+    assert response.status_code == 200, response.text
+    scope = {"population": 249, "compared": 199, "partial": True, "selection": "roster_order"}
+    assert response.json()["class_comparison_scope"] == scope
+    assert fakes.task(2)["tool_history"][0]["output"]["scope"] == scope
+    assert len(fakes.calls("/v1/performance")) == 4
+
+
+@pytest.mark.parametrize("stage", ["authorization", "opening"])
+def test_total_deadline_cancels_preflight_reads(api, fakes: Fakes, monkeypatch, stage):
+    import asyncio
+
+    cancelled = []
+
+    async def stalled(*args, **kwargs):
+        try:
+            await asyncio.Event().wait()
+        finally:
+            cancelled.append(True)
+
+    main.app.state.settings = dataclasses.replace(SETTINGS, budget=0.05)
+    if stage == "authorization":
+        monkeypatch.setattr(agent, "require_relation", stalled)
+    else:
+        monkeypatch.setattr(agent.Agent, "_open", stalled)
+    response = api.post(PATH, json=BODY, headers=as_user())
+    assert response.status_code == 503, response.text
+    assert response.json()["error"]["code"] == agents.OUT_OF_TIME
+    assert cancelled == [True]
+    assert not fakes.calls("/v1/inference")

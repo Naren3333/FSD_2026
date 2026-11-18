@@ -12,9 +12,9 @@ from learning_transport.agents import MIN_CALL, OUT_OF_TIME, ai_core_refusal, ga
 
 import checks
 import prompts
-from clients import GENERATE_TIMEOUT, Services, billed
+from clients import GENERATE_TIMEOUT, ClassSample, Services, billed
 from config import Settings
-from contracts import Evidence, Observation, RequestContract, ResponseContract, Step
+from contracts import ClassComparisonScope, Evidence, Observation, RequestContract, ResponseContract, Step
 from workspace import MAX_RESULTS, Topic, Workspace
 
 log = logging.getLogger("student-performance-agent.agent")
@@ -70,11 +70,15 @@ class Agent:
         self.failed_turns = 0
         self.started = time.monotonic()
         self.until = self.started + settings.budget  # no call runs past this
-        self.class_read: asyncio.Future[list[Any]] | None = None  # the class's summaries, read once
+        self.class_read: asyncio.Future[ClassSample] | None = None
+        self.comparison_scope: ClassComparisonScope | None = None
 
     async def interpret(self, body: RequestContract) -> ResponseContract:
         try:
-            return await self._interpret(body)
+            async with asyncio.timeout(max(0.0, self.until - time.monotonic())):
+                return await self._interpret(body)
+        except TimeoutError:
+            raise refused(UpstreamError("ai-core", 0, OUT_OF_TIME)) from None
         finally:
             # a class read a timed-out tool left running does not outlive the request.
             if self.class_read is not None:
@@ -290,12 +294,21 @@ class Agent:
         unread = ToolError(target, "failed", "The class's results could not be read just now.")
         try:
             # shielded: one call running out of time does not cancel the read the others share.
-            students = await asyncio.shield(self.class_read)
+            sample = await asyncio.shield(self.class_read)
         except UpstreamError:
             self.class_read = None  # a later call reads the class again
             raise unread from None
         try:
-            return target, "ok", self.workspace.class_comparison(students, topic, self.student)
+            output = self.workspace.class_comparison(sample.students, topic, self.student)
+            self.comparison_scope = ClassComparisonScope(
+                population=max(0, sample.total - 1),
+                compared=output["students_compared"],
+                partial=output["students_compared"] < max(0, sample.total - 1),
+            )
+            output["scope"] = self.comparison_scope.model_dump()
+            if self.comparison_scope.partial:
+                target = f"{target} (subset of classmates)" if topic else "subset of classmates"
+            return target, "ok", output
         except (KeyError, TypeError, ValueError, AttributeError):
             raise unread from None
 
@@ -344,6 +357,7 @@ class Agent:
             steps=self.steps,
             model_turns=turn,
             dropped=dict(dropped),
+            class_comparison_scope=self.comparison_scope,
         )
 
 

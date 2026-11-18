@@ -19,6 +19,14 @@
   <app-section-state [section]="result" loading="Reading results and drafting an interpretation…" />
   @if (result.ready() && result.value(); as draft) {
     <div class="interpretation-result" aria-live="polite">
+      @if (draft.class_comparison_scope; as scope) {
+        @if (scope.partial) {
+          <p class="caption">
+            Class comparison covers {{ scope.compared }} of {{ scope.population }} classmates, selected in
+            roster order. It may not represent the whole class.
+          </p>
+        }
+      }
       <h4>Observations</h4>
       <ul class="findings">
         @for (item of draft.observations; track $index) {

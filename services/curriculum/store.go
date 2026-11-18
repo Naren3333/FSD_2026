@@ -10,6 +10,7 @@ import (
 
 // store is an organization's curriculum topics and their prerequisites.
 type store interface {
+	findTopics(ctx context.Context, org string, ids []string) ([]Topic, error)
 	countTopics(ctx context.Context, org string, archived bool) (int, error)
 	listTopics(ctx context.Context, org string, archived bool, paging ...platform.ListWindow) ([]Topic, error)
 	findTopic(ctx context.Context, org, id string) (Topic, error)
@@ -24,6 +25,14 @@ type store interface {
 
 // pgStore is the store in the service's own postgres database.
 type pgStore struct{ db *pgxpool.Pool }
+
+func (p pgStore) findTopics(ctx context.Context, org string, ids []string) ([]Topic, error) {
+	rows, err := p.db.Query(ctx, "SELECT id,name FROM topics WHERE org_id=$1 AND id=ANY($2::uuid[]) ORDER BY id", org, ids)
+	if err != nil {
+		return nil, err
+	}
+	return pgx.CollectRows(rows, func(row pgx.CollectableRow) (Topic, error) { return scanTopic(row) })
+}
 
 // listTopics is the organization's active topics, or its archived ones, by name; up to 200.
 func (p pgStore) listTopics(ctx context.Context, org string, archived bool, paging ...platform.ListWindow) ([]Topic, error) {

@@ -155,3 +155,20 @@ func TestPrerequisitesCanBeReadAndRemoved(t *testing.T) {
 		t.Fatalf("after removing: %+v %v", got, err)
 	}
 }
+
+func TestTopicBatchIsOrganizationScopedAndIncludesArchived(t *testing.T) {
+	ctx, s := context.Background(), testStore(t)
+	active, retired, other := topic(t, s, "org"), topic(t, s, "org"), topic(t, s, "elsewhere")
+	if ok, err := s.archiveTopic(ctx, "org", retired); err != nil || !ok {
+		t.Fatal(ok, err)
+	}
+	found, err := s.findTopics(ctx, "org", []string{active, retired, other, retired})
+	if err != nil || len(found) != 2 {
+		t.Fatalf("%v: %v", found, err)
+	}
+	for _, value := range found {
+		if value.ID == other {
+			t.Fatal("another organization's topic was returned")
+		}
+	}
+}

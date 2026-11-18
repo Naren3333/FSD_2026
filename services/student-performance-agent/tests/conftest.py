@@ -182,8 +182,10 @@ class Fakes:
             students = self.class_students
             if students is None:
                 students = [{"student_id": STUDENT, "topics": self.summary}, other]
-            return httpx.Response(200, json={"classroom_id": ROOM, "total": len(students), "offset": 0,
-                                             "interpretation": "x", "students": students})  # fmt: skip
+            offset = int(request.url.params.get("offset", 0))
+            limit = int(request.url.params.get("limit", 50))
+            return httpx.Response(200, json={"classroom_id": ROOM, "total": len(students), "offset": offset,
+                                             "interpretation": "x", "students": students[offset:offset + limit]})  # fmt: skip
         if path == "/v1/evaluations":
             assert request.url.params["student_id"] == STUDENT
             offset, limit = int(request.url.params.get("offset", 0)), int(request.url.params.get("limit", 20))
@@ -196,6 +198,13 @@ class Fakes:
         if path.startswith("/v1/assessments/"):
             found = self.assessments.get(path.rsplit("/", 1)[1])
             return httpx.Response(200, json=found) if found else httpx.Response(404)
+        if path == "/v1/topics/batch":
+            return httpx.Response(
+                200,
+                json=[
+                    {"id": topic, "name": self.topics[topic]} for topic in body["ids"] if topic in self.topics
+                ],
+            )
         if path.startswith("/v1/topics/") and path.endswith("/prerequisites"):
             return httpx.Response(200, json=self.prerequisites.get(path.split("/")[3], []))
         if path.startswith("/v1/topics/"):

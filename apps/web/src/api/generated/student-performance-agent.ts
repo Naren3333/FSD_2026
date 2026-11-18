@@ -4,6 +4,12 @@ export type paths = Record<string, never>;
 export type webhooks = Record<string, never>;
 export interface components {
   schemas: {
+    ClassComparisonScope: {
+      population: number;
+      compared: number;
+      partial: boolean;
+      selection?: 'roster_order';
+    };
     ErrorBody: {
       code: string;
       message: string;
@@ -43,6 +49,7 @@ export interface components {
       dropped: {
         [key: string]: number;
       };
+      class_comparison_scope?: components['schemas']['ClassComparisonScope'] | null;
       requires_teacher_review?: true;
     };
     Step: {

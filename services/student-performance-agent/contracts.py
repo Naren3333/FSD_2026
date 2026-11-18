@@ -43,6 +43,13 @@ class Step(Contract):
     outcome: Literal["ok", "refused", "failed"]
 
 
+class ClassComparisonScope(Contract):
+    population: int = Field(ge=0)
+    compared: int = Field(ge=0)
+    partial: bool
+    selection: Literal["roster_order"] = "roster_order"
+
+
 class ResponseContract(Contract):
     """a draft interpretation for the classroom's teacher; it never changes a grade."""
 
@@ -57,4 +64,5 @@ class ResponseContract(Contract):
     model_turns: int = Field(ge=1)
     # what the checks removed from the model's report, by reason.
     dropped: dict[str, int]
+    class_comparison_scope: ClassComparisonScope | None = None
     requires_teacher_review: Literal[True] = True

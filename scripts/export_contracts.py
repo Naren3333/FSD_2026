@@ -678,6 +678,12 @@ operations = {
         school_students,
     ],
     "curriculum": [
+        operation(
+            "POST",
+            "/v1/topics/batch",
+            obj({"ids": array(UUID, minimum=1, maximum=50)}),
+            array(curriculum_topic, maximum=50),
+        ),
         topic_list,
         operation("GET", "/v1/topics/{id}", None, curriculum_topic),
         operation("POST", "/v1/topics", topic_input, curriculum_topic, 201),

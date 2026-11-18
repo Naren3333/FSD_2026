@@ -14,6 +14,7 @@ type server struct{ store store }
 func (s server) routes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /v1/topics", s.list)
 	mux.HandleFunc("GET /v1/topics/page", s.list)
+	mux.HandleFunc("POST /v1/topics/batch", s.batch)
 	mux.HandleFunc("GET /v1/topics/{id}", s.get)
 	mux.HandleFunc("POST /v1/topics", s.create)
 	mux.HandleFunc("PATCH /v1/topics/{id}", s.rename)
@@ -22,6 +23,32 @@ func (s server) routes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /v1/topics/{id}/prerequisites", s.prerequisites)
 	mux.HandleFunc("POST /v1/topics/{id}/prerequisites", s.addPrerequisite)
 	mux.HandleFunc("DELETE /v1/topics/{id}/prerequisites/{prerequisite}", s.removePrerequisite)
+}
+
+// batch names requested topics, including archived ones, within the caller's organization.
+func (s server) batch(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		IDs []string `json:"ids"`
+	}
+	if !platform.Decode(w, r, &body) {
+		return
+	}
+	if len(body.IDs) == 0 || len(body.IDs) > 50 {
+		platform.Invalid(w, "Provide 1–50 topic ids.")
+		return
+	}
+	for _, id := range body.IDs {
+		if _, err := uuid.Parse(id); err != nil {
+			platform.Invalid(w, "Provide valid topic ids.")
+			return
+		}
+	}
+	items, err := s.store.findTopics(r.Context(), platform.Actor(r).Org, body.IDs)
+	if err != nil {
+		platform.Fail(w, err)
+		return
+	}
+	platform.JSON(w, http.StatusOK, items)
 }
 
 // list answers the active topics, or with ?archived=true the archived ones, which pages still need to name
