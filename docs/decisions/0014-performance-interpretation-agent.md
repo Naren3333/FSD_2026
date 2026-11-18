@@ -36,3 +36,5 @@ The absolute request budget also covers classroom authorization and opening read
 - An interpretation costs up to five model calls. They are bounded by the turn limit, the deadline and the tokens per turn, and the teacher's daily allowance applies to each.
 - The summary comes from released grades while the results include finalized grades not yet released, so with manual release the two can differ until the teacher releases them.
 - Not built yet: running it automatically when a grade is finalized (it would need storage and a payer), saving interpretations, linking findings to teaching material, generating practice from the recommended topics (with a question bank), and evaluating the reports against teachers' own judgement.
+
+Analytics, Grading, Assessment and Curriculum responses are validated into service-local typed views at the client boundary. Numeric strings and boolean counts are rejected; malformed payloads map consistently to upstream failures before inference. Workspace assembly consumes validated evidence and metric types without repeating conversion rules.

@@ -143,17 +143,9 @@ class Agent:
             self.services.results(self.authorization, classroom, student, self.correlation, MAX_RESULTS),
         )
         # only the newest results reach the workspace, so only their assessments are read.
-        try:
-            self.workspace.add_summary(list(summary.get("topics") or []))
-        except (KeyError, TypeError, ValueError, AttributeError):
-            raise UpstreamError("analytics", 502) from None
+        self.workspace.add_summary(summary["topics"])
         # every topic is in the summary or the evidence, so names are read alongside the assessments.
-        topics = list(self.workspace.topics) + [
-            e["topic_id"]
-            for v in evaluations
-            for e in v.get("evidence") or []
-            if isinstance(e, dict) and isinstance(e.get("topic_id"), str)
-        ]
+        topics = list(self.workspace.topics) + [e["topic_id"] for v in evaluations for e in v["evidence"]]
         assessments, names = await gather_all(
             self.services.assessments(
                 self.authorization,
@@ -162,10 +154,7 @@ class Agent:
             ),
             self.services.topic_names(self.authorization, list(dict.fromkeys(topics)), self.correlation),
         )
-        try:
-            self.workspace.add_results(evaluations, assessments)
-        except (KeyError, TypeError, ValueError, AttributeError):
-            raise UpstreamError("grading", 502) from None
+        self.workspace.add_results(evaluations, assessments)
         self.workspace.name_topics(names)
         self.workspace.fit()
 
@@ -348,7 +337,7 @@ class Agent:
                     assessment_id=q.assessment_id,  # type: ignore[arg-type]
                     assessment_title=q.assessment_title,
                     topic_id=q.topic_id,  # type: ignore[arg-type]
-                    prompt=str(q.question.get("prompt") or ""),
+                    prompt=str((q.question["prompt"] if q.question else "") or ""),
                     awarded=q.awarded,
                     possible=q.possible,
                 )

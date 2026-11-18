@@ -488,3 +488,31 @@ def test_total_deadline_cancels_preflight_reads(api, fakes: Fakes, monkeypatch, 
     assert response.json()["error"]["code"] == agents.OUT_OF_TIME
     assert cancelled == [True]
     assert not fakes.calls("/v1/inference")
+
+
+@pytest.mark.parametrize(
+    "changes",
+    [
+        {"attempted": True},
+        {"correct": "1"},
+        {"weakness_indicator": "false"},
+        {"observed_accuracy": 1.1},
+        {"recent_marks_accuracy": "0.5"},
+    ],
+)
+def test_invalid_metrics_are_rejected_at_the_boundary(api, fakes: Fakes, changes):
+    fakes.summary[0].update(changes)
+    response = api.post(PATH, json=BODY, headers=as_user())
+    assert response.status_code == 503
+    assert response.json()["error"]["code"] == "AI_UNAVAILABLE"
+    assert not fakes.calls("/v1/inference")
+
+
+def test_invalid_rubric_is_rejected_before_inference(api, fakes: Fakes):
+    import copy
+
+    fakes.assessments = copy.deepcopy(fakes.assessments)
+    fakes.assessments[QUIZ]["questions"][0]["rubric"] = {"criteria": "invalid"}
+    response = api.post(PATH, json=BODY, headers=as_user())
+    assert response.status_code == 503
+    assert not fakes.calls("/v1/inference")

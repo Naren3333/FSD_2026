@@ -1,8 +1,19 @@
 """what the agent knows about one student, under short references the model cites ("R1" a result, "E1" a question's evidence, "T1" a topic), and the tools that add to it."""
 
 import json
+from collections.abc import Mapping
 from dataclasses import dataclass, field
 from typing import Any
+
+from upstream import (
+    Assessment,
+    ClassStudent,
+    CriterionScore,
+    Evaluation,
+    TeacherQuestion,
+    TopicMetrics,
+    TopicName,
+)
 
 # the longest text of a prompt, answer, key or feedback the model is shown.
 MAX_FIELD = 300
@@ -20,24 +31,6 @@ def clip(text: object, limit: int = MAX_FIELD) -> str:
     return value if len(value) <= limit else value[: limit - 1] + "…"
 
 
-def _metrics_row(t: dict[str, Any]) -> dict[str, Any]:
-    """one analytics topic row, checked: the fields the overview and the tools read, with their types."""
-    return {
-        "topic_id": str(t["topic_id"]),
-        "attempted": int(t["attempted"]),
-        "correct": int(t["correct"]),
-        "marks_awarded": int(t["marks_awarded"]),
-        "marks_possible": int(t["marks_possible"]),
-        "observed_accuracy": float(t["observed_accuracy"]),
-        "evidence_status": str(t["evidence_status"]),
-        "weakness_indicator": bool(t["weakness_indicator"]),
-        # the share of marks on the topic's latest questions, which needs_practice reads; none from an older analytics.
-        "recent_marks_accuracy": None
-        if t.get("recent_marks_accuracy") is None
-        else float(t["recent_marks_accuracy"]),
-    }
-
-
 @dataclass
 class Question:
     ref: str  # "E1", "E2"…
@@ -48,10 +41,10 @@ class Question:
     topic_id: str
     awarded: int
     possible: int
-    question: dict[str, Any]  # the teacher's view from assessment; empty when it was not found
+    question: TeacherQuestion | None  # the teacher's view from assessment; empty when it was not found
     answer: str
     feedback: str
-    criteria: list[dict[str, Any]]  # grading's criterion scores
+    criteria: list[CriterionScore]  # grading's criterion scores
 
     @property
     def lost_marks(self) -> bool:
@@ -81,7 +74,7 @@ class Topic:
 class Workspace:
     results: list[Result] = field(default_factory=list)
     topics: dict[str, Topic] = field(default_factory=dict)  # by topic id
-    summary: list[dict[str, Any]] = field(default_factory=list)  # analytics' topic metrics
+    summary: list[TopicMetrics] = field(default_factory=list)  # analytics' topic metrics
 
     # ---- building it
 
@@ -93,17 +86,16 @@ class Workspace:
             self.topics[topic_id].name = name
         return self.topics[topic_id]
 
-    def add_results(self, evaluations: list[dict[str, Any]], assessments: dict[str, Any]) -> None:
-        """grading's finalized evaluations, newest first, joined with their assessments' questions."""
+    def add_results(self, evaluations: list[Evaluation], assessments: dict[str, Assessment]) -> None:
+        """join validated finalized evaluations to the teacher's assessment snapshots."""
         count = 0
         for v in evaluations[:MAX_RESULTS]:
-            assessment: dict[str, Any] = assessments.get(v.get("assessment_id", "")) or {}
-            by_id: dict[str, dict[str, Any]] = {
-                str(q.get("id")): q for q in assessment.get("questions") or [] if isinstance(q, dict)
-            }
-            answers: dict[str, Any] = v["answers"] if isinstance(v.get("answers"), dict) else {}
+            assessment = assessments.get(v["assessment_id"])
+            title = clip(assessment["title"] if assessment else "Deleted assessment", 160)
+            by_id = {q["id"]: q for q in assessment["questions"]} if assessment else {}
+            answers = v.get("answers") or {}
             questions = []
-            for e in v.get("evidence") or []:
+            for e in v["evidence"]:
                 count += 1
                 self.topic(e["topic_id"])
                 questions.append(
@@ -112,14 +104,14 @@ class Workspace:
                         e["question_id"],
                         v["id"],
                         v["assessment_id"],
-                        clip(assessment.get("title") or "Deleted assessment", 160),
+                        title,
                         e["topic_id"],
-                        int(e["awarded"]),
-                        int(e["possible"]),
-                        by_id.get(e["question_id"]) or {},
-                        str(answers.get(e["question_id"]) or ""),
-                        str(e.get("feedback") or ""),
-                        [c for c in e.get("criteria") or [] if isinstance(c, dict)],
+                        e["awarded"],
+                        e["possible"],
+                        by_id.get(e["question_id"]),
+                        answers.get(e["question_id"], ""),
+                        e.get("feedback") or "",
+                        e.get("criteria") or [],
                     )
                 )
             self.results.append(
@@ -127,17 +119,17 @@ class Workspace:
                     f"R{len(self.results) + 1}",
                     v["id"],
                     v["assessment_id"],
-                    clip(assessment.get("title") or "Deleted assessment", 160),
-                    str(v.get("finalized_at") or "")[:10],
-                    bool(v.get("late")),
+                    title,
+                    (v.get("finalized_at") or "")[:10],
+                    v.get("late", False),
                     bool(v.get("released_at")),
                     questions,
                 )
             )
 
-    def add_summary(self, topics: list[dict[str, Any]]) -> None:
-        """analytics' topic rows, with every field the overview shows; keyerror, typeerror or valueerror when one is missing."""
-        self.summary = [_metrics_row(t) for t in topics]
+    def add_summary(self, topics: list[TopicMetrics]) -> None:
+        """validated analytics rows used by the overview and tools."""
+        self.summary = topics
         for t in self.summary:
             self.topic(t["topic_id"])
 
@@ -160,7 +152,7 @@ class Workspace:
         topic = self.topics.get(topic_id)
         return topic.name if topic and topic.name else "an unnamed topic"
 
-    def _metrics(self, topic_id: str) -> dict[str, Any] | None:
+    def _metrics(self, topic_id: str) -> TopicMetrics | None:
         return next((t for t in self.summary if t["topic_id"] == topic_id), None)
 
     # ---- what the model sees
@@ -190,7 +182,7 @@ class Workspace:
                         {
                             "evidence": q.ref,
                             "topic": self.topics[q.topic_id].ref,
-                            "type": q.question.get("type") or "unknown",
+                            "type": q.question["type"] if q.question else "unknown",
                             "marks": f"{q.awarded}/{q.possible}",
                         }
                         for q in r.questions
@@ -201,7 +193,7 @@ class Workspace:
             "topics": [{"topic": t.ref, "name": t.name or "(unnamed)"} for t in self.topics.values()],
         }
 
-    def _summary_row(self, t: dict[str, Any]) -> dict[str, Any]:
+    def _summary_row(self, t: TopicMetrics) -> dict[str, Any]:
         return {
             "topic": self.topics[t["topic_id"]].ref,
             "name": self.topic_name(t["topic_id"]),
@@ -210,7 +202,7 @@ class Workspace:
             "marks": f"{t['marks_awarded']}/{t['marks_possible']}",
             "observed_accuracy": t["observed_accuracy"],
             "evidence": t["evidence_status"],
-            "recent_marks_share": t["recent_marks_accuracy"],
+            "recent_marks_share": t.get("recent_marks_accuracy"),
             "needs_practice": t["weakness_indicator"],
         }
 
@@ -226,7 +218,7 @@ class Workspace:
         }
 
     def _answer(self, q: Question) -> dict[str, Any]:
-        question = q.question
+        question: Mapping[str, Any] = q.question or {}
         row: dict[str, Any] = {
             "evidence": q.ref,
             "topic": self.topics[q.topic_id].ref,
@@ -257,7 +249,7 @@ class Workspace:
             row["teacher_feedback"] = clip(q.feedback)
         return row
 
-    def prerequisites(self, topic: Topic, prerequisites: list[dict[str, str]]) -> dict[str, Any]:
+    def prerequisites(self, topic: Topic, prerequisites: list[TopicName]) -> dict[str, Any]:
         rows = []
         for p in prerequisites:
             ref = self.topic(p["id"], p["name"])
@@ -272,7 +264,7 @@ class Workspace:
         return {"topic": topic.ref, "prerequisites": rows}
 
     def class_comparison(
-        self, students: list[dict[str, Any]], topic: Topic | None, student_id: str
+        self, students: list[ClassStudent], topic: Topic | None, student_id: str
     ) -> dict[str, Any]:
         """the rest of the class's pooled accuracy on each of the student's topics, next to the student's own; the student is left out so their own marks do not pull the class figure toward theirs."""
         students = [s for s in students if s.get("student_id") != student_id]
@@ -284,8 +276,8 @@ class Workspace:
                 for m in s.get("topics") or []:
                     if m.get("topic_id") == t["topic_id"]:
                         attempted, correct, learners = (
-                            attempted + int(m["attempted"]),
-                            correct + int(m["correct"]),
+                            attempted + m["attempted"],
+                            correct + m["correct"],
                             learners + 1,
                         )
             rows.append(

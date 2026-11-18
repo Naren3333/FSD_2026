@@ -9,6 +9,7 @@ import httpx
 from learning_transport import Claims, UpstreamError, upstream_error
 from learning_transport.agents import AgentClients, billed_to, gather_all
 
+import upstream
 from config import Settings
 
 READ_TIMEOUT = 10.0
@@ -27,7 +28,7 @@ CLASS_PAGES = 4  # the class comparison reads at most 200 students
 
 @dataclass(frozen=True)
 class ClassSample:
-    students: list[Any]
+    students: list[upstream.ClassStudent]
     total: int
 
 
@@ -58,16 +59,22 @@ class Services(AgentClients):
         except ValueError:
             raise UpstreamError(service, 502) from None
 
-    async def performance(self, authorization: str, classroom: str, student: str, correlation: str) -> Any:
+    async def performance(
+        self, authorization: str, classroom: str, student: str, correlation: str
+    ) -> upstream.Performance:
         """analytics' topic summary of the student's released grades (finalized ones not yet released are not in it)."""
         url = f"{self.settings.analytics_url}/v1/performance/{student}"
-        return await self._get("analytics", url, authorization, correlation, classroom_id=classroom)
+        return upstream.read(
+            upstream.performance,
+            await self._get("analytics", url, authorization, correlation, classroom_id=classroom),
+            "analytics",
+        )
 
     async def results(
         self, authorization: str, classroom: str, student: str, correlation: str, wanted: int
-    ) -> list[Any]:
+    ) -> list[upstream.Evaluation]:
         """the student's newest `wanted` finalized evaluations in the classroom, newest first, with their answers. grading lists drafts too, so pages are read until enough are finalized or none are left."""
-        finalized: list[Any] = []
+        finalized: list[upstream.Evaluation] = []
         for n in range(EVALUATION_PAGES):
             data = await self._get(
                 "grading",
@@ -79,28 +86,24 @@ class Services(AgentClients):
                 offset=n * EVALUATION_LIMIT,
                 limit=EVALUATION_LIMIT,
             )
-            evaluations = data.get("evaluations") if isinstance(data, dict) else None
-            if not isinstance(evaluations, list) or not all(isinstance(e, dict) for e in evaluations):
-                raise UpstreamError("grading", 502)
-            page = [e for e in evaluations if e.get("status") == "finalized"]
-            if not all(
-                isinstance(e.get("id"), str) and isinstance(e.get("assessment_id"), str) for e in page
-            ):
-                raise UpstreamError("grading", 502)
+            data = upstream.read(upstream.evaluation_page, data, "grading")
+            evaluations = data["evaluations"]
+            page = [e for e in evaluations if e["status"] == "finalized"]
             finalized += page
-            total = data.get("total")
+            total = data["total"]
             if (
                 len(finalized) >= wanted
                 or len(evaluations) < EVALUATION_LIMIT
-                or not isinstance(total, int)
                 or (n + 1) * EVALUATION_LIMIT >= total
             ):
                 break
         return finalized[:wanted]
 
-    async def assessments(self, authorization: str, ids: list[str], correlation: str) -> dict[str, Any]:
+    async def assessments(
+        self, authorization: str, ids: list[str], correlation: str
+    ) -> dict[str, upstream.Assessment]:
         """the teacher's view of each assessment by id; one deleted since it was graded is left out."""
-        found: dict[str, Any] = {}
+        found: dict[str, upstream.Assessment] = {}
         for start in range(0, len(ids), BATCH):
             chunk = ids[start : start + BATCH]
             try:
@@ -111,10 +114,10 @@ class Services(AgentClients):
                 # the batch refuses all of them when one is gone, so read them one by one.
                 read = await bounded(lambda i: self._one(authorization, i, correlation), chunk)
                 items = [a for a in read if a]
-            found.update({a["id"]: a for a in items if isinstance(a, dict) and isinstance(a.get("id"), str)})
+            found.update({a["id"]: a for a in items})
         return found
 
-    async def _batch(self, authorization: str, ids: list[str], correlation: str) -> list[Any]:
+    async def _batch(self, authorization: str, ids: list[str], correlation: str) -> list[upstream.Assessment]:
         try:
             resp = await self.http.post(
                 f"{self.settings.assessment_url}/v1/assessments/batch",
@@ -130,14 +133,16 @@ class Services(AgentClients):
             items = resp.json()
         except ValueError:
             raise UpstreamError("assessment", 502) from None
-        if not isinstance(items, list):
-            raise UpstreamError("assessment", 502)
-        return items
+        return upstream.read(upstream.assessments, items, "assessment")
 
-    async def _one(self, authorization: str, assessment: str, correlation: str) -> Any:
+    async def _one(self, authorization: str, assessment: str, correlation: str) -> upstream.Assessment | None:
         url = f"{self.settings.assessment_url}/v1/assessments/{assessment}"
         try:
-            return await self._get("assessment", url, authorization, correlation)
+            return upstream.read(
+                upstream.assessment,
+                await self._get("assessment", url, authorization, correlation),
+                "assessment",
+            )
         except UpstreamError as e:
             if e.status == 404:
                 return None
@@ -165,34 +170,24 @@ class Services(AgentClients):
                 items = response.json()
             except ValueError:
                 raise UpstreamError("curriculum", 502) from None
-            if not isinstance(items, list) or not all(
-                isinstance(item, dict)
-                and isinstance(item.get("id"), str)
-                and item["id"] in chunk
-                and isinstance(item.get("name"), str)
-                and item["name"]
-                for item in items
-            ):
+            items = upstream.read(upstream.topic_names, items, "curriculum")
+            if any(item["id"] not in chunk or not item["name"] for item in items):
                 raise UpstreamError("curriculum", 502)
             found.update({item["id"]: item["name"] for item in items})
         return found
 
-    async def prerequisites(self, authorization: str, topic: str, correlation: str) -> list[dict[str, str]]:
+    async def prerequisites(
+        self, authorization: str, topic: str, correlation: str
+    ) -> list[upstream.TopicName]:
         """the topic's active prerequisites, by id and name."""
         url = f"{self.settings.curriculum_url}/v1/topics/{topic}/prerequisites"
         data = await self._get("curriculum", url, authorization, correlation)
-        if not isinstance(data, list):
-            raise UpstreamError("curriculum", 502)
-        return [
-            {"id": t["id"], "name": t["name"]}
-            for t in data
-            if isinstance(t, dict) and isinstance(t.get("id"), str) and isinstance(t.get("name"), str)
-        ]
+        return upstream.read(upstream.topic_names, data, "curriculum")
 
     async def class_performance(self, authorization: str, classroom: str, correlation: str) -> ClassSample:
         """the topic summaries of the classroom's students, its first 200 in roster order."""
 
-        async def page(n: int) -> tuple[list[Any], int]:
+        async def page(n: int) -> tuple[list[upstream.ClassStudent], int]:
             data = await self._get(
                 "analytics",
                 f"{self.settings.analytics_url}/v1/performance",
@@ -202,13 +197,9 @@ class Services(AgentClients):
                 offset=n * CLASS_PAGE,
                 limit=CLASS_PAGE,
             )
-            batch = data.get("students") if isinstance(data, dict) else None
-            if not isinstance(batch, list) or not all(
-                isinstance(s, dict) and isinstance(s.get("student_id"), str) for s in batch
-            ):
-                raise UpstreamError("analytics", 502)
-            total = data.get("total")
-            if not isinstance(total, int) or isinstance(total, bool) or total < len(batch):
+            data = upstream.read(upstream.class_page, data, "analytics")
+            batch, total = data["students"], data["total"]
+            if total < len(batch):
                 raise UpstreamError("analytics", 502)
             return batch, total
 
