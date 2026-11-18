@@ -16,6 +16,9 @@ import (
 	"github.com/jackc/pgx/v5"
 )
 
+// rolemonitoringreader grants private telemetry reads.
+const RoleMonitoringReader = "monitoring-reader"
+
 // claims are the verified token claims services use: the user, their organization and realm roles.
 type Claims struct {
 	Subject  string `json:"sub"`

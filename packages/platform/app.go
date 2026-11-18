@@ -50,6 +50,7 @@ func New(name string, migrations fs.FS, bootstrap string) (*App, error) {
 	})
 	a.Mux.HandleFunc("GET /health/ready", a.ready)
 	a.Mux.HandleFunc("GET /internal/metrics", a.metrics)
+	a.Mux.HandleFunc("GET /internal/http-metrics", httpHeaderMetrics)
 	return a, nil
 }
 
@@ -82,6 +83,10 @@ func (a *App) Handler() http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		recorder := &responseRecorder{ResponseWriter: w}
 		start := time.Now()
+		if strings.HasPrefix(r.URL.Path, "/v1/") {
+			recorder.onHeaders = func() { observeHTTPHeaders(time.Since(start)) }
+			defer recorder.observeHeaders()
+		}
 		defer func() {
 			CountMetric("learning_http_requests_total", 1)
 			CountMetric("learning_http_request_seconds_total", time.Since(start).Seconds())
@@ -97,11 +102,15 @@ func (a *App) Handler() http.Handler {
 		recorder.Header().Set("X-Correlation-ID", correlation)
 		recorder.Header().Set("X-Request-ID", request)
 		defer func() {
+			status := recorder.status
+			if status == 0 {
+				status = http.StatusOK
+			}
 			category := ""
-			if recorder.status >= 400 {
+			if status >= 400 {
 				category = "http_error"
 			}
-			slog.Info("request", "request_id", request, "correlation_id", correlation, "method", r.Method, "status", recorder.status, "error_category", category, "duration_ms", time.Since(start).Milliseconds())
+			slog.Info("request", "request_id", request, "correlation_id", correlation, "method", r.Method, "status", status, "error_category", category, "duration_ms", time.Since(start).Milliseconds())
 		}()
 		timeout := requestTimeout
 		if deadline, ok := a.slow[r.Method+" "+r.URL.Path]; ok {
@@ -150,12 +159,23 @@ func (a *App) Run(workers ...func(context.Context)) error {
 
 type responseRecorder struct {
 	http.ResponseWriter
-	status int
+	status    int
+	onHeaders func()
 }
 
 func (w *responseRecorder) WriteHeader(status int) {
-	w.status = status
+	if w.status == 0 && (status >= 200 || status == http.StatusSwitchingProtocols) {
+		w.status = status
+		w.observeHeaders()
+	}
 	w.ResponseWriter.WriteHeader(status)
+}
+
+func (w *responseRecorder) observeHeaders() {
+	if w.onHeaders != nil {
+		w.onHeaders()
+		w.onHeaders = nil
+	}
 }
 
 // unwrap lets http.newresponsecontroller reach the connection, so a handler can extend its own write

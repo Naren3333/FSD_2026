@@ -65,6 +65,27 @@ PERFORMANCE_AGENT = {
     "routes": [{"name": "performance-agent", "paths": ["/api/performance-agent"], "strip_path": True}],
 }
 
+MONITORING = {
+    "name": "monitoring",
+    "url": "http://monitoring:8080",
+    "connect_timeout": 2000,
+    "read_timeout": 8000,
+    "write_timeout": 5000,
+    "retries": 0,
+    "routes": [
+        {
+            "name": "monitoring",
+            "paths": [
+                "~/api/monitoring/status$",
+                "~/api/monitoring/ai-spend$",
+                "~/api/monitoring/ai-spend/users$",
+            ],
+            "methods": ["GET", "OPTIONS"],
+            "strip_path": False,
+        }
+    ],
+}
+
 PLUGINS = [
     {
         "name": "jwt",
@@ -121,6 +142,7 @@ def main() -> None:
             CHATBOT,
             QUESTION_GENERATION,
             PERFORMANCE_AGENT,
+            MONITORING,
         ],
         "consumers": [
             {

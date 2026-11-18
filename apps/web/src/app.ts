@@ -1,13 +1,11 @@
 import {
   Component,
-  DestroyRef,
   ElementRef,
   HostListener,
   OnInit,
   computed,
   effect,
   inject,
-  signal,
   untracked,
   ViewChild,
 } from '@angular/core';
@@ -21,8 +19,10 @@ import { ClassroomContext } from './core/classroom-context';
 import { sectionOf } from './core/section-shown';
 import { Session } from './core/session';
 import { UnsavedChanges } from './core/unsaved-changes';
+import { OperatorShellComponent } from './features/monitoring/operator-shell';
 import { UsageComponent } from './features/usage/usage';
 import { ActionState } from './shared/action-state';
+import { Drawer } from './shared/drawer';
 import { IconComponent } from './shared/icon';
 import { RefreshButtonComponent } from './shared/refresh-button';
 import { Section } from './shared/section';
@@ -40,6 +40,7 @@ import { StatusComponent } from './shared/status';
     UsageComponent,
     IconComponent,
     RefreshButtonComponent,
+    OperatorShellComponent,
   ],
   templateUrl: './app.html',
 })
@@ -62,10 +63,14 @@ export class AppComponent implements OnInit {
   /* draft grades waiting in the current classroom, shown beside grading review. */
   private readonly drafts = new Section<number>();
   readonly draftCount = computed(() => this.drafts.value() ?? 0);
-  /* the phone drawer holding the sidebar. */
-  readonly menuOpen = signal(false);
   @ViewChild('brand') private brand?: ElementRef<HTMLElement>;
   @ViewChild('menuButton') private menuButton?: ElementRef<HTMLElement>;
+  /* the phone drawer holding the sidebar. */
+  private readonly drawer = new Drawer(
+    () => this.brand?.nativeElement,
+    () => this.menuButton?.nativeElement,
+  );
+  readonly menuOpen = this.drawer.open;
 
   constructor() {
     let section: string | null = null;
@@ -94,13 +99,6 @@ export class AppComponent implements OnInit {
         this.loadDrafts();
       });
     });
-    // a drawer left open while the window widens would keep the page inert.
-    if (typeof matchMedia === 'function') {
-      const wide = matchMedia('(min-width: 900px)');
-      const close = () => wide.matches && this.menuOpen.set(false);
-      wide.addEventListener('change', close);
-      inject(DestroyRef).onDestroy(() => wide.removeEventListener('change', close));
-    }
   }
 
   private loadDrafts(): void {
@@ -113,14 +111,11 @@ export class AppComponent implements OnInit {
   }
 
   openMenu(): void {
-    this.menuOpen.set(true);
-    // focus moves once the drawer is visible.
-    setTimeout(() => this.brand?.nativeElement.focus());
+    this.drawer.show();
   }
 
   closeMenu(): void {
-    this.menuOpen.set(false);
-    setTimeout(() => this.menuButton?.nativeElement.focus());
+    this.drawer.hide();
   }
 
   @HostListener('document:keydown.escape')

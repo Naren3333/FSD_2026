@@ -16,6 +16,7 @@ from fastapi import Depends, Request
 from learning_transport.errors import failure
 
 TEACHER, STUDENT, AI_CLIENT = "teacher", "student", "ai-client"
+MONITORING_READER = "monitoring-reader"
 LEEWAY = 30  # seconds of clock skew allowed between the identity provider and this service (exp, iat, nbf)
 REFETCH_INTERVAL = 30.0  # seconds between key set refetches for a key id the cached set lacks
 

@@ -15,6 +15,7 @@ const SERVICES = [
   'question-chatbot-agent',
   'question-generation-agent',
   'student-performance-agent',
+  'monitoring',
 ];
 const contracts = new URL('../../../contracts/http/', import.meta.url);
 const generated = new URL('../src/api/generated/', import.meta.url);
@@ -31,7 +32,11 @@ for (const service of SERVICES) {
   const options = await prettier.resolveConfig(fileURLToPath(target));
   const source = ts.createSourceFile(`${service}.ts`, astToString(ast), ts.ScriptTarget.Latest, true);
   const types = ts.createPrinter({ removeComments: true }).printFile(source);
-  const text = await prettier.format(header + types, {
+  const policy =
+    service === 'monitoring'
+      ? `\nexport const operatorPolicy = ${JSON.stringify(contract['x-operator-policy'])};\n`
+      : '';
+  const text = await prettier.format(header + types + policy, {
     ...options,
     filepath: fileURLToPath(target),
   });

@@ -1,0 +1,4 @@
+{
+  "required_role": "platform-operator",
+  "excluded_roles": ["teacher", "student", "monitoring-reader", "ai-client"]
+}

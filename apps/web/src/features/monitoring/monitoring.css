@@ -1,0 +1,74 @@
+:host {
+  display: block;
+}
+
+.detail {
+  display: block;
+  font-size: var(--text-xs);
+}
+
+.identifier {
+  font-family: Consolas, monospace;
+  overflow-wrap: anywhere;
+}
+
+summary {
+  cursor: pointer;
+  min-height: 44px;
+  align-content: center;
+}
+
+details ul {
+  margin: 0 0 8px;
+  padding-inline-start: 20px;
+}
+
+.spend-totals {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px 24px;
+  margin-block: 16px 24px;
+}
+
+.spend-totals > div {
+  flex: 1 1 160px;
+}
+
+.spend-totals dd {
+  margin-inline-start: 0;
+  font-variant-numeric: tabular-nums;
+}
+
+.spend-totals dd:first-of-type {
+  font-weight: 600;
+}
+
+.spend-tables {
+  display: grid;
+  gap: 16px;
+}
+
+.billed-accounts {
+  border-top: 1px solid var(--line);
+  margin-top: 24px;
+  padding-top: 16px;
+}
+
+.spend-filters {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: end;
+  gap: 12px;
+  margin-block: 0 16px;
+}
+
+.spend-filters label {
+  flex: 1 1 180px;
+  min-width: 0;
+}
+
+@media (min-width: 1200px) {
+  .spend-tables {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}

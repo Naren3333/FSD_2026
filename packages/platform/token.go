@@ -37,6 +37,12 @@ func (t *ServiceToken) Get(ctx context.Context) (string, error) {
 		return token, nil
 	}
 	result := t.fetches.DoChan("token", func() (any, error) {
+		t.mu.Lock()
+		token, valid := t.token, t.token != "" && time.Now().Before(t.expires)
+		t.mu.Unlock()
+		if valid {
+			return token, nil
+		}
 		fetchCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), fetchTimeout)
 		defer cancel()
 		token, expires, err := t.fetch(fetchCtx)
@@ -82,9 +88,12 @@ func (t *ServiceToken) fetch(ctx context.Context) (string, time.Time, error) {
 	return body.AccessToken, time.Now().Add(lifetime - min(30*time.Second, lifetime/2)), nil
 }
 
-// reset drops the cached token, so the next get fetches a new one (after the token was refused, say).
-func (t *ServiceToken) Reset() {
+// reject drops a refused token, so the next get fetches a new one, but only while it is still cached: a late
+// 401 must not invalidate its replacement.
+func (t *ServiceToken) Reject(token string) {
 	t.mu.Lock()
-	t.token = ""
+	if t.token == token {
+		t.token = ""
+	}
 	t.mu.Unlock()
 }

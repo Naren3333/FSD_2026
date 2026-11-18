@@ -1,0 +1,316 @@
+<header class="page-header">
+  <div class="page-header-title"><h2>Monitoring</h2></div>
+</header>
+
+@if (blocked(); as message) {
+  <p class="error" role="alert">{{ message }}</p>
+} @else {
+  @let snapshot = status.data();
+  <section class="panel" aria-labelledby="monitoring-services">
+    <header class="panel-heading">
+      <div>
+        <h3 id="monitoring-services">Services</h3>
+        <p>Request p95 covers time to response headers over the last five minutes.</p>
+      </div>
+      <app-refresh-button
+        label="Refresh services and dead letters"
+        [busy]="status.feedback.busy()"
+        (refresh)="refreshStatus()"
+      />
+    </header>
+    <app-status [state]="status.feedback" />
+    @if (snapshot) {
+      <table class="stack-table">
+        <thead>
+          <tr>
+            <th scope="col">Service</th>
+            <th scope="col">Readiness</th>
+            <th scope="col">Latest probe</th>
+            <th scope="col">Request p95</th>
+            <th scope="col">Checked</th>
+          </tr>
+        </thead>
+        <tbody>
+          @for (service of snapshot.services; track service.name) {
+            <tr>
+              <th scope="row" data-label="Service">{{ service.name }}</th>
+              <td data-label="Readiness">
+                <span
+                  class="badge"
+                  [class.badge-good]="service.state === 'ready'"
+                  [class.badge-warning]="service.state === 'degraded'"
+                  [class.badge-danger]="
+                    service.state === 'not_ready' ||
+                    service.state === 'unreachable' ||
+                    service.state === 'discovery_failed'
+                  "
+                  >{{ serviceLabels[service.state] }}</span
+                >
+                @if (service.replicas.length) {
+                  <details>
+                    <summary>{{ service.ready_replicas }} of {{ service.replicas.length }} ready</summary>
+                    <ul>
+                      @for (replica of service.replicas; track replica.replica) {
+                        <li>Replica {{ replica.replica }} · {{ serviceLabels[replica.state] }}</li>
+                      }
+                    </ul>
+                  </details>
+                }
+              </td>
+              <td data-label="Latest probe">
+                @for (replica of service.replicas; track replica.replica) {
+                  <div>
+                    @if (service.replicas.length > 1) {
+                      <span class="muted">Replica {{ replica.replica }} · </span>
+                    }
+                    {{
+                      replica.ready_probe_ms === null
+                        ? 'Unavailable'
+                        : (replica.ready_probe_ms | number: '1.0-0') + ' ms'
+                    }}
+                  </div>
+                } @empty {
+                  {{ service.state === 'checking' ? 'Collecting data' : 'Unavailable' }}
+                }
+              </td>
+              <td data-label="Request p95">
+                {{ latencyText(service.latency) }}
+                @if (service.latency.state === 'available' || service.latency.state === 'partial') {
+                  <span class="detail muted">{{ service.latency.requests | number }} requests</span>
+                }
+                @if (service.latency.state === 'partial') {
+                  <span class="detail muted"
+                    >Partial · {{ service.latency.covered_replicas }} of
+                    {{ service.replicas.length }} replicas sampled</span
+                  >
+                }
+              </td>
+              <td data-label="Checked">
+                {{ service.checked_at ? when(service.checked_at) : 'Pending' }}
+                @if (service.state !== 'ready' && service.last_ready_at) {
+                  <span class="detail muted">Last ready {{ when(service.last_ready_at) }}</span>
+                }
+              </td>
+            </tr>
+          }
+        </tbody>
+      </table>
+    }
+  </section>
+
+  <section class="panel" aria-labelledby="monitoring-dead-letters">
+    <header class="panel-heading">
+      <div>
+        <h3 id="monitoring-dead-letters">Dead letters</h3>
+        <p>Estimated retained records from partition offsets. Kafka keeps dead letters for seven days.</p>
+      </div>
+    </header>
+    @if (snapshot) {
+      <table class="stack-table">
+        <thead>
+          <tr>
+            <th scope="col">Topic</th>
+            <th scope="col">Estimated retained</th>
+            <th scope="col">Last checked</th>
+          </tr>
+        </thead>
+        <tbody>
+          @for (topic of snapshot.dead_letters; track topic.name) {
+            <tr>
+              <th scope="row" data-label="Topic" class="identifier">{{ topic.name }}</th>
+              <td data-label="Estimated retained">
+                {{
+                  topic.estimated_retained === null
+                    ? topicLabels[topic.state]
+                    : (topic.estimated_retained | number)
+                }}
+                @if (topic.state === 'stale') {
+                  <span class="detail muted">Stale · last read {{ when(topic.last_success_at) }}</span>
+                }
+              </td>
+              <td data-label="Last checked">
+                {{ topic.checked_at ? when(topic.checked_at) : 'Pending' }}
+              </td>
+            </tr>
+          }
+        </tbody>
+      </table>
+    } @else if (status.pending()) {
+      <p class="muted">Loading dead letters…</p>
+    } @else if (status.feedback.error()) {
+      <p class="muted">
+        Dead letters could not be loaded. Use Refresh services and dead letters above to try again.
+      </p>
+    }
+  </section>
+
+  <section class="panel" aria-labelledby="monitoring-spend">
+    <header class="panel-heading">
+      <div><h3 id="monitoring-spend">AI expenditure</h3></div>
+      <app-refresh-button
+        label="Refresh AI expenditure"
+        [busy]="spend.feedback.busy()"
+        (refresh)="refreshSpend()"
+      />
+    </header>
+    <app-status [state]="spend.feedback" />
+    @if (spend.data(); as summary) {
+      <p class="muted">
+        Budget days use {{ summary.timezone }} · Read {{ when(summary.as_of, summary.timezone) }}
+      </p>
+      <dl class="spend-totals">
+        <div>
+          <dt>Recorded today</dt>
+          <dd>{{ usd(summary.today.recorded_usd) }}</dd>
+        </div>
+        <div>
+          <dt>Estimated portion</dt>
+          <dd>{{ usd(summary.today.estimated_usd) }}</dd>
+        </div>
+        <div>
+          <dt>Billable calls today</dt>
+          <dd>{{ summary.today.calls | number }}</dd>
+        </div>
+        <div>
+          <dt>Outstanding reservations</dt>
+          <dd>{{ usd(summary.reservations.reserved_usd) }}</dd>
+          <dd class="detail">
+            {{ summary.reservations.count | number }} holds ·
+            {{ summary.reservations.expired_count | number }} expired ({{
+              usd(summary.reservations.expired_usd)
+            }})
+          </dd>
+        </div>
+        @if (summary.ceiling; as ceiling) {
+          <div>
+            <dt>Shared ceiling</dt>
+            <dd>{{ usd(ceiling.remaining_usd) }} remaining</dd>
+            <dd class="detail">{{ usd(ceiling.limit_usd) }} limit</dd>
+          </div>
+        }
+      </dl>
+      <div class="spend-tables">
+        <div>
+          <h4>Spend by operation today</h4>
+          @if (summary.operations.length) {
+            <table class="stack-table">
+              <thead>
+                <tr>
+                  <th scope="col">Operation</th>
+                  <th scope="col">Recorded</th>
+                  <th scope="col">Estimated portion</th>
+                  <th scope="col">Calls</th>
+                </tr>
+              </thead>
+              <tbody>
+                @for (row of summary.operations; track row.operation) {
+                  <tr>
+                    <th scope="row" data-label="Operation">{{ row.operation }}</th>
+                    <td data-label="Recorded">{{ usd(row.recorded_usd) }}</td>
+                    <td data-label="Estimated portion">{{ usd(row.estimated_usd) }}</td>
+                    <td data-label="Calls">{{ row.calls | number }}</td>
+                  </tr>
+                }
+              </tbody>
+            </table>
+          } @else {
+            <p>No billable calls recorded today.</p>
+          }
+        </div>
+        <div>
+          <h4>Last seven calendar days</h4>
+          <table class="stack-table">
+            <thead>
+              <tr>
+                <th scope="col">Day</th>
+                <th scope="col">Recorded</th>
+                <th scope="col">Estimated portion</th>
+                <th scope="col">Calls</th>
+              </tr>
+            </thead>
+            <tbody>
+              @for (day of summary.days; track day.day) {
+                <tr>
+                  <th scope="row" data-label="Day">{{ day.day | date: 'd MMM y' }}</th>
+                  <td data-label="Recorded">{{ usd(day.recorded_usd) }}</td>
+                  <td data-label="Estimated portion">{{ usd(day.estimated_usd) }}</td>
+                  <td data-label="Calls">{{ day.calls | number }}</td>
+                </tr>
+              }
+            </tbody>
+          </table>
+        </div>
+      </div>
+    }
+
+    <section class="billed-accounts" aria-labelledby="billed-accounts">
+      <header class="panel-heading">
+        <div><h4 id="billed-accounts">Spend by billed account</h4></div>
+        <app-refresh-button
+          label="Refresh billed accounts"
+          [busy]="users.pending()"
+          (refresh)="loadUsers()"
+        />
+      </header>
+      <form class="spend-filters" [formGroup]="filters" (ngSubmit)="applyFilters()">
+        <label for="spend-period"
+          >Period
+          <select id="spend-period" formControlName="period">
+            <option value="today">Today</option>
+            <option value="last_7_days">Last seven calendar days</option>
+          </select></label
+        >
+        <label for="spend-org"
+          >Organization ID
+          <input id="spend-org" formControlName="org_id" type="text" maxlength="200" autocomplete="off"
+        /></label>
+        <label for="spend-user"
+          >Billed user ID
+          <input id="spend-user" formControlName="user_id" type="text" maxlength="200" autocomplete="off"
+        /></label>
+        <button type="submit">Apply filters</button>
+      </form>
+      <app-status [state]="users.feedback" />
+      @if (users.data(); as result) {
+        <p class="muted">
+          Read {{ when(result.as_of, result.timezone) }} · Budget days use {{ result.timezone }}
+        </p>
+        @if (result.items.length) {
+          <table class="stack-table">
+            <thead>
+              <tr>
+                <th scope="col">Billed user ID</th>
+                <th scope="col">Organization ID</th>
+                <th scope="col">Recorded</th>
+                <th scope="col">Estimated portion</th>
+                <th scope="col">Calls</th>
+              </tr>
+            </thead>
+            <tbody>
+              @for (row of result.items; track row.org_id.length + ':' + row.org_id + row.user_id) {
+                <tr>
+                  <th scope="row" data-label="Billed user ID" class="identifier">{{ row.user_id }}</th>
+                  <td data-label="Organization ID" class="identifier">{{ row.org_id }}</td>
+                  <td data-label="Recorded">{{ usd(row.recorded_usd) }}</td>
+                  <td data-label="Estimated portion">{{ usd(row.estimated_usd) }}</td>
+                  <td data-label="Calls">{{ row.calls | number }}</td>
+                </tr>
+              }
+            </tbody>
+          </table>
+          <app-pager
+            label="Billed account pages"
+            noun="accounts"
+            [page]="page"
+            [pageSize]="pageSize"
+            [total]="result.total"
+            [disabled]="users.pending()"
+            (pageChange)="changePage($event)"
+          />
+        } @else {
+          <p>No billed accounts match these filters.</p>
+        }
+      }
+    </section>
+  </section>
+}

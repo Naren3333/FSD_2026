@@ -1,0 +1,936 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "Platform monitoring",
+    "version": "1.0.0"
+  },
+  "x-operator-policy": {
+    "required_role": "platform-operator",
+    "excluded_roles": [
+      "teacher",
+      "student",
+      "monitoring-reader",
+      "ai-client"
+    ]
+  },
+  "security": [
+    {
+      "bearerAuth": []
+    }
+  ],
+  "components": {
+    "schemas": {
+      "Ceiling": {
+        "properties": {
+          "limit_usd": {
+            "type": "string",
+            "title": "Limit Usd"
+          },
+          "remaining_usd": {
+            "type": "string",
+            "title": "Remaining Usd"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "limit_usd",
+          "remaining_usd"
+        ],
+        "title": "Ceiling"
+      },
+      "DailySpend": {
+        "properties": {
+          "recorded_usd": {
+            "type": "string",
+            "title": "Recorded Usd"
+          },
+          "estimated_usd": {
+            "type": "string",
+            "title": "Estimated Usd"
+          },
+          "calls": {
+            "type": "integer",
+            "title": "Calls"
+          },
+          "day": {
+            "type": "string",
+            "format": "date",
+            "title": "Day"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "recorded_usd",
+          "estimated_usd",
+          "calls",
+          "day"
+        ],
+        "title": "DailySpend"
+      },
+      "OperationSpend": {
+        "properties": {
+          "recorded_usd": {
+            "type": "string",
+            "title": "Recorded Usd"
+          },
+          "estimated_usd": {
+            "type": "string",
+            "title": "Estimated Usd"
+          },
+          "calls": {
+            "type": "integer",
+            "title": "Calls"
+          },
+          "operation": {
+            "type": "string",
+            "title": "Operation"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "recorded_usd",
+          "estimated_usd",
+          "calls",
+          "operation"
+        ],
+        "title": "OperationSpend"
+      },
+      "Reservations": {
+        "properties": {
+          "count": {
+            "type": "integer",
+            "title": "Count"
+          },
+          "reserved_usd": {
+            "type": "string",
+            "title": "Reserved Usd"
+          },
+          "expired_count": {
+            "type": "integer",
+            "title": "Expired Count"
+          },
+          "expired_usd": {
+            "type": "string",
+            "title": "Expired Usd"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "count",
+          "reserved_usd",
+          "expired_count",
+          "expired_usd"
+        ],
+        "title": "Reservations"
+      },
+      "SpendSummary": {
+        "properties": {
+          "as_of": {
+            "type": "string",
+            "format": "date-time",
+            "title": "As Of"
+          },
+          "timezone": {
+            "type": "string",
+            "title": "Timezone"
+          },
+          "today": {
+            "$ref": "#/components/schemas/DailySpend"
+          },
+          "days": {
+            "items": {
+              "$ref": "#/components/schemas/DailySpend"
+            },
+            "type": "array",
+            "title": "Days"
+          },
+          "operations": {
+            "items": {
+              "$ref": "#/components/schemas/OperationSpend"
+            },
+            "type": "array",
+            "title": "Operations"
+          },
+          "reservations": {
+            "$ref": "#/components/schemas/Reservations"
+          },
+          "ceiling": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Ceiling"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "as_of",
+          "timezone",
+          "today",
+          "days",
+          "operations",
+          "reservations",
+          "ceiling"
+        ],
+        "title": "SpendSummary"
+      },
+      "UserSpend": {
+        "properties": {
+          "recorded_usd": {
+            "type": "string",
+            "title": "Recorded Usd"
+          },
+          "estimated_usd": {
+            "type": "string",
+            "title": "Estimated Usd"
+          },
+          "calls": {
+            "type": "integer",
+            "title": "Calls"
+          },
+          "org_id": {
+            "type": "string",
+            "title": "Org Id"
+          },
+          "user_id": {
+            "type": "string",
+            "title": "User Id"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "recorded_usd",
+          "estimated_usd",
+          "calls",
+          "org_id",
+          "user_id"
+        ],
+        "title": "UserSpend"
+      },
+      "UserSpendPage": {
+        "properties": {
+          "as_of": {
+            "type": "string",
+            "format": "date-time",
+            "title": "As Of"
+          },
+          "timezone": {
+            "type": "string",
+            "title": "Timezone"
+          },
+          "total": {
+            "type": "integer",
+            "title": "Total"
+          },
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/UserSpend"
+            },
+            "type": "array",
+            "title": "Items"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "as_of",
+          "timezone",
+          "total",
+          "items"
+        ],
+        "title": "UserSpendPage"
+      },
+      "MonitoringStatus": {
+        "type": "object",
+        "properties": {
+          "services": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "name": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "state": {
+                  "enum": [
+                    "checking",
+                    "ready",
+                    "degraded",
+                    "not_ready",
+                    "unreachable",
+                    "discovery_failed"
+                  ]
+                },
+                "checked_at": {
+                  "type": [
+                    "string",
+                    "null"
+                  ],
+                  "format": "date-time"
+                },
+                "ready_replicas": {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                "replicas": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "replica": {
+                        "type": "integer",
+                        "minimum": 1
+                      },
+                      "state": {
+                        "enum": [
+                          "ready",
+                          "not_ready",
+                          "unreachable"
+                        ]
+                      },
+                      "ready_probe_ms": {
+                        "type": [
+                          "integer",
+                          "null"
+                        ],
+                        "minimum": 0
+                      }
+                    },
+                    "required": [
+                      "replica",
+                      "state",
+                      "ready_probe_ms"
+                    ],
+                    "additionalProperties": false
+                  },
+                  "minItems": 0,
+                  "maxItems": 64
+                },
+                "last_ready_at": {
+                  "type": "string",
+                  "format": "date-time"
+                },
+                "latency": {
+                  "type": "object",
+                  "properties": {
+                    "state": {
+                      "enum": [
+                        "checking",
+                        "available",
+                        "partial",
+                        "unavailable"
+                      ]
+                    },
+                    "requests": {
+                      "type": "integer",
+                      "minimum": 0
+                    },
+                    "p95_ms": {
+                      "type": [
+                        "integer",
+                        "null"
+                      ],
+                      "minimum": 0
+                    },
+                    "above_max_bucket": {
+                      "type": "boolean"
+                    },
+                    "covered_replicas": {
+                      "type": "integer",
+                      "minimum": 0
+                    }
+                  },
+                  "required": [
+                    "state",
+                    "requests",
+                    "p95_ms",
+                    "above_max_bucket",
+                    "covered_replicas"
+                  ],
+                  "additionalProperties": false
+                }
+              },
+              "required": [
+                "name",
+                "state",
+                "checked_at",
+                "ready_replicas",
+                "replicas",
+                "latency"
+              ],
+              "additionalProperties": false
+            },
+            "minItems": 10,
+            "maxItems": 10
+          },
+          "dead_letters": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "name": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "state": {
+                  "enum": [
+                    "checking",
+                    "available",
+                    "unavailable",
+                    "stale"
+                  ]
+                },
+                "estimated_retained": {
+                  "type": [
+                    "integer",
+                    "null"
+                  ],
+                  "minimum": 0
+                },
+                "checked_at": {
+                  "type": [
+                    "string",
+                    "null"
+                  ],
+                  "format": "date-time"
+                },
+                "last_success_at": {
+                  "type": [
+                    "string",
+                    "null"
+                  ],
+                  "format": "date-time"
+                }
+              },
+              "required": [
+                "name",
+                "state",
+                "estimated_retained",
+                "checked_at",
+                "last_success_at"
+              ],
+              "additionalProperties": false
+            },
+            "minItems": 9,
+            "maxItems": 9
+          }
+        },
+        "required": [
+          "services",
+          "dead_letters"
+        ],
+        "additionalProperties": false
+      }
+    },
+    "securitySchemes": {
+      "bearerAuth": {
+        "type": "http",
+        "scheme": "bearer",
+        "bearerFormat": "JWT"
+      }
+    }
+  },
+  "paths": {
+    "/api/monitoring/status": {
+      "get": {
+        "operationId": "monitoring_status",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "Operator data",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MonitoringStatus"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthenticated",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "minLength": 1
+                        },
+                        "message": {
+                          "type": "string",
+                          "minLength": 1
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message"
+                      ],
+                      "additionalProperties": false
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "minLength": 1
+                        },
+                        "message": {
+                          "type": "string",
+                          "minLength": 1
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message"
+                      ],
+                      "additionalProperties": false
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/monitoring/ai-spend": {
+      "get": {
+        "operationId": "monitoring_ai_spend",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "Operator data",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SpendSummary"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthenticated",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "minLength": 1
+                        },
+                        "message": {
+                          "type": "string",
+                          "minLength": 1
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message"
+                      ],
+                      "additionalProperties": false
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "minLength": 1
+                        },
+                        "message": {
+                          "type": "string",
+                          "minLength": 1
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message"
+                      ],
+                      "additionalProperties": false
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "AI expenditure report failed or the monitoring service account is misconfigured",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "minLength": 1
+                        },
+                        "message": {
+                          "type": "string",
+                          "minLength": 1
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message"
+                      ],
+                      "additionalProperties": false
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Dependency unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "minLength": 1
+                        },
+                        "message": {
+                          "type": "string",
+                          "minLength": 1
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message"
+                      ],
+                      "additionalProperties": false
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/monitoring/ai-spend/users": {
+      "get": {
+        "operationId": "monitoring_ai_spend_users",
+        "parameters": [
+          {
+            "name": "period",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "enum": [
+                "today",
+                "last_7_days"
+              ],
+              "type": "string",
+              "default": "today",
+              "title": "Period"
+            }
+          },
+          {
+            "name": "org_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 200
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Org Id"
+            }
+          },
+          {
+            "name": "user_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 200
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "User Id"
+            }
+          },
+          {
+            "name": "offset",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 2147483647,
+              "minimum": 0,
+              "default": 0,
+              "title": "Offset"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Operator data",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UserSpendPage"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthenticated",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "minLength": 1
+                        },
+                        "message": {
+                          "type": "string",
+                          "minLength": 1
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message"
+                      ],
+                      "additionalProperties": false
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "minLength": 1
+                        },
+                        "message": {
+                          "type": "string",
+                          "minLength": 1
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message"
+                      ],
+                      "additionalProperties": false
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "minLength": 1
+                        },
+                        "message": {
+                          "type": "string",
+                          "minLength": 1
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message"
+                      ],
+                      "additionalProperties": false
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "AI expenditure report failed or the monitoring service account is misconfigured",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "minLength": 1
+                        },
+                        "message": {
+                          "type": "string",
+                          "minLength": 1
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message"
+                      ],
+                      "additionalProperties": false
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Dependency unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "minLength": 1
+                        },
+                        "message": {
+                          "type": "string",
+                          "minLength": 1
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message"
+                      ],
+                      "additionalProperties": false
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}

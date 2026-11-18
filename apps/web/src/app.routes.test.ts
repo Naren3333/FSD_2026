@@ -12,14 +12,14 @@ beforeAll(() => TestBed.initTestEnvironment(BrowserTestingModule, platformBrowse
 /* runs a route guard the way the router does, for a user with this role (or signed out). */
 async function guard(
   path: string,
-  role: 'teacher' | 'student' | null,
+  role: 'teacher' | 'student' | 'operator' | null,
   profileFails = false,
 ): Promise<string | boolean> {
   TestBed.resetTestingModule();
   TestBed.configureTestingModule({
     providers: [
       provideRouter([]),
-      { provide: Auth, useValue: { authenticated: role !== null } },
+      { provide: Auth, useValue: { authenticated: role !== null, operator: role === 'operator' } },
       {
         provide: IdentityApi,
         useValue: {
@@ -46,6 +46,15 @@ describe('role landing pages', () => {
   it('sends each role from the root to its own landing page', async () => {
     expect(await guard('', 'student')).toBe('/home');
     expect(await guard('', 'teacher')).toBe('/dashboard');
+  });
+
+  it('opens the operator workspace even when Identity is down and protects its direct address', async () => {
+    expect(await guard('', 'operator', true)).toBe('/admin/monitoring');
+    expect(await guard('admin/monitoring', 'operator', true)).toBe(true);
+    expect(await guard('admin/monitoring', 'teacher')).toBe('/dashboard');
+    expect(await guard('admin/monitoring', 'student')).toBe('/home');
+    expect(await guard('admin/monitoring', null)).toBe(false);
+    expect(await guard('assessments', 'operator')).toBe('/admin/monitoring');
   });
 
   it('sends a role away from the other role’s sections', async () => {

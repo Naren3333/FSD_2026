@@ -277,6 +277,43 @@ def test_migrations_reject_gaps_and_bad_names(tmp_path: Path, names: list[str]) 
         migrations(tmp_path)
 
 
+@pytest.mark.parametrize(
+    ("statement", "target"),
+    [
+        ("CREATE INDEX CONCURRENTLY usage_by_date ON usage (created_at);", ("usage_by_date", "usage")),
+        (
+            "create unique index concurrently if not exists Usage_By_Org\n  on usage using btree (org_id, created_at)\n"
+            "  where cost_usd > 0",
+            ("usage_by_org", "usage"),
+        ),
+    ],
+)
+def test_marked_concurrent_index_migrations_name_their_target(
+    tmp_path: Path, statement: str, target: tuple[str, str]
+) -> None:
+    from learning_transport.db import CONCURRENT_DIRECTIVE, migrations
+
+    (tmp_path / "001_init.sql").write_text("CREATE TABLE usage (created_at timestamptz);")
+    (tmp_path / "002_index.sql").write_text(f"{CONCURRENT_DIRECTIVE}\n{statement}\n")
+    assert [m.concurrent_index for m in migrations(tmp_path)] == [None, target]
+
+
+@pytest.mark.parametrize(
+    "sql",
+    [
+        "CREATE INDEX CONCURRENTLY usage_by_date ON usage (created_at);",
+        "-- migrate: concurrent-index\nCREATE INDEX CONCURRENTLY a ON usage (x);\nCREATE INDEX CONCURRENTLY b ON usage (y);",
+        "-- migrate: concurrent-index\nCREATE TABLE usage (x int);",
+    ],
+)
+def test_misplaced_concurrent_builds_fail_when_loaded(tmp_path: Path, sql: str) -> None:
+    from learning_transport.db import migrations
+
+    (tmp_path / "001_index.sql").write_text(sql)
+    with pytest.raises(ValueError, match="001_index.sql"):
+        migrations(tmp_path)
+
+
 def roster_client(status: int, body: Any) -> IdentityClient:
     def answer(request: httpx.Request) -> httpx.Response:
         assert str(request.url) == "http://identity/v1/classrooms/c1/student-ids"

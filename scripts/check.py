@@ -16,6 +16,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 GO_MODULES = [
     "packages/platform",
+    "infra/monitoring",
     *(f"services/{s}" for s in ["identity", "curriculum", "content", "assessment", "grading"]),
 ]
 PYTHON_SERVICES = [

@@ -19,6 +19,10 @@ export class Session {
     return this.auth.authenticated;
   }
 
+  get isOperator(): boolean {
+    return this.auth.operator;
+  }
+
   private loading: Promise<void> | null = null;
 
   /* registers the signed-in user with identity and loads their profile, once; a failed load can be retried. */
@@ -31,7 +35,7 @@ export class Session {
   }
 
   private async load(): Promise<void> {
-    if (this.auth.authenticated) this.profile.set(await this.identity.register());
+    if (this.auth.authenticated && !this.isOperator) this.profile.set(await this.identity.register());
   }
 
   login(): Promise<void> {

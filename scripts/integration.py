@@ -5,6 +5,7 @@ import contextlib
 import dataclasses
 import functools
 import json
+import os
 import re
 import subprocess
 import sys
@@ -19,18 +20,28 @@ from jsonschema import Draft202012Validator, FormatChecker
 from local_stack import (
     BASE,
     ROOT,
+    TEST_PROJECT,
     TOKEN_URL,
     admin_client,
     delete_topics,
     ensure_person,
     env,
+    load_test_monitoring_credentials,
     password_token,
+    project,
     psql,
     psql_value,
     require_test_stack,
     sse_events,
 )
-from setup import AI_CLIENTS, DATABASES, SERVICES, client_secret_key
+from setup import (
+    AI_CLIENTS,
+    DATABASES,
+    MONITORING_CLIENT,
+    SERVICES,
+    TEST_OPERATOR_USERNAME,
+    client_secret_key,
+)
 
 # gateway path → contract file
 CONTRACTS = {
@@ -94,7 +105,8 @@ def login(username: str, password_key: str) -> httpx.Client:
 
 
 def service_token(client_id: str) -> str:
-    secret = env()[client_secret_key(client_id)]
+    key = client_secret_key(client_id)
+    secret = os.environ.get(key) or env()[key]
     data = {"client_id": client_id, "client_secret": secret, "grant_type": "client_credentials"}
     res = httpx.post(TOKEN_URL, data=data, timeout=15)
     assert res.status_code == 200, f"Service account login failed for {client_id}: {res.status_code}"
@@ -145,7 +157,7 @@ def validate_response(method: str, path: str, status: int, data: Any) -> None:
     service, _, resource = path.lstrip("/").partition("/")
     contract_file = ROOT / f"contracts/http/{CONTRACTS.get(service, service)}.openapi.json"
     contract = json.loads(contract_file.read_text(encoding="utf-8"))
-    route = "/v1/" + resource.split("?")[0]
+    route = ("/api/monitoring/" if service == "monitoring" else "/v1/") + resource.split("?")[0]
     # literal paths before templated ones, as go's mux matches them: /v1/evaluations/mine is not
     # /v1/evaluations/{id}.
     for template, methods in sorted(contract["paths"].items(), key=lambda item: item[0].count("{")):
@@ -198,6 +210,11 @@ def publish(topic: str, key: str, event: dict[str, Any]) -> None:
 def restart(*services: str) -> None:
     """restarts containers and waits until every application is ready again, so the next request is not a 502."""
     docker("restart", *services)
+    wait_ready(f"restarting {', '.join(services)}")
+
+
+def wait_ready(after: str) -> None:
+    """waits until every application answers ready again."""
     ready = subprocess.run(
         [sys.executable, str(ROOT / "scripts" / "wait_ready.py")],
         text=True,
@@ -205,9 +222,7 @@ def restart(*services: str) -> None:
         capture_output=True,
         check=False,
     )
-    assert ready.returncode == 0, (
-        f"Not ready after restarting {', '.join(services)}:\n{ready.stdout}{ready.stderr}"
-    )
+    assert ready.returncode == 0, f"Not ready after {after}:\n{ready.stdout}{ready.stderr}"
 
 
 def inbox_has(service: str, event_id: str) -> bool:
@@ -1221,7 +1236,7 @@ def databases() -> None:
         ("analytics", "1,2,3,4,5,6,7"),
         ("curriculum", "1,2"),
         ("chatbot", "1,2,3,4,5,6"),
-        ("aicore", "1,2,3"),
+        ("aicore", "1,2,3,4,5,6"),
     ]:
         migrations = sql_value(service, versions)
         assert migrations == expected, (service, migrations, expected)
@@ -1322,6 +1337,8 @@ def main() -> None:
     )
     args = parser.parse_args()
     require_test_stack(dev=args.dev)
+    if project() == TEST_PROJECT:
+        os.environ.update(load_test_monitoring_credentials())
     LIVE_AI = args.live_ai
     if LIVE_AI and not env().get("OPENAI_API_KEY"):
         raise SystemExit("--live-ai needs OPENAI_API_KEY in .env")
@@ -1368,6 +1385,126 @@ def run() -> None:
     step("Protected operational measurements", lambda: operational_metrics(users))
     step("Per-session rate limit", rate_limit_per_session)
     step("Removing this run's topics", remove_topics)
+    if password := os.environ.get("TEST_OPERATOR_PASSWORD"):
+        step("Platform monitoring and Kafka outage recovery", lambda: platform_monitoring(users, password))
+    else:
+        print(
+            "skipped: Platform monitoring and Kafka outage recovery (TEST_OPERATOR_PASSWORD is unset; "
+            "the disposable test stack provisions the operator).",
+            flush=True,
+        )
+
+
+def platform_monitoring(users: Users, password: str) -> None:
+    route = "/monitoring/status"
+    reader = service_token(MONITORING_CLIENT)
+    request(users.teacher, "GET", route, 403)
+    request(users.student, "GET", "/monitoring/ai-spend/users", 403)
+    assert ai_core_status(reader) == 403
+    with (
+        httpx.Client(base_url=BASE, timeout=10) as client,
+        httpx.Client(
+            base_url=BASE,
+            headers={"Authorization": "Bearer " + password_token(TEST_OPERATOR_USERNAME, password)},
+            timeout=10,
+        ) as operator,
+    ):
+        assert client.get(route).status_code == 401
+        assert client.get(route, headers={"Authorization": "Bearer " + reader}).status_code == 403
+        assert client.get("/monitoring/internal/http-metrics").status_code == 404
+        assert client.get("/monitoring/health/ready").status_code == 404
+        assert operator.post(route).status_code == 404
+        assert operator.get(route).headers.get("Cache-Control") == "no-store"
+        assert len(request(operator, "GET", "/monitoring/ai-spend")["days"]) == 7
+        assert (
+            request(operator, "GET", "/monitoring/ai-spend/users?user_id=unknown-billed-user")["total"] == 0
+        )
+
+        def status() -> dict[str, Any]:
+            return request(operator, "GET", route)
+
+        def identity_status(data: dict[str, Any]) -> dict[str, Any]:
+            return next(service for service in data["services"] if service["name"] == "identity")
+
+        expected_replicas = len(
+            docker("ps", "--status", "running", "--quiet", "identity").stdout.splitlines()
+        )
+        assert expected_replicas > 0
+        snapshot = eventually(
+            status,
+            lambda data: all(s["state"] == "ready" for s in data["services"])
+            and all(t["state"] == "available" for t in data["dead_letters"])
+            and identity_status(data)["ready_replicas"] == expected_replicas
+            and all(s["latency"]["covered_replicas"] == s["ready_replicas"] for s in data["services"]),
+            "ready replicas and Kafka offsets",
+        )
+        assert all(s.get("last_ready_at") for s in snapshot["services"])
+        request(users.teacher, "GET", "/identity/classrooms")
+        eventually(
+            lambda: identity_status(status())["latency"],
+            lambda metric: metric["requests"] > 0 and isinstance(metric["p95_ms"], int),
+            "request latency from live Identity traffic",
+        )
+
+        def submission_dlq() -> dict[str, Any]:
+            return next(t for t in status()["dead_letters"] if t["name"] == "assessment.submitted.v4.dlq")
+
+        retained = submission_dlq()["estimated_retained"] + 1
+        publish("assessment.submitted.v4", str(uuid4()), {"invalid_test_event": True})
+        eventually(
+            submission_dlq,
+            lambda t: t["state"] == "available" and t["estimated_retained"] == retained,
+            "one durably dead-lettered submission event",
+        )
+        joined = {name for name, (_, members) in consumer_groups().items() if members > 0}
+        assert joined, "no consumer group has members before the broker outage"
+        try:
+            docker("stop", "kafka")
+            eventually(
+                submission_dlq,
+                lambda t: t["state"] == "stale"
+                and t["estimated_retained"] == retained
+                and t["last_success_at"],
+                "a broker outage preserves the last retained estimate",
+            )
+        finally:
+            docker("start", "kafka")
+        eventually(
+            submission_dlq,
+            lambda t: t["state"] == "available" and t["estimated_retained"] == retained,
+            "Kafka offsets recover after a restart",
+        )
+        # later suites rely on events again, so every consumer must have rejoined, not just the broker.
+        eventually(
+            consumer_groups,
+            lambda groups: all(
+                groups.get(name, ("", 0))[0] == "Stable" and groups[name][1] > 0 for name in joined
+            ),
+            "every consumer group rejoined after the broker restart",
+        )
+        wait_ready("restarting kafka")
+        publish("assessment.submitted.v4", str(uuid4()), {"invalid_test_event": True})
+        eventually(
+            submission_dlq,
+            lambda t: t["state"] == "available" and t["estimated_retained"] == retained + 1,
+            "a consumer dead-letters again after the broker restart",
+        )
+
+
+def consumer_groups() -> dict[str, tuple[str, int]]:
+    """each consumer group's state and member count, as the broker reports them."""
+    out = docker(
+        "exec", "-T", "kafka", "/opt/kafka/bin/kafka-consumer-groups.sh",
+        "--bootstrap-server", "kafka:9092", "--describe", "--all-groups", "--state",
+        check=False,
+    ).stdout  # fmt: skip
+    groups = {}
+    for line in out.splitlines():
+        # group, coordinator "host:port (id)", assignment strategy (blank when empty), state, members.
+        fields = line.split()
+        if len(fields) >= 4 and fields[0] != "GROUP" and fields[-1].isdigit():
+            groups[fields[0]] = (fields[-2], int(fields[-1]))
+    return groups
 
 
 def reopen_and_bulk_finalize(u: Users, room_id: str, graded: Graded) -> None:

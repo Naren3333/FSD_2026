@@ -1,0 +1,25 @@
+{
+  "services": [
+    "identity",
+    "curriculum",
+    "content",
+    "assessment",
+    "grading",
+    "analytics",
+    "ai-core",
+    "question-generation-agent",
+    "student-performance-agent",
+    "question-chatbot-agent"
+  ],
+  "dead_letter_topics": [
+    "assessment.submitted.v4.dlq",
+    "grading.finalized.v3.dlq",
+    "grading.reopened.v1.dlq",
+    "identity.classroom.deleted.v1.dlq",
+    "assessment.deleted.v1.dlq",
+    "content.deleted.v1.dlq",
+    "identity.enrollment.removed.v1.dlq",
+    "assessment.due_changed.v1.dlq",
+    "identity.user.deleted.v1.dlq"
+  ]
+}

@@ -10,6 +10,7 @@ import { AiUsage } from './core/ai-usage';
 import { Auth } from './core/auth';
 import { UnsavedChanges } from './core/unsaved-changes';
 import { StatusComponent } from './shared/status';
+import { OperatorShellComponent } from './features/monitoring/operator-shell';
 import { UsageComponent } from './features/usage/usage';
 
 const template = (path: string) => readFileSync(new URL(path, import.meta.url), 'utf8');
@@ -24,7 +25,7 @@ const json = (status: number, body: unknown) =>
   new Response(JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json' } });
 
 /* the shell for a user signed in with keycloak, whose api calls `fetch` answers; identity, gateway and session are the real ones. */
-function render(fetch: (url: string) => Response) {
+function render(fetch: (url: string) => Response, operator = false) {
   const calls: string[] = [];
   vi.stubGlobal(
     'fetch',
@@ -35,6 +36,7 @@ function render(fetch: (url: string) => Response) {
   );
   const auth = {
     authenticated: true,
+    operator,
     expired: signal(false),
     token: () => Promise.resolve('token'),
     login: vi.fn(() => Promise.resolve()),
@@ -62,6 +64,9 @@ function render(fetch: (url: string) => Response) {
   TestBed.overrideComponent(AppComponent, { set: { template: template('./app.html') } });
   TestBed.overrideComponent(StatusComponent, { set: { template: template('./shared/status.html') } });
   TestBed.overrideComponent(UsageComponent, { set: { template: '' } });
+  TestBed.overrideComponent(OperatorShellComponent, {
+    set: { template: operator ? template('./features/monitoring/operator-shell.html') : '' },
+  });
   const fixture = TestBed.createComponent(AppComponent);
   fixture.detectChanges();
   const root = fixture.nativeElement as HTMLElement;
@@ -219,5 +224,34 @@ describe('the signed-in shell', () => {
     await TestBed.inject(Router).navigateByUrl('/elsewhere');
     page.fixture.detectChanges();
     expect(menu.getAttribute('aria-expanded')).toBe('false');
+  });
+});
+
+describe('the operator shell', () => {
+  it('opens without Identity and offers only monitoring', async () => {
+    const page = render(() => json(500, {}), true);
+    await page.settle();
+    const links = [...page.root.querySelectorAll('nav[aria-label="Workspace"] a')];
+    expect(links.map((link) => link.textContent?.trim())).toEqual(['Monitoring']);
+    expect(page.text()).toContain('Platform operator');
+    expect(page.root.querySelector('#active-classroom')).toBeNull();
+    expect(page.text()).not.toContain('Profile');
+    expect(page.calls.filter((url) => url.includes('/api/identity/'))).toEqual([]);
+  });
+
+  it('closes its drawer on Escape with focus back on Open menu', async () => {
+    const page = render(() => json(500, {}), true);
+    await page.settle();
+    document.body.append(page.root);
+    const menu = page.root.querySelector('[aria-label="Open menu"]') as HTMLButtonElement;
+    menu.click();
+    page.fixture.detectChanges();
+    expect(page.root.querySelector('main')?.hasAttribute('inert')).toBe(true);
+    await vi.waitFor(() => expect(document.activeElement?.classList.contains('brand')).toBe(true));
+    document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }));
+    page.fixture.detectChanges();
+    expect(menu.getAttribute('aria-expanded')).toBe('false');
+    await vi.waitFor(() => expect(document.activeElement).toBe(menu));
+    page.root.remove();
   });
 });

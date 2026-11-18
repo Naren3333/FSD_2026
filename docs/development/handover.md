@@ -112,17 +112,22 @@ Grade queue selection and navigation live in `features/review/grade-queue.ts`, i
 
 Latest runs:
 
-The 2026-11-18 fix verification could not run live integration, database or browser suites: disposable stack configuration stops at missing `KEYCLOAK_DB_PASSWORD` in `.env`; test database URLs are unset. Historical stack results below do not verify these changes.
+Monitoring was verified with AI provider keys disabled in the disposable stack.
 
 | Check | Date | Result |
 |---|---|---|
-| `scripts/check.py --keep-going --jobs 3 --timeout 180` + Angular lane rerun | 2026-11-18 | All 15 lanes pass across verification runs: the first run passed 14 lanes and found one Angular formatting issue (99 s); after correction all six Angular steps passed, including 480 tests and the production build. Agent checks pass (191 generation, 55 performance tests), with Ruff/mypy. Real database tests skip without test database URLs; disposable stack preflight is blocked by missing `KEYCLOAK_DB_PASSWORD`. Paid keys disabled; no paid calls. |
+| `scripts/check.py --keep-going --jobs 3 --timeout 600` | 2026-11-18 | All 16 lanes passed in 169 s. The disposable stack ran the database-dependent tests. |
+| Second monitoring review fixes | 2026-11-18 | Migration 005 now locks the ledger only to install the lifetime-total trigger; migration 006 backfills under row share locks, and ai-core commits each migration on its own. `scripts/check.py` passed all 16 lanes. ai-core's 17 ledger tests, the chatbot's 12 and Analytics' 16 store tests passed in their images against PostgreSQL, including a backfill over rows changed between the two migrations. On a fresh disposable stack without `--live-ai`: integration passed in 308 s, including platform monitoring and Kafka outage recovery; every database suite passed; e2e passed 11/11, both monitoring cases included; scale accepted and marked all 200 submissions exactly once in every run. |
+| Monitoring review fixes | 2026-11-18 | `scripts/check.py --keep-going` passed all 16 lanes. ai-core's 16 ledger tests passed in its image against PostgreSQL 17, including the migration lock-wait and waiting-replica tests. On fresh disposable stacks with the replaced OpenAI key: integration passed in 304 s, including performance interpretation, monitoring over the `events` network and every consumer group rejoining after the Kafka outage; db passed; e2e passed 11/11 after its generation spec was updated to the "inference requests attempted" label. |
+| Disposable monitoring verification | 2026-11-18 | Integration, PostgreSQL and scale suites passed. Live integration checked operator access, three Identity replicas, measured request latency, and dead-letter retention and recovery across a Kafka outage. All 200 submissions were accepted and marked once in each load trial, including the Grading replica loss. Both monitoring Playwright cases passed on a focused rerun. The full browser run also failed existing chat answer-text and question-generation label assertions. |
 | Stack tests (integration, db, e2e) with `--live-ai` | 2026-11-01 | All pass on Windows behind the edge, with the question bank and resits: integration 201 s with every AI path required to work (indexing, search, chat, generation, marking suggestions, interpretation), every database suite 69 s (Assessment's bank, assignee and resit races included), 9/9 Playwright 98 s (`resits.spec.ts` included). Playwright's generation and chat specs stub model responses, so only integration checks real model answers; a fresh volume does not exercise the H2-to-PostgreSQL migration or migration 006 on existing data. |
 | Agent evals (`scripts/eval/`) | 2026-10-27 | Reviewer caught 11/13 planted faults with no good draft failed; interpretations accepted 10/10 with expected tool use 1.0. $0.023 in all. Details: operations.md, "Agent evals". |
 | Retrieval and chat evals | 2026-10-20 | Retrieval hit@1 0.924, MRR 0.950, no leaks; chat 3 failed cases (`waterfall-weakness`, `multi-review-testing`, `multi-persistence-design`). Follow-up changes await a paid rerun: `rag-quality-followup.md`. The 0.5 floors have not been re-run against the corpus. |
 | Premium UI audit | 2026-10-21 | 64 findings the tool raises on Angular `(click)` and shared textarea styles; reviewed, not a clean pass. |
 
 ## Operational notes
+
+- Dedicated Keycloak platform operators use `/admin/monitoring` for service readiness, five-minute response-header p95, Kafka dead-letter estimates and ai-core expenditure. Provisioning and metric meanings are in operations.md, "Platform monitoring".
 
 - Kong re-resolves service names every 5 seconds; a new route still needs `docker compose restart kong`.
 - Kong rate-limits per `Authorization` header (120 a minute per signed-in session).

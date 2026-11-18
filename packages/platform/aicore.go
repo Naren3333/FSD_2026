@@ -107,7 +107,7 @@ func (a AICore) Call(ctx context.Context, path, contentType string, body io.Read
 		}
 		_ = json.NewDecoder(io.LimitReader(res.Body, 1<<16)).Decode(&e)
 		if res.StatusCode == http.StatusUnauthorized {
-			a.Tokens.Reset()
+			a.Tokens.Reject(token)
 		}
 		return &AIError{res.StatusCode, e.Error.Code, e.Error.Message, e.Error.ResetsAt}
 	}

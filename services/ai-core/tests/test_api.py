@@ -4,6 +4,7 @@ import json
 from collections.abc import Callable
 
 import httpx2
+import psycopg
 import pytest
 from conftest import (
     BILLED,
@@ -15,6 +16,7 @@ from conftest import (
     embedding_response,
 )
 from fastapi.testclient import TestClient
+from learning_transport import MONITORING_READER
 from learning_transport.testing import as_caller, token_claims
 
 from main import app
@@ -54,6 +56,54 @@ def test_embed(api: TestClient, openai_fake: FakeOpenAI) -> None:
         "finish_reason": None,
     }
     assert openai_fake.requests[0]["input"] == ["Authorized material"]
+
+
+def test_monitoring_reader_cannot_run_paid_operations(api: TestClient, openai_fake: FakeOpenAI) -> None:
+    assert api.get("/internal/spend/summary").status_code == 403
+    assert api.get("/internal/http-metrics").status_code == 403
+    with as_caller(app, token_claims(MONITORING_READER)):
+        before = api.get("/internal/http-metrics")
+        assert before.status_code == 200
+        assert before.json()["bounds_ms"] == [10, 50, 100, 500, 1000, 5000, 30000, 60000, 120000, 300000]
+        assert api.get("/health/live").status_code == 200
+        assert api.get("/internal/spend/summary").status_code == 503  # the test double has no report database
+        assert api.post("/v1/inference", json=EMBED).status_code == 403
+        assert api.post("/v1/rerank", json=RERANK).status_code == 403
+        after = api.get("/internal/http-metrics").json()
+        assert after["instance"] == before.json()["instance"]
+        assert sum(after["bucket_counts"]) - sum(before.json()["bucket_counts"]) == 2
+    assert not openai_fake.requests
+
+
+@pytest.mark.parametrize(
+    ("report", "exception", "expected"),
+    [
+        ("summary", TimeoutError, 503),
+        ("users", psycopg.OperationalError, 503),
+        ("summary", ValueError, 500),
+    ],
+)
+def test_spend_failures_are_logged_without_private_details(
+    api: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+    report: str,
+    exception: type[Exception],
+    expected: int,
+) -> None:
+    async def fail(*_args: object) -> None:
+        raise exception("private billed account filter")
+
+    monkeypatch.setattr("main.reporting_ledger", lambda _request: None)
+    monkeypatch.setattr(f"spend_report.{report}", fail)
+    with as_caller(app, token_claims(MONITORING_READER)):
+        response = api.get(f"/internal/spend/{report}")
+    assert response.status_code == expected
+    record = next(record for record in caplog.records if record.message == "spend_report_failed")
+    assert record.__dict__["report"] == report
+    assert record.__dict__["error_category"] == exception.__name__
+    assert record.__dict__["correlation_id"] == response.headers["X-Correlation-ID"]
+    assert "private billed account filter" not in caplog.text + response.text
 
 
 def test_generate_from_input(api: TestClient, openai_fake: FakeOpenAI) -> None:

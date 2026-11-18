@@ -90,9 +90,9 @@ What it shows, and what it does not:
 - **Operational caches are local.** Content coalesces identical embedding misses within one replica; ai-core's
   disk caches and coalescing are optimizations, not shared authorities. Replicas may duplicate a cache miss.
   AI allowance reservations and user concurrency are serialized in ai-core's PostgreSQL database across replicas.
-- **Metrics need a collector.** Authenticated `/internal/metrics` endpoints expose request/cache latency and
-  counts, pool pressure, Content queues and AI cost/reservation gauges. There is no Prometheus server or tracing
-  deployment; the scale demo also measures from the load generator, `docker stats` and the databases.
+- **Monitoring.** The internal collector samples readiness and API response-header histograms by replica,
+  reads Kafka dead-letter offsets, and asks ai-core for ledger reports. The operator page shows five-minute
+  latency and replica coverage. The scale demo also measures from the load generator, `docker stats` and the databases.
 
 ## What a real deployment would change
 

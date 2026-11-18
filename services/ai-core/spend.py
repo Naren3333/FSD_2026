@@ -132,7 +132,7 @@ class PostgresLedger(AsyncPooled):
                 await lock_async(conn, "ai-budget", "all-users")
                 total = await (
                     await conn.execute(
-                        """SELECT (SELECT coalesce(sum(cost_usd),0) FROM usage)
+                        """SELECT (SELECT sum(cost_usd) FROM usage_lifetime_total)
                         +(SELECT coalesce(sum(amount),0) FROM budget_reservations) AS committed"""
                     )
                 ).fetchone()

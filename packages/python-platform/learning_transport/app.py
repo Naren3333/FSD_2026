@@ -15,7 +15,7 @@ from pydantic import BaseModel
 from starlette.responses import Response
 
 from learning_transport import logs, metrics
-from learning_transport.auth import AI_CLIENT, Claims, requires
+from learning_transport.auth import AI_CLIENT, MONITORING_READER, Claims, requires
 from learning_transport.errors import ErrorResponse, unavailable
 
 OIDC_SETTINGS = ("OIDC_ISSUER", "OIDC_AUDIENCE", "OIDC_JWKS_URL")
@@ -77,7 +77,10 @@ def application(name: str, **kwargs: Any) -> FastAPI:
             )
         response.headers["X-Correlation-ID"] = correlation
         response.headers["X-Request-ID"] = request_id
-        metrics.observe(time.monotonic() - start, response.status_code)
+        elapsed = time.monotonic() - start
+        if request.url.path.startswith("/v1/"):
+            metrics.observe_api_headers(elapsed)
+        metrics.observe(elapsed, response.status_code)
         logger.info(
             "request",
             extra={
@@ -100,6 +103,10 @@ def application(name: str, **kwargs: Any) -> FastAPI:
         if collect is not None:
             extra.update(await collect())
         return Response(metrics.render(extra), media_type="text/plain; version=0.0.4")
+
+    @app.get("/internal/http-metrics", include_in_schema=False)
+    async def http_headers(_caller: Claims = Depends(requires(MONITORING_READER))) -> JSONResponse:
+        return JSONResponse(metrics.header_histogram(), headers={"Cache-Control": "no-store"})
 
     return app
 

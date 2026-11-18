@@ -10,10 +10,12 @@ from pathlib import Path
 from typing import Any, NoReturn
 
 import openai
-from fastapi import Depends, HTTPException, Query, Request
+import psycopg
+from fastapi import Depends, HTTPException, Query, Request, Response
 from fastapi.responses import StreamingResponse
 from learning_transport import (
     AI_CLIENT,
+    MONITORING_READER,
     OIDC_SETTINGS,
     Claims,
     ErrorResponse,
@@ -29,6 +31,7 @@ import budget
 import openai_client
 import rerank
 import spend
+import spend_report
 from billing import Billing, Slot, StreamBill, ingest_charges, ledger_unavailable, priced, reply_charge
 from contracts import (
     IngestChunk,
@@ -76,6 +79,65 @@ app = application("ai-core", lifespan=lifespan)
 
 # only service accounts holding ai-client call ai-core; each call names the user it is billed to.
 SERVICE = requires(AI_CLIENT)
+MONITORING = requires(MONITORING_READER)
+REPORT_ERRORS = {**ERRORS, 500: {"model": ErrorResponse}}
+
+
+def reporting_ledger(request: Request) -> spend.PostgresLedger:
+    ledger = billing_of(request).ledger
+    if not isinstance(ledger, spend.PostgresLedger):
+        log.error(
+            "spend_report_unavailable",
+            extra={"correlation_id": correlation_of(request), "error_category": "ledger_missing"},
+        )
+        raise ledger_unavailable()
+    return ledger
+
+
+@contextlib.asynccontextmanager
+async def reporting_timeout(request: Request, report: str) -> AsyncIterator[None]:
+    try:
+        async with asyncio.timeout(4):
+            yield
+    except Exception as error:
+        log.error(
+            "spend_report_failed",
+            extra={
+                "correlation_id": correlation_of(request),
+                "report": report,
+                "error_category": type(error).__name__,
+                "sqlstate": error.sqlstate if isinstance(error, psycopg.Error) else None,
+            },
+        )
+        if isinstance(error, TimeoutError | psycopg.OperationalError):
+            raise ledger_unavailable() from None
+        raise failure(500, "INTERNAL_ERROR", "The spend report could not be generated.") from None
+
+
+@app.get("/internal/spend/summary", responses=REPORT_ERRORS)
+async def spend_summary(
+    request: Request, response: Response, _caller: Claims = Depends(MONITORING)
+) -> spend_report.SpendSummary:
+    response.headers["Cache-Control"] = "no-store"
+    ledger = reporting_ledger(request)
+    async with reporting_timeout(request, "summary"):
+        return await spend_report.summary(ledger)
+
+
+@app.get("/internal/spend/users", responses=REPORT_ERRORS)
+async def spend_users(
+    request: Request,
+    response: Response,
+    period: spend_report.Period = "today",
+    org_id: str | None = Query(None, min_length=1, max_length=200),
+    user_id: str | None = Query(None, min_length=1, max_length=200),
+    offset: int = Query(0, ge=0, le=2_147_483_647),
+    _caller: Claims = Depends(MONITORING),
+) -> spend_report.UserSpendPage:
+    response.headers["Cache-Control"] = "no-store"
+    ledger = reporting_ledger(request)
+    async with reporting_timeout(request, "users"):
+        return await spend_report.users(ledger, period, org_id, user_id, offset)
 
 
 @app.get("/health/ready", responses={503: {"model": ErrorResponse}})

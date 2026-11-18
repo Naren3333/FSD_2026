@@ -142,7 +142,9 @@ test('a teacher generates questions and drafts marking guidance', async ({ page 
   expect(requests.at(-1)?.review).toBe(true);
   await page.getByText('How the drafts were checked').click();
   await expect(page.getByText('Round 1:')).toBeVisible();
-  await expect(page.getByText('4 AI calls in total.')).toBeVisible();
+  await expect(
+    page.getByText(/4 inference requests attempted, including\s+failures and refusals\./),
+  ).toBeVisible();
   const firstDraft = page.getByRole('group', { name: 'Generated question 1' });
   await expect(firstDraft.getByText('AI-written draft')).toBeVisible();
   // closing the panel keeps its drafts.

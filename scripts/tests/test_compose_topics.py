@@ -1,5 +1,6 @@
 """verify that compose provisions every topic the services use."""
 
+import json
 import re
 from pathlib import Path
 
@@ -57,6 +58,13 @@ def test_every_consumed_topic_has_its_dead_letter_topic():
     created = created_topics()
     missing = {f"{topic}.dlq" for topic in named_topics() if topic not in EMIT_ONLY} - created
     assert missing == set()
+
+
+def test_monitor_checks_each_configured_dead_letter_topic():
+    targets = json.loads((ROOT / "infra/monitoring/targets.json").read_text(encoding="utf-8"))
+    topics = targets["dead_letter_topics"]
+    assert len(topics) == len(set(topics))
+    assert set(topics) == {topic for topic in created_topics() if topic.endswith(".dlq")}
 
 
 def test_emit_only_topics_are_only_named_by_content():

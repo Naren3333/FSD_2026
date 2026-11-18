@@ -2,9 +2,31 @@
 
 import threading
 from typing import Any
+from uuid import uuid4
 
 _lock = threading.Lock()
 _values: dict[str, float] = {}
+_instance = str(uuid4())
+_header_bounds_ms = (10, 50, 100, 500, 1000, 5000, 30_000, 60_000, 120_000, 300_000)
+_header_counts = [0] * (len(_header_bounds_ms) + 1)
+
+
+def observe_api_headers(seconds: float) -> None:
+    bucket = next(
+        (i for i, bound in enumerate(_header_bounds_ms) if seconds <= bound / 1000),
+        len(_header_bounds_ms),
+    )
+    with _lock:
+        _header_counts[bucket] += 1
+
+
+def header_histogram() -> dict[str, str | list[int]]:
+    with _lock:
+        return {
+            "instance": _instance,
+            "bounds_ms": list(_header_bounds_ms),
+            "bucket_counts": _header_counts.copy(),
+        }
 
 
 def increment(name: str, value: float = 1.0) -> None:

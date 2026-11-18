@@ -5,7 +5,7 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        path: [packages/platform, services/identity, services/curriculum, services/content, services/assessment, services/grading]
+        path: [packages/platform, infra/monitoring, services/identity, services/curriculum, services/content, services/assessment, services/grading]
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5

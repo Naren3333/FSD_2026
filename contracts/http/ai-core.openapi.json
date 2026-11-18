@@ -38,6 +38,286 @@
         }
       }
     },
+    "/internal/spend/summary": {
+      "get": {
+        "summary": "Spend Summary",
+        "operationId": "spend_summary_internal_spend_summary_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SpendSummary"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "Content Too Large",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "415": {
+            "description": "Unsupported Media Type",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Unprocessable Content",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Too Many Requests",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "Bad Gateway",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Service Unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal Server Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/internal/spend/users": {
+      "get": {
+        "summary": "Spend Users",
+        "operationId": "spend_users_internal_spend_users_get",
+        "parameters": [
+          {
+            "name": "period",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "enum": [
+                "today",
+                "last_7_days"
+              ],
+              "type": "string",
+              "default": "today",
+              "title": "Period"
+            }
+          },
+          {
+            "name": "org_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 200
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Org Id"
+            }
+          },
+          {
+            "name": "user_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 200
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "User Id"
+            }
+          },
+          {
+            "name": "offset",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 2147483647,
+              "minimum": 0,
+              "default": 0,
+              "title": "Offset"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UserSpendPage"
+                }
+              }
+            }
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "413": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Content Too Large"
+          },
+          "415": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Unsupported Media Type"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Unprocessable Content"
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Too Many Requests"
+          },
+          "502": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Bad Gateway"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          }
+        }
+      }
+    },
     "/health/ready": {
       "get": {
         "summary": "Ready",
@@ -644,6 +924,55 @@
         "title": "Billed",
         "description": "the user a call is made for."
       },
+      "Ceiling": {
+        "properties": {
+          "limit_usd": {
+            "type": "string",
+            "title": "Limit Usd"
+          },
+          "remaining_usd": {
+            "type": "string",
+            "title": "Remaining Usd"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "limit_usd",
+          "remaining_usd"
+        ],
+        "title": "Ceiling"
+      },
+      "DailySpend": {
+        "properties": {
+          "recorded_usd": {
+            "type": "string",
+            "title": "Recorded Usd"
+          },
+          "estimated_usd": {
+            "type": "string",
+            "title": "Estimated Usd"
+          },
+          "calls": {
+            "type": "integer",
+            "title": "Calls"
+          },
+          "day": {
+            "type": "string",
+            "format": "date",
+            "title": "Day"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "recorded_usd",
+          "estimated_usd",
+          "calls",
+          "day"
+        ],
+        "title": "DailySpend"
+      },
       "ErrorBody": {
         "properties": {
           "code": {
@@ -949,6 +1278,35 @@
         ],
         "title": "Message"
       },
+      "OperationSpend": {
+        "properties": {
+          "recorded_usd": {
+            "type": "string",
+            "title": "Recorded Usd"
+          },
+          "estimated_usd": {
+            "type": "string",
+            "title": "Estimated Usd"
+          },
+          "calls": {
+            "type": "integer",
+            "title": "Calls"
+          },
+          "operation": {
+            "type": "string",
+            "title": "Operation"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "recorded_usd",
+          "estimated_usd",
+          "calls",
+          "operation"
+        ],
+        "title": "OperationSpend"
+      },
       "Passage": {
         "properties": {
           "title": {
@@ -1168,6 +1526,35 @@
         ],
         "title": "RerankResponse"
       },
+      "Reservations": {
+        "properties": {
+          "count": {
+            "type": "integer",
+            "title": "Count"
+          },
+          "reserved_usd": {
+            "type": "string",
+            "title": "Reserved Usd"
+          },
+          "expired_count": {
+            "type": "integer",
+            "title": "Expired Count"
+          },
+          "expired_usd": {
+            "type": "string",
+            "title": "Expired Usd"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "count",
+          "reserved_usd",
+          "expired_count",
+          "expired_usd"
+        ],
+        "title": "Reservations"
+      },
       "ResponseContract": {
         "properties": {
           "output": {
@@ -1233,6 +1620,61 @@
         ],
         "title": "ResponseContract"
       },
+      "SpendSummary": {
+        "properties": {
+          "as_of": {
+            "type": "string",
+            "format": "date-time",
+            "title": "As Of"
+          },
+          "timezone": {
+            "type": "string",
+            "title": "Timezone"
+          },
+          "today": {
+            "$ref": "#/components/schemas/DailySpend"
+          },
+          "days": {
+            "items": {
+              "$ref": "#/components/schemas/DailySpend"
+            },
+            "type": "array",
+            "title": "Days"
+          },
+          "operations": {
+            "items": {
+              "$ref": "#/components/schemas/OperationSpend"
+            },
+            "type": "array",
+            "title": "Operations"
+          },
+          "reservations": {
+            "$ref": "#/components/schemas/Reservations"
+          },
+          "ceiling": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Ceiling"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "as_of",
+          "timezone",
+          "today",
+          "days",
+          "operations",
+          "reservations",
+          "ceiling"
+        ],
+        "title": "SpendSummary"
+      },
       "Usage": {
         "properties": {
           "spent_usd": {
@@ -1259,6 +1701,73 @@
           "resets_at"
         ],
         "title": "Usage"
+      },
+      "UserSpend": {
+        "properties": {
+          "recorded_usd": {
+            "type": "string",
+            "title": "Recorded Usd"
+          },
+          "estimated_usd": {
+            "type": "string",
+            "title": "Estimated Usd"
+          },
+          "calls": {
+            "type": "integer",
+            "title": "Calls"
+          },
+          "org_id": {
+            "type": "string",
+            "title": "Org Id"
+          },
+          "user_id": {
+            "type": "string",
+            "title": "User Id"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "recorded_usd",
+          "estimated_usd",
+          "calls",
+          "org_id",
+          "user_id"
+        ],
+        "title": "UserSpend"
+      },
+      "UserSpendPage": {
+        "properties": {
+          "as_of": {
+            "type": "string",
+            "format": "date-time",
+            "title": "As Of"
+          },
+          "timezone": {
+            "type": "string",
+            "title": "Timezone"
+          },
+          "total": {
+            "type": "integer",
+            "title": "Total"
+          },
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/UserSpend"
+            },
+            "type": "array",
+            "title": "Items"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "as_of",
+          "timezone",
+          "total",
+          "items"
+        ],
+        "title": "UserSpendPage"
       }
     }
   }

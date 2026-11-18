@@ -543,6 +543,7 @@ ERRORS = {
     413: "Too large",
     422: "Validation error",
     500: "Internal error",
+    502: "AI expenditure report failed or the monitoring service account is misconfigured",
     503: "Dependency unavailable",
 }
 
@@ -1196,6 +1197,115 @@ for topic, payload in payloads.items():
         },
     )
 
+
+def export_monitoring(ai_contract):
+    count = {"type": "integer", "minimum": 0}
+    optional_count = {"type": ["integer", "null"], "minimum": 0}
+    replica = obj(
+        {
+            "replica": {"type": "integer", "minimum": 1},
+            "state": {"enum": ["ready", "not_ready", "unreachable"]},
+            "ready_probe_ms": optional_count,
+        }
+    )
+    service = obj(
+        {
+            "name": TEXT,
+            "state": {
+                "enum": ["checking", "ready", "degraded", "not_ready", "unreachable", "discovery_failed"]
+            },
+            "checked_at": NULLABLE_TIME,
+            "ready_replicas": count,
+            "replicas": array(replica, maximum=64),
+            "last_ready_at": {"type": "string", "format": "date-time"},
+            "latency": obj(
+                {
+                    "state": {"enum": ["checking", "available", "partial", "unavailable"]},
+                    "requests": count,
+                    "p95_ms": optional_count,
+                    "above_max_bucket": {"type": "boolean"},
+                    "covered_replicas": count,
+                }
+            ),
+        },
+        ["name", "state", "checked_at", "ready_replicas", "replicas", "latency"],
+    )
+    dead_letter = obj(
+        {
+            "name": TEXT,
+            "state": {"enum": ["checking", "available", "unavailable", "stale"]},
+            "estimated_retained": optional_count,
+            "checked_at": NULLABLE_TIME,
+            "last_success_at": NULLABLE_TIME,
+        }
+    )
+    sources = ai_contract["components"]["schemas"]
+    schemas = {
+        name: sources[name]
+        for name in (
+            "Ceiling",
+            "DailySpend",
+            "OperationSpend",
+            "Reservations",
+            "SpendSummary",
+            "UserSpend",
+            "UserSpendPage",
+        )
+    }
+    # the collector reports one row per watched application and dead-letter topic.
+    targets = json.loads((ROOT / "infra/monitoring/targets.json").read_text(encoding="utf-8"))
+    watched, topics = len(targets["services"]), len(targets["dead_letter_topics"])
+    schemas["MonitoringStatus"] = obj(
+        {"services": array(service, watched, watched), "dead_letters": array(dead_letter, topics, topics)}
+    )
+    paths = {}
+    for path, schema in (
+        ("status", "MonitoringStatus"),
+        ("ai-spend", "SpendSummary"),
+        ("ai-spend/users", "UserSpendPage"),
+    ):
+        parameters = (
+            ai_contract["paths"]["/internal/spend/users"]["get"]["parameters"]
+            if path.endswith("/users")
+            else []
+        )
+        paths[f"/api/monitoring/{path}"] = {
+            "get": {
+                "operationId": "monitoring_" + path.replace("-", "_").replace("/", "_"),
+                "parameters": parameters,
+                "responses": {
+                    "200": {
+                        "description": "Operator data",
+                        "content": {
+                            "application/json": {"schema": {"$ref": f"#/components/schemas/{schema}"}}
+                        },
+                    },
+                    **errors(
+                        [401, 403] + ([422] if parameters else []) + ([502, 503] if path != "status" else [])
+                    ),
+                },
+            }
+        }
+    save(
+        "contracts/http/monitoring.openapi.json",
+        {
+            "openapi": "3.1.0",
+            "info": {"title": "Platform monitoring", "version": "1.0.0"},
+            "x-operator-policy": json.loads(
+                (ROOT / "infra/monitoring/operator-policy.json").read_text(encoding="utf-8")
+            ),
+            "security": [{"bearerAuth": []}],
+            "components": {
+                "schemas": schemas,
+                "securitySchemes": {
+                    "bearerAuth": {"type": "http", "scheme": "bearer", "bearerFormat": "JWT"}
+                },
+            },
+            "paths": paths,
+        },
+    )
+
+
 env = dict(os.environ, PYTHONPATH=str(ROOT / "packages/python-platform"))
 for name in [
     "analytics",
@@ -1211,7 +1321,10 @@ for name in [
         text=True,
         encoding="utf-8",
     )
-    save(f"contracts/http/{name}.openapi.json", json.loads(data))
+    contract = json.loads(data)
+    save(f"contracts/http/{name}.openapi.json", contract)
+    if name == "ai-core":
+        export_monitoring(contract)
 # leftover event schemas (a retired version) are stale too: nothing above writes them.
 written = {f"contracts/events/{topic}.schema.json" for topic in payloads}
 stale += sorted(
@@ -1228,7 +1341,7 @@ if stale:  # leftover event schemas, when writing
         (ROOT / path).unlink()
         print(f"Removed {path}")
 print(
-    f"{'Checked' if CHECK else 'Exported'} ten HTTP contracts and {len(payloads)} implemented event schemas."
+    f"{'Checked' if CHECK else 'Exported'} eleven HTTP contracts and {len(payloads)} implemented event schemas."
 )
 # the web app's api types are generated from these contracts (apps/web/src/api/generated); its check.py lane
 # checks them with `npm run contracts:check`.

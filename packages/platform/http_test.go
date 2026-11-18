@@ -210,6 +210,42 @@ func TestHandlersCanExtendTheirOwnWriteDeadline(t *testing.T) {
 	}
 }
 
+type headerSequence struct {
+	*httptest.ResponseRecorder
+	codes []int
+}
+
+func (w *headerSequence) WriteHeader(status int) {
+	w.codes = append(w.codes, status)
+	if status >= 200 || status == http.StatusSwitchingProtocols {
+		w.ResponseRecorder.WriteHeader(status)
+	}
+}
+
+func TestInformationalHeadersDoNotStartFinalResponse(t *testing.T) {
+	for _, final := range []int{http.StatusOK, http.StatusSwitchingProtocols} {
+		underlying := &headerSequence{ResponseRecorder: httptest.NewRecorder()}
+		observations := 0
+		writer := &responseRecorder{ResponseWriter: underlying, onHeaders: func() { observations++ }}
+		writer.WriteHeader(http.StatusContinue)
+		writer.WriteHeader(http.StatusEarlyHints)
+		if writer.status != 0 || observations != 0 {
+			t.Fatalf("interim headers set status %d with %d observations", writer.status, observations)
+		}
+		if final == http.StatusOK {
+			if _, err := writer.Write([]byte("body")); err != nil {
+				t.Fatal(err)
+			}
+		} else {
+			writer.WriteHeader(final)
+		}
+		want := []int{http.StatusContinue, http.StatusEarlyHints, final}
+		if writer.status != final || observations != 1 || !slices.Equal(underlying.codes, want) {
+			t.Fatalf("got status %d, %d observations and headers %v, want %v", writer.status, observations, underlying.codes, want)
+		}
+	}
+}
+
 func TestFoundAnswersNotFoundOrFails(t *testing.T) {
 	cases := []struct {
 		err   error

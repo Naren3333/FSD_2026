@@ -2,12 +2,65 @@ package platform
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"sync/atomic"
 	"testing"
 	"time"
 )
+
+func TestAICoreLateUnauthorizedPreservesReplacementToken(t *testing.T) {
+	var fetches atomic.Int32
+	sent, release := make(chan struct{}), make(chan struct{})
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/token" {
+			_, _ = fmt.Fprintf(w, `{"access_token":"t%d","expires_in":300}`, fetches.Add(1))
+			return
+		}
+		if r.URL.Path == "/slow" {
+			close(sent)
+			<-release
+		}
+		if r.Header.Get("Authorization") == "Bearer t1" {
+			w.WriteHeader(http.StatusUnauthorized)
+			return
+		}
+		_, _ = w.Write([]byte(`{}`))
+	}))
+	t.Cleanup(server.Close)
+	tokens := &ServiceToken{URL: server.URL + "/token", Client: server.Client()}
+	api := AICore{Base: server.URL, Tokens: tokens, Client: server.Client()}
+	call := func(path string) error {
+		return api.Call(t.Context(), path, "application/json", nil, 0, new(struct{}))
+	}
+	late := make(chan error, 1)
+	go func() { late <- call("/slow") }()
+	defer close(release)
+	select {
+	case <-sent:
+	case err := <-late:
+		t.Fatalf("slow request did not reach ai-core: %v", err)
+	}
+
+	requireUnauthorized := func(err error) {
+		t.Helper()
+		var failure *AIError
+		if !errors.As(err, &failure) || failure.Status != http.StatusUnauthorized {
+			t.Fatalf("got %v, want unauthorized", err)
+		}
+	}
+	requireUnauthorized(call("/fast"))
+	if err := call("/fast"); err != nil {
+		t.Fatal(err)
+	}
+	release <- struct{}{}
+	requireUnauthorized(<-late)
+	if token, err := tokens.Get(t.Context()); err != nil || token != "t2" || fetches.Load() != 2 {
+		t.Fatalf("got token %q (%v) after %d fetches, want t2 after two", token, err, fetches.Load())
+	}
+}
 
 func TestServiceTokenFetchesOnceAndWaitersHonourTheirContext(t *testing.T) {
 	var fetches atomic.Int32

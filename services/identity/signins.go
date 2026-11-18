@@ -56,7 +56,7 @@ func (k keycloakUsers) remove(ctx context.Context, user string) error {
 	case http.StatusNoContent, http.StatusNotFound:
 		return nil
 	case http.StatusUnauthorized:
-		k.tokens.Reset()
+		k.tokens.Reject(token)
 	}
 	return fmt.Errorf("keycloak answered %d", res.StatusCode)
 }

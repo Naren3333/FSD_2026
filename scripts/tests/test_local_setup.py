@@ -33,6 +33,19 @@ def test_every_value_compose_requires_is_generated_and_in_the_example() -> None:
     assert required <= example.keys(), required - example.keys()
 
 
+def test_monitor_keeps_machine_and_test_operator_roles_separate() -> None:
+    values = generate_secrets()
+    local = setup.realm(values)
+    assert all(setup.OPERATOR_ROLE not in user.get("realmRoles", []) for user in local["users"])
+    reader = next(
+        user for user in local["users"] if user.get("serviceAccountClientId") == setup.MONITORING_CLIENT
+    )
+    assert reader["realmRoles"] == [setup.MONITORING_CLIENT]
+    test = setup.realm(values, setup.TEST_WEB_ORIGIN, operator_password="test-only-value")
+    operator = next(user for user in test["users"] if user["username"] == setup.TEST_OPERATOR_USERNAME)
+    assert operator["realmRoles"] == [setup.OPERATOR_ROLE]
+
+
 def test_no_unguarded_secret_in_compose() -> None:
     """a plain ${name} would silently become empty; only optional values carry a default."""
     assert re.findall(r"\$\{\w+\}", COMPOSE) == []
@@ -71,7 +84,7 @@ def test_read_env_reads_values_as_compose_does(tmp_path: Path) -> None:
 
 def test_every_application_has_a_healthcheck() -> None:
     """the go images are distroless, so their binary checks itself; the python images ask with python."""
-    go = {"identity", "curriculum", "content", "assessment", "grading"}
+    go = {"identity", "curriculum", "content", "assessment", "grading", "monitoring"}
     for name in wait_ready.SERVICES:
         block = re.search(
             rf"^  {re.escape(name)}:\n((?:    .*\n|      .*\n|        .*\n)*)", COMPOSE, re.MULTILINE
@@ -99,6 +112,14 @@ def test_upgrade_adds_only_what_env_lacks(tmp_path: Path) -> None:
     before = env_path.read_text(encoding="utf-8")
     upgrade_local.add_missing_secrets(env_path)
     assert env_path.read_text(encoding="utf-8") == before
+
+
+def test_monitor_probes_each_application() -> None:
+    targets = json.loads((ROOT / "infra" / "monitoring" / "targets.json").read_text(encoding="utf-8"))
+    probed = targets["services"]
+    applications = [name for name in wait_ready.SERVICES if name != "monitoring"]
+    assert sorted(probed) == sorted(applications) and len(probed) == len(set(probed))
+    assert set(probed) <= set(yaml.safe_load(COMPOSE)["services"])
 
 
 def test_kong_waits_longer_than_contents_upload_deadline() -> None:
@@ -203,6 +224,7 @@ class FakeKeycloak:
         self.clients = {name: f"id-{name}" for name in {*clients, setup.ACCOUNTS_ROLE[0]}}
         self.created: list[str] = []
         self.mappings: set[tuple[str, str]] = set()
+        self.roles = {"ai-client"}
 
     def handle(self, request: httpx.Request) -> httpx.Response:
         path, method = request.url.path, request.method
@@ -217,6 +239,13 @@ class FakeKeycloak:
             return httpx.Response(201)
         if path.endswith("/service-account-user"):
             return httpx.Response(200, json={"id": "account-" + path.split("/")[2]})
+        if path.startswith("/roles/") and method == "GET" and path.rsplit("/", 1)[1] not in self.roles:
+            return httpx.Response(404)
+        if path == "/roles" and method == "POST":
+            role = json.loads(request.content)["name"]
+            assert role not in self.roles
+            self.roles.add(role)
+            return httpx.Response(201)
         if method == "GET" and "/roles/" in path:
             return httpx.Response(200, json={"name": path.rsplit("/", 1)[1]})
         if method == "POST" and "/role-mappings/" in path:
@@ -248,9 +277,15 @@ def test_upgrade_assigns_the_accounts_role_after_a_half_finished_run(monkeypatch
 def test_upgrade_assigns_the_ai_client_role_to_existing_clients(monkeypatch: pytest.MonkeyPatch) -> None:
     keycloak = FakeKeycloak({setup.AI_CLIENTS[0]})
     monkeypatch.setattr(upgrade_local, "admin_client", keycloak.admin)
-    upgrade_local.add_missing_clients(generate_secrets())
-    assert keycloak.created == setup.AI_CLIENTS[1:]
-    assert keycloak.mappings == {(f"account-id-{client}", "ai-client") for client in setup.AI_CLIENTS}
+    values = generate_secrets()
+    upgrade_local.add_missing_clients(values)
+    upgrade_local.add_missing_clients(values)
+    assert keycloak.created == [*setup.AI_CLIENTS[1:], setup.MONITORING_CLIENT]
+    assert keycloak.roles == {"ai-client", setup.MONITORING_CLIENT, setup.OPERATOR_ROLE}
+    assert keycloak.mappings == {
+        *((f"account-id-{client}", "ai-client") for client in setup.AI_CLIENTS),
+        (f"account-id-{setup.MONITORING_CLIENT}", setup.MONITORING_CLIENT),
+    }
 
 
 def compose_services() -> dict[str, Any]:
@@ -267,6 +302,15 @@ def test_only_data_owners_reach_the_data_network() -> None:
         assert services[agent]["networks"] == ["app"], agent
     assert "data" not in services["web"]["networks"] and "data" not in services["kong"]["networks"]
     assert "data" not in services["edge"]["networks"]
+
+
+def test_monitoring_reaches_the_broker_but_no_database() -> None:
+    networks = yaml.safe_load(COMPOSE)["networks"]
+    assert networks["events"] == {"internal": True}
+    services = compose_services()
+    assert services["monitoring"]["networks"] == ["app", "events"]
+    reachable = {name for name, service in services.items() if "events" in service.get("networks", [])}
+    assert reachable == {"kafka", "monitoring"}
 
 
 def test_every_container_has_limits_and_long_running_ones_restart() -> None:

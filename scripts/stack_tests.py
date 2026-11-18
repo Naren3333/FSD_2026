@@ -3,13 +3,22 @@
 import argparse
 import json
 import os
+import secrets
 import subprocess
 import sys
 import time
 from pathlib import Path
 
-from local_stack import ROOT, TEST_PORTS, TEST_PROJECT, TEST_URLS, env
-from setup import TEST_WEB_ORIGIN, postgres_init, realm
+from local_stack import (
+    ROOT,
+    TEST_LOCAL_CONFIG_DIR,
+    TEST_PORTS,
+    TEST_PROJECT,
+    TEST_URLS,
+    env,
+    load_test_monitoring_credentials,
+)
+from setup import MONITORING_CLIENT, TEST_WEB_ORIGIN, client_secret_key, postgres_init, realm
 
 # each suite's command and working directory, in the order they run.
 NPM = "npm.cmd" if os.name == "nt" else "npm"
@@ -24,9 +33,6 @@ DEFAULT_SUITES = ["integration", "db", "e2e"]
 # compose files the scale demo adds: its replicas, cpu caps and the k6 load generator.
 SCALE_FILE = "docker-compose.scale.yml"
 READY_TIMEOUT = 600  # seconds: a fresh stack imports the realm and runs every migration before it answers
-# the test stack's postgresql init script and realm import, beside the development stack's in .local
-# (relative to the repository, as docker-compose.yml's LOCAL_CONFIG_DIR reads it).
-TEST_LOCAL_CONFIG_DIR = ".local/test-stack"
 # isolate compose commands, ports and first-start files from the development stack.
 TEST_ENV = {
     **os.environ,
@@ -37,24 +43,41 @@ TEST_ENV = {
 }
 
 
-def compose(*args: str, check: bool = True) -> subprocess.CompletedProcess[str]:
+def compose(*args: str, check: bool = True, capture_output: bool = False) -> subprocess.CompletedProcess[str]:
     """runs `docker compose` on the test stack, showing its output."""
-    return subprocess.run(["docker", "compose", *args], cwd=ROOT, env=TEST_ENV, text=True, check=check)
+    return subprocess.run(
+        ["docker", "compose", *args],
+        cwd=ROOT,
+        env=TEST_ENV,
+        text=True,
+        check=check,
+        capture_output=capture_output,
+    )
 
 
-def refresh_local_files() -> None:
-    """writes the test stack's postgresql init script and realm import from .env, as scripts/setup.py writes the development stack's, into TEST_LOCAL_CONFIG_DIR."""
+def render_local_files() -> dict[str, str]:
+    """generate the disposable stack's postgresql init and realm import from .env."""
     try:
-        values = env()
-        sql, import_ = postgres_init(values), realm(values, TEST_WEB_ORIGIN)
+        values = dict(env())
+        key = client_secret_key(MONITORING_CLIENT)
+        TEST_ENV[key] = values[key] = secrets.token_hex(20)
+        operator_password = TEST_ENV["TEST_OPERATOR_PASSWORD"] = secrets.token_hex(20)
+        sql, import_ = (
+            postgres_init(values),
+            realm(values, TEST_WEB_ORIGIN, operator_password=operator_password),
+        )
     except FileNotFoundError:
         raise SystemExit("No .env: run python scripts/setup.py first.") from None
     except KeyError as missing:
         raise SystemExit(f".env lacks {missing}: run python scripts/upgrade_local.py.") from None
+    return {"postgres-init.sql": sql, "learning-realm.json": json.dumps(import_, indent=2)}
+
+
+def write_local_files(files: dict[str, str]) -> None:
     local = ROOT / TEST_LOCAL_CONFIG_DIR
     local.mkdir(parents=True, exist_ok=True)
-    (local / "postgres-init.sql").write_text(sql, encoding="utf-8")
-    (local / "learning-realm.json").write_text(json.dumps(import_, indent=2), encoding="utf-8")
+    for name, contents in files.items():
+        (local / name).write_text(contents, encoding="utf-8")
 
 
 def with_scale_file() -> None:
@@ -74,6 +97,31 @@ def run_suite(name: str, live_ai: bool) -> bool:
     return passed
 
 
+def wait_until_ready() -> None:
+    ready = [sys.executable, "scripts/wait_ready.py", "--timeout", str(READY_TIMEOUT)]
+    if subprocess.run(ready, cwd=ROOT, env=TEST_ENV, check=False).returncode != 0:
+        compose("ps", "--all", check=False)
+        raise SystemExit(f"The test stack did not become ready; see `docker compose -p {TEST_PROJECT} logs`.")
+
+
+def fresh_stack(suites: list[str], args: argparse.Namespace) -> list[str]:
+    files = render_local_files()
+    compose("down", "--volumes", "--remove-orphans")
+    write_local_files(files)
+    try:
+        compose("up", "--detach", *([] if args.no_build else ["--build"]))
+        wait_until_ready()
+        return [name for name in suites if not run_suite(name, args.live_ai)]
+    finally:
+        if args.keep:
+            print(
+                f"\nThe test stack is available at {TEST_WEB_ORIGIN}. "
+                "Rerun suites with: python scripts/stack_tests.py --reuse"
+            )
+        else:
+            compose("down", "--volumes", "--remove-orphans", check=False)
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(
         description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
@@ -85,6 +133,7 @@ def main() -> None:
         help=f"any of {', '.join(SUITES)} (default: {', '.join(DEFAULT_SUITES)})",
     )
     parser.add_argument("--keep", action="store_true", help="leave the test stack running afterwards")
+    parser.add_argument("--reuse", action="store_true", help="run against the already-running test stack")
     parser.add_argument("--no-build", action="store_true", help="reuse the images the last run built")
     parser.add_argument(
         "--live-ai", action="store_true", help="pass --live-ai to integration.py (paid calls)"
@@ -97,30 +146,21 @@ def main() -> None:
     if "scale" in suites:
         with_scale_file()
 
-    refresh_local_files()
-    # whatever an earlier --keep or interrupted run left, volumes included: every run starts from empty.
-    compose("down", "--volumes", "--remove-orphans")
-    failed: list[str] = []
-    try:
-        compose("up", "--detach", *([] if args.no_build else ["--build"]))
-        ready = [sys.executable, "scripts/wait_ready.py", "--timeout", str(READY_TIMEOUT)]
-        if subprocess.run(ready, cwd=ROOT, env=TEST_ENV, check=False).returncode != 0:
-            compose("ps", "--all", check=False)
+    if args.reuse:
+        TEST_ENV.update(load_test_monitoring_credentials(ROOT))
+        if not compose(
+            "ps", "--status", "running", "--quiet", "postgres", capture_output=True
+        ).stdout.strip():
             raise SystemExit(
-                f"The test stack did not become ready; see `docker compose -p {TEST_PROJECT} logs`."
+                "The test stack is not running. Start it with python scripts/stack_tests.py --keep."
             )
+        wait_until_ready()
         failed = [name for name in suites if not run_suite(name, args.live_ai)]
-    finally:
-        if args.keep:
-            web = TEST_WEB_ORIGIN
-            print(
-                f"\nThe test stack is still running at {web}. Remove it with: docker compose -p {TEST_PROJECT} down -v"
-            )
-        else:
-            compose("down", "--volumes", "--remove-orphans", check=False)
+    else:
+        failed = fresh_stack(suites, args)
     if failed:
         raise SystemExit(f"FAIL: {', '.join(failed)} (against the {TEST_PROJECT} stack)")
-    print(f"\nPASS: {', '.join(suites)} against a fresh {TEST_PROJECT} stack")
+    print(f"\nPASS: {', '.join(suites)} against the {TEST_PROJECT} stack")
 
 
 if __name__ == "__main__":

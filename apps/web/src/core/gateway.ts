@@ -14,7 +14,8 @@ export type Service =
   | 'analytics'
   | 'chatbot'
   | 'question-generation'
-  | 'performance-agent';
+  | 'performance-agent'
+  | 'monitoring';
 
 export interface RequestOptions {
   method?: 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE';
@@ -23,6 +24,7 @@ export interface RequestOptions {
   contentType?: string;
   /* bounds the whole call, upload included. */
   timeout?: number;
+  signal?: AbortSignal;
 }
 
 /* a failure the api answered: its readable message, its status and, when it named one, its error code. */
@@ -44,7 +46,8 @@ export class Gateway {
 
   async request<T>(service: Service, path: string, options: RequestOptions = {}): Promise<T> {
     const timeout = AbortSignal.timeout(options.timeout ?? this.config.requestTimeout);
-    const response = await this.send(service, path, options, timeout);
+    const signal = options.signal ? AbortSignal.any([timeout, options.signal]) : timeout;
+    const response = await this.send(service, path, options, signal);
     // 204 no content, such as an archive, has no body to read.
     if (response.status === 204) return undefined as T;
     return response.json() as Promise<T>;

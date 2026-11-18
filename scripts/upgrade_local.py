@@ -12,6 +12,8 @@ from setup import (
     AI_CLIENTS,
     DATABASES,
     LEGACY_WEB_ORIGINS,
+    MONITORING_CLIENT,
+    OPERATOR_ROLE,
     PEOPLE,
     TEST_WEB_ORIGIN,
     WEB_ATTRIBUTES,
@@ -62,15 +64,19 @@ def add_missing_databases(env: dict[str, str]) -> None:
 
 
 def add_missing_clients(env: dict[str, str]) -> None:
-    """creates each ai client keycloak lacks, with .env's secret, and gives its service account the ai-client role."""
+    """provisions client credentials with their roles, without assigning any human operator role."""
     with admin_client() as admin:
-        for client in AI_CLIENTS:
+        for name in (OPERATOR_ROLE, MONITORING_CLIENT):
+            if admin.get(f"/roles/{name}").status_code == 404:
+                check(admin.post("/roles", json={"name": name}))
+        for client in [*AI_CLIENTS, MONITORING_CLIENT]:
             created = ensure_client(
                 admin, client, lambda c=client: service_client(c, env[client_secret_key(c)])
             )
             client_id = check(admin.get("/clients", params={"clientId": client})).json()[0]["id"]
             account = check(admin.get(f"/clients/{client_id}/service-account-user")).json()
-            role = check(admin.get("/roles/ai-client")).json()
+            role_name = MONITORING_CLIENT if client == MONITORING_CLIENT else "ai-client"
+            role = check(admin.get(f"/roles/{role_name}")).json()
             check(admin.post(f"/users/{account['id']}/role-mappings/realm", json=[role]))
             if created:
                 print(f"Created Keycloak client {client}")

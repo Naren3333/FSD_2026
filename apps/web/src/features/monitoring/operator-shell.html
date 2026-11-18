@@ -1,0 +1,63 @@
+<a class="skip-link" href="#workspace" [attr.inert]="drawer.open() ? '' : null">Skip to workspace</a>
+<div class="app-shell" [class.menu-open]="drawer.open()">
+  <aside id="sidebar" class="sidebar">
+    <div class="sidebar-top">
+      <a #brand routerLink="/" class="brand">
+        <span class="brand-symbol" aria-hidden="true">L</span>
+        <span>Learning Ledger</span>
+      </a>
+      <button type="button" class="icon-button menu-close" aria-label="Close menu" (click)="drawer.hide()">
+        <app-icon name="x" />
+      </button>
+    </div>
+    <nav aria-label="Workspace">
+      <a [routerLink]="monitoringPath" routerLinkActive="active" ariaCurrentWhenActive="page">
+        <app-icon name="dashboard" />
+        Monitoring
+      </a>
+    </nav>
+    <div class="sidebar-status">
+      <app-status [state]="state" />
+    </div>
+    <div class="account">
+      <div class="account-who">
+        <strong>Signed in</strong>
+        <span>Platform operator</span>
+      </div>
+      <button type="button" class="quiet sign-out" (click)="logout()" [disabled]="state.busy()">
+        <app-icon name="logout" />
+        Sign out
+      </button>
+    </div>
+  </aside>
+  @if (drawer.open()) {
+    <div class="drawer-backdrop" (click)="drawer.hide()" aria-hidden="true"></div>
+  }
+  <main id="workspace" [attr.inert]="drawer.open() ? '' : null">
+    <div class="topbar">
+      <button
+        #menuButton
+        type="button"
+        class="icon-button menu-button"
+        aria-label="Open menu"
+        aria-controls="sidebar"
+        [attr.aria-expanded]="drawer.open()"
+        (click)="drawer.show()"
+      >
+        <app-icon name="menu" />
+      </button>
+      <span class="topbar-classroom">Operations</span>
+    </div>
+    <div class="notice-row" role="status">
+      @if (session.expired()) {
+        <p class="notice">
+          Your session expired. Sign in again to continue.
+          <button type="button" (click)="login()" [disabled]="state.busy()">Sign in again</button>
+        </p>
+      }
+    </div>
+    <div class="workspace-content">
+      <router-outlet />
+    </div>
+  </main>
+</div>

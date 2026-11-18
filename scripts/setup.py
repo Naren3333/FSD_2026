@@ -20,6 +20,9 @@ AI_CLIENTS = [
     "question-generation-agent",
     "student-performance-agent",
 ]
+MONITORING_CLIENT = "monitoring-reader"
+OPERATOR_ROLE = "platform-operator"
+TEST_OPERATOR_USERNAME = "monitoring-operator"
 # identity's service account for removing the sign-in account of a user who deleted theirs (adr 0011).
 ACCOUNTS_CLIENT = "identity-accounts"
 ACCOUNTS_ROLE = ("realm-management", "manage-users")
@@ -60,6 +63,7 @@ def generate_secrets() -> dict[str, str]:
         *(key for _, _, key in PEOPLE),
         "S3_CONTENT_PASSWORD",
         *(client_secret_key(c) for c in AI_CLIENTS),
+        client_secret_key(MONITORING_CLIENT),
         client_secret_key(ACCOUNTS_CLIENT),
         *(password_key(s) for s in DATABASES),
     ]
@@ -99,13 +103,13 @@ def person(username: str, role: str, password: str) -> dict[str, Any]:
     }
 
 
-def service_account(client: str) -> dict[str, Any]:
+def service_account(client: str, role: str = "ai-client") -> dict[str, Any]:
     return {
         "id": user_id(f"service-account-{client}"),
         "username": f"service-account-{client}",
         "enabled": True,
         "serviceAccountClientId": client,
-        "realmRoles": ["ai-client"],
+        "realmRoles": [role],
     }
 
 
@@ -177,7 +181,10 @@ def clients(values: dict[str, str], web_origin: str) -> list[dict[str, Any]]:
         "directAccessGrantsEnabled": True,
         "protocolMappers": PERSON_MAPPERS,
     }
-    services = [service_client(client, values[client_secret_key(client)]) for client in AI_CLIENTS]
+    services = [
+        service_client(client, values[client_secret_key(client)])
+        for client in [*AI_CLIENTS, MONITORING_CLIENT]
+    ]
     return [web, e2e, *services, accounts_client(values[client_secret_key(ACCOUNTS_CLIENT)])]
 
 
@@ -206,10 +213,15 @@ def service_client(client: str, secret: str) -> dict[str, Any]:
     }
 
 
-def realm(values: dict[str, str], web_origin: str = WEB_ORIGIN) -> dict[str, Any]:
+def realm(
+    values: dict[str, str], web_origin: str = WEB_ORIGIN, *, operator_password: str | None = None
+) -> dict[str, Any]:
     """the learning realm's import, for a stack whose web app is at `web_origin`."""
     users = [person(username, role, values[key]) for username, role, key in PEOPLE]
     users += [service_account(client) for client in AI_CLIENTS]
+    users.append(service_account(MONITORING_CLIENT, MONITORING_CLIENT))
+    if operator_password is not None:
+        users.append(person(TEST_OPERATOR_USERNAME, OPERATOR_ROLE, operator_password))
     owner, role = ACCOUNTS_ROLE
     users.append(
         {
@@ -227,7 +239,11 @@ def realm(values: dict[str, str], web_origin: str = WEB_ORIGIN) -> dict[str, Any
         # from the compose networks and this computer.
         "sslRequired": "external",
         "registrationAllowed": False,
-        "roles": {"realm": [{"name": r} for r in ["teacher", "student", "ai-client"]]},
+        "roles": {
+            "realm": [
+                {"name": r} for r in ["teacher", "student", "ai-client", OPERATOR_ROLE, MONITORING_CLIENT]
+            ]
+        },
         "users": users,
         "clients": clients(values, web_origin),
     }

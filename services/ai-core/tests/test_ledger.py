@@ -4,6 +4,8 @@ import asyncio
 import os
 from collections.abc import AsyncIterator
 from datetime import datetime, timedelta
+from decimal import Decimal
+from pathlib import Path
 from uuid import uuid4
 from zoneinfo import ZoneInfo
 
@@ -14,6 +16,7 @@ from fastapi import HTTPException
 from learning_transport import db
 
 import spend
+import spend_report
 
 pytestmark = pytest.mark.anyio
 URL = os.environ.get("AICORE_TEST_DATABASE_URL")
@@ -45,7 +48,9 @@ class Pinned:
 
 
 @pytest.fixture
-async def pinned(monkeypatch: pytest.MonkeyPatch) -> AsyncIterator[Pinned]:
+async def pinned(
+    monkeypatch: pytest.MonkeyPatch, request: pytest.FixtureRequest, tmp_path: Path
+) -> AsyncIterator[Pinned]:
     if not URL:
         pytest.skip("AICORE_TEST_DATABASE_URL is not set")
     schema = f"ledger_{uuid4().hex}"
@@ -53,7 +58,16 @@ async def pinned(monkeypatch: pytest.MonkeyPatch) -> AsyncIterator[Pinned]:
     monkeypatch.setattr(db, "CONNECTION_OPTIONS", {**db.CONNECTION_OPTIONS, "options": options})
     async with await psycopg.AsyncConnection.connect(URL, autocommit=True) as conn:
         await conn.execute(f"CREATE SCHEMA {schema}")
-    ledger = await spend.PostgresLedger.open(URL)  # migrates into the new schema
+    ledger_type = spend.PostgresLedger
+    if legacy_version := getattr(request, "param", None):
+        for step in db.migrations(spend.MIGRATIONS)[:legacy_version]:
+            (tmp_path / step.name).write_text(step.sql, encoding="utf-8")
+
+        class LegacyLedger(spend.PostgresLedger):
+            MIGRATIONS = tmp_path
+
+        ledger_type = LegacyLedger
+    ledger = await ledger_type.open(URL)
     try:
         async with ledger.pool.connection() as conn:
             await conn.execute(CLOCK)
@@ -79,6 +93,290 @@ async def test_concurrent_reservations_cannot_both_spend_the_same_allowance(pinn
     for i in ids:
         await pinned.ledger.release(i)
     await pinned.ledger.reserve(str(uuid4()), who, 4.0, 10)
+
+
+async def test_date_index_migration_allows_concurrent_starts_and_writes(pinned: Pinned) -> None:
+    assert URL is not None
+    at = datetime(2026, 11, 18, tzinfo=SGT)
+    async with pinned.ledger.pool.connection() as conn:
+        await conn.execute("DROP INDEX usage_by_date")
+        await conn.execute("DELETE FROM schema_migrations WHERE version = 4")
+
+    async def apply(url: str) -> None:
+        ledger = await spend.PostgresLedger.open(url)
+        await ledger.close()
+
+    waiting = """SELECT 1 FROM pg_stat_progress_create_index
+                 WHERE command = 'CREATE INDEX CONCURRENTLY'
+                   AND phase = 'waiting for writers before build'"""
+    second = psycopg.conninfo.make_conninfo(URL, application_name="test_second_ledger_migration")
+    competing = """SELECT 1 FROM pg_stat_activity
+                   WHERE application_name = 'test_second_ledger_migration'
+                     AND query ~ 'pg_(try_)?advisory_lock'"""
+    async with (
+        asyncio.timeout(20),
+        await psycopg.AsyncConnection.connect(URL, autocommit=True) as observer,
+        asyncio.TaskGroup() as group,
+        pinned.ledger.pool.connection() as blocker,
+    ):
+        await blocker.execute("UPDATE usage SET created_at = created_at")
+        group.create_task(apply(URL))
+        async with asyncio.timeout(8):
+            while not await (await observer.execute(waiting)).fetchone():
+                await asyncio.sleep(0.05)
+            group.create_task(apply(second))
+            while not await (await observer.execute(competing)).fetchone():
+                await asyncio.sleep(0.05)
+        await asyncio.wait_for(pinned.spent("new", "school", 0.1, at), timeout=3)
+    async with pinned.ledger.pool.connection() as conn:
+        cur = await conn.execute(
+            "SELECT indisvalid FROM pg_index WHERE indexrelid = 'usage_by_date'::regclass"
+        )
+        assert await cur.fetchone() == {"indisvalid": True}
+        cur = await conn.execute("SELECT version FROM schema_migrations WHERE version = 4")
+        assert await cur.fetchone() == {"version": 4}
+
+
+async def test_date_index_migration_recovers_an_invalid_index(pinned: Pinned) -> None:
+    assert URL is not None
+    at = datetime(2026, 11, 18, tzinfo=SGT)
+    await pinned.spent("one", "school", 0.1, at)
+    await pinned.spent("two", "school", 0.1, at)
+    async with pinned.ledger.pool.connection() as conn:
+        await conn.execute("DROP INDEX usage_by_date")
+        await conn.execute("DELETE FROM schema_migrations WHERE version = 4")
+    async with await psycopg.AsyncConnection.connect(URL, autocommit=True, **db.CONNECTION_OPTIONS) as conn:
+        with pytest.raises(psycopg.errors.UniqueViolation):
+            await conn.execute("CREATE UNIQUE INDEX CONCURRENTLY usage_by_date ON usage (created_at)")
+    ledger = await spend.PostgresLedger.open(URL)
+    try:
+        async with ledger.pool.connection() as conn:
+            cur = await conn.execute(
+                "SELECT indisvalid, indisunique FROM pg_index WHERE indexrelid = 'usage_by_date'::regclass"
+            )
+            assert await cur.fetchone() == {"indisvalid": True, "indisunique": False}
+            cur = await conn.execute("SELECT count(*) AS total FROM usage")
+            assert await cur.fetchone() == {"total": 2}
+    finally:
+        await ledger.close()
+
+
+@pytest.mark.parametrize("pinned", [4], indirect=True)
+async def test_lifetime_total_migration_yields_to_writers_until_it_gets_its_lock(
+    pinned: Pinned, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    assert URL is not None
+    monkeypatch.setattr(db, "MIGRATION_LOCK_WAIT", 0.5)
+    at = datetime(2026, 11, 18, tzinfo=SGT)
+
+    async def trigger_lock_waiting() -> bool:
+        async with pinned.ledger.pool.connection() as conn:
+            cur = await conn.execute(
+                """SELECT count(*) AS waiting FROM pg_locks WHERE relation = 'usage'::regclass
+                   AND mode = 'ShareRowExclusiveLock' AND NOT granted"""
+            )
+            row = await cur.fetchone()
+            return bool(row and row["waiting"])
+
+    async def until(waiting: bool) -> None:
+        while await trigger_lock_waiting() != waiting:
+            await asyncio.sleep(0.02)
+
+    async with pinned.ledger.pool.connection() as blocker:
+        # an open ledger write keeps the trigger's table lock out of reach.
+        await blocker.execute("UPDATE usage SET created_at = created_at")
+        upgrade = asyncio.create_task(spend.PostgresLedger.open(URL))
+        async with asyncio.timeout(10):
+            # the migration asks for the lock, gives up, and asks again.
+            await until(True)
+            await until(False)
+            await until(True)
+        assert not upgrade.done()
+        # while the blocker still holds the table, a writer queued behind the request is let through.
+        await asyncio.wait_for(pinned.spent("writer", "school", 0.1, at), timeout=10)
+    ledger = await asyncio.wait_for(upgrade, timeout=15)
+    try:
+        async with ledger.pool.connection() as conn:
+            cur = await conn.execute("SELECT sum(cost_usd) AS total FROM usage_lifetime_total")
+            assert await cur.fetchone() == {"total": Decimal("0.1")}
+    finally:
+        await ledger.close()
+
+
+@pytest.mark.parametrize("pinned", [3], indirect=True)
+async def test_a_starting_replica_waits_out_another_replicas_long_migration(
+    pinned: Pinned, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    assert URL is not None
+    # the pool's own statement limit is shorter than the other replica's migration.
+    options = db.CONNECTION_OPTIONS["options"].replace("statement_timeout=10000", "statement_timeout=300")
+    monkeypatch.setattr(db, "CONNECTION_OPTIONS", {**db.CONNECTION_OPTIONS, "options": options})
+
+    class Replica(spend.PostgresLedger):
+        MIGRATIONS = tmp_path  # 001-003 only: no concurrent index, so the pool applies them
+
+    async with pinned.ledger.pool.connection() as migrating:
+        await migrating.execute(db.LOCK, (db.LOCK_MIGRATIONS, ""))
+        replica = asyncio.create_task(Replica.open(URL))
+        async with asyncio.timeout(10):
+            while not replica.done():
+                cur = await migrating.execute(
+                    "SELECT count(*) AS waiting FROM pg_locks WHERE locktype = 'advisory' AND NOT granted"
+                )
+                row = await cur.fetchone()
+                if row and row["waiting"]:
+                    break
+                await asyncio.sleep(0.02)
+        # well past the pool's limit, the replica is still waiting rather than failed.
+        await asyncio.sleep(1)
+        assert not replica.done()
+    ledger = await asyncio.wait_for(replica, timeout=10)
+    await ledger.close()
+
+
+async def test_operator_reports_group_exact_ledger_amounts_at_budget_midnight(
+    pinned: Pinned, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    midnight = datetime(2026, 11, 18, tzinfo=SGT)
+    now = midnight + timedelta(minutes=1)
+    await pinned.at(now)
+    monkeypatch.setattr(spend_report, "get_settings", lambda: configured(total_spend_limit_usd=50))
+    async with pinned.ledger.pool.connection() as conn:
+        await conn.execute(
+            """INSERT INTO usage(org_id,user_id,role,operation,model,tokens_in,tokens_out,cost_usd,
+              estimated,correlation_id,created_at) VALUES
+              ('org-a','deleted-account','teacher','generate','m',1,1,0.0000000123,true,'t',%s),
+              ('org-b','deleted-account','student','embed','m',1,0,0.5,false,'t',%s),
+              ('org-a','deleted-account','teacher','embed','m',1,0,1.5,false,'t',%s),
+              ('org-a','older-account','student','rerank','m',1,0,2,false,'t',%s),
+              ('org-a','future-account','student','embed','m',1,0,3,false,'t',%s)""",
+            (
+                midnight,
+                now,
+                midnight - timedelta(microseconds=1),
+                midnight - timedelta(days=7),
+                now + timedelta(seconds=1),
+            ),
+        )
+        await conn.execute(
+            """INSERT INTO budget_reservations(id,org_id,user_id,amount,expires_at)
+               VALUES (%s,'org-a','deleted-account',1,%s), (%s,'org-b','deleted-account',2,%s)""",
+            (uuid4(), now, uuid4(), now + timedelta(minutes=1)),
+        )
+
+    report = await spend_report.summary(pinned.ledger)
+    assert report.as_of == now and report.timezone == "Asia/Singapore"
+    assert report.today.calls == 2 and report.today.recorded_usd == "0.5000000123"
+    assert report.today.estimated_usd == "0.0000000123"
+    assert len(report.days) == 7 and report.days[-2].recorded_usd == "1.5000000000"
+    assert [row.operation for row in report.operations] == ["embed", "generate"]
+    assert report.reservations.count == 2 and report.reservations.expired_count == 1
+    assert Decimal(report.reservations.reserved_usd) == 3 and Decimal(report.reservations.expired_usd) == 1
+    assert report.ceiling and report.ceiling.remaining_usd == "39.9999999877"
+
+    todays_users = await spend_report.users(pinned.ledger, "today", None, "deleted-account", 0)
+    assert todays_users.total == 2
+    assert [user.org_id for user in todays_users.items] == ["org-b", "org-a"]
+    week = await spend_report.users(pinned.ledger, "last_7_days", "org-a", None, 0)
+    assert week.total == 1 and week.items[0].recorded_usd == "1.5000000123"
+
+
+async def test_operator_spend_pages_have_stable_ties_and_totals(pinned: Pinned) -> None:
+    now = datetime(2026, 11, 18, 12, tzinfo=SGT)
+    await pinned.at(now)
+    async with pinned.ledger.pool.connection() as conn:
+        await conn.execute(
+            """INSERT INTO usage(org_id,user_id,role,operation,model,tokens_in,tokens_out,cost_usd,
+              correlation_id,created_at)
+              SELECT 'org-a','account-' || lpad(i::text, 2, '0'),'student','embed','m',1,0,1,'t',%s
+              FROM generate_series(1,22) AS i""",
+            (now,),
+        )
+    first = await spend_report.users(pinned.ledger, "today", None, None, 0)
+    next_page = await spend_report.users(pinned.ledger, "today", None, None, 20)
+    last = await spend_report.users(pinned.ledger, "today", None, None, 40)
+    assert first.total == next_page.total == last.total == 22
+    assert [row.user_id for row in first.items] == [f"account-{i:02d}" for i in range(1, 21)]
+    assert [row.user_id for row in next_page.items] == ["account-21", "account-22"]
+    assert last.items == []
+
+
+@pytest.mark.parametrize("pinned", [4], indirect=True)
+async def test_lifetime_total_backfills_and_tracks_ledger_transactions(
+    pinned: Pinned, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    assert URL is not None
+    settings = configured(total_spend_limit_usd=5.0)
+    monkeypatch.setattr(spend, "get_settings", lambda: settings)
+    monkeypatch.setattr(spend_report, "get_settings", lambda: settings)
+    prior = datetime(2026, 11, 1, tzinfo=SGT)
+    await pinned.at(prior + timedelta(days=17))
+    await pinned.spent("existing", "school", 1.0000000001, prior)
+    ledger = await spend.PostgresLedger.open(URL)
+    try:
+        accrued = await spend_report.summary(ledger)
+        assert accrued.ceiling is not None and accrued.ceiling.remaining_usd == "3.9999999999"
+        await asyncio.gather(
+            pinned.spent("older-writer", "school", 0.5, prior),
+            ledger.record(billed("new-writer"), spend.Charge("embed", "m", 1, 0, 1.5), "new"),
+        )
+        async with ledger.pool.connection() as conn:
+            await conn.execute("UPDATE usage SET cost_usd = cost_usd + 0.25 WHERE user_id = 'existing'")
+            await conn.execute("DELETE FROM usage WHERE user_id = 'older-writer'")
+            async with conn.transaction(force_rollback=True):
+                await conn.execute("UPDATE usage SET cost_usd = 0")
+
+        report = await spend_report.summary(ledger)
+        assert report.ceiling is not None and report.ceiling.remaining_usd == "2.2499999999"
+        with pytest.raises(HTTPException) as exc:
+            await ledger.reserve(str(uuid4()), billed("next"), 2.3, 10)
+        assert exc.value.detail["code"] == "AI_TOTAL_SPEND_LIMIT"
+        await ledger.reserve(str(uuid4()), billed("next"), 2.2, 10)
+    finally:
+        await ledger.close()
+
+
+@pytest.mark.parametrize("pinned", [4], indirect=True)
+async def test_lifetime_backfill_counts_rows_changed_between_trigger_and_backfill(
+    pinned: Pinned, tmp_path: Path
+) -> None:
+    assert URL is not None
+    at = datetime(2026, 11, 18, tzinfo=SGT)
+    for user, cost in (("kept", 1), ("changed", 2), ("removed", 4)):
+        await pinned.spent(user, "school", cost, at)
+    triggered = tmp_path / "triggered"
+    triggered.mkdir()
+    for step in db.migrations(spend.MIGRATIONS)[:5]:
+        (triggered / step.name).write_text(step.sql, encoding="utf-8")
+
+    class Triggered(spend.PostgresLedger):
+        MIGRATIONS = triggered  # the trigger is in place, the backfill has not run
+
+    await (await Triggered.open(URL)).close()
+    async with pinned.ledger.pool.connection() as conn:
+        await conn.execute("UPDATE usage SET cost_usd = 3 WHERE user_id = 'changed'")
+        await conn.execute("DELETE FROM usage WHERE user_id = 'removed'")
+    await pinned.spent("new", "school", 8, at)
+    async with pinned.ledger.pool.connection() as conn:
+        await conn.execute("UPDATE usage SET cost_usd = 16 WHERE user_id = 'new'")
+
+    async def lifetime(ledger: spend.PostgresLedger) -> Decimal:
+        async with ledger.pool.connection() as conn:
+            cur = await conn.execute("SELECT sum(cost_usd) AS total FROM usage_lifetime_total")
+            row = await cur.fetchone()
+            assert row is not None
+            return Decimal(row["total"])
+
+    ledger = await spend.PostgresLedger.open(URL)
+    try:
+        assert await lifetime(ledger) == 20
+        async with ledger.pool.connection() as conn:
+            await conn.execute("UPDATE usage SET cost_usd = 5 WHERE user_id = 'kept'")
+            cur = await conn.execute("SELECT to_regclass('usage_lifetime_backfill') IS NULL AS done")
+            assert await cur.fetchone() == {"done": True}
+        assert await lifetime(ledger) == 24
+    finally:
+        await ledger.close()
 
 
 async def test_shared_concurrency_and_organisation_isolation(pinned: Pinned) -> None:

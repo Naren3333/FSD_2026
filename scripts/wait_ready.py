@@ -1,4 +1,4 @@
-"""probe all ten applications from their private network, then the public kong, keycloak and edge ports, with bounded startup wait."""
+"""probe the applications and monitoring from their private network, then the public ports."""
 
 import argparse
 import json
@@ -23,6 +23,7 @@ SERVICES = [
     "question-generation-agent",
     "student-performance-agent",
     "question-chatbot-agent",
+    "monitoring",
 ]
 # what the tests and the browser call from the host, on the ports docker-compose.yml publishes for this
 # stack: kong and keycloak directly, and the gateway and sign-in through the edge by host name.
@@ -96,8 +97,8 @@ def main() -> None:
     timeout = parser.parse_args().timeout
     deadline = time.monotonic() + timeout
     if not wait(applications_ready, deadline):
-        raise SystemExit(f"Applications did not become ready within {timeout} seconds")
-    print("PASS: all ten applications ready")
+        raise SystemExit(f"Applications and monitoring did not all become ready within {timeout} seconds")
+    print("PASS: all ten applications and monitoring ready")
     if not wait(public_ports_ready, deadline):
         states = ", ".join(f"{name} {status(url, host)}" for name, (url, _, host) in PUBLIC.items())
         raise SystemExit(f"Kong, Keycloak or the edge did not answer within {timeout} seconds: {states}")

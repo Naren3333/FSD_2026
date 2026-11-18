@@ -187,7 +187,7 @@ services:
       KAFKA_HEAP_OPTS: -Xms512m -Xmx512m
     volumes:
     - kafka-data:/var/lib/kafka/data
-    networks: [data]
+    networks: [data, events]
     deploy:
       resources:
         limits:
@@ -325,6 +325,9 @@ services:
       student-performance-agent:
         condition: service_healthy
         required: false
+      monitoring:
+        condition: service_healthy
+        required: false
     environment:
       KONG_DATABASE: 'off'
       KONG_DECLARATIVE_CONFIG: /config/kong.json
@@ -356,6 +359,21 @@ services:
       interval: 10s
       timeout: 5s
       retries: 10
+  monitoring:
+    build:
+      context: .
+      dockerfile: infra/monitoring/Dockerfile
+    restart: unless-stopped
+    environment:
+      OIDC_ISSUER: ${AUTH_URL:-https://auth.localhost}/realms/learning
+      OIDC_AUDIENCE: learning
+      OIDC_JWKS_URL: http://keycloak:8080/realms/learning/protocol/openid-connect/certs
+      MONITORING_TOKEN_URL: http://keycloak:8080/realms/learning/protocol/openid-connect/token
+      MONITORING_READER_CLIENT_SECRET: ${MONITORING_READER_CLIENT_SECRET:?run scripts/upgrade_local.py or scripts/setup.py}
+      KAFKA_BROKERS: kafka:9092
+    healthcheck: *go-healthcheck
+    networks: [app, events]
+    deploy: *go-limits
   identity:
     build:
       context: .
@@ -698,10 +716,13 @@ services:
     restart: unless-stopped
 # edge: the public entry and what it routes to. app: the applications and identity provider. data: the
 # databases, broker and object store, reachable only from the containers attached to it and with no route out.
+# events: the broker alone, for monitoring, which reads kafka offsets but needs no database.
 networks:
   edge: {}
   app: {}
   data:
+    internal: true
+  events:
     internal: true
 volumes:
   postgres-data: {}

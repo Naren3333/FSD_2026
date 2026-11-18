@@ -8,7 +8,7 @@ from functools import cache
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-from setup import ORG, TEST_WEB_ORIGIN
+from setup import MONITORING_CLIENT, ORG, TEST_OPERATOR_USERNAME, TEST_WEB_ORIGIN, client_secret_key
 
 if TYPE_CHECKING:
     import httpx
@@ -55,6 +55,7 @@ PSQL_TIMEOUT = 90  # seconds
 # compose projects of docker-compose.yml.
 DEV_PROJECT = "learning-foundation"
 TEST_PROJECT = "learning-test"
+TEST_LOCAL_CONFIG_DIR = ".local/test-stack"
 TEST_PORTS = {"KONG_PORT": "18000", "KEYCLOAK_PORT": "18081", "EDGE_PORT": "18443"}
 # the test stack's public urls behind its edge, which docker-compose.yml reads as APP_URL and AUTH_URL.
 TEST_URLS = {"APP_URL": TEST_WEB_ORIGIN, "AUTH_URL": f"https://auth.localhost:{TEST_PORTS['EDGE_PORT']}"}
@@ -64,6 +65,23 @@ TEST_URLS = {"APP_URL": TEST_WEB_ORIGIN, "AUTH_URL": f"https://auth.localhost:{T
 def env() -> dict[str, str]:
     """the repository's .env, made by scripts/setup.py, read once."""
     return read_env()
+
+
+def load_test_monitoring_credentials(root: Path = ROOT) -> dict[str, str]:
+    """read the two credentials from the disposable stack's existing realm import."""
+    try:
+        config = json.loads(
+            (root / TEST_LOCAL_CONFIG_DIR / "learning-realm.json").read_text(encoding="utf-8")
+        )
+        reader = next(client for client in config["clients"] if client["clientId"] == MONITORING_CLIENT)
+        operator = next(user for user in config["users"] if user["username"] == TEST_OPERATOR_USERNAME)
+        password = next(item["value"] for item in operator["credentials"] if item["type"] == "password")
+        secret = reader["secret"]
+        if isinstance(secret, str) and secret and isinstance(password, str) and password:
+            return {client_secret_key(MONITORING_CLIENT): secret, "TEST_OPERATOR_PASSWORD": password}
+    except (OSError, ValueError, KeyError, TypeError, StopIteration):
+        pass
+    raise SystemExit("Test monitoring credentials are unavailable. Run python scripts/stack_tests.py first.")
 
 
 def project() -> str:

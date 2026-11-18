@@ -151,17 +151,62 @@ def test_fresh_volumes_get_every_database_and_client(monkeypatch: pytest.MonkeyP
     values = setup.generate_secrets()
     monkeypatch.setattr(stack_tests, "ROOT", tmp_path)
     monkeypatch.setattr(stack_tests, "env", lambda: values)
-    stack_tests.refresh_local_files()
+    monkeypatch.setattr(stack_tests, "TEST_ENV", dict(stack_tests.TEST_ENV))
+    stack_tests.write_local_files(stack_tests.render_local_files())
     local = tmp_path / stack_tests.TEST_LOCAL_CONFIG_DIR
     sql = (local / "postgres-init.sql").read_text(encoding="utf-8")
     assert all(f"CREATE DATABASE {name} OWNER {name};" in sql for name in setup.DATABASES)
     realm = json.loads((local / "learning-realm.json").read_text(encoding="utf-8"))
-    assert realm == setup.realm(values, setup.TEST_WEB_ORIGIN)
+    key = setup.client_secret_key(setup.MONITORING_CLIENT)
+    assert stack_tests.TEST_ENV[key] != values[key]
+    assert realm == setup.realm(
+        {**values, key: stack_tests.TEST_ENV[key]},
+        setup.TEST_WEB_ORIGIN,
+        operator_password=stack_tests.TEST_ENV["TEST_OPERATOR_PASSWORD"],
+    )
+    assert local_stack.load_test_monitoring_credentials(tmp_path) == {
+        key: stack_tests.TEST_ENV[key],
+        "TEST_OPERATOR_PASSWORD": stack_tests.TEST_ENV["TEST_OPERATOR_PASSWORD"],
+    }
     assert not (tmp_path / ".local/learning-realm.json").exists()
     assert stack_tests.TEST_ENV["LOCAL_CONFIG_DIR"] == f"./{stack_tests.TEST_LOCAL_CONFIG_DIR}"
     compose = (ROOT / "docker-compose.yml").read_text(encoding="utf-8")
     assert "${LOCAL_CONFIG_DIR:-./.local}/postgres-init.sql:" in compose
     assert "${LOCAL_CONFIG_DIR:-./.local}/learning-realm.json:" in compose
+
+
+def test_reuse_loads_the_kept_credentials_without_recreating_the_stack(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    monkeypatch.setattr(stack_tests, "ROOT", tmp_path)
+    monkeypatch.setattr(stack_tests, "env", setup.generate_secrets)
+    monkeypatch.setattr(stack_tests, "TEST_ENV", dict(stack_tests.TEST_ENV))
+    stack_tests.write_local_files(stack_tests.render_local_files())
+    expected = local_stack.load_test_monitoring_credentials(tmp_path)
+    for key in expected:
+        stack_tests.TEST_ENV.pop(key)
+    monkeypatch.setattr("sys.argv", ["stack_tests.py", "--reuse", "integration"])
+    calls = []
+
+    def compose(*args: str, **_kwargs: object) -> subprocess.CompletedProcess[str]:
+        calls.append(args)
+        return compose_result("running-container\n")
+
+    def run_suite(name: str, _live_ai: bool) -> bool:
+        assert name == "integration"
+        assert {key: stack_tests.TEST_ENV[key] for key in expected} == expected
+        return True
+
+    monkeypatch.setattr(stack_tests, "compose", compose)
+    monkeypatch.setattr(stack_tests, "wait_until_ready", lambda: None)
+    monkeypatch.setattr(stack_tests, "run_suite", run_suite)
+    stack_tests.main()
+    assert calls == [("ps", "--status", "running", "--quiet", "postgres")]
+
+
+def test_missing_kept_credentials_fail_explicitly(tmp_path: Path) -> None:
+    with pytest.raises(SystemExit, match="Test monitoring credentials are unavailable"):
+        local_stack.load_test_monitoring_credentials(tmp_path)
 
 
 def test_an_old_env_is_sent_to_upgrade_local(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
@@ -170,7 +215,7 @@ def test_an_old_env_is_sent_to_upgrade_local(monkeypatch: pytest.MonkeyPatch, tm
     monkeypatch.setattr(stack_tests, "ROOT", tmp_path)
     monkeypatch.setattr(stack_tests, "env", lambda: values)
     with pytest.raises(SystemExit, match="upgrade_local"):
-        stack_tests.refresh_local_files()
+        stack_tests.render_local_files()
     assert not (tmp_path / ".local").exists()
 
 

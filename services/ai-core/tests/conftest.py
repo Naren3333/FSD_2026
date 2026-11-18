@@ -56,6 +56,7 @@ def test_settings(monkeypatch: pytest.MonkeyPatch) -> settings.Settings:
         "ingest",
         "main",
         "spend",
+        "spend_report",
         "billing",
         "budget",
         "ingest.reuse",

@@ -1,7 +1,17 @@
 """shared transport, authentication and operational helpers for the python services."""
 
 from learning_transport.app import OIDC_SETTINGS, application, placeholder_app, require_env
-from learning_transport.auth import AI_CLIENT, STUDENT, TEACHER, Claims, actor, caller, keyset, requires
+from learning_transport.auth import (
+    AI_CLIENT,
+    MONITORING_READER,
+    STUDENT,
+    TEACHER,
+    Claims,
+    actor,
+    caller,
+    keyset,
+    requires,
+)
 from learning_transport.errors import (
     Contract,
     ErrorBody,
@@ -17,6 +27,7 @@ from learning_transport.tokens import ServiceToken
 
 __all__ = [
     "AI_CLIENT",
+    "MONITORING_READER",
     "OIDC_SETTINGS",
     "RELATION_STUDENT",
     "RELATION_TEACHER",

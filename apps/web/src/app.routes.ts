@@ -136,6 +136,7 @@ export function sectionLabel(section: WorkspaceSection, session: Session): strin
 
 /* the order of each role's navigation groups. */
 const GROUPS = { teacher: ['', 'Teach', 'Review', 'Assistant', 'Setup'], student: ['', 'My work', 'Learn'] };
+export const MONITORING_PATH = '/admin/monitoring';
 
 export interface NavigationGroup {
   label: string;
@@ -164,12 +165,13 @@ export function navigation(role: 'teacher' | 'student'): NavigationGroup[] {
 
 /* where each role starts: teachers on their class dashboard, students on their home. */
 function landing(session: Session): string {
+  if (session.isOperator) return MONITORING_PATH;
   return session.isStudent() ? '/home' : '/dashboard';
 }
 
 /* signed in, but the profile (and so the role) did not load: nothing opens until the shell's try again works. */
 function profileMissing(session: Session): boolean {
-  return session.signedIn && !session.profile();
+  return session.signedIn && !session.isOperator && !session.profile();
 }
 
 /* sections for one role send the other role to its own landing page. */
@@ -177,6 +179,7 @@ function onlyFor(role: 'teacher' | 'student'): CanMatchFn {
   return async () => {
     const session = inject(Session);
     const router = inject(Router);
+    if (session.isOperator) return router.parseUrl(MONITORING_PATH);
     await session.ready().catch(() => undefined);
     if (profileMissing(session)) return false;
     const profile = session.profile();
@@ -193,17 +196,36 @@ const toLanding: CanActivateFn = async () => {
   return router.parseUrl(landing(session));
 };
 
+const onlyOperator: CanActivateFn = async () => {
+  const session = inject(Session);
+  const router = inject(Router);
+  if (session.isOperator) return true;
+  if (!session.signedIn) return false;
+  await session.ready().catch(() => undefined);
+  return profileMissing(session) ? false : router.parseUrl(landing(session));
+};
+
+const onlyLearningWorkspace: CanActivateFn = () =>
+  !inject(Session).isOperator || inject(Router).parseUrl(MONITORING_PATH);
+
 function title(section: WorkspaceSection): ResolveFn<string> {
   return () => `${sectionLabel(section, inject(Session))} · Learning Ledger`;
 }
 
 export const routes: Routes = [
   { path: '', pathMatch: 'full', canActivate: [toLanding], children: [] },
+  {
+    path: MONITORING_PATH.slice(1),
+    title: 'Monitoring · Learning Ledger',
+    loadComponent: () => import('./features/monitoring/monitoring').then((m) => m.MonitoringComponent),
+    canActivate: [onlyOperator],
+  },
   ...SECTIONS.map((section) => ({
     path: section.path,
     title: title(section),
     loadComponent: section.load,
     canMatch: section.teacherOnly ? [onlyFor('teacher')] : section.studentOnly ? [onlyFor('student')] : [],
+    ...(!section.teacherOnly && !section.studentOnly && { canActivate: [onlyLearningWorkspace] }),
     data: { keepAlive: true },
   })),
   { path: '**', canActivate: [toLanding], children: [] },
