@@ -26,17 +26,11 @@ export class PagedSection<T> extends Section<T[]> {
   readonly page = signal(0);
   readonly total = signal(0);
   readonly pageSize = 20;
-  private read = 0;
-
-  override clear(): void {
-    this.read++;
-    super.clear();
-  }
 
   async readPage(fetch: (offset: number, limit: number) => Promise<ListPage<T>>): Promise<T[]> {
-    const read = ++this.read;
+    const current = this.current();
     const { result, page } = await readPage(this.page(), this.pageSize, fetch, (r) => !r.items.length);
-    if (read === this.read) {
+    if (current()) {
       this.total.set(result.total);
       this.page.set(page);
     }

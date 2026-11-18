@@ -11,6 +11,11 @@ export class Section<T> {
   readonly ready = computed(() => !this.loading() && !this.error());
   private request = 0;
 
+  protected current(): () => boolean {
+    const request = this.request;
+    return () => request === this.request;
+  }
+
   /* loads the value. `work` can ask whether its request is still the newest before it changes anything else. */
   async load(work: (current: () => boolean) => Promise<T>): Promise<void> {
     const request = ++this.request;
@@ -31,10 +36,12 @@ export class Section<T> {
 
   /* re-reads the value without showing it as loading. */
   async poll(work: () => Promise<T>): Promise<boolean> {
-    const request = this.request;
+    if (this.loading()) return true;
+    ++this.request;
+    const current = this.current();
     try {
       const value = await work();
-      if (request === this.request && !this.loading()) this.value.set(value);
+      if (current()) this.value.set(value);
       return true;
     } catch {
       return false;

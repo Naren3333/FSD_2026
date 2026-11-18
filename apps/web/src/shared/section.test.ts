@@ -9,6 +9,36 @@ function deferred<T>() {
 }
 
 describe('Section', () => {
+  it('ignores an older poll and a poll superseded by a mutation', async () => {
+    const section = new Section<number>();
+    const older = deferred<number>();
+    const pending = section.poll(() => older.promise);
+    await section.poll(async () => 2);
+    older.resolve(1);
+    await pending;
+    expect(section.value()).toBe(2);
+    const stale = deferred<number>();
+    const poll = section.poll(() => stale.promise);
+    section.set(3);
+    stale.resolve(0);
+    await poll;
+    expect(section.value()).toBe(3);
+  });
+
+  it('does not poll over a visible load', async () => {
+    const section = new Section<number>();
+    const result = deferred<number>();
+    const load = section.load(() => result.promise);
+    let called = false;
+    await section.poll(async () => {
+      called = true;
+      return 0;
+    });
+    expect(called).toBe(false);
+    result.resolve(1);
+    await load;
+    expect(section.value()).toBe(1);
+  });
   it('is not ready while loading or after a failure, so an empty list is only shown once loaded', async () => {
     const section = new Section<string[]>();
     const answer = deferred<string[]>();
