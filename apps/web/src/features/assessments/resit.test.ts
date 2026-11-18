@@ -145,6 +145,7 @@ function setup(
     bank?: (filter: BankFilter) => BankQuestion[];
     assessment?: Assessment;
     archived?: Topic[];
+    roster?: typeof roster;
   } = {},
 ) {
   const grades = options.grades ?? [];
@@ -167,7 +168,14 @@ function setup(
   const gradingApi = {
     evaluations: vi.fn(() => Promise.resolve({ evaluations: grades, total: options.total ?? grades.length })),
   };
-  const identityApi = { roster: vi.fn(() => Promise.resolve(roster)) };
+  const identityApi = {
+    rosterPage: vi.fn((_classroom: string, offset: number, limit: number) =>
+      Promise.resolve({
+        students: (options.roster ?? roster).slice(offset, offset + limit),
+        total: (options.roster ?? roster).length,
+      }),
+    ),
+  };
   TestBed.resetTestingModule();
   TestBed.configureTestingModule({
     providers: [
@@ -213,6 +221,26 @@ const lostOnQ1 = [
 ];
 
 describe('the resit builder', () => {
+  it('reads one roster page and preserves removable selections across pages', async () => {
+    const people = Array.from({ length: 65 }, (_, i) => ({
+      id: `s${i}`,
+      username: `student${i}`,
+      display_name: `Student ${i}`,
+    }));
+    const page = setup({ roster: people });
+    await page.open();
+    expect(page.builder.roster.value()?.length).toBe(20);
+    page.builder.toggleStudent('s0', true);
+    page.builder.roster.page.set(1);
+    page.builder.loadRoster();
+    await settle();
+    expect(page.builder.roster.value()?.[0].id).toBe('s20');
+    expect(page.builder.students().has('s0')).toBe(true);
+    expect(page.builder.chosenStudentList().map((s) => s.id)).toContain('s0');
+    page.builder.toggleStudent('s0', false);
+    expect(page.builder.chosenStudentList()).toEqual([]);
+  });
+
   it('pre-ticks the students who lost marks on finalized grades, and their questions', async () => {
     const { builder, open, gradingApi } = setup({ grades: lostOnQ1 });
     await open();

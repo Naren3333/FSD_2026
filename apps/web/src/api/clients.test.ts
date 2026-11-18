@@ -29,6 +29,17 @@ beforeEach(() => {
 });
 
 describe('the clients for topics, documents and assessment changes', () => {
+  it('requests just the topic ids needed for names', async () => {
+    await TestBed.inject(CurriculumApi).topicNames(['t1', 't2']);
+    expect(calls).toEqual([
+      {
+        service: 'curriculum',
+        path: '/topics/batch',
+        options: { method: 'POST', body: { ids: ['t1', 't2'] } },
+      },
+    ]);
+  });
+
   it('lists archived topics apart and restores one', async () => {
     const curriculum = TestBed.inject(CurriculumApi);
     await curriculum.archivedTopics();

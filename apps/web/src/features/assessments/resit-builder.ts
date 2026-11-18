@@ -66,7 +66,9 @@ export class ResitBuilderComponent implements OnChanges {
   readonly state = new ActionState();
   readonly original = new Section<Assessment>();
   readonly grades = new Section<FinalizedGrades>();
-  readonly roster = new Section<Student[]>();
+  readonly roster = new PagedSection<Student>();
+  readonly chosenStudents = signal<ReadonlyMap<string, Student>>(new Map());
+  readonly chosenStudentList = computed(() => [...this.chosenStudents().values()]);
   readonly bank = new PagedSection<BankQuestion>();
   readonly students = signal<ReadonlySet<string>>(new Set());
   readonly copies = signal<ReadonlySet<string>>(new Set());
@@ -134,6 +136,8 @@ export class ResitBuilderComponent implements OnChanges {
     this.original.clear();
     this.grades.clear();
     this.roster.clear();
+    this.roster.page.set(0);
+    this.chosenStudents.set(new Map());
     this.bank.clear();
     this.bank.page.set(0);
     this.students.set(new Set());
@@ -187,13 +191,13 @@ export class ResitBuilderComponent implements OnChanges {
   loadRoster(): void {
     const { classroomId } = this;
     void this.roster
-      .load(() => this.identityApi.roster(classroomId))
-      .then(() => {
-        // a chosen student no longer on the roster could not be unticked.
-        const ids = new Set((this.roster.value() ?? []).map((s) => s.id));
-        if (this.roster.value()) this.students.update((s) => new Set([...s].filter((id) => ids.has(id))));
-        this.suggest();
-      });
+      .load(() =>
+        this.roster.readPage(async (offset, limit) => {
+          const page = await this.identityApi.rosterPage(classroomId, offset, limit);
+          return { items: page.students, total: page.total };
+        }),
+      )
+      .then(() => this.suggest());
   }
 
   /* the header's refresh: every part again, keeping the choices. */
@@ -207,7 +211,9 @@ export class ResitBuilderComponent implements OnChanges {
     if (!this.studentsTouched && roster && this.grades.value()) {
       const enrolled = new Set(roster.map((s) => s.id));
       const struggling = strugglingStudents(this.finalized()).filter((id) => enrolled.has(id));
-      this.students.set(new Set(struggling.slice(0, RESIT_STUDENTS)));
+      const selected = new Set([...this.students(), ...struggling].slice(0, RESIT_STUDENTS));
+      this.students.set(selected);
+      this.rememberStudents();
     }
     this.followStudents();
   }
@@ -257,7 +263,17 @@ export class ResitBuilderComponent implements OnChanges {
     if (checked && !this.students().has(id) && this.studentsFull()) return;
     this.studentsTouched = true;
     this.students.update((s) => toggled(s, id, checked));
+    this.rememberStudents();
     this.followStudents();
+  }
+
+  private rememberStudents(): void {
+    const names = new Map(this.chosenStudents());
+    for (const student of this.roster.value() ?? []) {
+      if (this.students().has(student.id)) names.set(student.id, student);
+    }
+    for (const id of names.keys()) if (!this.students().has(id)) names.delete(id);
+    this.chosenStudents.set(names);
   }
 
   toggleCopy(id: string, checked: boolean): void {
@@ -305,7 +321,7 @@ export class ResitBuilderComponent implements OnChanges {
 
   chosenStudentName(): string {
     const id = this.single();
-    const student = this.roster.value()?.find((s) => s.id === id);
+    const student = this.chosenStudents().get(id);
     return student ? this.studentName(student) : 'this student';
   }
 

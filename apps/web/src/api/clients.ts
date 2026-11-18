@@ -130,7 +130,7 @@ export class IdentityApi {
 export class CurriculumApi {
   private readonly gateway = inject(Gateway);
 
-  /* the organization's active topics, by name; up to 200. */
+  /* all active topics for the teacher's native pickers. */
   topics(): Promise<Topic[]> {
     return allPages((offset, limit) => this.topicPage(offset, limit));
   }
@@ -140,10 +140,13 @@ export class CurriculumApi {
       `/topics/page?offset=${offset}&limit=${limit}&archived=${archived}`,
     );
   }
+  topicNames(ids: string[]): Promise<Topic[]> {
+    return this.gateway.request('curriculum', '/topics/batch', { method: 'POST', body: { ids } });
+  }
   createTopic(topic: { name: string }): Promise<Topic> {
     return this.gateway.request('curriculum', '/topics', { method: 'POST', body: topic });
   }
-  /* the organization's archived topics, by name; up to 200. */
+  /* archived topics for curriculum management and picker validation. */
   archivedTopics(): Promise<Topic[]> {
     return allPages((offset, limit) => this.topicPage(offset, limit, true));
   }

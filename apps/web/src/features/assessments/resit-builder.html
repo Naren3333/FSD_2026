@@ -25,8 +25,8 @@
       <fieldset class="question-set" id="resit-students">
         <legend>1. Students</legend>
         <p class="caption">
-          Students who lost marks on a finalized grade are ticked. Choose 1 to {{ maxStudents }}:
-          {{ students().size }} chosen.
+          Students on each viewed page who lost marks on a finalized grade are ticked until you change a
+          choice. Choose 1 to {{ maxStudents }}: {{ students().size }} chosen.
         </p>
         <app-section-state [section]="grades" loading="Loading finalized grades…" />
         @if (grades.error()) {
@@ -44,6 +44,23 @@
         }
         @if (studentsFull()) {
           <p class="caption">{{ maxStudents }} students are chosen, the most a resit can have.</p>
+        }
+        @if (chosenStudentList().length) {
+          <p class="caption">Chosen students, including other pages:</p>
+          <ul class="tag-row" aria-label="Chosen students">
+            @for (student of chosenStudentList(); track student.id) {
+              <li>
+                <button
+                  type="button"
+                  class="secondary"
+                  [disabled]="state.busy()"
+                  (click)="toggleStudent(student.id, false)"
+                >
+                  Remove {{ studentName(student) }}
+                </button>
+              </li>
+            }
+          </ul>
         }
         <app-section-state [section]="roster" loading="Loading the classroom's students…" />
         @if (roster.error()) {
@@ -81,6 +98,16 @@
             }
           </ul>
         }
+        <app-pager
+          label="Student pages"
+          [page]="roster.page()"
+          (pageChange)="roster.page.set($event)"
+          [pageSize]="roster.pageSize"
+          [total]="roster.total()"
+          noun="students"
+          [disabled]="roster.loading() || state.busy()"
+          (go)="loadRoster()"
+        />
       </fieldset>
 
       <fieldset class="question-set" id="resit-questions">
