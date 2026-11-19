@@ -527,7 +527,7 @@ profile = obj(
     {
         "id": TEXT,
         "org_id": TEXT,
-        "role": {"enum": ["teacher", "student"]},
+        "role": {"enum": ["admin", "teacher", "student"]},
         "username": NAME,
         "display_name": NAME,
     }
@@ -626,14 +626,48 @@ def paged(op, most, fallback):
     return op
 
 
-# one page of the teacher's school's students, narrowed by an optional search.
-school_student_page = obj({"students": array(student, maximum=50), "total": COUNT})
 roster_page = obj({"students": array(student, maximum=500), "total": COUNT})
-school_students = operation("GET", "/v1/students", None, school_student_page)
-school_students[2]["parameters"] = [
+
+# a school's admins manage its accounts, classrooms and enrollment (adr 0019).
+PERSON_ROLE = {"enum": ["teacher", "student"]}
+CLASSROOM_NAME = {"type": "string", "minLength": 1, "maxLength": 120}
+account = obj({"id": TEXT, "username": NAME, "display_name": NAME, "role": PERSON_ROLE})
+account_page = obj({"accounts": array(account, maximum=50), "total": COUNT})
+account_input = obj(
+    {
+        "role": PERSON_ROLE,
+        "username": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{2,63}$",
+            "description": "Unique within the school; its user signs in with the school's id, a dot, then this.",
+        },
+        "first_name": {"type": "string", "minLength": 1, "maxLength": 60},
+        "last_name": {"type": "string", "minLength": 1, "maxLength": 60},
+    }
+)
+# the new account with its temporary password, answered once and never again.
+created_account = obj(
+    {
+        "id": TEXT,
+        "username": {
+            **TEXT,
+            "description": "What its user signs in with: the school's id, a dot, then the username.",
+        },
+        "display_name": TEXT,
+        "role": PERSON_ROLE,
+        "temporary_password": TEXT,
+    }
+)
+school_classroom = obj(
+    {"id": UUID, "name": TEXT, "teacher_id": TEXT, "teacher_name": NAME, "students": COUNT}
+)
+school_classroom_page = obj({"items": array(school_classroom, maximum=100), "total": COUNT})
+accounts_list = operation("GET", "/v1/admin/accounts", None, account_page)
+accounts_list[2]["parameters"] = [
+    {"name": "role", "in": "query", "required": True, "schema": PERSON_ROLE},
     {"name": "search", "in": "query", "required": False, "schema": {"type": "string", "maxLength": 120}},
 ]
-paged(school_students, 50, 10)
+paged(accounts_list, 50, 20)
 
 operations = {
     "identity": [
@@ -641,33 +675,13 @@ operations = {
         operation("DELETE", "/v1/me", None, None, 204),
         operation("GET", "/v1/classrooms", None, array(classroom)),
         operation(
-            "POST",
-            "/v1/classrooms",
-            obj({"name": {"type": "string", "minLength": 1, "maxLength": 120}}),
-            classroom,
-            201,
-        ),
-        operation("DELETE", "/v1/classrooms/{id}", None, obj({"classroom_id": UUID})),
-        operation(
             "GET",
             "/v1/classrooms/{id}/access",
             None,
             obj({"allowed": {"const": True}, "relation": {"enum": ["teacher", "student"]}}),
             query=["student_id"],
         ),
-        operation(
-            "POST",
-            "/v1/classrooms/{id}/enrollments",
-            enrollment,
-            enrollment_record,
-        ),
-        operation(
-            "DELETE",
-            "/v1/classrooms/{id}/enrollments/{student}",
-            None,
-            enrollment_record,
-        ),
-        # one page of the roster by name, and how many are enrolled.
+        # one page of the roster by name, and how many are enrolled, for the classroom's teacher.
         paged(
             operation("GET", "/v1/classrooms/{id}/students", None, roster_page),
             500,
@@ -676,7 +690,29 @@ operations = {
         # every enrolled student's id, in the same order and not paged, for the services that keep removed
         # students' work out of the teacher's lists (platform.Identity.Roster).
         operation("GET", "/v1/classrooms/{id}/student-ids", None, {"type": "array", "items": TEXT}),
-        school_students,
+        accounts_list,
+        operation("POST", "/v1/admin/accounts", account_input, created_account, 201),
+        # a new temporary password for a teacher or student of the school, answered once like a new account's.
+        operation("POST", "/v1/admin/accounts/{id}/password", None, created_account),
+        paged(operation("GET", "/v1/admin/classrooms", None, school_classroom_page), 100, 20),
+        operation(
+            "POST",
+            "/v1/admin/classrooms",
+            obj({"name": CLASSROOM_NAME, "teacher_id": TEXT}),
+            classroom,
+            201,
+        ),
+        operation(
+            "PATCH",
+            "/v1/admin/classrooms/{id}",
+            {**obj({"name": CLASSROOM_NAME, "teacher_id": TEXT}, []), "minProperties": 1},
+            obj({"classroom_id": UUID}),
+        ),
+        operation("DELETE", "/v1/admin/classrooms/{id}", None, obj({"classroom_id": UUID})),
+        paged(operation("GET", "/v1/admin/classrooms/{id}/students", None, roster_page), 500, 50),
+        operation("GET", "/v1/admin/classrooms/{id}/student-ids", None, {"type": "array", "items": TEXT}),
+        operation("POST", "/v1/admin/classrooms/{id}/enrollments", enrollment, enrollment_record),
+        operation("DELETE", "/v1/admin/classrooms/{id}/enrollments/{student}", None, enrollment_record),
     ],
     "curriculum": [
         operation(
@@ -878,7 +914,12 @@ NAMES = {
     "Classroom": classroom,
     "Student": student,
     "StudentPage": roster_page,
-    "SchoolStudentPage": school_student_page,
+    "Account": account,
+    "AccountPage": account_page,
+    "AccountInput": account_input,
+    "CreatedAccount": created_account,
+    "SchoolClassroom": school_classroom,
+    "SchoolClassroomPage": school_classroom_page,
     "EnrollmentRequest": enrollment,
     "Enrollment": enrollment_record,
     "Topic": curriculum_topic,
@@ -1079,6 +1120,7 @@ for name, routes in operations.items():
 
 payloads = {
     "identity.classroom.deleted.v1": obj({"classroom_id": UUID, "org_id": TEXT}),
+    "identity.classroom.reassigned.v1": obj({"classroom_id": UUID, "org_id": TEXT, "teacher_id": TEXT}),
     "identity.enrollment.removed.v1": obj({"classroom_id": UUID, "org_id": TEXT, "student_id": TEXT}),
     "identity.user.deleted.v1": obj(
         {"user_id": UUID, "org_id": TEXT, "role": {"enum": ["teacher", "student"]}}
@@ -1162,7 +1204,11 @@ FINALIZED_TIMING = (
 descriptions = {
     "identity.user.deleted.v1": "A user deleted their own account (ADR 0011); the resource is the user. Assessment, "
     "Grading, Analytics and the chatbot delete the user's submissions, saved work, grades, evidence and chats, and "
-    "refuse new ones for them. A teacher deletes their classrooms first.",
+    "refuse new ones for them. A teacher owns no classroom by then: a school admin deleted their classrooms or "
+    "gave them another teacher (ADR 0019).",
+    "identity.classroom.reassigned.v1": "A school admin gave a classroom another teacher (ADR 0019); the resource is "
+    "the classroom and the event's timestamp orders reassignments. Grading bills the classroom's AI marking to "
+    "teacher_id from then on, draft grades included, and ignores a reassignment older than one it has applied.",
     "identity.enrollment.removed.v1": "A teacher removed a student from a classroom. The student's submissions and "
     "grades are kept, and leave the teacher's lists and counts while the student is not enrolled; Grading makes no "
     "more AI suggestions for work they submitted before.",

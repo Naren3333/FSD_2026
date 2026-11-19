@@ -61,11 +61,7 @@ def render_local_files() -> dict[str, str]:
         values = dict(env())
         key = client_secret_key(MONITORING_CLIENT)
         TEST_ENV[key] = values[key] = secrets.token_hex(20)
-        operator_password = TEST_ENV["TEST_OPERATOR_PASSWORD"] = secrets.token_hex(20)
-        sql, import_ = (
-            postgres_init(values),
-            realm(values, TEST_WEB_ORIGIN, operator_password=operator_password),
-        )
+        sql, import_ = postgres_init(values), realm(values, TEST_WEB_ORIGIN)
     except FileNotFoundError:
         raise SystemExit("No .env: run python scripts/setup.py first.") from None
     except KeyError as missing:

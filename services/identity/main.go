@@ -13,7 +13,8 @@ var migrations embed.FS
 
 func main() {
 	platform.Serve("identity", migrations, platform.EventMigration, func(a *platform.App) ([]func(context.Context), error) {
-		server{store: pgStore{a.DB}}.routes(a.Mux)
-		return []func(context.Context){platform.Outbox{DB: a.DB}.Run, signInCleanup{a.DB, newKeycloakUsers()}.run}, nil
+		keycloak := newKeycloakUsers()
+		server{store: pgStore{a.DB}, accounts: keycloak}.routes(a.Mux)
+		return []func(context.Context){platform.Outbox{DB: a.DB}.Run, signInCleanup{a.DB, keycloak}.run}, nil
 	})
 }

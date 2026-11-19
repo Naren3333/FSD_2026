@@ -69,13 +69,14 @@ def ensure_topics(teacher: Session, spec: dict, state: dict) -> dict[str, str]:
     return ids
 
 
-def ensure_classroom(teacher: Session, spec: dict, state: dict) -> str:
+def ensure_classroom(teacher: Session, admin: Session, spec: dict, state: dict) -> str:
+    """the teacher's performance classroom, which the school's admin creates for them (adr 0019)."""
     perf = state["performance"]
     mine = {c["id"] for c in check(teacher.request("GET", "/identity/classrooms")).json()}
     if perf.get("classroom") not in mine:
-        perf["classroom"] = check(
-            teacher.request("POST", "/identity/classrooms", json={"name": spec["classroom"]})
-        ).json()["id"]
+        teacher_id = check(teacher.request("POST", "/identity/me", json={})).json()["id"]
+        body = {"name": spec["classroom"], "teacher_id": teacher_id}
+        perf["classroom"] = check(admin.request("POST", "/identity/admin/classrooms", json=body)).json()["id"]
         perf.pop("assessments", None)
         perf.pop("students", None)
         save_state(state)
@@ -227,11 +228,12 @@ def main() -> None:
         for key in spec["students"]
     }
     ids = {key: p["id"] for key, p in profiles.items()}
-    room = ensure_classroom(teacher, spec, state)
+    admin = Session("admin", state)
+    room = ensure_classroom(teacher, admin, spec, state)
     for student_id in ids.values():
         check(
-            teacher.request(
-                "POST", f"/identity/classrooms/{room}/enrollments", json={"student_id": student_id}
+            admin.request(
+                "POST", f"/identity/admin/classrooms/{room}/enrollments", json={"student_id": student_id}
             )
         )
     state["performance"]["students"] = ids

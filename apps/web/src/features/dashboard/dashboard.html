@@ -9,8 +9,7 @@
 @if (!classroomId()) {
   <app-no-classroom>
     <p class="empty">
-      No classroom selected. Create one under <a routerLink="/classrooms">Classrooms</a>, or choose one from
-      the classroom list.
+      No classroom selected. Choose one from the classroom list; your school admin assigns your classrooms.
     </p>
   </app-no-classroom>
 } @else {
@@ -90,9 +89,7 @@
     <app-section-state [section]="performance" loading="Loading class topics…" />
     @if (performance.ready() && performance.value(); as data) {
       @if (!data.total) {
-        <p class="empty">
-          No students enrolled yet. Enroll them under <a routerLink="/students">Students</a>.
-        </p>
+        <p class="empty">No students enrolled yet. Your school admin enrolls them.</p>
       } @else if (!topicRows().length) {
         <p class="empty">
           No finalized grades for these students yet. Finalize drafts in

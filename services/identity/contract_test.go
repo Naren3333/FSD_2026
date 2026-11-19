@@ -9,8 +9,10 @@ import (
 // integration.py's response checks) describe what it really sends.
 func TestResponsesMatchTheContract(t *testing.T) {
 	for name, value := range map[string]any{
-		"Classroom": Classroom{},
-		"Student":   Student{},
+		"Classroom":       Classroom{},
+		"Student":         Student{},
+		"Account":         Account{},
+		"SchoolClassroom": SchoolClassroom{},
 	} {
 		t.Run(name, func(t *testing.T) {
 			platformtest.MatchesSchema(t, platformtest.HTTPSchema(t, "identity", name), value)

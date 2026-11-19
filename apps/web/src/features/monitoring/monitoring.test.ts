@@ -101,12 +101,13 @@ it('trims pasted identifiers before filtering billed accounts', () => {
   const fixture = TestBed.createComponent(MonitoringComponent);
   try {
     const page = fixture.componentInstance;
-    page.filters.setValue({ org_id: ' school \n', user_id: '\tbilled-user ', period: 'today' });
+    page.filters.setValue({ user_id: '\tbilled-user \n', period: 'today' });
     page.applyFilters();
-    expect(page.filters.getRawValue()).toEqual({ org_id: 'school', user_id: 'billed-user', period: 'today' });
+    expect(page.filters.getRawValue()).toEqual({ user_id: 'billed-user', period: 'today' });
+    // monitoring reports the admin's own school only, so the page never asks for an organization.
     expect(request).toHaveBeenLastCalledWith(
       'monitoring',
-      '/ai-spend/users?period=today&offset=0&org_id=school&user_id=billed-user',
+      '/ai-spend/users?period=today&offset=0&user_id=billed-user',
       expect.anything(),
     );
   } finally {

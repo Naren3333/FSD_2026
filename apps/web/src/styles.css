@@ -494,18 +494,6 @@ html {
   color: var(--navy-text);
   margin: 2px 4px 0;
 }
-.sidebar-create {
-  display: flex;
-  align-items: center;
-  min-height: 44px;
-  padding: 0 4px;
-  color: var(--accent);
-  font-size: var(--text-sm);
-  font-weight: 600;
-}
-.sidebar-create:hover {
-  color: var(--on-dark);
-}
 .sidebar nav {
   display: grid;
   gap: 2px;
@@ -3295,4 +3283,30 @@ form .marking-bar-actions button {
   .account-link.active {
     outline: 2px solid Highlight;
   }
+}
+
+/* school admin (adr 0019): the classrooms table above the open classroom's students, and a new account's sign-in details. */
+.admin-classrooms-table td.numeric,
+.admin-classrooms-table th.numeric {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+.admin-classrooms-table tr.current th {
+  box-shadow: inset 3px 0 0 var(--brand);
+}
+.admin-students {
+  margin-top: 24px;
+}
+.created-account {
+  display: grid;
+  grid-template-columns: max-content minmax(0, 1fr);
+  gap: 8px 16px;
+  margin: 16px 0;
+}
+.created-account dt {
+  color: var(--muted);
+}
+.created-account dd {
+  margin: 0;
+  overflow-wrap: anywhere;
 }

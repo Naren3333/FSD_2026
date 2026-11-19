@@ -22,14 +22,14 @@ export class ProfileComponent {
   private readonly unsaved = inject(UnsavedChanges);
   readonly profile = this.session.profile;
   readonly state = new ActionState();
-  /* a teacher's own classrooms: deleting those comes first, since each one deletes its students' work. */
+  /* a teacher's own classrooms: the school admin reassigns or deletes those first (adr 0019). */
   readonly classroomCount = computed(() => (this.session.isTeacher() ? this.context.classrooms().length : 0));
   /* whether a teacher's classrooms are still unknown (loading, or failed to load), so they may still have some. */
   readonly classroomsUnknown = computed(
     () =>
       this.session.isTeacher() && (!this.context.known() || this.context.loading() || !!this.context.error()),
   );
-  /* whether a teacher must wait, or delete their classrooms, before deleting their account. */
+  /* whether a teacher must wait, or still owns classrooms, before deleting their account. */
   readonly blocked = computed(() => this.classroomsUnknown() || this.classroomCount() > 0);
   @ViewChild('deleteDialog') deleteDialog?: ConfirmDialogComponent;
 

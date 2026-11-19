@@ -1,5 +1,7 @@
 # 0018 — Platform monitoring and operator access
 
+Status: access partly superseded 2026-11-19 by ADR 0019: the school's `admin` role replaces `platform-operator`, and spend reports are limited to the admin's own organization. The collector and its reads still hold.
+
 ## Context
 
 Operators need one view of service readiness, request latency, dead-letter retention, and recorded AI expenditure. The ten learning and AI applications retain their existing responsibilities and databases.

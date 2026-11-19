@@ -3,7 +3,7 @@ import { TestBed } from '@angular/core/testing';
 import { BrowserTestingModule, platformBrowserTesting } from '@angular/platform-browser/testing';
 import { beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { Gateway, type RequestOptions, type Service } from '../core/gateway';
-import { AssessmentApi, ContentApi, CurriculumApi } from './clients';
+import { AdminApi, AssessmentApi, ContentApi, CurriculumApi } from './clients';
 
 beforeAll(() => TestBed.initTestEnvironment(BrowserTestingModule, platformBrowserTesting()));
 
@@ -71,5 +71,57 @@ describe('the clients for topics, documents and assessment changes', () => {
       ['/assessments/a1', 'DELETE'],
       ['/assessments/a1?with_submissions=true', 'DELETE'],
     ]);
+  });
+});
+
+describe('the school admin client', () => {
+  it('reads every teacher, the pages after the first together, without repeats', async () => {
+    const teacher = (n: number) => ({
+      id: `t${n}`,
+      username: `t${n}`,
+      display_name: `T${n}`,
+      role: 'teacher',
+    });
+    const pages = new Map([
+      [0, Array.from({ length: 50 }, (_, i) => teacher(i))],
+      [50, [...Array.from({ length: 49 }, (_, i) => teacher(i + 51)), teacher(49)]],
+      [100, [teacher(100)]],
+    ]);
+    let pending = 0;
+    let together = 0;
+    TestBed.overrideProvider(Gateway, {
+      useValue: {
+        request: async (_service: Service, path: string) => {
+          const offset = Number(new URLSearchParams(path.split('?')[1]).get('offset'));
+          pending++;
+          together = Math.max(together, pending);
+          await Promise.resolve();
+          pending--;
+          return { accounts: pages.get(offset) ?? [], total: 101 };
+        },
+      },
+    });
+    const teachers = await TestBed.inject(AdminApi).teachers();
+    expect(teachers.map((t) => t.id)).toEqual([
+      ...Array.from({ length: 50 }, (_, i) => `t${i}`),
+      ...Array.from({ length: 49 }, (_, i) => `t${i + 51}`),
+      't100',
+    ]);
+    expect(together).toBe(2);
+  });
+
+  it("reads a classroom's enrolled ids from the admin route in one request", async () => {
+    const paths: string[] = [];
+    TestBed.overrideProvider(Gateway, {
+      useValue: {
+        request: async (service: Service, path: string) => {
+          paths.push(`${service} ${path}`);
+          return ['s1', 's2'];
+        },
+      },
+    });
+    const room = '7f3c8a2e-4b1d-4c6e-9a5f-1e2d3c4b5a69';
+    await expect(TestBed.inject(AdminApi).rosterIds(room)).resolves.toEqual(['s1', 's2']);
+    expect(paths).toEqual([`identity /admin/classrooms/${room}/student-ids`]);
   });
 });

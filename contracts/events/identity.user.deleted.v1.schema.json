@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "urn:learning:identity.user.deleted.v1",
-  "description": "A user deleted their own account (ADR 0011); the resource is the user. Assessment, Grading, Analytics and the chatbot delete the user's submissions, saved work, grades, evidence and chats, and refuse new ones for them. A teacher deletes their classrooms first.",
+  "description": "A user deleted their own account (ADR 0011); the resource is the user. Assessment, Grading, Analytics and the chatbot delete the user's submissions, saved work, grades, evidence and chats, and refuse new ones for them. A teacher owns no classroom by then: a school admin deleted their classrooms or gave them another teacher (ADR 0019).",
   "type": "object",
   "properties": {
     "event_id": {

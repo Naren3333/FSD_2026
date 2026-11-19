@@ -5,16 +5,28 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-from local_stack import KEYCLOAK_PORT, ROOT, TEST_PORTS, admin_client, check, psql, psql_value, read_env
+from local_stack import (
+    KEYCLOAK_PORT,
+    ROOT,
+    TEST_PORTS,
+    admin_client,
+    apply_user_profile,
+    check,
+    ensure_person,
+    psql,
+    psql_value,
+    read_env,
+)
 from setup import (
     ACCOUNTS_CLIENT,
-    ACCOUNTS_ROLE,
+    ACCOUNTS_ROLES,
+    ADMIN_ROLE,
     AI_CLIENTS,
     DATABASES,
     LEGACY_WEB_ORIGINS,
     MONITORING_CLIENT,
-    OPERATOR_ROLE,
     PEOPLE,
+    PERSON_ROLES,
     TEST_WEB_ORIGIN,
     WEB_ATTRIBUTES,
     WEB_ORIGIN,
@@ -29,8 +41,13 @@ from setup import (
 if TYPE_CHECKING:
     import httpx
 
-# new environment defaults affect fresh volumes only; existing account passwords stay in effect.
-FIRST_START_ONLY = {"POSTGRES_PASSWORD", "KEYCLOAK_ADMIN_PASSWORD", *(key for _, _, key in PEOPLE)}
+# new environment defaults affect fresh volumes only; existing account passwords stay in effect. the admin
+# account is created by this script when missing (add_missing_admin), so its password always applies.
+FIRST_START_ONLY = {
+    "POSTGRES_PASSWORD",
+    "KEYCLOAK_ADMIN_PASSWORD",
+    *(key for _, role, key in PEOPLE if role != ADMIN_ROLE),
+}
 
 
 def add_missing_secrets(env_path: Path) -> dict[str, str]:
@@ -64,9 +81,9 @@ def add_missing_databases(env: dict[str, str]) -> None:
 
 
 def add_missing_clients(env: dict[str, str]) -> None:
-    """provisions client credentials with their roles, without assigning any human operator role."""
+    """provisions client credentials with their roles, without assigning any person role."""
     with admin_client() as admin:
-        for name in (OPERATOR_ROLE, MONITORING_CLIENT):
+        for name in (*PERSON_ROLES, MONITORING_CLIENT):
             if admin.get(f"/roles/{name}").status_code == 404:
                 check(admin.post("/roles", json={"name": name}))
         for client in [*AI_CLIENTS, MONITORING_CLIENT]:
@@ -83,19 +100,38 @@ def add_missing_clients(env: dict[str, str]) -> None:
 
 
 def add_missing_accounts_client(env: dict[str, str]) -> None:
-    """creates identity's identity-accounts client if keycloak lacks it, with .env's secret, and gives its service account realm-management's manage-users role."""
+    """creates identity's identity-accounts client if keycloak lacks it, with .env's secret, and gives its service account realm-management's manage-users and view-realm roles."""
     with admin_client() as admin:
         created = ensure_client(
             admin, ACCOUNTS_CLIENT, lambda: accounts_client(env[client_secret_key(ACCOUNTS_CLIENT)])
         )
         client_id = check(admin.get("/clients", params={"clientId": ACCOUNTS_CLIENT})).json()[0]["id"]
         account = check(admin.get(f"/clients/{client_id}/service-account-user")).json()
-        owner, role_name = ACCOUNTS_ROLE
+        owner, role_names = ACCOUNTS_ROLES
         management = check(admin.get("/clients", params={"clientId": owner})).json()[0]["id"]
-        role = check(admin.get(f"/clients/{management}/roles/{role_name}")).json()
-        check(admin.post(f"/users/{account['id']}/role-mappings/clients/{management}", json=[role]))
+        roles = [check(admin.get(f"/clients/{management}/roles/{name}")).json() for name in role_names]
+        check(admin.post(f"/users/{account['id']}/role-mappings/clients/{management}", json=roles))
         if created:
             print(f"Created Keycloak client {ACCOUNTS_CLIENT}")
+
+
+def add_missing_admin(env: dict[str, str]) -> None:
+    """lets identity give new accounts their school (org_id) without an email, and creates the local school's admin with .env's password unless keycloak has one; an existing admin keeps its password."""
+    with admin_client() as admin:
+        apply_user_profile(admin)
+        username, role, key = next(person for person in PEOPLE if person[1] == ADMIN_ROLE)
+        found = check(admin.get("/users", params={"username": username, "exact": "true"})).json()
+        if found:
+            held = check(admin.get(f"/users/{found[0]['id']}/role-mappings/realm")).json()
+            others = sorted({r["name"] for r in held} & (set(PERSON_ROLES) - {role}))
+            if others:
+                # an account holds one person role, so giving it this one too would lock it out.
+                raise SystemExit(
+                    f"Keycloak user {username} already holds the {', '.join(others)} role; rename it before upgrading."
+                )
+        ensure_person(admin, username, "School", "Admin", env[key], role=role, reset_password=False)
+        if not found:
+            print(f"Created the local school admin {username} (password: {key} in .env)")
 
 
 def update_web_client() -> None:
@@ -156,6 +192,7 @@ def main() -> None:
     add_missing_databases(env)
     add_missing_clients(env)
     add_missing_accounts_client(env)
+    add_missing_admin(env)
     update_web_client()
     # keycloak-migrate copies a development-mode realm out of keycloak's h2 file, which keycloak must not hold
     # open meanwhile (infra/keycloak/migrate.sh).

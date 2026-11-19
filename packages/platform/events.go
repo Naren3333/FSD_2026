@@ -33,11 +33,17 @@ type Event struct {
 // emit writes an event to the outbox inside the caller's transaction, so it is published only if the change
 // commits.
 func Emit(ctx context.Context, tx pgx.Tx, topic, key string, data any) error {
+	return EmitAt(ctx, tx, topic, key, time.Now(), data)
+}
+
+// emitat is emit with the event's timestamp given, for events whose consumers order them by it: a time read
+// from the database under the resource's lock orders them as they committed, whichever process emits them.
+func EmitAt(ctx context.Context, tx pgx.Tx, topic, key string, at time.Time, data any) error {
 	payload, err := json.Marshal(data)
 	if err != nil {
 		return err
 	}
-	e := Event{uuid.NewString(), topic, 1, time.Now().UTC(), Correlation(ctx), key, payload}
+	e := Event{uuid.NewString(), topic, 1, at.UTC(), Correlation(ctx), key, payload}
 	body, err := json.Marshal(e)
 	if err != nil {
 		return err

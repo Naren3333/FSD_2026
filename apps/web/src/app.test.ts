@@ -10,7 +10,7 @@ import { AiUsage } from './core/ai-usage';
 import { Auth } from './core/auth';
 import { UnsavedChanges } from './core/unsaved-changes';
 import { StatusComponent } from './shared/status';
-import { OperatorShellComponent } from './features/monitoring/operator-shell';
+import { AdminShellComponent } from './features/admin/admin-shell';
 import { UsageComponent } from './features/usage/usage';
 
 const template = (path: string) => readFileSync(new URL(path, import.meta.url), 'utf8');
@@ -25,7 +25,7 @@ const json = (status: number, body: unknown) =>
   new Response(JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json' } });
 
 /* the shell for a user signed in with keycloak, whose api calls `fetch` answers; identity, gateway and session are the real ones. */
-function render(fetch: (url: string) => Response, operator = false) {
+function render(fetch: (url: string) => Response, admin = false) {
   const calls: string[] = [];
   vi.stubGlobal(
     'fetch',
@@ -36,7 +36,7 @@ function render(fetch: (url: string) => Response, operator = false) {
   );
   const auth = {
     authenticated: true,
-    operator,
+    admin,
     expired: signal(false),
     token: () => Promise.resolve('token'),
     login: vi.fn(() => Promise.resolve()),
@@ -64,8 +64,8 @@ function render(fetch: (url: string) => Response, operator = false) {
   TestBed.overrideComponent(AppComponent, { set: { template: template('./app.html') } });
   TestBed.overrideComponent(StatusComponent, { set: { template: template('./shared/status.html') } });
   TestBed.overrideComponent(UsageComponent, { set: { template: '' } });
-  TestBed.overrideComponent(OperatorShellComponent, {
-    set: { template: operator ? template('./features/monitoring/operator-shell.html') : '' },
+  TestBed.overrideComponent(AdminShellComponent, {
+    set: { template: admin ? template('./features/admin/admin-shell.html') : '' },
   });
   const fixture = TestBed.createComponent(AppComponent);
   fixture.detectChanges();
@@ -227,13 +227,13 @@ describe('the signed-in shell', () => {
   });
 });
 
-describe('the operator shell', () => {
-  it('opens without Identity and offers only monitoring', async () => {
+describe('the school admin shell', () => {
+  it('opens without Identity and offers the school admin sections', async () => {
     const page = render(() => json(500, {}), true);
     await page.settle();
     const links = [...page.root.querySelectorAll('nav[aria-label="Workspace"] a')];
-    expect(links.map((link) => link.textContent?.trim())).toEqual(['Monitoring']);
-    expect(page.text()).toContain('Platform operator');
+    expect(links.map((link) => link.textContent?.trim())).toEqual(['Classrooms', 'Accounts', 'Monitoring']);
+    expect(page.text()).toContain('School admin');
     expect(page.root.querySelector('#active-classroom')).toBeNull();
     expect(page.text()).not.toContain('Profile');
     expect(page.calls.filter((url) => url.includes('/api/identity/'))).toEqual([]);

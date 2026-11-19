@@ -847,3 +847,92 @@ func TestTheTeachersListComesInPagesThatNeverOverlap(t *testing.T) {
 		t.Fatalf("found in another organization: %v", err)
 	}
 }
+
+// reassignment is identity.classroom.reassigned.v1 giving the test submissions' classroom to teacher at at.
+func reassignment(t *testing.T, teacher string, at time.Time) platform.Event {
+	t.Helper()
+	data, err := json.Marshal(platform.ClassroomReassigned{Classroom: submissionID, Org: "org", Teacher: teacher})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return platform.Event{Type: platform.TopicClassroomReassigned, Resource: submissionID, Timestamp: at, Data: data}
+}
+
+func payer(t *testing.T, db *pgxpool.Pool, id string) *string {
+	t.Helper()
+	var teacher *string
+	if err := db.QueryRow(t.Context(), "SELECT teacher_id FROM evaluations WHERE id=$1", id).Scan(&teacher); err != nil {
+		t.Fatal(err)
+	}
+	return teacher
+}
+
+func TestAReassignedClassroomsNewTeacherPaysForItsMarking(t *testing.T) {
+	db := testDB(t)
+	submit(t, db, submissionA, "student-a", map[string]any{"teacher_id": "teacher-old"})
+	submit(t, db, submissionC, "student-c", map[string]any{"teacher_id": "teacher-old", "ai_marking": false})
+	at := time.Date(2026, 11, 19, 9, 0, 0, 0, time.UTC)
+	// a duplicate changes nothing, and an older reassignment delivered late does not win.
+	for _, event := range []platform.Event{reassignment(t, "teacher-new", at), reassignment(t, "teacher-new", at), reassignment(t, "teacher-stale", at.Add(-time.Hour))} {
+		if err := apply(t, db, reassign, event); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if p := payer(t, db, submissionA); p == nil || *p != "teacher-new" {
+		t.Fatalf("a draft's payer = %v", p)
+	}
+	if p := payer(t, db, submissionC); p != nil {
+		t.Fatalf("work without ai marking gained a payer: %s", *p)
+	}
+	// a submission the assessment's teacher made before the reassignment, arriving after it.
+	submit(t, db, submissionB, "student-b", map[string]any{"teacher_id": "teacher-old"})
+	if p := payer(t, db, submissionB); p == nil || *p != "teacher-new" {
+		t.Fatalf("a late submission's payer = %v", p)
+	}
+	f := newFakeAI(t, `{"output":null,"model_version":"m"}`)
+	markOnce(t, marker{db, f.client()})
+	if f.body["billed_to"].(map[string]any)["user_id"] != "teacher-new" {
+		t.Fatalf("billed %v", f.body["billed_to"])
+	}
+	// a purged classroom forgets its teacher and is not recorded again by a reassignment that arrives later.
+	deleted, err := json.Marshal(platform.ClassroomDeleted{Classroom: submissionID, Org: "org"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = apply(t, db, purge, platform.Event{Type: platform.TopicClassroomDeleted, Resource: submissionID, Data: deleted}); err != nil {
+		t.Fatal(err)
+	}
+	if err = apply(t, db, reassign, reassignment(t, "teacher-later", at.Add(time.Hour))); err != nil {
+		t.Fatal(err)
+	}
+	if n := count(t, db, "SELECT count(*) FROM classroom_teachers"); n != 0 {
+		t.Fatalf("%d classroom teachers after the purge", n)
+	}
+	var invalid platform.InvalidEvent
+	if err = apply(t, db, reassign, platform.Event{Resource: submissionID, Timestamp: at, Data: json.RawMessage(`{}`)}); !errors.As(err, &invalid) {
+		t.Fatalf("a malformed reassignment: %v", err)
+	}
+}
+
+// a grade finalized before its classroom was reassigned keeps its payer until it is reopened, when the new
+// teacher pays for any marking of the draft.
+func TestAReopenedGradeOfAReassignedClassroomBillsItsNewTeacher(t *testing.T) {
+	db := testDB(t)
+	ctx, s := t.Context(), pgStore{db}
+	submit(t, db, submissionA, "student-a", map[string]any{"teacher_id": "teacher-old"})
+	if _, err := s.finalizeEvaluation(ctx, "org", submissionA, "teacher-old", "Checked", map[string]Mark{questionID: {Criteria: map[string]int{"c1": 3}}}); err != nil {
+		t.Fatal(err)
+	}
+	if err := apply(t, db, reassign, reassignment(t, "teacher-new", time.Date(2026, 11, 19, 9, 0, 0, 0, time.UTC))); err != nil {
+		t.Fatal(err)
+	}
+	if p := payer(t, db, submissionA); p == nil || *p != "teacher-old" {
+		t.Fatalf("a finalized grade's payer = %v", p)
+	}
+	if _, err := s.reopenEvaluation(ctx, "org", submissionA, "teacher-new", "Mis-marked"); err != nil {
+		t.Fatal(err)
+	}
+	if p := payer(t, db, submissionA); p == nil || *p != "teacher-new" {
+		t.Fatalf("a reopened grade's payer = %v", p)
+	}
+}

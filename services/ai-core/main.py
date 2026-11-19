@@ -116,12 +116,15 @@ async def reporting_timeout(request: Request, report: str) -> AsyncIterator[None
 
 @app.get("/internal/spend/summary", responses=REPORT_ERRORS)
 async def spend_summary(
-    request: Request, response: Response, _caller: Claims = Depends(MONITORING)
+    request: Request,
+    response: Response,
+    org_id: str | None = Query(None, min_length=1, max_length=200),
+    _caller: Claims = Depends(MONITORING),
 ) -> spend_report.SpendSummary:
     response.headers["Cache-Control"] = "no-store"
     ledger = reporting_ledger(request)
     async with reporting_timeout(request, "summary"):
-        return await spend_report.summary(ledger)
+        return await spend_report.summary(ledger, org_id)
 
 
 @app.get("/internal/spend/users", responses=REPORT_ERRORS)

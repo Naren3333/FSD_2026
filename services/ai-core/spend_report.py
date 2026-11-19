@@ -83,7 +83,9 @@ async def report_clock(conn: AsyncConnection[DictRow]) -> datetime:
     return cast(datetime, row["at"]).astimezone(ZoneInfo(timezone()))
 
 
-async def summary(ledger: PostgresLedger) -> SpendSummary:
+async def summary(ledger: PostgresLedger, org_id: str | None = None) -> SpendSummary:
+    """the last seven days' spend and the held reservations, of one organization when org_id is given. the
+    platform-wide ceiling covers every organization, so an organization's report leaves it out."""
     async with ledger.pool.connection() as conn, conn.transaction():
         await conn.execute("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ, READ ONLY")
         at = await report_clock(conn)
@@ -94,13 +96,13 @@ async def summary(ledger: PostgresLedger) -> SpendSummary:
                 f"""WITH recent AS (
                      SELECT (created_at AT TIME ZONE %(zone)s)::date AS day, operation, cost_usd, estimated
                      FROM usage WHERE created_at >= (%(start)s::timestamp AT TIME ZONE %(zone)s)
-                       AND created_at <= %(at)s
+                       AND created_at <= %(at)s AND (%(org)s::text IS NULL OR org_id = %(org)s)
                    ) SELECT day, operation, {AMOUNTS} FROM recent
                    GROUP BY GROUPING SETS ((day), (day, operation)) ORDER BY day, operation""",
-                {"zone": timezone(), "start": first, "at": at},
+                {"zone": timezone(), "start": first, "at": at, "org": org_id},
             )
         ).fetchall()
-        limit = get_settings().total_spend_limit_usd
+        limit = get_settings().total_spend_limit_usd if org_id is None else None
         held = await (
             await conn.execute(
                 """SELECT count(*) AS count, coalesce(sum(amount),0) AS reserved,
@@ -108,8 +110,8 @@ async def summary(ledger: PostgresLedger) -> SpendSummary:
                    coalesce(sum(amount) FILTER (WHERE expires_at<=%(at)s),0) AS expired,
                    CASE WHEN %(limited)s THEN
                        (SELECT sum(cost_usd) FROM usage_lifetime_total) END AS spent
-                   FROM budget_reservations""",
-                {"at": at, "limited": limit is not None},
+                   FROM budget_reservations WHERE %(org)s::text IS NULL OR org_id = %(org)s""",
+                {"at": at, "limited": limit is not None, "org": org_id},
             )
         ).fetchone()
     assert held is not None

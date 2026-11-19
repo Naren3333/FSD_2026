@@ -41,7 +41,7 @@ func (a *Authenticator) Wrap(next http.Handler) http.Handler {
 			Unauthenticated(w, "Required identity claims are missing.")
 			return
 		}
-		if c.Has("teacher") && c.Has("student") {
+		if c.PersonRoles() > 1 {
 			RoleConflict(w)
 			return
 		}
@@ -49,8 +49,19 @@ func (a *Authenticator) Wrap(next http.Handler) http.Handler {
 	})
 }
 
-// RoleConflict answers 403 ROLE_CONFLICT: an account holds both the teacher and the student role, which no
-// service accepts.
+// PersonRoles counts the admin, teacher and student roles the token holds.
+func (c Claims) PersonRoles() int {
+	n := 0
+	for _, role := range []string{RoleAdmin, RoleTeacher, RoleStudent} {
+		if c.Has(role) {
+			n++
+		}
+	}
+	return n
+}
+
+// RoleConflict answers 403 ROLE_CONFLICT: an account holds more than one of the admin, teacher and student
+// roles, which no service accepts.
 func RoleConflict(w http.ResponseWriter) {
-	Error(w, http.StatusForbidden, "ROLE_CONFLICT", "An account must be either a teacher or a student, not both.")
+	Error(w, http.StatusForbidden, "ROLE_CONFLICT", "An account must be exactly one of a school admin, a teacher or a student.")
 }

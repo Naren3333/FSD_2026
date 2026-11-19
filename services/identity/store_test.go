@@ -111,9 +111,9 @@ func TestStudentLookupsStayInTheOrganizationAndSkipTeachers(t *testing.T) {
 	if ids, err := s.studentsNamed(ctx, "org-a", "Kim"); err != nil || len(ids) != 1 || ids[0] != "student-a" {
 		t.Errorf("studentsNamed kim = %v, %v", ids, err)
 	}
-	students, total, err := s.listOrgStudents(ctx, "org-a", "", 0, 50)
-	if err != nil || total != 1 || len(students) != 1 || students[0].ID != "student-a" {
-		t.Errorf("listOrgStudents = %v, %d, %v", students, total, err)
+	accounts, total, err := s.listAccounts(ctx, "org-a", "student", "", 0, 50)
+	if err != nil || total != 1 || len(accounts) != 1 || accounts[0].ID != "student-a" {
+		t.Errorf("listAccounts = %v, %d, %v", accounts, total, err)
 	}
 }
 
@@ -205,10 +205,10 @@ func TestTheRosterOfIDsHasEveryStudent(t *testing.T) {
 	}
 }
 
-func TestInsertClassroomNeedsARegisteredTeacher(t *testing.T) {
+func TestInsertClassroomNeedsATeacherOfTheOrganization(t *testing.T) {
 	s := testStore(t)
 	register(t, s, "org-a", "teacher-a", "teacher", "a")
-	if err := s.insertClassroom(context.Background(), uuid.NewString(), "Year 5", "org-a", "nobody"); !errors.Is(err, errProfileRequired) {
+	if err := s.insertClassroom(context.Background(), uuid.NewString(), "Year 5", "org-a", "nobody"); !errors.Is(err, errNotATeacher) {
 		t.Fatalf("unregistered teacher: %v", err)
 	}
 }
@@ -246,7 +246,7 @@ func TestRostersAndRemoval(t *testing.T) {
 	if err = s.db.QueryRow(ctx, "SELECT count(*) OVER (), body->'data'->>'student_id', body->'data'->>'org_id' FROM outbox WHERE topic=$1 AND partition_key=$2", platform.TopicEnrollmentRemoved, id).Scan(&events, &student, &org); err != nil || events != 1 || student != "student-a" || org != "org-a" {
 		t.Fatalf("event = %d %s %s, %v", events, student, org, err)
 	}
-	if students, total, err := s.listOrgStudents(ctx, "org-a", "BE", 0, 10); err != nil || total != 1 || students[0].ID != "student-b" {
+	if students, total, err := s.listAccounts(ctx, "org-a", "student", "BE", 0, 10); err != nil || total != 1 || students[0].ID != "student-b" {
 		t.Fatalf("search = %v, %d, %v", students, total, err)
 	}
 }
@@ -302,7 +302,7 @@ func TestADeletedAccountIsClearedAnnouncedAndNeverReturns(t *testing.T) {
 	if err := s.deleteAccount(ctx, "org-a", teacher); err != nil {
 		t.Fatal(err)
 	}
-	if err := s.insertClassroom(ctx, uuid.NewString(), "Year 6", "org-a", teacher); !errors.Is(err, errProfileRequired) {
+	if err := s.insertClassroom(ctx, uuid.NewString(), "Year 6", "org-a", teacher); !errors.Is(err, errNotATeacher) {
 		t.Errorf("a deleted teacher created a classroom: %v", err)
 	}
 }
@@ -411,3 +411,117 @@ func TestSignInBackoffGrowsToItsCap(t *testing.T) {
 		}
 	}
 }
+
+func TestTheSchoolsClassroomsCountOnlyTheirOwnStudents(t *testing.T) {
+	ctx, s := context.Background(), testStore(t)
+	register(t, s, "org-c", "teacher-c", "teacher", "c")
+	register(t, s, "org-c", "student-c", "student", "s")
+	older := classroom(t, s, "org-c", "teacher-c")
+	if err := s.insertEnrollment(ctx, older, "student-c"); err != nil {
+		t.Fatal(err)
+	}
+	newer := classroom(t, s, "org-c", "teacher-c")
+	rooms, total, err := s.listOrgClassrooms(ctx, "org-c", 0, 10)
+	if err != nil || total != 2 || len(rooms) != 2 || rooms[0].ID != newer || rooms[0].Students != 0 || rooms[1].ID != older || rooms[1].Students != 1 {
+		t.Fatalf("classrooms = %+v of %d, %v", rooms, total, err)
+	}
+	if rooms, _, err = s.listOrgClassrooms(ctx, "org-c", 1, 1); err != nil || len(rooms) != 1 || rooms[0].ID != older || rooms[0].Students != 1 {
+		t.Fatalf("second page = %+v, %v", rooms, err)
+	}
+}
+
+func TestAdminsManageOnlyTheirOrganization(t *testing.T) {
+	ctx, s := context.Background(), testStore(t)
+	register(t, s, "org-a", "admin-a", "admin", "head")
+	register(t, s, "org-a", "teacher-a", "teacher", "t")
+	register(t, s, "org-a", "teacher-b", "teacher", "u")
+	register(t, s, "org-b", "teacher-z", "teacher", "z")
+	// an account made by an admin is listed and assignable before its first sign-in, which keeps its role.
+	if err := s.insertAccount(ctx, "org-a", "student-new", "student", "org-a.new.kid", "New Kid"); err != nil {
+		t.Fatal(err)
+	}
+	if accounts, total, err := s.listAccounts(ctx, "org-a", "student", "KID", 0, 10); err != nil || total != 1 || accounts[0].Name != "New Kid" {
+		t.Fatalf("accounts = %v of %d, %v", accounts, total, err)
+	}
+	// the username after the school's id is searched; the school's id that starts it is not.
+	if _, total, err := s.listAccounts(ctx, "org-a", "student", "new.kid", 0, 10); err != nil || total != 1 {
+		t.Fatalf("by username = %d, %v", total, err)
+	}
+	if _, total, err := s.listAccounts(ctx, "org-a", "student", "org-a", 0, 10); err != nil || total != 0 {
+		t.Fatalf("by the school's id = %d, %v", total, err)
+	}
+	if _, total, err := s.listAccounts(ctx, "org-a", "teacher", "", 0, 10); err != nil || total != 2 {
+		t.Fatalf("teachers = %d, %v", total, err)
+	}
+	for _, teacher := range []string{"student-new", "admin-a", "teacher-z"} {
+		if err := s.insertClassroom(ctx, uuid.NewString(), "Year 5", "org-a", teacher); !errors.Is(err, errNotATeacher) {
+			t.Fatalf("%s as teacher: %v", teacher, err)
+		}
+	}
+	id := classroom(t, s, "org-a", "teacher-a")
+	if err := s.insertEnrollment(ctx, id, "student-new"); err != nil {
+		t.Fatal(err)
+	}
+	register(t, s, "org-a", "student-new", "student", "org-a.new.kid")
+	if rooms, total, err := s.listOrgClassrooms(ctx, "org-a", 0, 10); err != nil || total != 1 || rooms[0].Students != 1 || rooms[0].TeacherName != "t" {
+		t.Fatalf("classrooms = %v of %d, %v", rooms, total, err)
+	}
+	if _, total, err := s.listOrgClassrooms(ctx, "org-b", 0, 10); err != nil || total != 0 {
+		t.Fatalf("another organization's classrooms = %d, %v", total, err)
+	}
+	name, other, outsider := "Year 6", "teacher-b", "teacher-z"
+	if err := s.updateClassroom(ctx, "org-b", id, &name, nil); !errors.Is(err, platform.ErrNotFound) {
+		t.Fatalf("renamed from another organization: %v", err)
+	}
+	if err := s.updateClassroom(ctx, "org-a", id, nil, &outsider); !errors.Is(err, errNotATeacher) {
+		t.Fatalf("another organization's teacher: %v", err)
+	}
+	if err := s.updateClassroom(ctx, "org-a", id, &name, &other); err != nil {
+		t.Fatal(err)
+	}
+	if org, teacher, err := s.findClassroomOwner(ctx, id); err != nil || org != "org-a" || teacher != "teacher-b" {
+		t.Fatalf("owner = %s %s, %v", org, teacher, err)
+	}
+	// only a new teacher is announced: a rename, or the same teacher again, is not.
+	renamed := "Year 7"
+	if err := s.updateClassroom(ctx, "org-a", id, &renamed, &other); err != nil {
+		t.Fatal(err)
+	}
+	var events int
+	var teacher, org string
+	err := s.db.QueryRow(ctx, "SELECT count(*) OVER (),body->'data'->>'teacher_id',body->'data'->>'org_id' FROM outbox WHERE topic=$1 AND partition_key=$2", platform.TopicClassroomReassigned, id).Scan(&events, &teacher, &org)
+	if err != nil || events != 1 || teacher != "teacher-b" || org != "org-a" {
+		t.Fatalf("reassignments = %d %s %s, %v", events, teacher, org, err)
+	}
+	// each reassignment is stamped by the database's clock after the one before it committed.
+	if err = s.updateClassroom(ctx, "org-a", id, nil, ptr("teacher-a")); err != nil {
+		t.Fatal(err)
+	}
+	var ordered bool
+	err = s.db.QueryRow(ctx, `SELECT bool_and(stamp>prev) FROM (SELECT (body->>'timestamp')::timestamptz AS stamp,
+		lag((body->>'timestamp')::timestamptz) OVER (ORDER BY created_at,id) AS prev FROM outbox WHERE topic=$1 AND partition_key=$2) t
+		WHERE prev IS NOT NULL`, platform.TopicClassroomReassigned, id).Scan(&ordered)
+	if err != nil || !ordered {
+		t.Fatalf("reassignments out of order: %v", err)
+	}
+	// a student is found by the username the admin chose, or by the whole sign-in username.
+	for _, username := range []string{"NEW.KID", "org-a.new.kid"} {
+		if ids, err := s.studentsNamed(ctx, "org-a", username); err != nil || len(ids) != 1 || ids[0] != "student-new" {
+			t.Fatalf("studentsNamed %s = %v, %v", username, ids, err)
+		}
+	}
+	if ids, err := s.studentsNamed(ctx, "org-b", "new.kid"); err != nil || len(ids) != 0 {
+		t.Fatalf("another school's student = %v, %v", ids, err)
+	}
+	// an admin resets passwords of the school's teachers and students only.
+	if a, err := s.findAccount(ctx, "org-a", "student-new"); err != nil || a.Username != "org-a.new.kid" || a.Role != "student" {
+		t.Fatalf("findAccount = %v, %v", a, err)
+	}
+	for _, account := range [][2]string{{"org-a", "admin-a"}, {"org-b", "student-new"}, {"org-a", "teacher-z"}} {
+		if _, err := s.findAccount(ctx, account[0], account[1]); !errors.Is(err, platform.ErrNotFound) {
+			t.Fatalf("findAccount %v: %v", account, err)
+		}
+	}
+}
+
+func ptr(s string) *string { return &s }

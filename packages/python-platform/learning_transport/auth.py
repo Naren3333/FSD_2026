@@ -15,7 +15,8 @@ from fastapi import Depends, Request
 
 from learning_transport.errors import failure
 
-TEACHER, STUDENT, AI_CLIENT = "teacher", "student", "ai-client"
+ADMIN, TEACHER, STUDENT, AI_CLIENT = "admin", "teacher", "student", "ai-client"
+PERSON_ROLES = (ADMIN, TEACHER, STUDENT)
 MONITORING_READER = "monitoring-reader"
 LEEWAY = 30  # seconds of clock skew allowed between the identity provider and this service (exp, iat, nbf)
 REFETCH_INTERVAL = 30.0  # seconds between key set refetches for a key id the cached set lacks
@@ -130,19 +131,17 @@ class Claims:
 
     @property
     def person_role(self) -> str | None:
-        """the person's role, teacher or student (an account never holds both; see caller); None for a service account."""
-        if self.has(TEACHER):
-            return TEACHER
-        if self.has(STUDENT):
-            return STUDENT
-        return None
+        """the person's one role, admin, teacher or student (see caller); None for a service account."""
+        return next((role for role in PERSON_ROLES if self.has(role)), None)
 
 
 def caller(claims: dict[str, Any] = Depends(actor)) -> Claims:
-    """fastapi dependency: the verified caller. an account is a teacher or a student, never both: a token holding both roles is refused with 403."""
+    """fastapi dependency: the verified caller. an account is exactly one of a school admin, a teacher or a student: a token holding more than one of those roles is refused with 403."""
     verified = Claims.from_token(claims)
-    if verified.has(TEACHER) and verified.has(STUDENT):
-        raise failure(403, "ROLE_CONFLICT", "An account must be either a teacher or a student, not both.")
+    if sum(verified.has(role) for role in PERSON_ROLES) > 1:
+        raise failure(
+            403, "ROLE_CONFLICT", "An account must be exactly one of a school admin, a teacher or a student."
+        )
     return verified
 
 

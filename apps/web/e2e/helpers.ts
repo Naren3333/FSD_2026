@@ -21,6 +21,10 @@ export const env: Record<string, string> = Object.fromEntries(
     }),
 );
 
+/* the stack's kong gateway and keycloak, on the ports scripts/local_stack.py reads: the environment's (stack_tests.py sets the test stack's), else .env's, else the development defaults. */
+export const GATEWAY = `http://127.0.0.1:${process.env['KONG_PORT'] || env['KONG_PORT'] || '8000'}/api`;
+const KEYCLOAK = `http://127.0.0.1:${process.env['KEYCLOAK_PORT'] || env['KEYCLOAK_PORT'] || '8081'}`;
+
 /* signs in through keycloak and waits for the workspace. */
 export async function login(page: Page, user: string, password: string): Promise<void> {
   await page.goto('/');
@@ -31,42 +35,88 @@ export async function login(page: Page, user: string, password: string): Promise
   await expect(page.getByRole('button', { name: 'Sign out' })).toBeVisible();
 }
 
-/* creates a classroom from the classrooms page and makes it the current one. */
+/* a local person's access token through the e2e client's password grant. */
+export async function passwordToken(username: string, password: string): Promise<string> {
+  const signIn = await fetch(`${KEYCLOAK}/realms/learning/protocol/openid-connect/token`, {
+    method: 'POST',
+    body: new URLSearchParams({ client_id: 'learning-e2e', grant_type: 'password', username, password }),
+  });
+  if (!signIn.ok) throw new Error(`Sign-in for ${username} failed: ${signIn.status}`);
+  return ((await signIn.json()) as { access_token: string }).access_token;
+}
+
+/* calls identity through kong as the signed-in person, failing the test on an error. */
+export async function identity<T>(token: string, path: string, method = 'GET', body?: unknown): Promise<T> {
+  const response = await fetch(`${GATEWAY}/identity${path}`, {
+    method,
+    headers: { Authorization: 'Bearer ' + token, 'Content-Type': 'application/json' },
+    body: body === undefined ? undefined : JSON.stringify(body),
+  });
+  if (!response.ok) throw new Error(`${method} ${path} failed: ${response.status} ${await response.text()}`);
+  return (response.status === 204 ? undefined : await response.json()) as T;
+}
+
+/* the school admin's token: classrooms and enrollment are theirs to manage (adr 0019). */
+export function adminToken(): Promise<string> {
+  return passwordToken('admin', env.ADMIN_PASSWORD);
+}
+
+/* the school admin creates a classroom for the seeded teacher, whose page then refreshes its classrooms and makes it the current one. */
 export async function createClassroom(page: Page, name: string): Promise<void> {
+  const admin = await adminToken();
+  const teacher = await identity<{ id: string }>(
+    await passwordToken('teacher', env.TEACHER_PASSWORD),
+    '/me',
+    'POST',
+    {},
+  );
+  const room = await identity<{ id: string }>(admin, '/admin/classrooms', 'POST', {
+    name,
+    teacher_id: teacher.id,
+  });
+  createdClassrooms.push(room.id);
+  classroomIds.set(name, room.id);
+  await openMenu(page);
   await page
     .getByRole('navigation', { name: 'Workspace' })
     .getByRole('link', { name: 'Classrooms', exact: true })
     .click();
-  await page.getByLabel('Classroom name', { exact: true }).fill(name);
-  const created = page.waitForResponse(
-    (r) => r.request().method() === 'POST' && new URL(r.url()).pathname === '/api/identity/classrooms',
-  );
-  await page.getByRole('button', { name: 'Create classroom', exact: true }).click();
-  const response = await created;
-  if (response.status() === 201) createdClassrooms.push(((await response.json()) as { id: string }).id);
-  await expect(page.getByText('Classroom created.', { exact: true })).toBeVisible();
+  await page.getByRole('button', { name: 'Refresh classrooms' }).first().click();
+  await expect(page.getByRole('article', { name })).toBeVisible();
   await page.getByLabel('Current classroom').selectOption({ label: name });
 }
 
-/* opens Students, finds the student in the school's list by username and enrolls them in the current classroom. */
+/* the school admin enrolls the student by username in the classroom; the teacher's page then opens Students and sees them on the roster. */
 export async function enrollStudent(
   page: Page,
   username: string,
   studentName: string,
   classroom: string,
 ): Promise<void> {
+  await identity(await adminToken(), `/admin/classrooms/${classroomIds.get(classroom)}/enrollments`, 'POST', {
+    username,
+  });
   await openMenu(page);
   await page
     .getByRole('navigation', { name: 'Workspace' })
     .getByRole('link', { name: 'Students', exact: true })
     .click();
-  const everyone = page.getByRole('region', { name: 'All students' });
-  await everyone.getByLabel('Search students').fill(username);
-  await everyone.getByRole('button', { name: `Enroll ${studentName} in ${classroom}` }).click();
-  await expect(page.getByText(`${studentName} enrolled.`, { exact: true })).toBeVisible();
+  await page.getByRole('button', { name: 'Refresh students' }).click();
+  await expect(
+    page.getByRole('region', { name: 'Students in ' + classroom }).getByText(studentName, { exact: true }),
+  ).toBeVisible();
 }
 
-/* signs in as the seeded teacher and creates a classroom to work in. */
+/* the school admin removes the student from the classroom. */
+export async function unenrollStudent(classroom: string, studentId: string): Promise<void> {
+  await identity(
+    await adminToken(),
+    `/admin/classrooms/${classroomIds.get(classroom)}/enrollments/${encodeURIComponent(studentId)}`,
+    'DELETE',
+  );
+}
+
+/* signs in as the seeded teacher and has the school admin create a classroom to work in. */
 export async function teacherWithClassroom(page: Page, name: string): Promise<void> {
   await login(page, 'teacher', env.TEACHER_PASSWORD);
   await createClassroom(page, name);
@@ -137,34 +187,21 @@ export function deleteTestTopic(name: string): void {
   );
 }
 
-/* the stack's kong gateway and keycloak, on the ports scripts/local_stack.py reads: the environment's (stack_tests.py sets the test stack's), else .env's, else the development defaults. */
-export const GATEWAY = `http://127.0.0.1:${process.env['KONG_PORT'] || env['KONG_PORT'] || '8000'}/api`;
-const KEYCLOAK = `http://127.0.0.1:${process.env['KEYCLOAK_PORT'] || env['KEYCLOAK_PORT'] || '8081'}`;
-
-/* deletes a classroom a test created through identity's api, as the seeded teacher who created it, so every service purges its data for it as for a teacher's deletion and test classrooms never pile up. */
+/* deletes a classroom a test created through identity's api, as the school admin, so every service purges its data for it and test classrooms never pile up. */
 export async function deleteTestClassroom(id: string): Promise<void> {
-  const signIn = await fetch(`${KEYCLOAK}/realms/learning/protocol/openid-connect/token`, {
-    method: 'POST',
-    body: new URLSearchParams({
-      client_id: 'learning-e2e',
-      grant_type: 'password',
-      username: 'teacher',
-      password: env.TEACHER_PASSWORD,
-    }),
-  });
-  if (!signIn.ok) throw new Error(`Teacher sign-in to delete classroom ${id} failed: ${signIn.status}`);
-  const { access_token } = (await signIn.json()) as { access_token: string };
-  const deleted = await fetch(`${GATEWAY}/identity/classrooms/${encodeURIComponent(id)}`, {
+  const deleted = await fetch(`${GATEWAY}/identity/admin/classrooms/${encodeURIComponent(id)}`, {
     method: 'DELETE',
-    headers: { Authorization: 'Bearer ' + access_token },
+    headers: { Authorization: 'Bearer ' + (await adminToken()) },
   });
-  if (!deleted.ok && deleted.status !== 403) {
+  if (!deleted.ok && deleted.status !== 404) {
     throw new Error(`Deleting classroom ${id} failed: ${deleted.status} ${await deleted.text()}`);
   }
 }
 
 /* classrooms (by id) and topics (by name) the running test created, deleted after it whether it passed or failed (see deleteTestDataAfterEach). */
 const createdClassrooms: string[] = [];
+/* the ids of the classrooms the running test created, by name. */
+const classroomIds = new Map<string, string>();
 const createdTopics: string[] = [];
 
 /* records a topic the test is about to create, so it is deleted after the test even if the test fails. */
@@ -177,6 +214,7 @@ export function topicToDelete(name: string): string {
 export function deleteTestDataAfterEach(): void {
   test.afterEach(async () => {
     for (const id of createdClassrooms.splice(0)) await deleteTestClassroom(id);
+    classroomIds.clear();
     for (const name of createdTopics.splice(0)) deleteTestTopic(name);
   });
 }

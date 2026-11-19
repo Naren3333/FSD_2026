@@ -1,0 +1,337 @@
+<app-page-header title="Classrooms" [subtitle]="subtitle()">
+  <app-refresh-button
+    label="Refresh classrooms"
+    [busy]="classrooms.loading()"
+    [disabled]="state.busy()"
+    (refresh)="refresh()"
+  />
+</app-page-header>
+<section class="panel create-classroom" aria-labelledby="classroom-form-title">
+  <h3 #formHeading id="classroom-form-title" tabindex="-1">
+    {{ editing() ? 'Edit ' + editing()!.name : 'Create a classroom' }}
+  </h3>
+  <app-section-state [section]="teachers" loading="Loading teachers…" />
+  @if (noTeachers()) {
+    <p class="empty">
+      Your school has no teacher accounts yet.
+      <a [routerLink]="accountsPath">Create a teacher account</a> first.
+    </p>
+  }
+  <form id="classroom-form" class="create-form" novalidate [formGroup]="form" (ngSubmit)="save()">
+    <app-field
+      controlId="class-name"
+      label="Classroom name"
+      [control]="form.controls.name"
+      error="Enter a name of 1–120 characters."
+    >
+      <input appFieldControl id="class-name" formControlName="name" maxlength="120" />
+    </app-field>
+    <app-field
+      controlId="class-teacher"
+      label="Teacher"
+      hint="They get the classroom's teacher access at once."
+      [control]="form.controls.teacher"
+      error="Choose the classroom's teacher."
+    >
+      <select appFieldControl id="class-teacher" formControlName="teacher">
+        <option value="">Choose a teacher</option>
+        @for (teacher of teachers.value() ?? []; track teacher.id) {
+          <option [value]="teacher.id">{{ teacher.display_name || teacher.username }}</option>
+        }
+      </select>
+    </app-field>
+    <div class="button-row">
+      <button [disabled]="state.busy() || noTeachers()">
+        {{ editing() ? 'Save classroom' : 'Create classroom' }}
+      </button>
+      <button type="button" class="secondary" (click)="clearForm()" [disabled]="state.busy()">
+        {{ editing() ? 'Cancel editing' : 'Clear form' }}
+      </button>
+    </div>
+  </form>
+</section>
+@if (!deleting()) {
+  <app-status [state]="state" />
+}
+<section class="panel" aria-labelledby="school-classrooms-title">
+  <div class="panel-heading">
+    <h3 id="school-classrooms-title">School classrooms</h3>
+    <p class="caption">Newest first, {{ pageSize }} a page</p>
+  </div>
+  <app-section-state [section]="classrooms" loading="Loading classrooms…" />
+  @if (classrooms.ready()) {
+    @if (classrooms.value()?.items?.length) {
+      <div class="table-scroll">
+        <table class="stack-table admin-classrooms-table">
+          <caption class="visually-hidden">
+            School classrooms
+          </caption>
+          <thead>
+            <tr>
+              <th scope="col">Classroom</th>
+              <th scope="col">Teacher</th>
+              <th scope="col" class="numeric">Students</th>
+              <th scope="col"><span class="visually-hidden">Actions</span></th>
+            </tr>
+          </thead>
+          <tbody>
+            @for (classroom of classrooms.value()?.items ?? []; track classroom.id) {
+              <tr [class.current]="managing()?.id === classroom.id">
+                <th scope="row">
+                  <strong>{{ classroom.name }}</strong>
+                </th>
+                <td data-label="Teacher">{{ teacherName(classroom) }}</td>
+                <td data-label="Students" class="numeric">{{ classroom.students }}</td>
+                <td class="actions-cell">
+                  <div class="row-actions">
+                    <button
+                      type="button"
+                      class="secondary"
+                      (click)="manage(classroom)"
+                      [attr.aria-label]="'Manage students of ' + classroom.name"
+                      [attr.aria-pressed]="managing()?.id === classroom.id"
+                    >
+                      Students
+                    </button>
+                    <button
+                      type="button"
+                      class="icon-button"
+                      (click)="edit(classroom)"
+                      [disabled]="state.busy()"
+                      [attr.aria-label]="'Edit ' + classroom.name"
+                      [title]="'Edit ' + classroom.name"
+                    >
+                      <app-icon name="edit" />
+                    </button>
+                    <button
+                      type="button"
+                      class="icon-button"
+                      (click)="confirmDelete(classroom)"
+                      [disabled]="state.busy()"
+                      [attr.aria-label]="'Delete ' + classroom.name"
+                      [title]="'Delete ' + classroom.name"
+                    >
+                      <app-icon name="trash" />
+                    </button>
+                  </div>
+                </td>
+              </tr>
+            }
+          </tbody>
+        </table>
+      </div>
+    } @else {
+      <p class="empty">No classrooms yet. Create the first one above and choose its teacher.</p>
+    }
+  }
+  <app-pager
+    label="School classrooms pages"
+    [(page)]="page"
+    [pageSize]="pageSize"
+    [total]="classrooms.value()?.total ?? 0"
+    noun="classrooms"
+    [disabled]="state.busy()"
+    (go)="loadClassrooms()"
+  />
+</section>
+@if (managing(); as classroom) {
+  <div class="students-layout admin-students">
+    <section class="panel" aria-labelledby="admin-roster-title">
+      <div class="panel-heading">
+        <h3 #studentsHeading id="admin-roster-title" tabindex="-1">Students in {{ classroom.name }}</h3>
+        <button type="button" class="quiet" (click)="closeManage()">Close</button>
+      </div>
+      <p class="caption">Teacher: {{ teacherName(classroom) }}. By name, {{ rosterPageSize }} a page.</p>
+      <app-section-state [section]="roster" loading="Loading students…" />
+      @if (roster.ready()) {
+        @if (roster.value()?.students?.length) {
+          <div class="table-scroll">
+            <table class="stack-table roster-table">
+              <caption class="visually-hidden">
+                Students in
+                {{
+                  classroom.name
+                }}
+              </caption>
+              <thead>
+                <tr>
+                  <th scope="col">Name</th>
+                  <th scope="col">Username</th>
+                  <th scope="col"><span class="visually-hidden">Actions</span></th>
+                </tr>
+              </thead>
+              <tbody>
+                @for (student of roster.value()?.students ?? []; track student.id) {
+                  <tr>
+                    <th scope="row">
+                      <strong>{{ studentName(student) || 'Name not recorded yet' }}</strong>
+                      @if (!studentName(student)) {
+                        <span class="identifier">{{ student.id }}</span>
+                      }
+                    </th>
+                    <td data-label="Username">
+                      @if (student.username && student.username !== studentName(student)) {
+                        {{ student.username }}
+                      } @else {
+                        <span aria-hidden="true">–</span><span class="visually-hidden">Same as name</span>
+                      }
+                    </td>
+                    <td class="actions-cell">
+                      <button
+                        type="button"
+                        class="icon-button"
+                        (click)="confirmRemove(student)"
+                        [disabled]="rosterState.busy()"
+                        [attr.aria-label]="
+                          'Remove ' + (studentName(student) || student.id) + ' from ' + classroom.name
+                        "
+                        [title]="'Remove ' + (studentName(student) || student.id) + ' from ' + classroom.name"
+                      >
+                        <app-icon name="trash" />
+                      </button>
+                    </td>
+                  </tr>
+                }
+              </tbody>
+            </table>
+          </div>
+        } @else {
+          <p class="empty">No students enrolled yet. Enroll them from the school's students.</p>
+        }
+      }
+      <app-pager
+        label="Classroom students pages"
+        [(page)]="rosterPage"
+        [pageSize]="rosterPageSize"
+        [total]="roster.value()?.total ?? 0"
+        [disabled]="rosterState.busy()"
+        (go)="showRosterPage()"
+      />
+      @if (!removing()) {
+        <app-status [state]="rosterState" />
+      }
+    </section>
+    <section class="panel" aria-labelledby="school-students-title">
+      <div class="panel-heading">
+        <h3 id="school-students-title">School students</h3>
+        <button
+          type="button"
+          class="secondary"
+          (click)="loadEveryone()"
+          [disabled]="everyoneState.busy() || everyone.loading()"
+        >
+          Refresh school students
+        </button>
+      </div>
+      <p class="caption everyone-caption">
+        Add students to {{ classroom.name }}. New students are created on
+        <a [routerLink]="accountsPath">Accounts</a>.
+      </p>
+      <app-field controlId="admin-student-search" label="Search students" hint="By name or username">
+        <input
+          #searchBox
+          appFieldControl
+          id="admin-student-search"
+          type="search"
+          autocomplete="off"
+          [value]="search()"
+          (input)="searchFor(searchBox.value)"
+        />
+      </app-field>
+      <app-section-state [section]="everyone" loading="Loading students…" />
+      @if (everyone.ready()) {
+        @for (student of everyone.value()?.accounts ?? []; track student.id) {
+          <article class="record roster-row">
+            <div>
+              <strong>{{ studentName(student) }}</strong>
+              @if (student.username !== studentName(student)) {
+                <span class="caption">{{ student.username }}</span>
+              }
+            </div>
+            @if (enrolledIds.value()?.has(student.id)) {
+              <span class="badge badge-plain">Enrolled</span>
+            } @else {
+              <button
+                type="button"
+                class="secondary"
+                (click)="enroll(student)"
+                [disabled]="everyoneState.busy() || !enrolledIds.ready()"
+                [attr.aria-label]="'Enroll ' + studentName(student) + ' in ' + classroom.name"
+              >
+                Enroll
+              </button>
+            }
+          </article>
+        } @empty {
+          <p class="empty">
+            {{
+              search().trim()
+                ? 'No students match that search.'
+                : 'Your school has no student accounts yet. Create them on Accounts.'
+            }}
+          </p>
+        }
+      }
+      <app-pager
+        label="School students pages"
+        [(page)]="everyonePage"
+        [pageSize]="everyonePageSize"
+        [total]="everyone.value()?.total ?? 0"
+        [disabled]="everyoneState.busy()"
+        (go)="loadEveryone()"
+      />
+      <app-status [state]="everyoneState" />
+    </section>
+  </div>
+}
+<app-confirm-dialog
+  #deleteDialog
+  dialogId="delete"
+  tone="danger"
+  heading="Delete this classroom?"
+  confirmLabel="Delete classroom"
+  [state]="state"
+  (confirm)="deleteClassroom()"
+  (closed)="closeDelete()"
+>
+  @if (deleting(); as classroom) {
+    <p>
+      {{ classroom.name }} will disappear for its teacher and its students, along with access to its
+      materials, assessments and results. Its students are unenrolled and its materials, assessments, grades
+      and chats are permanently deleted. Their accounts are kept. This cannot be undone.
+    </p>
+  }
+</app-confirm-dialog>
+<app-confirm-dialog
+  #discardDialog
+  dialogId="discard"
+  heading="Discard your changes?"
+  confirmLabel="Discard changes"
+  [state]="discardState"
+  (confirm)="discardAndEdit()"
+  (closed)="closeDiscard()"
+>
+  @if (pendingEdit(); as classroom) {
+    <p>
+      The classroom form has changes you have not saved. Discard them to edit {{ classroom.name }} instead.
+    </p>
+  }
+</app-confirm-dialog>
+<app-confirm-dialog
+  #removeDialog
+  dialogId="remove"
+  tone="danger"
+  heading="Remove this student?"
+  confirmLabel="Remove student"
+  [state]="rosterState"
+  (confirm)="remove()"
+  (closed)="closeRemove()"
+>
+  @if (removing(); as student) {
+    <p>
+      {{ studentName(student) || student.id }} will lose access to {{ managing()?.name || 'this classroom' }}.
+      Their submissions and grades are kept but leave the teacher's grading review and counts, and AI marking
+      of their work stops. Enroll them again to bring it back.
+    </p>
+  }
+</app-confirm-dialog>

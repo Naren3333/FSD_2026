@@ -66,7 +66,9 @@ def password(user: str, state: dict) -> str:
         return state["student2_password"]
     if user in (seeded := state.get("performance", {}).get("passwords", {})):
         return str(seeded[user])
-    return env()[{"teacher": "TEACHER_PASSWORD", "student": "STUDENT_PASSWORD"}[user]]
+    return env()[
+        {"admin": "ADMIN_PASSWORD", "teacher": "TEACHER_PASSWORD", "student": "STUDENT_PASSWORD"}[user]
+    ]
 
 
 def spent(res: httpx.Response) -> bool:

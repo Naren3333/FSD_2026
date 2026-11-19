@@ -1,31 +1,10 @@
 <app-page-header
   title="Classrooms"
-  subtitle="Each classroom keeps its own materials, assessments and grades."
+  subtitle="Your school admin creates your classrooms and enrolls their students."
 >
   <app-refresh-button label="Refresh classrooms" [busy]="state.busy()" (refresh)="refresh()" />
 </app-page-header>
-@if (session.isTeacher()) {
-  <section class="panel create-classroom" aria-labelledby="create-title">
-    <h3 id="create-title">Create a classroom</h3>
-    <form id="classroom-form" class="create-form" novalidate [formGroup]="form" (ngSubmit)="create()">
-      <app-field
-        controlId="class-name"
-        label="Classroom name"
-        [control]="form.controls.name"
-        error="Enter a name of 1–120 characters."
-      >
-        <input appFieldControl id="class-name" formControlName="name" maxlength="120" />
-      </app-field>
-      <div class="button-row">
-        <button [disabled]="state.busy()">Create classroom</button>
-        <button type="reset" class="secondary" [disabled]="state.busy()">Clear form</button>
-      </div>
-    </form>
-  </section>
-}
-@if (!deleting()) {
-  <app-status [state]="state" />
-}
+<app-status [state]="state" />
 <section class="classroom-list" aria-labelledby="classrooms-title">
   <div class="panel-heading">
     <h3 id="classrooms-title">Your classrooms</h3>
@@ -66,22 +45,16 @@
             @if (item.id === classroomId()) {
               <a class="button-link" routerLink="/students">Students</a>
             }
-            <button
-              type="button"
-              class="icon-button"
-              (click)="confirmDelete(item)"
-              [disabled]="state.busy()"
-              [attr.aria-label]="'Delete ' + item.name"
-              [title]="'Delete ' + item.name"
-            >
-              <app-icon name="trash" />
-            </button>
           </div>
         </article>
       }
     </div>
   } @else {
-    <app-no-classroom><p class="empty">No classrooms yet. Create your first one above.</p></app-no-classroom>
+    <app-no-classroom>
+      <p class="empty">
+        No classrooms yet. Your school admin assigns your classrooms; refresh once they have.
+      </p>
+    </app-no-classroom>
   }
   <app-pager
     label="Classrooms pages"
@@ -93,21 +66,3 @@
     [disabled]="state.busy()"
   />
 </section>
-<app-confirm-dialog
-  #deleteDialog
-  dialogId="delete"
-  tone="danger"
-  heading="Delete this classroom?"
-  confirmLabel="Delete classroom"
-  [state]="state"
-  (confirm)="deleteClassroom()"
-  (closed)="closeDelete()"
->
-  @if (deleting(); as classroom) {
-    <p>
-      {{ classroom.name }} will disappear for you and its students, along with access to its materials,
-      assessments and results. Its students are unenrolled and its materials, assessments, grades and chats
-      are permanently deleted. Their accounts are kept.
-    </p>
-  }
-</app-confirm-dialog>

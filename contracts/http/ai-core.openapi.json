@@ -42,6 +42,26 @@
       "get": {
         "summary": "Spend Summary",
         "operationId": "spend_summary_internal_spend_summary_get",
+        "parameters": [
+          {
+            "name": "org_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 200
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Org Id"
+            }
+          }
+        ],
         "responses": {
           "200": {
             "description": "Successful Response",
@@ -54,94 +74,94 @@
             }
           },
           "401": {
-            "description": "Unauthorized",
             "content": {
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/ErrorResponse"
                 }
               }
-            }
+            },
+            "description": "Unauthorized"
           },
           "403": {
-            "description": "Forbidden",
             "content": {
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/ErrorResponse"
                 }
               }
-            }
+            },
+            "description": "Forbidden"
           },
           "413": {
-            "description": "Content Too Large",
             "content": {
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/ErrorResponse"
                 }
               }
-            }
+            },
+            "description": "Content Too Large"
           },
           "415": {
-            "description": "Unsupported Media Type",
             "content": {
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/ErrorResponse"
                 }
               }
-            }
+            },
+            "description": "Unsupported Media Type"
           },
           "422": {
-            "description": "Unprocessable Content",
             "content": {
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/ErrorResponse"
                 }
               }
-            }
+            },
+            "description": "Unprocessable Content"
           },
           "429": {
-            "description": "Too Many Requests",
             "content": {
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/ErrorResponse"
                 }
               }
-            }
+            },
+            "description": "Too Many Requests"
           },
           "502": {
-            "description": "Bad Gateway",
             "content": {
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/ErrorResponse"
                 }
               }
-            }
+            },
+            "description": "Bad Gateway"
           },
           "503": {
-            "description": "Service Unavailable",
             "content": {
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/ErrorResponse"
                 }
               }
-            }
+            },
+            "description": "Service Unavailable"
           },
           "500": {
-            "description": "Internal Server Error",
             "content": {
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/ErrorResponse"
                 }
               }
-            }
+            },
+            "description": "Internal Server Error"
           }
         }
       }

@@ -21,10 +21,11 @@ Students start on Home. On wide screens the to-do list sits on the left and ever
 - Navigation groups, in order (`apps/web/src/app.routes.ts`):
   - Teacher: Class dashboard; **Teach**: Assessments, Question bank, Teaching materials, Students, Curriculum; **Review**: Grading review, Learning performance; **Assistant**: Ask the materials; **Setup**: Classrooms.
   - Student: Home; **My work**: Assessments, My results, My progress; **Learn**: Teaching materials, Ask the materials.
+  - School admin (ADR 0019): **School admin**: Classrooms, Accounts, Monitoring, in its own shell with no classroom select or AI meter.
 - The classroom choice is remembered per user in this browser (`apps/web/src/core/classroom-context.ts`). If the saved classroom is gone, or storage is blocked, the first classroom in the list is chosen.
 - A 56px sticky top bar (`styles.css:619`) holds the AI meter pill on the right.
 - Under 900px the sidebar becomes a drawer, 280px wide and at most 85% of the viewport. The top bar's "Open menu" button opens it, with a backdrop and "Close menu". The workspace is inert while it is open. The top bar also shows the current classroom's name.
-- Teachers start on `/dashboard`; students on `/home`.
+- Teachers start on `/dashboard`; students on `/home`; school admins on `/admin/classrooms`.
 
 ## Tokens and ownership
 Runtime source of truth: apps/web/src/styles.css `:root`. This document records intent; CSS owns exact token values.
@@ -77,7 +78,7 @@ Breakpoints:
 - Under 480px: the AI pill hides its amount visually.
 
 Other pages:
-- Classrooms is a create form above a grid of cards.
+- Classrooms (teacher) is a grid of cards; the school admin's Classrooms is a create/edit form above a table, with the open classroom's roster beside the school's students from 1100px. Accounts is a create form, the one-time temporary password panel, then the accounts table.
 - Teaching materials has an upload card with a drop zone, above the library table.
 - Curriculum is one column.
 - Question bank is one column: a filter card (prompt search, topic, type), then the questions table (question, type, marks, topic with "(archived)", Edit and a Delete icon button). Its form is the editor's question fields for one question, without marking points or source passages.
@@ -86,7 +87,7 @@ Other pages:
 - There is no two-column `.split` layout.
 
 ## Motion and content
-Only short hover and focus transitions, at most 150ms, and the drawer's slide. `prefers-reduced-motion` removes them and stops the refresh icon's spin. No animated counters or fabricated progress. Say "Finalize grade", "Create classroom" and "Upload document". AI features that are not implemented are displayed as unavailable. Document chat ("Ask the materials") answers only from indexed teaching materials and shows numbered sources. Never imply text extraction is indexing, and label model-written passages as such. Evidence uses textual counts plus observed accuracy, never mastery claims.
+Only short hover and focus transitions, at most 150ms, and the drawer's slide. `prefers-reduced-motion` removes them and stops the refresh icon's spin. No animated counters or fabricated progress. Say "Finalize grade", "Create classroom", "Create account" and "Upload document". AI features that are not implemented are displayed as unavailable. Document chat ("Ask the materials") answers only from indexed teaching materials and shows numbered sources. Never imply text extraction is indexing, and label model-written passages as such. Evidence uses textual counts plus observed accuracy, never mastery claims.
 
 ## Accessibility
 WCAG 2.2 AA target, semantic controls, visible keyboard focus, error and live regions, and minimum 44px controls. Icon-only buttons carry the action's name as `aria-label`; those on pages also show it as a `title` tooltip (the drawer's Open menu and Close menu have the label only). Colour bands and chips always have text, so no status is shown by colour alone. Forced-colours mode outlines the current navigation item. Light theme only; English Singapore formatting; no Japanese market assumptions.

@@ -256,14 +256,14 @@ Language: Go.
 Owns:
 
 * Application user identities.
-* Teacher and student profiles.
+* School admin, teacher and student profiles.
 * Schools or organizations.
 * Classrooms.
 * Classroom membership.
 * Enrollment.
 * Application roles and access policies.
 
-Implement functioning classroom and membership operations.
+Implement functioning classroom and membership operations. A school's admin creates its accounts and classrooms, assigns each classroom its teacher and enrolls its students (ADR 0019).
 
 Integrate with a standards-based authentication solution.
 
@@ -959,7 +959,7 @@ Use a standards-based authentication solution.
 
 Do not implement custom cryptographic authentication.
 
-Support teacher and student roles.
+Support teacher and student roles, and a school admin role that manages one school's accounts and classrooms (ADR 0019).
 
 Implement authorization for:
 
@@ -1120,7 +1120,7 @@ Test at least one complete non-AI workflow.
 For example:
 
 ```text
-Teacher creates classroom
+Admin creates classroom for a teacher
            |
            v
 Teacher creates curriculum topic

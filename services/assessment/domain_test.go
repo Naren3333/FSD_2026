@@ -216,3 +216,24 @@ func TestTextLimitsCountCharactersNotBytes(t *testing.T) {
 		t.Fatal("a title past the limit accepted")
 	}
 }
+
+// identical questions keep the previous teacher's links where they were (adr 0019), whichever of them the
+// editor linked to their own bank.
+func TestIdenticalQuestionsKeepTheirOwnPreviousLinks(t *testing.T) {
+	bank := "6f1c5d2e-8a4b-4c3d-9e2f-1a2b3c4d5e6f"
+	before := []Question{{ID: "old-1", Prompt: "Same?"}, {ID: "old-2", Prompt: "Same?"}, {ID: "old-3", Prompt: "Other?"}}
+	others := map[string]string{"old-2": "bank-2", "old-3": "bank-3"}
+	v := Assessment{Questions: []Question{{ID: "new-1", Prompt: "Same?"}, {ID: "new-2", Prompt: "Same?"}, {ID: "new-3", Prompt: "Moved?"}}}
+	if kept := keptLinks(v, before, others); len(kept) != 1 || kept[1] != "old-2" {
+		t.Fatalf("kept %v", kept)
+	}
+	v.BankLinks = []string{bank}
+	if kept := keptLinks(v, before, others); len(kept) != 1 || kept[1] != "old-2" {
+		t.Fatalf("with the first linked by the editor, kept %v", kept)
+	}
+	// a question moved to another place keeps its link.
+	v = Assessment{Questions: []Question{{ID: "new-1", Prompt: "Other?"}, {ID: "new-2", Prompt: "Same?"}}}
+	if kept := keptLinks(v, before, others); len(kept) != 2 || kept[0] != "old-3" || kept[1] != "old-2" {
+		t.Fatalf("moved: kept %v", kept)
+	}
+}

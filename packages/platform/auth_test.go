@@ -86,6 +86,9 @@ func TestRealJWTValidation(t *testing.T) {
 		{"missing org_id", valid(func(c map[string]any) { delete(c, "org_id") }), 401, "UNAUTHENTICATED"},
 		{"lowercase bearer", "bearer " + strings.TrimPrefix(valid(nil), "Bearer "), 401, "UNAUTHENTICATED"},
 		{"teacher and student", valid(roles("teacher", "student")), 403, "ROLE_CONFLICT"},
+		{"admin and teacher", valid(roles("admin", "teacher")), 403, "ROLE_CONFLICT"},
+		{"admin and student", valid(roles("admin", "student")), 403, "ROLE_CONFLICT"},
+		{"admin", valid(roles("admin")), 200, ""},
 		{"teacher and ai-client", valid(roles("teacher", "ai-client")), 200, ""},
 	} {
 		t.Run(tc.name, func(t *testing.T) {

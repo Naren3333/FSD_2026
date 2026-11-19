@@ -19,8 +19,9 @@ export class Session {
     return this.auth.authenticated;
   }
 
-  get isOperator(): boolean {
-    return this.auth.operator;
+  /* a school admin, whose workspace manages accounts and classrooms and needs no identity profile. */
+  get isAdmin(): boolean {
+    return this.auth.admin;
   }
 
   private loading: Promise<void> | null = null;
@@ -35,7 +36,7 @@ export class Session {
   }
 
   private async load(): Promise<void> {
-    if (this.auth.authenticated && !this.isOperator) this.profile.set(await this.identity.register());
+    if (this.auth.authenticated && !this.isAdmin) this.profile.set(await this.identity.register());
   }
 
   login(): Promise<void> {

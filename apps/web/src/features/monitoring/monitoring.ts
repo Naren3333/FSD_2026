@@ -70,7 +70,6 @@ export class MonitoringComponent implements OnInit {
   readonly pageSize = 20;
   page = 0;
   readonly filters = inject(FormBuilder).nonNullable.group({
-    org_id: '',
     user_id: '',
     period: 'today' as Period,
   });
@@ -132,10 +131,11 @@ export class MonitoringComponent implements OnInit {
     }
   }
 
+  /* the filters narrow the admin's own school, the only one monitoring reports (adr 0019). */
   applyFilters(): void {
-    const { org_id, user_id } = this.filters.getRawValue();
+    const { user_id } = this.filters.getRawValue();
     // a pasted identifier often carries surrounding whitespace that would match no account.
-    this.filters.patchValue({ org_id: org_id.trim(), user_id: user_id.trim() });
+    this.filters.patchValue({ user_id: user_id.trim() });
     this.appliedFilters = this.filters.getRawValue();
     this.changePage(0);
   }
@@ -147,9 +147,8 @@ export class MonitoringComponent implements OnInit {
   }
 
   loadUsers(): void {
-    const { period, org_id, user_id } = this.appliedFilters;
+    const { period, user_id } = this.appliedFilters;
     const query = new URLSearchParams({ period, offset: String(this.page * this.pageSize) });
-    if (org_id) query.set('org_id', org_id);
     if (user_id) query.set('user_id', user_id);
     void this.read(this.users, `/ai-spend/users?${query}`, true).then((value) => {
       if (value && this.users.data() === value && this.page > 0 && value.items.length === 0) {

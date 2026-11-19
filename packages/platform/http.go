@@ -19,6 +19,13 @@ import (
 // rolemonitoringreader grants private telemetry reads.
 const RoleMonitoringReader = "monitoring-reader"
 
+// person roles: an account holds exactly one (see Authenticator.Wrap).
+const (
+	RoleAdmin   = "admin"
+	RoleTeacher = "teacher"
+	RoleStudent = "student"
+)
+
 // claims are the verified token claims services use: the user, their organization and realm roles.
 type Claims struct {
 	Subject  string `json:"sub"`
@@ -156,6 +163,15 @@ func whole(value string, fallback int) (int, bool) {
 func Teacher(w http.ResponseWriter, r *http.Request) bool {
 	if !Actor(r).Has("teacher") {
 		Forbidden(w, "Teacher access is required.")
+		return false
+	}
+	return true
+}
+
+// admin requires the token's school admin role, writing a 403 otherwise.
+func Admin(w http.ResponseWriter, r *http.Request) bool {
+	if !Actor(r).Has(RoleAdmin) {
+		Forbidden(w, "School admin access is required.")
 		return false
 	}
 	return true

@@ -42,6 +42,7 @@ def claims(*roles: str) -> Claims:
 def test_person_role_is_the_accounts_one_role() -> None:
     assert claims("teacher").person_role == "teacher"
     assert claims("student").person_role == "student"
+    assert claims("admin").person_role == "admin"
     assert claims("ai-client").person_role is None
 
 
@@ -59,6 +60,9 @@ def test_a_token_with_both_person_roles_is_refused() -> None:
     assert error.value.status_code == 403
     assert error.value.detail["code"] == "ROLE_CONFLICT"  # type: ignore[index]
     assert caller(token_claims("teacher", "ai-client", sub="u1", org="o1")).person_role == "teacher"
+    for pair in (("admin", "teacher"), ("admin", "student")):
+        with pytest.raises(HTTPException):
+            caller(token_claims(*pair, sub="u1", org="o1"))
 
 
 def identity(status: int, body: dict[str, Any] | None = None) -> IdentityClient:

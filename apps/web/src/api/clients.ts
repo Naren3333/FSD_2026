@@ -2,9 +2,13 @@ import { Injectable, inject } from '@angular/core';
 import { Gateway } from '../core/gateway';
 import { documentMime } from '../shared/files';
 import type {
+  Account,
+  AccountInput,
+  AccountPage,
   Assessment,
   AssessmentPage,
   ClassroomPage,
+  CreatedAccount,
   DocumentPage,
   TopicPage,
   AssessmentDetails,
@@ -33,8 +37,10 @@ import type {
   OwnResult,
   OwnSubmission,
   Performance,
+  PersonRole,
   Profile,
   ResitRequest,
+  SchoolClassroomPage,
   SavedAnswers,
   StreamEvent,
   Student,
@@ -82,30 +88,6 @@ export class IdentityApi {
   classroomPage(offset: number, limit: number): Promise<ClassroomPage> {
     return this.gateway.request('identity', `/classrooms/page?offset=${offset}&limit=${limit}`);
   }
-  createClassroom(name: string): Promise<Classroom> {
-    return this.gateway.request('identity', '/classrooms', { method: 'POST', body: { name } });
-  }
-  /* deletes the classroom for its teacher. */
-  deleteClassroom(classroomId: string): Promise<{ classroom_id: string }> {
-    return this.gateway.request('identity', `/classrooms/${id(classroomId)}`, { method: 'DELETE' });
-  }
-  /* enrolls one of the organization's students by account id. */
-  enroll(classroomId: string, studentId: string): Promise<Enrollment> {
-    return this.gateway.request('identity', `/classrooms/${id(classroomId)}/enrollments`, {
-      method: 'POST',
-      body: { student_id: studentId },
-    });
-  }
-  unenroll(classroomId: string, studentId: string): Promise<Enrollment> {
-    return this.gateway.request('identity', `/classrooms/${id(classroomId)}/enrollments/${id(studentId)}`, {
-      method: 'DELETE',
-    });
-  }
-  /* one page of the students in the teacher's organization who have signed in, by name, and how many match. */
-  students(search: string, offset: number, limit: number): Promise<StudentPage> {
-    const query = new URLSearchParams({ search, offset: String(offset), limit: String(limit) });
-    return this.gateway.request('identity', `/students?${query}`);
-  }
   /* one page of the classroom's students by name, for its teacher only, and how many are enrolled. */
   rosterPage(classroomId: string, offset: number, limit: number): Promise<StudentPage> {
     const query = new URLSearchParams({ offset: String(offset), limit: String(limit) });
@@ -120,9 +102,79 @@ export class IdentityApi {
       if (!page.students.length || students.length >= page.total) return students;
     }
   }
-  /* the ids of every student enrolled in the classroom, for its teacher only. */
+}
+
+/* the school admin's management of the school's accounts, classrooms and enrollment (adr 0019). */
+@Injectable({ providedIn: 'root' })
+export class AdminApi {
+  private readonly gateway = inject(Gateway);
+
+  /* one page of the school's teacher or student accounts by name, matching the search, and how many match. */
+  accounts(role: PersonRole, search: string, offset: number, limit: number): Promise<AccountPage> {
+    const query = new URLSearchParams({ role, search, offset: String(offset), limit: String(limit) });
+    return this.gateway.request('identity', `/admin/accounts?${query}`);
+  }
+  /* every teacher of the school, for choosing a classroom's teacher: the first page gives the total, then the rest are read together, 50 at a time. */
+  async teachers(): Promise<Account[]> {
+    const size = 50;
+    const first = await this.accounts('teacher', '', 0, size);
+    const offsets: number[] = [];
+    for (let offset = first.accounts.length ? size : first.total; offset < first.total; offset += size) {
+      offsets.push(offset);
+    }
+    const rest = await Promise.all(offsets.map((offset) => this.accounts('teacher', '', offset, size)));
+    // an account created meanwhile can push one onto two pages.
+    const byId = new Map<string, Account>();
+    for (const page of [first, ...rest]) page.accounts.forEach((a) => byId.set(a.id, a));
+    return [...byId.values()];
+  }
+  /* creates a sign-in account in the school; its temporary password comes back this once. */
+  createAccount(account: AccountInput): Promise<CreatedAccount> {
+    return this.gateway.request('identity', '/admin/accounts', { method: 'POST', body: account });
+  }
+  /* gives a teacher or student of the school a new temporary password, which comes back this once; the old one stops working. */
+  resetPassword(accountId: string): Promise<CreatedAccount> {
+    return this.gateway.request('identity', `/admin/accounts/${id(accountId)}/password`, { method: 'POST' });
+  }
+  classrooms(offset: number, limit: number): Promise<SchoolClassroomPage> {
+    return this.gateway.request('identity', `/admin/classrooms?offset=${offset}&limit=${limit}`);
+  }
+  createClassroom(name: string, teacherId: string): Promise<Classroom> {
+    return this.gateway.request('identity', '/admin/classrooms', {
+      method: 'POST',
+      body: { name, teacher_id: teacherId },
+    });
+  }
+  /* renames the classroom and gives it its teacher, who then has the classroom's teacher access. */
+  updateClassroom(classroomId: string, name: string, teacherId: string): Promise<{ classroom_id: string }> {
+    return this.gateway.request('identity', `/admin/classrooms/${id(classroomId)}`, {
+      method: 'PATCH',
+      body: { name, teacher_id: teacherId },
+    });
+  }
+  deleteClassroom(classroomId: string): Promise<{ classroom_id: string }> {
+    return this.gateway.request('identity', `/admin/classrooms/${id(classroomId)}`, { method: 'DELETE' });
+  }
+  rosterPage(classroomId: string, offset: number, limit: number): Promise<StudentPage> {
+    const query = new URLSearchParams({ offset: String(offset), limit: String(limit) });
+    return this.gateway.request('identity', `/admin/classrooms/${id(classroomId)}/students?${query}`);
+  }
+  /* the ids of every student enrolled in the classroom. */
   rosterIds(classroomId: string): Promise<string[]> {
-    return this.gateway.request('identity', `/classrooms/${id(classroomId)}/student-ids`);
+    return this.gateway.request('identity', `/admin/classrooms/${id(classroomId)}/student-ids`);
+  }
+  enroll(classroomId: string, studentId: string): Promise<Enrollment> {
+    return this.gateway.request('identity', `/admin/classrooms/${id(classroomId)}/enrollments`, {
+      method: 'POST',
+      body: { student_id: studentId },
+    });
+  }
+  unenroll(classroomId: string, studentId: string): Promise<Enrollment> {
+    return this.gateway.request(
+      'identity',
+      `/admin/classrooms/${id(classroomId)}/enrollments/${id(studentId)}`,
+      { method: 'DELETE' },
+    );
   }
 }
 

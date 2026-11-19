@@ -159,15 +159,8 @@ def test_fresh_volumes_get_every_database_and_client(monkeypatch: pytest.MonkeyP
     realm = json.loads((local / "learning-realm.json").read_text(encoding="utf-8"))
     key = setup.client_secret_key(setup.MONITORING_CLIENT)
     assert stack_tests.TEST_ENV[key] != values[key]
-    assert realm == setup.realm(
-        {**values, key: stack_tests.TEST_ENV[key]},
-        setup.TEST_WEB_ORIGIN,
-        operator_password=stack_tests.TEST_ENV["TEST_OPERATOR_PASSWORD"],
-    )
-    assert local_stack.load_test_monitoring_credentials(tmp_path) == {
-        key: stack_tests.TEST_ENV[key],
-        "TEST_OPERATOR_PASSWORD": stack_tests.TEST_ENV["TEST_OPERATOR_PASSWORD"],
-    }
+    assert realm == setup.realm({**values, key: stack_tests.TEST_ENV[key]}, setup.TEST_WEB_ORIGIN)
+    assert local_stack.load_test_monitoring_credentials(tmp_path) == {key: stack_tests.TEST_ENV[key]}
     assert not (tmp_path / ".local/learning-realm.json").exists()
     assert stack_tests.TEST_ENV["LOCAL_CONFIG_DIR"] == f"./{stack_tests.TEST_LOCAL_CONFIG_DIR}"
     compose = (ROOT / "docker-compose.yml").read_text(encoding="utf-8")

@@ -36,7 +36,7 @@ func (api monitorAPI) handler(auth *platform.Authenticator) http.Handler {
 	authorized := auth.Wrap(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		actor := platform.Actor(r)
 		if !isOperator(actor) {
-			platform.Forbidden(w, "A dedicated operator account is required.")
+			platform.Forbidden(w, "A school admin account is required.")
 			return
 		}
 		mux.ServeHTTP(w, r)
@@ -59,8 +59,10 @@ func (api monitorAPI) handler(auth *platform.Authenticator) http.Handler {
 	})
 }
 
+// spend proxies one of ai-core's spend reports, always narrowed to the admin's own school (adr 0019).
 func (api monitorAPI) spend(endpoint string, users bool) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
+		org := platform.Actor(r).Org
 		ctx, cancel := context.WithTimeout(r.Context(), 6*time.Second)
 		defer cancel()
 		correlation := r.Header.Get("X-Correlation-ID")
@@ -68,20 +70,11 @@ func (api monitorAPI) spend(endpoint string, users bool) http.HandlerFunc {
 			correlation = platform.Correlation(ctx)
 		}
 		w.Header().Set("X-Correlation-ID", correlation)
-		target := api.aiCore + "/internal/spend/" + endpoint
-		if users {
-			query := url.Values{}
-			for _, name := range []string{"period", "org_id", "user_id", "offset"} {
-				if values, present := r.URL.Query()[name]; present {
-					if len(values) != 1 {
-						platform.Invalid(w, "Supply each spend filter once.")
-						return
-					}
-					query.Set(name, values[0])
-				}
-			}
-			target += "?" + query.Encode()
+		query, ok := spendQuery(w, r, org, users)
+		if !ok {
+			return
 		}
+		target := api.aiCore + "/internal/spend/" + endpoint + "?" + query.Encode()
 		req, err := http.NewRequestWithContext(ctx, http.MethodGet, target, nil)
 		if err != nil {
 			platform.Unavailable(w, "AI expenditure is temporarily unavailable.")
@@ -111,9 +104,32 @@ func (api monitorAPI) spend(endpoint string, users bool) http.HandlerFunc {
 		}
 		w.Header().Set("Content-Type", "application/json")
 		if _, err := w.Write(body); err == nil && users {
-			slog.Info("monitoring_billed_accounts_read", "operator_id", platform.Actor(r).Subject, "correlation_id", correlation)
+			slog.Info("monitoring_billed_accounts_read", "admin_id", platform.Actor(r).Subject, "org_id", org, "correlation_id", correlation)
 		}
 	}
+}
+
+// spendQuery is ai-core's query for the report: the admin's own organization, refusing another one, and for
+// the billed accounts each filter given once. it writes the refusal when the request has none to send.
+func spendQuery(w http.ResponseWriter, r *http.Request, org string, users bool) (url.Values, bool) {
+	if values, present := r.URL.Query()["org_id"]; present && (len(values) != 1 || values[0] != org) {
+		platform.Forbidden(w, "AI expenditure is limited to your own school.")
+		return nil, false
+	}
+	query := url.Values{"org_id": {org}}
+	if !users {
+		return query, true
+	}
+	for _, name := range []string{"period", "user_id", "offset"} {
+		if values, present := r.URL.Query()[name]; present {
+			if len(values) != 1 {
+				platform.Invalid(w, "Supply each spend filter once.")
+				return nil, false
+			}
+			query.Set(name, values[0])
+		}
+	}
+	return query, true
 }
 
 func writeSpendUpstreamError(w http.ResponseWriter, status int, endpoint, correlation string) {

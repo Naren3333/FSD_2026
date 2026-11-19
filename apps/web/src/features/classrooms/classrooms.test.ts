@@ -5,13 +5,10 @@ import { BrowserTestingModule, platformBrowserTesting } from '@angular/platform-
 import { Router, provideRouter } from '@angular/router';
 import { readFileSync } from 'node:fs';
 import { beforeAll, describe, expect, it, vi } from 'vitest';
-import { IdentityApi } from '../../api/clients';
 import type { Classroom } from '../../api/models';
 import { ClassroomContext } from '../../core/classroom-context';
 import { Session } from '../../core/session';
 import { UnsavedChanges } from '../../core/unsaved-changes';
-import { ConfirmDialogComponent } from '../../shared/confirm-dialog';
-import { FieldComponent } from '../../shared/field';
 import { PageHeaderComponent } from '../../shared/page-header';
 import { PagerComponent } from '../../shared/pager';
 import { StatusComponent } from '../../shared/status';
@@ -45,7 +42,6 @@ function render(rooms: Classroom[], known = true) {
         { path: 'students', children: [] },
       ]),
       { provide: Session, useValue: { isTeacher: signal(true), isStudent: signal(false) } },
-      { provide: IdentityApi, useValue: {} },
       {
         provide: ClassroomContext,
         useValue: {
@@ -64,10 +60,8 @@ function render(rooms: Classroom[], known = true) {
   TestBed.overrideComponent(ClassroomsComponent, { set: { template: template('./classrooms.html') } });
   for (const [component, path] of [
     [PageHeaderComponent, '../../shared/page-header.html'],
-    [FieldComponent, '../../shared/field.html'],
     [StatusComponent, '../../shared/status.html'],
     [PagerComponent, '../../shared/pager.html'],
-    [ConfirmDialogComponent, '../../shared/confirm-dialog.html'],
   ] as const)
     TestBed.overrideComponent(component, { set: { template: template(path) } });
   const fixture = TestBed.createComponent(ClassroomsComponent);
@@ -93,10 +87,15 @@ const room: Classroom = { id: 'c1', name: '3A', teacher_id: 't1' };
 const other: Classroom = { id: 'c2', name: '4B', teacher_id: 't1' };
 
 describe('classrooms states', () => {
-  it('says how to create the first classroom', async () => {
-    const page = render([]);
+  it('says the school admin assigns classrooms, with no way to create or delete one here', async () => {
+    const page = render([room]);
     await page.settle();
-    expect(page.root.textContent).toContain('No classrooms yet. Create your first one above.');
+    expect(page.root.querySelector('form')).toBeNull();
+    expect(page.button('Delete 3A')).toBeUndefined();
+    expect(page.root.querySelector('dialog')).toBeNull();
+    const empty = render([]);
+    await empty.settle();
+    expect(empty.root.textContent).toContain('No classrooms yet. Your school admin assigns your classrooms');
   });
 
   it('says the classrooms are loading, not that there are none, until they are known', async () => {
@@ -146,9 +145,10 @@ describe('classroom cards', () => {
     const page = render([room, other]);
     await page.settle();
     expect(page.root.querySelector('#classroom-open-lock')).toBeNull();
-    page.component.form.markAsDirty();
+    // a form elsewhere holds unsaved work.
+    vi.spyOn(TestBed.inject(UnsavedChanges), 'locksClassroom').mockReturnValue(true);
+    page.fixture.componentRef.changeDetectorRef.markForCheck();
     page.fixture.detectChanges();
-    expect(TestBed.inject(UnsavedChanges).any()).toBe(true);
     const open = page.button('Open 4B');
     expect(open.disabled).toBe(true);
     expect(open.getAttribute('aria-describedby')).toBe('classroom-open-lock');
@@ -158,15 +158,5 @@ describe('classroom cards', () => {
     expect(page.button('Open 3A').disabled).toBe(false);
     page.component.open(other);
     expect(page.select).not.toHaveBeenCalled();
-  });
-
-  it('asks before deleting a classroom', async () => {
-    const page = render([room, other]);
-    await page.settle();
-    page.button('Delete 4B').click();
-    page.fixture.detectChanges();
-    expect(page.component.deleting()).toEqual(other);
-    expect(page.root.querySelector('dialog')?.textContent).toContain('Delete this classroom?');
-    expect(page.root.querySelector('dialog')?.textContent).toContain('4B will disappear');
   });
 });

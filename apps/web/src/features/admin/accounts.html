@@ -1,0 +1,184 @@
+<app-page-header title="Accounts" subtitle="Sign-in accounts for your school's teachers and students.">
+  <app-refresh-button
+    label="Refresh accounts"
+    [busy]="accounts.loading()"
+    [disabled]="state.busy()"
+    (refresh)="load()"
+  />
+</app-page-header>
+<section class="panel" aria-labelledby="account-form-title">
+  <h3 id="account-form-title">Create an account</h3>
+  <form id="account-form" class="create-form" novalidate [formGroup]="form" (ngSubmit)="create()">
+    <app-field controlId="account-role" label="Role" [control]="form.controls.role">
+      <select appFieldControl id="account-role" formControlName="role">
+        @for (option of roles; track option.id) {
+          <option [value]="option.id">{{ option.label }}</option>
+        }
+      </select>
+    </app-field>
+    <app-field
+      controlId="account-first"
+      label="First name"
+      [control]="form.controls.first"
+      error="Enter a first name of 1–60 characters."
+    >
+      <input appFieldControl id="account-first" formControlName="first" maxlength="60" autocomplete="off" />
+    </app-field>
+    <app-field
+      controlId="account-last"
+      label="Last name"
+      [control]="form.controls.last"
+      error="Enter a last name of 1–60 characters."
+    >
+      <input appFieldControl id="account-last" formControlName="last" maxlength="60" autocomplete="off" />
+    </app-field>
+    <app-field
+      controlId="account-username"
+      label="Username"
+      hint="3–64 letters, digits, dots, hyphens or underscores, unique in your school. They sign in with your school's code, a dot, then this."
+      [control]="form.controls.username"
+      error="Use 3–64 letters, digits, dots, hyphens or underscores, starting with a letter or digit."
+    >
+      <input
+        appFieldControl
+        id="account-username"
+        formControlName="username"
+        maxlength="64"
+        autocomplete="off"
+        spellcheck="false"
+      />
+    </app-field>
+    <div class="button-row">
+      <button [disabled]="state.busy()">Create account</button>
+      <button type="reset" class="secondary" [disabled]="state.busy()">Clear form</button>
+    </div>
+  </form>
+  <app-status [state]="state" />
+</section>
+@if (created(); as account) {
+  <section class="panel" aria-labelledby="created-title">
+    <h3 #createdHeading id="created-title" tabindex="-1">
+      {{
+        passwordReset()
+          ? 'New temporary password for ' + (account.display_name || account.username)
+          : account.display_name + ' can now sign in'
+      }}
+    </h3>
+    <p>
+      Give them this sign-in username and temporary password. The password is shown only now; they choose
+      their own when they next sign in. If it is lost, reset the password again from the list below.
+    </p>
+    <dl class="created-account">
+      <dt>Sign-in username</dt>
+      <dd class="identifier">{{ account.username }}</dd>
+      <dt>Temporary password</dt>
+      <dd class="identifier">{{ account.temporary_password }}</dd>
+    </dl>
+    <div class="button-row">
+      <button type="button" class="secondary" (click)="copy(account.temporary_password)">
+        Copy password
+      </button>
+      <button type="button" class="quiet" (click)="done()">Done</button>
+    </div>
+    <p role="status" aria-live="polite">{{ copied() }}</p>
+  </section>
+}
+<section class="panel" aria-labelledby="accounts-title">
+  <div class="panel-heading">
+    <h3 id="accounts-title">School {{ roleLabel().toLowerCase() }}</h3>
+    <p class="caption">By name, {{ pageSize }} a page</p>
+  </div>
+  <div class="filter-chips" role="group" aria-label="Show">
+    @for (option of roles; track option.id) {
+      <button type="button" [attr.aria-pressed]="role() === option.id" (click)="showRole(option.id)">
+        {{ option.plural }}
+      </button>
+    }
+  </div>
+  <app-field controlId="account-search" label="Search accounts" hint="By name or username">
+    <input
+      #searchBox
+      appFieldControl
+      id="account-search"
+      type="search"
+      autocomplete="off"
+      [value]="search()"
+      (input)="searchFor(searchBox.value)"
+    />
+  </app-field>
+  <app-section-state [section]="accounts" loading="Loading accounts…" />
+  @if (accounts.ready()) {
+    @if (accounts.value()?.accounts?.length) {
+      <div class="table-scroll">
+        <table class="stack-table">
+          <caption class="visually-hidden">
+            School
+            {{
+              roleLabel().toLowerCase()
+            }}
+          </caption>
+          <thead>
+            <tr>
+              <th scope="col">Name</th>
+              <th scope="col">Username</th>
+              <th scope="col"><span class="visually-hidden">Actions</span></th>
+            </tr>
+          </thead>
+          <tbody>
+            @for (account of accounts.value()?.accounts ?? []; track account.id) {
+              <tr>
+                <th scope="row">
+                  <strong>{{ account.display_name || account.username || 'Name not recorded yet' }}</strong>
+                </th>
+                <td data-label="Username" class="identifier">{{ account.username || '–' }}</td>
+                <td class="actions-cell">
+                  <button
+                    type="button"
+                    class="secondary"
+                    (click)="confirmReset(account)"
+                    [disabled]="resetState.busy()"
+                    [attr.aria-label]="'Reset the password of ' + accountName(account)"
+                  >
+                    Reset password
+                  </button>
+                </td>
+              </tr>
+            }
+          </tbody>
+        </table>
+      </div>
+    } @else {
+      <p class="empty">
+        {{
+          search().trim()
+            ? 'No accounts match that search.'
+            : 'No ' + roleLabel().toLowerCase() + ' yet. Create their accounts above.'
+        }}
+      </p>
+    }
+  }
+  <app-pager
+    label="School accounts pages"
+    [(page)]="page"
+    [pageSize]="pageSize"
+    [total]="accounts.value()?.total ?? 0"
+    noun="accounts"
+    (go)="load()"
+  />
+</section>
+<app-confirm-dialog
+  #resetDialog
+  dialogId="reset-password"
+  heading="Reset this password?"
+  confirmLabel="Reset password"
+  [state]="resetState"
+  (confirm)="resetPassword()"
+  (closed)="closeReset()"
+>
+  @if (resetting(); as account) {
+    <p>
+      {{ accountName(account) }}'s current password stops working at once. You get a new temporary password to
+      give them, and they choose their own when they next sign in.
+    </p>
+  }
+</app-confirm-dialog>

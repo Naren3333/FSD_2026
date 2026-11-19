@@ -5,9 +5,12 @@ import {
   enrollStudent,
   env,
   expectNoHorizontalScroll,
+  identity,
   login,
   openMenu,
+  passwordToken,
   topicToDelete,
+  unenrollStudent,
 } from './helpers';
 
 deleteTestDataAfterEach();
@@ -30,15 +33,13 @@ test('teacher and student complete a real assessment through Kong', async ({ bro
   // the dashboard links to these pages too, so the menu link is the one to use.
   const teacherMenu = teacher.getByRole('navigation', { name: 'Workspace' });
   const suffix = Date.now().toString();
+  // the school admin creates the classroom for the teacher and enrolls the student by username (adr 0019).
   await createClassroom(teacher, 'Browser ' + suffix);
-  // the teacher finds the student in the school's list by username and enrolls them.
   await enrollStudent(teacher, studentUsername, 'Student Local', 'Browser ' + suffix);
-  const everyone = teacher.getByRole('region', { name: 'All students' });
   const roster = teacher.getByRole('region', { name: 'Students in Browser ' + suffix });
-  await expect(roster.getByText('Student Local', { exact: true })).toBeVisible();
-  await expect(
-    everyone.getByRole('article').filter({ hasText: 'Student Local' }).getByText('Enrolled', { exact: true }),
-  ).toBeVisible();
+  // teachers read the roster; only the admin adds or removes students.
+  await expect(roster.getByRole('button')).toHaveCount(0);
+  await expect(teacher.getByRole('region', { name: 'All students' })).toHaveCount(0);
   await teacher.getByRole('link', { name: 'Curriculum', exact: true }).click();
   await teacher.getByLabel('Name', { exact: true }).fill(topicToDelete('Browser topic ' + suffix));
   await teacher.getByRole('button', { name: 'Add topic', exact: true }).click();
@@ -205,13 +206,17 @@ test('teacher and student complete a real assessment through Kong', async ({ bro
   await teacherMenu.getByRole('link', { name: 'Grading review', exact: true }).click();
   await expectNoHorizontalScroll(teacher, 'test-results/review-mobile.png');
   await openMenu(teacher);
-  // removing asks first, with cancel focused; the student then no longer sees the classroom.
+  // once the school admin removes the student, the teacher's roster and the student's classrooms drop it.
   await teacherMenu.getByRole('link', { name: 'Students', exact: true }).click();
   await expectNoHorizontalScroll(teacher, 'test-results/students-mobile.png');
-  await roster.getByRole('button', { name: 'Remove Student Local from the classroom' }).click();
-  await expect(teacher.getByRole('button', { name: 'Cancel', exact: true })).toBeFocused();
-  await teacher.getByRole('button', { name: 'Remove student', exact: true }).click();
-  await expect(teacher.getByText('Student removed from the classroom.', { exact: true })).toBeVisible();
+  const studentId = await identity<{ id: string }>(
+    await passwordToken('student', env.STUDENT_PASSWORD),
+    '/me',
+    'POST',
+    {},
+  );
+  await unenrollStudent('Browser ' + suffix, studentId.id);
+  await teacher.getByRole('button', { name: 'Refresh students' }).click();
   await expect(roster.getByText(/No students enrolled yet/)).toBeVisible();
   await openMenu(teacher);
   await teacherMenu.getByRole('link', { name: 'Classrooms', exact: true }).click();

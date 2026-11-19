@@ -90,7 +90,7 @@ func (p pgStore) createResit(ctx context.Context, org string, v Assessment) erro
 	if _, err = tx.Exec(ctx, "INSERT INTO assessment_assignees(assessment_id,student_id) SELECT $1,unnest($2::text[]) ON CONFLICT DO NOTHING", v.ID, v.Assignees); err != nil {
 		return err
 	}
-	if err = writeLinks(ctx, tx, org, v); err != nil {
+	if err = writeLinks(ctx, tx, org, v, nil); err != nil {
 		return err
 	}
 	return tx.Commit(ctx)

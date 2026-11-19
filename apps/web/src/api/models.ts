@@ -24,6 +24,16 @@ export type Student = Identity['Student'];
 /* one page of students, and how many there are across every page. */
 export type StudentPage = Identity['StudentPage'];
 export type Classroom = Identity['Classroom'];
+/* a teacher or student account of the admin's school, signed in or not (adr 0019). */
+export type Account = Identity['Account'];
+export type AccountPage = Identity['AccountPage'];
+export type AccountInput = Identity['AccountInput'];
+/* a new account with its temporary password, which the server answers once and never again. */
+export type CreatedAccount = Identity['CreatedAccount'];
+export type PersonRole = Account['role'];
+/* a classroom of the admin's school, with its teacher and how many students it has. */
+export type SchoolClassroom = Identity['SchoolClassroom'];
+export type SchoolClassroomPage = Identity['SchoolClassroomPage'];
 export type ClassroomPage = Identity['ClassroomPage'];
 export type TopicPage = Curriculum['TopicPage'];
 export type DocumentPage = Content['DocumentPage'];

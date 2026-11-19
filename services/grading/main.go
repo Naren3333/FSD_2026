@@ -16,10 +16,10 @@ func main() {
 	platform.Serve("grading", migrations, platform.EventMigration, func(a *platform.App) ([]func(context.Context), error) {
 		identity := a.Identity()
 		server{store: pgStore{a.DB}, access: identity, roster: identity}.routes(a.Mux)
-		// ready only while all six consumers run: a stalled one would otherwise go unnoticed.
-		var submissionsRunning, classroomsRunning, assessmentsRunning, enrollmentsRunning, dueRunning, usersRunning atomic.Bool
+		// ready only while all seven consumers run: a stalled one would otherwise go unnoticed.
+		var submissionsRunning, classroomsRunning, assessmentsRunning, enrollmentsRunning, dueRunning, usersRunning, teachersRunning atomic.Bool
 		a.Checks = append(a.Checks, func(ctx context.Context) error {
-			if !submissionsRunning.Load() || !classroomsRunning.Load() || !assessmentsRunning.Load() || !enrollmentsRunning.Load() || !dueRunning.Load() || !usersRunning.Load() {
+			if !submissionsRunning.Load() || !classroomsRunning.Load() || !assessmentsRunning.Load() || !enrollmentsRunning.Load() || !dueRunning.Load() || !usersRunning.Load() || !teachersRunning.Load() {
 				return errors.New("a consumer is stopped")
 			}
 			return platform.KafkaReady(ctx)
@@ -30,6 +30,7 @@ func main() {
 		enrollments := platform.Consumer{DB: a.DB, Group: "grading-enrollments-v1"}
 		dueDates := platform.Consumer{DB: a.DB, Group: "grading-due-dates-v1"}
 		users := platform.Consumer{DB: a.DB, Group: "grading-users-v1"}
+		teachers := platform.Consumer{DB: a.DB, Group: "grading-teachers-v1"}
 		marking := marker{a.DB, aiSuggester{platform.NewAICore()}}
 		return []func(context.Context){
 			platform.Outbox{DB: a.DB}.Run,
@@ -47,6 +48,9 @@ func main() {
 			},
 			func(ctx context.Context) { dueDates.Consume(ctx, topicDueChanged, changeDue, &dueRunning) },
 			func(ctx context.Context) { users.Consume(ctx, platform.TopicUserDeleted, purgeUser, &usersRunning) },
+			func(ctx context.Context) {
+				teachers.Consume(ctx, platform.TopicClassroomReassigned, reassign, &teachersRunning)
+			},
 		}, nil
 	})
 }

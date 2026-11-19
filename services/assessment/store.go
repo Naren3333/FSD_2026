@@ -187,31 +187,109 @@ func (p pgStore) insertAssessment(ctx context.Context, org string, v Assessment)
 		v.ID, v.Classroom, org, v.Title, data, v.Status, v.OpensAt, v.DueAt, v.LatePolicy, v.ReleasePolicy, v.AIMarking, v.PublishedAt, v.CreatedBy); err != nil {
 		return err
 	}
-	if err = writeLinks(ctx, tx, org, v); err != nil {
+	if err = writeLinks(ctx, tx, org, v, nil); err != nil {
 		return err
 	}
 	return tx.Commit(ctx)
 }
 
 // writeLinks replaces the assessment's links with v.BankLinks, keeping only those naming a bank question of
-// v.LinkOwner (adr 0017). a link only drives its owner's own hints, so nothing else is checked.
-func writeLinks(ctx context.Context, tx pgx.Tx, org string, v Assessment) error {
-	if _, err := tx.Exec(ctx, "DELETE FROM question_bank_links WHERE assessment_id=$1", v.ID); err != nil {
+// v.LinkOwner (adr 0017). a link only drives its owner's own hints, so nothing else is checked. a link to
+// another teacher's bank question, such as a reassigned classroom's previous teacher's (adr 0019), cannot be
+// sent by the editor, who never sees it: it stays with its question while that question is unchanged from
+// before.
+func writeLinks(ctx context.Context, tx pgx.Tx, org string, v Assessment, before []Question) error {
+	// a new assessment (no questions before) has no links yet, so none to keep.
+	others, kept := map[string]string{}, map[int]string{}
+	var err error
+	if len(before) > 0 {
+		if others, err = othersLinks(ctx, tx, org, v.ID, v.LinkOwner); err != nil {
+			return err
+		}
+		kept = keptLinks(v, before, others)
+	}
+	if _, err = tx.Exec(ctx, "DELETE FROM question_bank_links WHERE assessment_id=$1", v.ID); err != nil {
 		return err
 	}
-	var questions, banks []string
-	for i, bank := range v.BankLinks {
-		if i < len(v.Questions) && platform.ID(bank) {
-			questions, banks = append(questions, v.Questions[i].ID), append(banks, bank)
+	var questions, banks, keptQuestions, keptBanks []string
+	for i, q := range v.Questions {
+		if i < len(v.BankLinks) && platform.ID(v.BankLinks[i]) {
+			questions, banks = append(questions, q.ID), append(banks, v.BankLinks[i])
+		} else if old := kept[i]; old != "" {
+			keptQuestions, keptBanks = append(keptQuestions, q.ID), append(keptBanks, others[old])
 		}
 	}
-	if len(banks) == 0 {
-		return nil
+	if len(banks) > 0 {
+		if _, err = tx.Exec(ctx, `INSERT INTO question_bank_links(assessment_id,question_id,bank_question_id)
+			SELECT $1,l.question,l.bank FROM unnest($2::uuid[],$3::uuid[]) AS l(question,bank)
+			JOIN bank_questions b ON b.id=l.bank AND b.owner_id=$4 AND b.org_id=$5 ON CONFLICT DO NOTHING`, v.ID, questions, banks, v.LinkOwner, org); err != nil {
+			return err
+		}
 	}
-	_, err := tx.Exec(ctx, `INSERT INTO question_bank_links(assessment_id,question_id,bank_question_id)
-		SELECT $1,l.question,l.bank FROM unnest($2::uuid[],$3::uuid[]) AS l(question,bank)
-		JOIN bank_questions b ON b.id=l.bank AND b.owner_id=$4 AND b.org_id=$5 ON CONFLICT DO NOTHING`, v.ID, questions, banks, v.LinkOwner, org)
+	if len(keptBanks) > 0 {
+		_, err = tx.Exec(ctx, `INSERT INTO question_bank_links(assessment_id,question_id,bank_question_id)
+			SELECT $1,l.question,l.bank FROM unnest($2::uuid[],$3::uuid[]) AS l(question,bank) ON CONFLICT DO NOTHING`, v.ID, keptQuestions, keptBanks)
+	}
 	return err
+}
+
+// othersLinks is the assessment's links to bank questions of teachers other than owner, by question id.
+func othersLinks(ctx context.Context, tx pgx.Tx, org, assessment, owner string) (map[string]string, error) {
+	rows, err := tx.Query(ctx, `SELECT l.question_id::text,l.bank_question_id::text FROM question_bank_links l
+		JOIN bank_questions b ON b.id=l.bank_question_id AND b.owner_id<>$2 AND b.org_id=$3 WHERE l.assessment_id=$1`, assessment, owner, org)
+	if err != nil {
+		return nil, err
+	}
+	links := map[string]string{}
+	var question, bank string
+	_, err = pgx.ForEachRow(rows, []any{&question, &bank}, func() error {
+		links[question] = bank
+		return nil
+	})
+	return links, err
+}
+
+// keptLinks maps each of v's questions the editor sent no link for to the question of before whose link it
+// keeps, of those linked to another teacher's bank: first the one at the same place when unchanged from it,
+// so identical questions keep their own links, then the first unmatched one it is unchanged from.
+func keptLinks(v Assessment, before []Question, others map[string]string) map[int]string {
+	var linked []Question
+	for _, old := range before {
+		if others[old.ID] != "" {
+			linked = append(linked, old)
+		}
+	}
+	kept, used := map[int]string{}, map[string]bool{}
+	open := func(i int) bool { return i >= len(v.BankLinks) || !platform.ID(v.BankLinks[i]) }
+	for i, q := range v.Questions {
+		if open(i) && i < len(before) && others[before[i].ID] != "" {
+			if old := unchangedFrom(q, before[i:i+1], used); old != "" {
+				kept[i] = old
+			}
+		}
+	}
+	for i, q := range v.Questions {
+		if open(i) && kept[i] == "" {
+			if old := unchangedFrom(q, linked, used); old != "" {
+				kept[i] = old
+			}
+		}
+	}
+	return kept
+}
+
+// unchangedFrom is the id of the question in before that q is identical to but for its id, not yet matched
+// in used, or "" when it has none.
+func unchangedFrom(q Question, before []Question, used map[string]bool) string {
+	for _, old := range before {
+		candidate := q
+		candidate.ID = old.ID
+		if !used[old.ID] && sameJSON(candidate, old) {
+			used[old.ID] = true
+			return old.ID
+		}
+	}
+	return ""
 }
 
 // lockedAssessment is what a change under changeLocked knows of the assessment it locked.
@@ -266,7 +344,7 @@ func (p pgStore) updateAssessment(ctx context.Context, org string, before, v Ass
 			err = errNotDraft
 		}
 		if err == nil {
-			err = writeLinks(ctx, tx, org, v) // a draft's questions have new ids, so its links are written again
+			err = writeLinks(ctx, tx, org, v, current.Questions) // a draft's questions have new ids, so its links are written again
 		}
 		if err != nil || a.status != statusPublished || sameTime(current.DueAt, v.DueAt) {
 			return err // nobody has submitted it, so no late flag here changes; a draft's due date nobody else knows

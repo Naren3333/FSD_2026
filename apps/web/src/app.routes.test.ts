@@ -12,14 +12,14 @@ beforeAll(() => TestBed.initTestEnvironment(BrowserTestingModule, platformBrowse
 /* runs a route guard the way the router does, for a user with this role (or signed out). */
 async function guard(
   path: string,
-  role: 'teacher' | 'student' | 'operator' | null,
+  role: 'teacher' | 'student' | 'admin' | null,
   profileFails = false,
 ): Promise<string | boolean> {
   TestBed.resetTestingModule();
   TestBed.configureTestingModule({
     providers: [
       provideRouter([]),
-      { provide: Auth, useValue: { authenticated: role !== null, operator: role === 'operator' } },
+      { provide: Auth, useValue: { authenticated: role !== null, admin: role === 'admin' } },
       {
         provide: IdentityApi,
         useValue: {
@@ -48,13 +48,16 @@ describe('role landing pages', () => {
     expect(await guard('', 'teacher')).toBe('/dashboard');
   });
 
-  it('opens the operator workspace even when Identity is down and protects its direct address', async () => {
-    expect(await guard('', 'operator', true)).toBe('/admin/monitoring');
-    expect(await guard('admin/monitoring', 'operator', true)).toBe(true);
-    expect(await guard('admin/monitoring', 'teacher')).toBe('/dashboard');
-    expect(await guard('admin/monitoring', 'student')).toBe('/home');
-    expect(await guard('admin/monitoring', null)).toBe(false);
-    expect(await guard('assessments', 'operator')).toBe('/admin/monitoring');
+  it('opens the school admin workspace even when Identity is down and protects its direct addresses', async () => {
+    expect(await guard('', 'admin', true)).toBe('/admin/classrooms');
+    for (const path of ['admin/classrooms', 'admin/accounts', 'admin/monitoring']) {
+      expect(await guard(path, 'admin', true)).toBe(true);
+      expect(await guard(path, 'teacher')).toBe('/dashboard');
+      expect(await guard(path, 'student')).toBe('/home');
+      expect(await guard(path, null)).toBe(false);
+    }
+    expect(await guard('assessments', 'admin')).toBe('/admin/classrooms');
+    expect(await guard('classrooms', 'admin')).toBe('/admin/classrooms');
   });
 
   it('sends a role away from the other role’s sections', async () => {

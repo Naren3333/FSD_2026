@@ -8,7 +8,7 @@ from functools import cache
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-from setup import MONITORING_CLIENT, ORG, TEST_OPERATOR_USERNAME, TEST_WEB_ORIGIN, client_secret_key
+from setup import MONITORING_CLIENT, ORG, TEST_WEB_ORIGIN, client_secret_key
 
 if TYPE_CHECKING:
     import httpx
@@ -68,17 +68,15 @@ def env() -> dict[str, str]:
 
 
 def load_test_monitoring_credentials(root: Path = ROOT) -> dict[str, str]:
-    """read the two credentials from the disposable stack's existing realm import."""
+    """read the monitoring reader's secret from the disposable stack's existing realm import."""
     try:
         config = json.loads(
             (root / TEST_LOCAL_CONFIG_DIR / "learning-realm.json").read_text(encoding="utf-8")
         )
         reader = next(client for client in config["clients"] if client["clientId"] == MONITORING_CLIENT)
-        operator = next(user for user in config["users"] if user["username"] == TEST_OPERATOR_USERNAME)
-        password = next(item["value"] for item in operator["credentials"] if item["type"] == "password")
         secret = reader["secret"]
-        if isinstance(secret, str) and secret and isinstance(password, str) and password:
-            return {client_secret_key(MONITORING_CLIENT): secret, "TEST_OPERATOR_PASSWORD": password}
+        if isinstance(secret, str) and secret:
+            return {client_secret_key(MONITORING_CLIENT): secret}
     except (OSError, ValueError, KeyError, TypeError, StopIteration):
         pass
     raise SystemExit("Test monitoring credentials are unavailable. Run python scripts/stack_tests.py first.")
@@ -193,18 +191,28 @@ def ensure_person(  # noqa: PLR0913 - one local person's whole Keycloak record
         )
     realm_role = check(admin.get(f"/roles/{role}")).json()
     check(admin.post(f"/users/{user_id}/role-mappings/realm", json=[realm_role]))
-    allow_admin_attributes(admin)
+    apply_user_profile(admin)
     user = check(admin.get(f"/users/{user_id}")).json()
     attributes = {**(user.get("attributes") or {}), "org_id": [ORG]}
     check(admin.put(f"/users/{user_id}", json={**user, "attributes": attributes}))
     return user_id
 
 
-def allow_admin_attributes(admin: "httpx.Client") -> None:
-    """lets the realm's admins (not its users) edit unmanaged attributes such as org_id, unless it already allows that, and leaves it so."""
+def apply_user_profile(admin: "httpx.Client") -> None:
+    """gives the realm setup.py's user profile rules: only its admins may edit unmanaged attributes such as
+    org_id, so no user can move to another school (ENABLED would let them), and email is optional, since
+    identity creates accounts without one (adr 0019). a profile already so is left as it is."""
     profile = check(admin.get("/users/profile")).json()
-    if profile.get("unmanagedAttributePolicy") not in {"ADMIN_EDIT", "ENABLED"}:
-        check(admin.put("/users/profile", json={**profile, "unmanagedAttributePolicy": "ADMIN_EDIT"}))
+    wanted = {
+        **profile,
+        "unmanagedAttributePolicy": "ADMIN_EDIT",
+        "attributes": [
+            {k: v for k, v in a.items() if k != "required"} if a.get("name") == "email" else a
+            for a in profile.get("attributes", [])
+        ],
+    }
+    if wanted != profile:
+        check(admin.put("/users/profile", json=wanted))
 
 
 def psql(

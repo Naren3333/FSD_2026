@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"testing"
+	"time"
 
 	"github.com/segmentio/kafka-go"
 )
@@ -47,6 +48,29 @@ func TestDecodeEnrollmentRemovedRejectsMalformedRemovals(t *testing.T) {
 	}
 	v, err := DecodeEnrollmentRemoved(Event{Resource: classroom, Data: json.RawMessage(`{"classroom_id":"` + classroom + `","org_id":"o","student_id":"s"}`)})
 	if err != nil || v.Classroom != classroom || v.Org != "o" || v.Student != "s" {
+		t.Fatalf("%+v %v", v, err)
+	}
+}
+
+func TestDecodeClassroomReassignedRejectsMalformedReassignments(t *testing.T) {
+	classroom, other := "6f1c5d2e-8a4b-4c3d-9e2f-1a2b3c4d5e6f", "7a2d6e3f-9b5c-4d4e-8f3a-2b3c4d5e6f70"
+	at := time.Date(2026, 11, 19, 9, 0, 0, 0, time.UTC)
+	valid := `{"classroom_id":"` + classroom + `","org_id":"o","teacher_id":"t"}`
+	for _, e := range []Event{
+		{Resource: classroom, Timestamp: at, Data: json.RawMessage(`not json`)},
+		{Resource: classroom, Timestamp: at, Data: json.RawMessage(`{"classroom_id":"` + classroom + `","org_id":"o"}`)},
+		{Resource: classroom, Timestamp: at, Data: json.RawMessage(`{"classroom_id":"` + classroom + `","org_id":"","teacher_id":"t"}`)},
+		{Resource: other, Timestamp: at, Data: json.RawMessage(valid)},
+		{Resource: classroom, Data: json.RawMessage(valid)}, // no time to order it by
+	} {
+		_, err := DecodeClassroomReassigned(e)
+		var invalid InvalidEvent
+		if !errors.As(err, &invalid) {
+			t.Errorf("%+v was not rejected: %v", e, err)
+		}
+	}
+	v, err := DecodeClassroomReassigned(Event{Resource: classroom, Timestamp: at, Data: json.RawMessage(valid)})
+	if err != nil || v.Classroom != classroom || v.Org != "o" || v.Teacher != "t" {
 		t.Fatalf("%+v %v", v, err)
 	}
 }

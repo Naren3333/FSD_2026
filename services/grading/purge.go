@@ -14,10 +14,15 @@ func purge(ctx context.Context, tx pgx.Tx, event platform.Event) error {
 	if err != nil {
 		return err
 	}
+	// exclusive against new evaluations and reassignments in the classroom.
+	if err = platform.Lock(ctx, tx, platform.LockClassroom, v.Classroom); err != nil {
+		return err
+	}
 	statements := []string{
 		"INSERT INTO purged_classrooms(classroom_id,org_id) VALUES($1,$2) ON CONFLICT DO NOTHING",
 		"DELETE FROM removed_enrollments WHERE classroom_id=$1 AND org_id=$2",
 		"DELETE FROM assessment_due WHERE classroom_id=$1 AND org_id=$2",
+		"DELETE FROM classroom_teachers WHERE classroom_id=$1 AND org_id=$2",
 		// locked first, so a teacher's change holding one (with its audit entry) commits before the audit is
 		// read.
 		"SELECT 1 FROM evaluations WHERE classroom_id=$1 AND org_id=$2 FOR UPDATE",

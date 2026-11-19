@@ -11,10 +11,13 @@
       </button>
     </div>
     <nav aria-label="Workspace">
-      <a [routerLink]="monitoringPath" routerLinkActive="active" ariaCurrentWhenActive="page">
-        <app-icon name="dashboard" />
-        Monitoring
-      </a>
+      <p class="nav-group">School admin</p>
+      @for (link of links; track link.path) {
+        <a [routerLink]="link.path" routerLinkActive="active" ariaCurrentWhenActive="page">
+          <app-icon [name]="link.icon" />
+          {{ link.label }}
+        </a>
+      }
     </nav>
     <div class="sidebar-status">
       <app-status [state]="state" />
@@ -22,7 +25,7 @@
     <div class="account">
       <div class="account-who">
         <strong>Signed in</strong>
-        <span>Platform operator</span>
+        <span>School admin</span>
       </div>
       <button type="button" class="quiet sign-out" (click)="logout()" [disabled]="state.busy()">
         <app-icon name="logout" />
@@ -46,7 +49,7 @@
       >
         <app-icon name="menu" />
       </button>
-      <span class="topbar-classroom">Operations</span>
+      <span class="topbar-classroom">School administration</span>
     </div>
     <div class="notice-row" role="status">
       @if (session.expired()) {

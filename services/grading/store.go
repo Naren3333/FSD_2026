@@ -81,6 +81,7 @@ func insertEvaluation(ctx context.Context, tx pgx.Tx, v Submitted, evidence []Ev
 	if err != nil {
 		return err
 	}
+	// the assessment's teacher pays for its ai marking, unless the classroom has been given another (reassign).
 	var teacher *string
 	if v.marking() {
 		teacher = &v.Teacher
@@ -93,12 +94,18 @@ func insertEvaluation(ctx context.Context, tx pgx.Tx, v Submitted, evidence []Ev
 	if err = platform.LockShared(ctx, tx, platform.LockUser, v.Student); err != nil {
 		return err
 	}
+	// and with the classroom's other work against its purge and its reassignment (reassign), which reads the
+	// classroom's drafts.
+	if err = platform.LockShared(ctx, tx, platform.LockClassroom, v.Classroom); err != nil {
+		return err
+	}
 	// a due date changed since the student submitted (changeDue) decides whether the work is late.
 	result, err := tx.Exec(ctx, `INSERT INTO evaluations(id,assessment_id,classroom_id,org_id,student_id,evidence,questions,answers,late,submitted_at,release_policy,teacher_id)
 		SELECT $1::uuid,$2::uuid,$3::uuid,$4::text,$5::text,$6::jsonb,$7::jsonb,$8::jsonb,
 			CASE WHEN d.assessment_id IS NULL OR $10::timestamptz IS NULL THEN $9::boolean ELSE coalesce($10::timestamptz>d.due_at,false) END,
-			$10::timestamptz,$11::text,$12::text
+			$10::timestamptz,$11::text,CASE WHEN $12::text IS NOT NULL THEN coalesce(t.teacher_id,$12::text) END
 		FROM (SELECT 1) one LEFT JOIN assessment_due d ON d.assessment_id=$2::uuid
+			LEFT JOIN classroom_teachers t ON t.classroom_id=$3::uuid AND t.org_id=$4::text
 		WHERE NOT EXISTS(SELECT 1 FROM purged_classrooms WHERE classroom_id=$3) AND NOT EXISTS(SELECT 1 FROM deleted_assessments WHERE assessment_id=$2)
 			AND NOT EXISTS(SELECT 1 FROM deleted_users WHERE user_id=$5)
 		ON CONFLICT(id) DO NOTHING`,
@@ -336,7 +343,10 @@ func (p pgStore) reopenEvaluation(ctx context.Context, org, id, actor, reason st
 	}
 	released := v.ReleasedAt != nil
 	v.Status, v.FinalizedAt, v.ReleasedAt, v.Revision = statusDraft, nil, nil, v.Revision+1
-	_, err = tx.Exec(ctx, "UPDATE evaluations SET status='draft',finalized_by=NULL,finalized_at=NULL,released_at=NULL,revision=$1 WHERE id=$2", v.Revision, v.ID)
+	// a draft's ai marking is billed to the classroom's current teacher, who may have changed since (reassign).
+	_, err = tx.Exec(ctx, `UPDATE evaluations SET status='draft',finalized_by=NULL,finalized_at=NULL,released_at=NULL,revision=$1,
+		teacher_id=CASE WHEN teacher_id IS NOT NULL THEN coalesce((SELECT t.teacher_id FROM classroom_teachers t WHERE t.classroom_id=$3::uuid AND t.org_id=$4::text),teacher_id) END
+		WHERE id=$2`, v.Revision, v.ID, v.Classroom, org)
 	if err == nil {
 		_, err = tx.Exec(ctx, "INSERT INTO audit(evaluation_id,actor_id,action,reason,before_evidence,after_evidence) VALUES($1,$2,'reopen',$3,$4,$4)", v.ID, actor, reason, evidence)
 	}

@@ -1,24 +1,23 @@
 import { expect, test } from '@playwright/test';
 import { env, expectNoHorizontalScroll, login } from './helpers';
 
-const operatorPassword = process.env['TEST_OPERATOR_PASSWORD'];
-
-test('an operator opens monitoring without Identity and can recover each section', async ({ page }, info) => {
-  test.skip(
-    !operatorPassword && process.env['E2E_DEV_STACK'] === '1',
-    'The disposable stack provisions the operator.',
-  );
-  if (!operatorPassword) throw new Error('Run the browser suite through scripts/stack_tests.py.');
+test('a school admin opens monitoring without Identity and can recover each section', async ({
+  page,
+}, info) => {
   await page.route('**/api/identity/**', (route) => route.abort());
+  await login(page, 'admin', env.ADMIN_PASSWORD);
+  await expect(page).toHaveURL(/\/admin\/classrooms$/);
+  const menu = page.getByRole('navigation', { name: 'Workspace' });
+  await expect(menu.getByRole('link')).toHaveText(['Classrooms', 'Accounts', 'Monitoring']);
+  await expect(page.getByLabel('Current classroom')).toHaveCount(0);
+  // monitoring needs no identity call, so it works while identity is down.
   const identityCalls: string[] = [];
   page.on('request', (request) => {
     if (new URL(request.url()).pathname.startsWith('/api/identity/')) identityCalls.push(request.url());
   });
-  await login(page, 'monitoring-operator', operatorPassword);
+  await menu.getByRole('link', { name: 'Monitoring', exact: true }).click();
   await expect(page).toHaveURL(/\/admin\/monitoring$/);
   await expect(page.getByRole('heading', { name: 'Monitoring', exact: true })).toBeVisible();
-  await expect(page.getByRole('navigation', { name: 'Workspace' }).getByRole('link')).toHaveCount(1);
-  await expect(page.getByLabel('Current classroom')).toHaveCount(0);
   const services = page.getByRole('region', { name: 'Services' });
   const dlq = page.getByRole('region', { name: 'Dead letters' });
   const spend = page.getByRole('region', { name: 'AI expenditure' });

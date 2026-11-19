@@ -504,6 +504,53 @@ func TestADraftSaveRewritesItsLinks(t *testing.T) {
 	}
 }
 
+// a reassigned classroom's new teacher (adr 0019) cannot see or send the previous teacher's links: their save
+// keeps those of questions it left unchanged and drops those of questions it changed.
+func TestANewTeachersSaveKeepsThePreviousTeachersLinks(t *testing.T) {
+	p, ctx := testStore(t), context.Background()
+	v := stored(t, p, "org", statusDraft, nil)
+	second := v.Questions[0]
+	second.Prompt += " Explain."
+	v.Questions = append(v.Questions, second)
+	v.Questions[1].ID = uuid.NewString()
+	previous := make([]string, 2)
+	for i, q := range v.Questions {
+		id, err := p.insertBankQuestion(ctx, "org", bankOwner, q, nil)
+		must(t, err)
+		previous[i] = id
+	}
+	linked := v
+	linked.Questions = slices.Clone(v.Questions)
+	for i := range linked.Questions {
+		linked.Questions[i].ID = uuid.NewString()
+	}
+	linked.BankLinks, linked.LinkOwner = previous, bankOwner
+	must(t, p.updateAssessment(ctx, "org", reread(t, p, v.ID), linked))
+	edited := linked
+	edited.Questions = slices.Clone(linked.Questions)
+	edited.Questions[1].Prompt = "Rewritten by the new teacher."
+	for i := range edited.Questions {
+		edited.Questions[i].ID = uuid.NewString()
+	}
+	edited.BankLinks, edited.LinkOwner = nil, otherTeacher
+	must(t, p.updateAssessment(ctx, "org", linked, edited))
+	links, err := p.findLinks(ctx, "org", v.ID, bankOwner)
+	if err != nil || len(links) != 1 || links[edited.Questions[0].ID] != previous[0] {
+		t.Fatalf("the previous teacher's links are %v, %v", links, err)
+	}
+	if mine, err := p.findLinks(ctx, "org", v.ID, otherTeacher); err != nil || len(mine) != 0 {
+		t.Fatalf("the new teacher sees %v, %v", mine, err)
+	}
+}
+
+// reread reads the assessment as stored, for an update's before.
+func reread(t *testing.T, p pgStore, id string) Assessment {
+	t.Helper()
+	v, err := p.findAssessment(context.Background(), "org", id)
+	must(t, err)
+	return v
+}
+
 // deleting a bankOwner's or a student's account, or the classroom, twice over, removes what each owns and no
 // more; the bank survives its classroom.
 func TestPurgesReachTheBankAndTheLists(t *testing.T) {

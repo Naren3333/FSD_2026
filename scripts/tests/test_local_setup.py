@@ -33,17 +33,26 @@ def test_every_value_compose_requires_is_generated_and_in_the_example() -> None:
     assert required <= example.keys(), required - example.keys()
 
 
-def test_monitor_keeps_machine_and_test_operator_roles_separate() -> None:
+def test_the_realm_keeps_machine_and_person_roles_apart() -> None:
     values = generate_secrets()
     local = setup.realm(values)
-    assert all(setup.OPERATOR_ROLE not in user.get("realmRoles", []) for user in local["users"])
     reader = next(
         user for user in local["users"] if user.get("serviceAccountClientId") == setup.MONITORING_CLIENT
     )
     assert reader["realmRoles"] == [setup.MONITORING_CLIENT]
-    test = setup.realm(values, setup.TEST_WEB_ORIGIN, operator_password="test-only-value")
-    operator = next(user for user in test["users"] if user["username"] == setup.TEST_OPERATOR_USERNAME)
-    assert operator["realmRoles"] == [setup.OPERATOR_ROLE]
+    people = [user for user in local["users"] if "serviceAccountClientId" not in user]
+    assert all(len(user["realmRoles"]) == 1 for user in people)
+    admin = next(user for user in people if user["realmRoles"] == [setup.ADMIN_ROLE])
+    assert admin["attributes"] == {"org_id": [setup.ORG]}
+    accounts = next(
+        user for user in local["users"] if user.get("serviceAccountClientId") == setup.ACCOUNTS_CLIENT
+    )
+    assert accounts["clientRoles"] == {"realm-management": ["manage-users", "view-realm"]}
+    # identity can give an account it creates its school only when admins may edit unmanaged attributes.
+    [profile] = local["components"]["org.keycloak.userprofile.UserProfileProvider"]
+    config = json.loads(profile["config"]["kc.user.profile.config"][0])
+    assert config["unmanagedAttributePolicy"] == "ADMIN_EDIT"
+    assert {a["name"] for a in config["attributes"]} == {"username", "email", "firstName", "lastName"}
 
 
 def test_no_unguarded_secret_in_compose() -> None:
@@ -197,6 +206,41 @@ def test_people_leave_the_attribute_policy_on(monkeypatch: pytest.MonkeyPatch) -
     assert [p["unmanagedAttributePolicy"] for p in profiles] == ["ADMIN_EDIT"]
 
 
+def test_an_upgraded_realm_lets_accounts_have_no_email() -> None:
+    email = {"name": "email", "required": {"roles": ["user"]}, "validations": {"email": {}}}
+    profile = {"unmanagedAttributePolicy": "ADMIN_EDIT", "attributes": [email, {"name": "firstName"}]}
+    puts: list[dict[str, Any]] = []
+
+    def handle(request: httpx.Request) -> httpx.Response:
+        if request.method == "PUT":
+            puts.append(json.loads(request.content))
+            return httpx.Response(204)
+        return httpx.Response(200, json=puts[-1] if puts else profile)
+
+    admin = httpx.Client(base_url="http://keycloak.test", transport=httpx.MockTransport(handle))
+    for _ in range(2):
+        local_stack.apply_user_profile(admin)
+    assert len(puts) == 1
+    assert puts[0]["attributes"] == [{"name": "email", "validations": {"email": {}}}, {"name": "firstName"}]
+    assert puts[0]["unmanagedAttributePolicy"] == "ADMIN_EDIT"
+
+
+def test_a_realm_letting_users_edit_attributes_is_limited_to_admins() -> None:
+    # under ENABLED a user could change their own org_id and so their school.
+    profile = {"unmanagedAttributePolicy": "ENABLED", "attributes": [{"name": "firstName"}]}
+    puts: list[dict[str, Any]] = []
+
+    def handle(request: httpx.Request) -> httpx.Response:
+        if request.method == "PUT":
+            puts.append(json.loads(request.content))
+            return httpx.Response(204)
+        return httpx.Response(200, json=profile)
+
+    admin = httpx.Client(base_url="http://keycloak.test", transport=httpx.MockTransport(handle))
+    local_stack.apply_user_profile(admin)
+    assert [p["unmanagedAttributePolicy"] for p in puts] == ["ADMIN_EDIT"]
+
+
 def test_upgrade_updates_the_web_client() -> None:
     old = {
         "id": "w",
@@ -221,7 +265,7 @@ class FakeKeycloak:
     """simulate the account, client and role-mapping endpoints used by local upgrades."""
 
     def __init__(self, clients: set[str]) -> None:
-        self.clients = {name: f"id-{name}" for name in {*clients, setup.ACCOUNTS_ROLE[0]}}
+        self.clients = {name: f"id-{name}" for name in {*clients, setup.ACCOUNTS_ROLES[0]}}
         self.created: list[str] = []
         self.mappings: set[tuple[str, str]] = set()
         self.roles = {"ai-client"}
@@ -264,14 +308,18 @@ def test_upgrade_assigns_the_accounts_role_after_a_half_finished_run(monkeypatch
     monkeypatch.setattr(upgrade_local, "admin_client", keycloak.admin)
     upgrade_local.add_missing_accounts_client(generate_secrets())
     assert keycloak.created == []
-    assert keycloak.mappings == {(f"account-id-{setup.ACCOUNTS_CLIENT}", setup.ACCOUNTS_ROLE[1])}
+    assert keycloak.mappings == {
+        (f"account-id-{setup.ACCOUNTS_CLIENT}", role) for role in setup.ACCOUNTS_ROLES[1]
+    }
     # a fresh keycloak gets the client and the role; running again changes nothing.
     keycloak = FakeKeycloak(set())
     monkeypatch.setattr(upgrade_local, "admin_client", keycloak.admin)
     upgrade_local.add_missing_accounts_client(generate_secrets())
     upgrade_local.add_missing_accounts_client(generate_secrets())
     assert keycloak.created == [setup.ACCOUNTS_CLIENT]
-    assert keycloak.mappings == {(f"account-id-{setup.ACCOUNTS_CLIENT}", setup.ACCOUNTS_ROLE[1])}
+    assert keycloak.mappings == {
+        (f"account-id-{setup.ACCOUNTS_CLIENT}", role) for role in setup.ACCOUNTS_ROLES[1]
+    }
 
 
 def test_upgrade_assigns_the_ai_client_role_to_existing_clients(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -281,7 +329,7 @@ def test_upgrade_assigns_the_ai_client_role_to_existing_clients(monkeypatch: pyt
     upgrade_local.add_missing_clients(values)
     upgrade_local.add_missing_clients(values)
     assert keycloak.created == [*setup.AI_CLIENTS[1:], setup.MONITORING_CLIENT]
-    assert keycloak.roles == {"ai-client", setup.MONITORING_CLIENT, setup.OPERATOR_ROLE}
+    assert keycloak.roles == {"ai-client", setup.MONITORING_CLIENT, *setup.PERSON_ROLES}
     assert keycloak.mappings == {
         *((f"account-id-{client}", "ai-client") for client in setup.AI_CLIENTS),
         (f"account-id-{setup.MONITORING_CLIENT}", setup.MONITORING_CLIENT),
@@ -319,3 +367,30 @@ def test_every_container_has_limits_and_long_running_ones_restart() -> None:
         assert service["deploy"]["resources"]["limits"]["memory"], name
         one_shot = name.endswith(("-init", "-migrate", "-config"))
         assert service.get("restart") == (None if one_shot else "unless-stopped"), name
+
+
+def test_upgrade_refuses_to_make_an_existing_teacher_the_admin(monkeypatch: pytest.MonkeyPatch) -> None:
+    """a keycloak user already named like the local admin but holding another person role is left alone: a second person role would lock it out (adr 0019)."""
+    changes: list[str] = []
+
+    def handle(request: httpx.Request) -> httpx.Response:
+        path, method = request.url.path, request.method
+        if method != "GET":
+            changes.append(f"{method} {path}")
+            return httpx.Response(204)
+        if path == "/users/profile":
+            return httpx.Response(200, json={"unmanagedAttributePolicy": "ADMIN_EDIT", "attributes": []})
+        if path == "/users":
+            return httpx.Response(200, json=[{"id": "user-1", "username": request.url.params["username"]}])
+        if path == "/users/user-1/role-mappings/realm":
+            return httpx.Response(200, json=[{"name": "teacher"}])
+        return httpx.Response(404, text=f"unexpected {method} {path}")
+
+    monkeypatch.setattr(
+        upgrade_local,
+        "admin_client",
+        lambda: httpx.Client(base_url="http://keycloak.test", transport=httpx.MockTransport(handle)),
+    )
+    with pytest.raises(SystemExit, match="teacher"):
+        upgrade_local.add_missing_admin({"ADMIN_PASSWORD": "secret"})
+    assert changes == []

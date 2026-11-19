@@ -44,7 +44,9 @@ func purgeUser(ctx context.Context, tx pgx.Tx, event platform.Event) error {
 		"DELETE FROM submissions WHERE student_id=$1 AND assessment_id IN (SELECT id FROM assessments WHERE org_id=$2)",
 		// last, in the order assignee removal deletes: an empty list hides a resit from everyone (adr 0017).
 		"DELETE FROM assessment_assignees WHERE student_id=$1 AND assessment_id IN (SELECT id FROM assessments WHERE org_id=$2)",
-		// a teacher's bank; adr 0011 already had them delete their classrooms.
+		// a teacher's bank. they own no classroom by now, but their assessments may live on in a classroom an
+		// admin gave another teacher (adr 0019), which keeps them; links to the bank are left, as a bank delete
+		// leaves them, and every read skips them.
 		"DELETE FROM bank_questions WHERE owner_id=$1 AND org_id=$2",
 	}
 	if err = platform.ExecAll(ctx, tx, statements, v.User, v.Org); err != nil {

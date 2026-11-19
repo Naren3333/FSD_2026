@@ -19,7 +19,7 @@ import { ClassroomContext } from './core/classroom-context';
 import { sectionOf } from './core/section-shown';
 import { Session } from './core/session';
 import { UnsavedChanges } from './core/unsaved-changes';
-import { OperatorShellComponent } from './features/monitoring/operator-shell';
+import { AdminShellComponent } from './features/admin/admin-shell';
 import { UsageComponent } from './features/usage/usage';
 import { ActionState } from './shared/action-state';
 import { Drawer } from './shared/drawer';
@@ -40,7 +40,7 @@ import { StatusComponent } from './shared/status';
     UsageComponent,
     IconComponent,
     RefreshButtonComponent,
-    OperatorShellComponent,
+    AdminShellComponent,
   ],
   templateUrl: './app.html',
 })

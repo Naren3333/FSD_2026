@@ -99,7 +99,8 @@ type Assessment struct {
 	ReleasePolicy string     `json:"release_policy"`
 	AIMarking     bool       `json:"ai_marking"`
 	PublishedAt   *time.Time `json:"published_at"`
-	// CreatedBy is the teacher who created it; their daily ai allowance pays for its ai marking (adr 0003).
+	// CreatedBy is the teacher who created it; their daily ai allowance pays for its ai marking (adr 0003)
+	// until an admin gives the classroom another teacher, who pays from then on (grading, adr 0019).
 	CreatedBy string `json:"-"`
 	// Assigned, fixed when it is created, makes it visible only to the students in Assignees (adr 0017);
 	// ResitOf is the assessment it resits. Only the server sets them.
@@ -379,13 +380,8 @@ func sameMarking(a, b Assessment) bool {
 func (v *Assessment) keepQuestionIDs(before []Question) {
 	used := map[string]bool{}
 	for i := range v.Questions {
-		for _, old := range before {
-			candidate := v.Questions[i]
-			candidate.ID = old.ID
-			if !used[old.ID] && sameJSON(candidate, old) {
-				v.Questions[i].ID, used[old.ID] = old.ID, true
-				break
-			}
+		if old := unchangedFrom(v.Questions[i], before, used); old != "" {
+			v.Questions[i].ID = old
 		}
 	}
 }

@@ -39,7 +39,6 @@ from setup import (
     DATABASES,
     MONITORING_CLIENT,
     SERVICES,
-    TEST_OPERATOR_USERNAME,
     client_secret_key,
 )
 
@@ -197,6 +196,28 @@ def replay(service: str, topic: str, resource: str, fresh_id: bool = False) -> s
     return event["event_id"]
 
 
+def reassigned_billing(room_id: str, teacher_id: str) -> None:
+    """both reassignments of the classroom reached grading, which bills its marking to the newest teacher; the
+    older one delivered again under a new event id changes nothing (adr 0019)."""
+    topic, room_id = "identity.classroom.reassigned.v1", str(UUID(room_id))
+    announced = f"FROM outbox WHERE topic='{topic}' AND partition_key='{room_id}'"
+    assert sql_value("identity", f"SELECT count(*) {announced}") == "2"
+    payer = f"SELECT coalesce((SELECT teacher_id FROM classroom_teachers WHERE classroom_id='{room_id}'),'')"
+    eventually(
+        lambda: sql_value("grading", payer), lambda t: t == teacher_id, "grading applies the newest teacher"
+    )
+    older = json.loads(sql_value("identity", f"SELECT body {announced} ORDER BY created_at LIMIT 1"))
+    schema = json.loads((ROOT / f"contracts/events/{topic}.schema.json").read_text(encoding="utf-8"))
+    Draft202012Validator(schema, format_checker=FormatChecker()).validate(older)
+    older["event_id"] = str(uuid4())
+    publish(topic, room_id, older)
+    seen = f"SELECT count(*) FROM inbox WHERE event_id='{older['event_id']}'"
+    eventually(
+        lambda: sql_value("grading", seen), lambda n: n == "1", "grading takes the replayed reassignment"
+    )
+    assert sql_value("grading", payer) == teacher_id, "an older reassignment replaced the newest"
+
+
 def publish(topic: str, key: str, event: dict[str, Any]) -> None:
     """puts an event straight on a kafka topic under `key`, as the outbox relay does (its partition key), so it keeps its order with the other events for the same resource."""
     producer = "/opt/kafka/bin/kafka-console-producer.sh"
@@ -236,40 +257,82 @@ def inbox_has(service: str, event_id: str) -> bool:
 
 @dataclass
 class Users:
+    admin: httpx.Client  # the school's admin, who manages its accounts and classrooms (adr 0019)
     teacher: httpx.Client
     student: httpx.Client
     other: httpx.Client  # a teacher of another classroom
     teacher_id: str
     student_id: str
+    other_id: str
 
 
 def sign_in() -> Users:
+    admin = login("admin", "ADMIN_PASSWORD")
     teacher = login("teacher", "TEACHER_PASSWORD")
     student = login("student", "STUDENT_PASSWORD")
     other = login("other-teacher", "OTHER_TEACHER_PASSWORD")
+    assert request(admin, "POST", "/identity/me", json={})["role"] == "admin"
     teacher_profile = request(teacher, "POST", "/identity/me", json={})
     student_profile = request(student, "POST", "/identity/me", json={})
-    request(other, "POST", "/identity/me", json={})
+    other_profile = request(other, "POST", "/identity/me", json={})
     # names come from the sign-in token.
     assert student_profile["username"] == "student", student_profile
     assert student_profile["display_name"] == "Student Local", student_profile
-    return Users(teacher, student, other, teacher_profile["id"], student_profile["id"])
+    return Users(
+        admin, teacher, student, other, teacher_profile["id"], student_profile["id"], other_profile["id"]
+    )
+
+
+def school_classroom(u: Users, name: str) -> dict[str, Any]:
+    """the admin creates a classroom for the seeded teacher."""
+    room = request(
+        u.admin, "POST", "/identity/admin/classrooms", 201, json={"name": name, "teacher_id": u.teacher_id}
+    )
+    CREATED_CLASSROOMS.append(room["id"])
+    return room
+
+
+def enroll(u: Users, room_id: str, username: str) -> None:
+    """the admin enrolls the school's student in the classroom."""
+    request(u.admin, "POST", f"/identity/admin/classrooms/{room_id}/enrollments", json={"username": username})
 
 
 def classroom(u: Users) -> dict[str, Any]:
-    """creates a classroom and enrolls the student by username."""
+    """the admin creates a classroom for a teacher, reassigns it and enrolls the student by username."""
     assert httpx.get(BASE + "/identity/classrooms").status_code == 401
-    room = request(
-        u.teacher, "POST", "/identity/classrooms", 201, json={"name": f"Integration {uuid4().hex[:8]}"}
+    create = {"name": f"Integration {uuid4().hex[:8]}", "teacher_id": u.teacher_id}
+    for person in [u.teacher, u.student]:
+        request(person, "POST", "/identity/admin/classrooms", 403, json=create)
+    assert u.teacher.post("/identity/classrooms", json={"name": "Old route"}).status_code == 405
+    invalid = request(
+        u.admin, "POST", "/identity/admin/classrooms", 422, json={**create, "teacher_id": u.student_id}
     )
-    CREATED_CLASSROOMS.append(room["id"])
-    request(u.student, "POST", "/identity/classrooms", 403, json={"name": "Forbidden"})
+    assert invalid["error"]["code"] == "INVALID_TEACHER", invalid
+    room = school_classroom(u, create["name"])
+    assert room["teacher_id"] == u.teacher_id
     request(u.other, "GET", f"/identity/classrooms/{room['id']}/access", 403)
+    # admins manage the classroom but have no relation to it, so no service shows them its data.
+    request(u.admin, "GET", f"/identity/classrooms/{room['id']}/access", 403)
+    listed = request(u.admin, "GET", "/identity/admin/classrooms?limit=100")
+    [mine] = [r for r in listed["items"] if r["id"] == room["id"]]
+    assert mine["teacher_name"] == "Teacher Local" and mine["students"] == 0, mine
+    request(u.teacher, "GET", "/identity/admin/classrooms", 403)
 
-    enroll = f"/identity/classrooms/{room['id']}/enrollments"
-    request(u.teacher, "POST", enroll, 422, json={"username": f"nobody-{uuid4().hex[:8]}"})
-    request(u.other, "POST", enroll, 403, json={"username": "student"})
-    enrolled = request(u.teacher, "POST", enroll, json={"username": "STUDENT"})
+    # reassigning the classroom moves its teacher's access at once, everywhere identity is asked.
+    edit = f"/identity/admin/classrooms/{room['id']}"
+    request(u.teacher, "PATCH", edit, 403, json={"teacher_id": u.other_id})
+    request(u.admin, "PATCH", edit, json={"teacher_id": u.other_id})
+    request(u.teacher, "GET", f"/identity/classrooms/{room['id']}/access", 403)
+    request(u.other, "GET", f"/identity/classrooms/{room['id']}/access")
+    request(u.admin, "PATCH", edit, json={"teacher_id": u.teacher_id, "name": create["name"]})
+    request(u.teacher, "GET", f"/identity/classrooms/{room['id']}/access")
+    reassigned_billing(room["id"], u.teacher_id)
+
+    path = f"/identity/admin/classrooms/{room['id']}/enrollments"
+    request(u.admin, "POST", path, 422, json={"username": f"nobody-{uuid4().hex[:8]}"})
+    request(u.teacher, "POST", path, 403, json={"username": "student"})
+    assert u.teacher.post(f"/identity/classrooms/{room['id']}/enrollments", json={}).status_code == 404
+    enrolled = request(u.admin, "POST", path, json={"username": "STUDENT"})
     assert enrolled["student_id"] == u.student_id
 
     roster = f"/identity/classrooms/{room['id']}/students"
@@ -284,14 +347,90 @@ def classroom(u: Users) -> dict[str, Any]:
     assert request(u.teacher, "GET", ids) == [u.student_id]
     request(u.student, "GET", ids, 403)
 
-    # teachers page through every student in their school, by search, to enroll them; students cannot.
-    found = request(u.teacher, "GET", "/identity/students?search=STUDENT%20local&limit=50")
-    assert expected[0] in found["students"] and found["total"] >= 1
-    first = request(u.teacher, "GET", "/identity/students?limit=1")
-    assert len(first["students"]) == 1 and first["total"] >= found["total"]
-    request(u.teacher, "GET", "/identity/students?limit=51", 422)
-    request(u.student, "GET", "/identity/students", 403)
+    assert request(u.admin, "GET", f"/identity/admin/classrooms/{room['id']}/students") == {
+        "students": expected,
+        "total": 1,
+    }
+
+    # admins page through the school's accounts, by role and search; teachers and students cannot.
+    found = request(u.admin, "GET", "/identity/admin/accounts?role=student&search=STUDENT%20local&limit=50")
+    assert {**expected[0], "role": "student"} in found["accounts"] and found["total"] >= 1
+    first = request(u.admin, "GET", "/identity/admin/accounts?role=student&limit=1")
+    assert len(first["accounts"]) == 1 and first["total"] >= found["total"]
+    teachers = request(u.admin, "GET", "/identity/admin/accounts?role=teacher&limit=50")["accounts"]
+    assert u.teacher_id in [a["id"] for a in teachers] and u.student_id not in [a["id"] for a in teachers]
+    request(u.admin, "GET", "/identity/admin/accounts?role=student&limit=51", 422)
+    for person in [u.teacher, u.student]:
+        request(person, "GET", "/identity/admin/accounts?role=student", 403)
+    admin_created_account(u, room["id"])
     return room
+
+
+def admin_created_account(u: Users, room_id: str) -> None:
+    """an account the admin creates is in the school, assignable before its first sign-in, and must change its temporary password."""
+    username = f"made-{uuid4().hex[:8]}"
+    account = {"role": "student", "username": username, "first_name": "Made", "last_name": "Here"}
+    request(u.teacher, "POST", "/identity/admin/accounts", 403, json=account)
+    response = u.admin.post("/identity/admin/accounts", json=account)
+    assert response.status_code == 201 and response.headers.get("Cache-Control") == "no-store", response.text
+    created = response.json()
+    validate_response("POST", "/identity/admin/accounts", 201, created)
+    taken = request(u.admin, "POST", "/identity/admin/accounts", 409, json=account)
+    assert taken["error"]["code"] == "USERNAME_TAKEN", taken
+    # its user signs in with the school's id before the username, so other schools' usernames never collide.
+    assert created["username"] == f"local-school.{username}", created
+    # the admin enrolls them by the username they chose, without the school's id.
+    enroll(u, room_id, username.upper())
+    username = created["username"]
+    # keycloak refuses the temporary password until its user sets their own.
+    data = {"client_id": "learning-e2e", "grant_type": "password", "username": username}
+    signed_in = httpx.post(TOKEN_URL, data={**data, "password": created["temporary_password"]}, timeout=15)
+    assert signed_in.status_code == 400, signed_in.text
+    with admin_client() as admin:
+        user = check_user(admin, username)
+        assert (
+            user["attributes"]["org_id"] == ["local-school"] and "UPDATE_PASSWORD" in user["requiredActions"]
+        )
+        chosen = uuid4().hex
+        admin.put(
+            f"/users/{user['id']}/reset-password",
+            json={"type": "password", "value": chosen, "temporary": False},
+        ).raise_for_status()
+    person = httpx.Client(
+        base_url=BASE, headers={"Authorization": "Bearer " + password_token(username, chosen)}, timeout=25
+    )
+    profile = request(person, "POST", "/identity/me", json={})
+    assert (profile["id"], profile["role"], profile["display_name"]) == (
+        created["id"],
+        "student",
+        "Made Here",
+    )
+    request(person, "GET", f"/identity/classrooms/{room_id}/access")
+    # a reset replaces the password they chose with a temporary one, answered once, which they must change.
+    reset = f"/identity/admin/accounts/{created['id']}/password"
+    for other in [u.teacher, person]:
+        request(other, "POST", reset, 403)
+    # an admin's account, like another school's, is not one an admin resets here.
+    admin_id = request(u.admin, "POST", "/identity/me", json={})["id"]
+    request(u.admin, "POST", f"/identity/admin/accounts/{admin_id}/password", 404)
+    response = u.admin.post(reset)
+    assert response.status_code == 200 and response.headers.get("Cache-Control") == "no-store", response.text
+    renewed = response.json()
+    validate_response("POST", "/identity/admin/accounts/{id}/password", 200, renewed)
+    assert (renewed["id"], renewed["username"]) == (created["id"], username), renewed
+    for old in [chosen, renewed["temporary_password"]]:
+        refused = httpx.post(TOKEN_URL, data={**data, "password": old}, timeout=15)
+        assert refused.status_code in (400, 401), refused.text
+    with admin_client() as admin:
+        assert "UPDATE_PASSWORD" in check_user(admin, username)["requiredActions"]
+    request(u.admin, "DELETE", f"/identity/admin/classrooms/{room_id}/enrollments/{created['id']}")
+    person.request("DELETE", "/identity/me").raise_for_status()
+
+
+def check_user(admin: httpx.Client, username: str) -> dict[str, Any]:
+    """the keycloak user with exactly this username."""
+    [found] = admin.get("/users", params={"username": username, "exact": "true"}).raise_for_status().json()
+    return dict(admin.get(f"/users/{found['id']}").raise_for_status().json())
 
 
 def documents(u: Users, room_id: str) -> None:
@@ -918,7 +1057,7 @@ def bank_and_resits(u: Users, room_id: str) -> None:
     assigned_student(u, room_id, r)
     resit_purges(u, room_id, r)
     # the later steps expect the classroom's one original student.
-    request(u.teacher, "DELETE", f"/identity/classrooms/{room_id}/enrollments/{r.student_id}")
+    request(u.admin, "DELETE", f"/identity/admin/classrooms/{room_id}/enrollments/{r.student_id}")
 
 
 def bank_and_resit(u: Users, room_id: str) -> Resit:
@@ -947,7 +1086,7 @@ def bank_and_resit(u: Users, room_id: str) -> Resit:
     )  # fmt: skip
     # the student the resit is for answered the original, wrongly; the classroom's other student did not.
     student, student_id, username = fresh_person("student")
-    request(u.teacher, "POST", f"/identity/classrooms/{room_id}/enrollments", json={"username": username})
+    enroll(u, room_id, username)
     request(
         student, "POST", f"/assessment/assessments/{original['id']}/submissions", 201,
         json={"answers": {question: "5"}},
@@ -1032,7 +1171,7 @@ def assigned_student(u: Users, room_id: str, r: Resit) -> None:
 def resit_purges(u: Users, room_id: str, r: Resit) -> None:
     """a deleted student leaves a resit's list, which then hides it from everyone; a deleted teacher's bank goes."""
     leaving, leaving_id, username = fresh_person("student")
-    request(u.teacher, "POST", f"/identity/classrooms/{room_id}/enrollments", json={"username": username})
+    enroll(u, room_id, username)
     body = {"student_ids": [leaving_id], "copy_question_ids": [r.original["questions"][0]["id"]]}
     resit = request(u.teacher, "POST", f"/assessment/assessments/{r.original['id']}/resits", 201, json=body)
     request(u.teacher, "POST", f"/assessment/assessments/{resit['id']}/publish")
@@ -1056,11 +1195,11 @@ def unenroll(u: Users, room_id: str) -> None:
     room = str(UUID(room_id))  # returned by a verified api
     student = u.student_id
     assert student.replace("-", "").isalnum(), student  # an account id, safe in sql
-    remove = f"/identity/classrooms/{room_id}/enrollments/{u.student_id}"
-    request(u.other, "DELETE", remove, 403)
-    request(u.student, "DELETE", remove, 403)
-    request(u.teacher, "DELETE", remove)
-    request(u.teacher, "DELETE", remove, 404)
+    remove = f"/identity/admin/classrooms/{room_id}/enrollments/{u.student_id}"
+    for person in [u.other, u.student, u.teacher]:
+        request(person, "DELETE", remove, 403)
+    request(u.admin, "DELETE", remove)
+    request(u.admin, "DELETE", remove, 404)
     assert request(u.teacher, "GET", f"/identity/classrooms/{room_id}/students") == {
         "students": [],
         "total": 0,
@@ -1087,6 +1226,8 @@ def delete_account(u: Users, room_id: str) -> None:
     """a user deletes their own account (adr 0011)."""
     teacher = request(u.teacher, "DELETE", "/identity/me", 409)
     assert teacher["error"]["code"] == "OWNS_CLASSROOMS", teacher
+    admin = request(u.admin, "DELETE", "/identity/me", 403)
+    assert admin["error"]["code"] == "ADMIN_ACCOUNT", admin
     username, password = f"deleted-{uuid4().hex[:8]}", uuid4().hex
     with admin_client() as admin:
         ensure_person(admin, username, "Deleted", "Student", password)
@@ -1094,7 +1235,7 @@ def delete_account(u: Users, room_id: str) -> None:
     gone = httpx.Client(base_url=BASE, headers={"Authorization": "Bearer " + token}, timeout=25)
     user_id = request(gone, "POST", "/identity/me", json={})["id"]
     user = str(UUID(user_id))  # keycloak ids are uuids, so safe in sql
-    request(u.teacher, "POST", f"/identity/classrooms/{room_id}/enrollments", json={"username": username})
+    enroll(u, room_id, username)
     request(gone, "POST", "/chatbot/threads", 201, json={"classroom_id": room_id})
     assert sql_value("chatbot", f"SELECT count(*) FROM threads WHERE user_id='{user}'") == "1"
 
@@ -1171,13 +1312,14 @@ def delete_classroom(u: Users, room_id: str, graded: Graded) -> None:
         assert sql_value(service, sql) != "0", service
     submitted_sql = f"SELECT body FROM outbox WHERE partition_key='{UUID(graded.submission_id)}'"
     late_submission = json.loads(sql_value("assessment", submitted_sql))
-    request(u.teacher, "POST", f"/identity/classrooms/{room_id}/enrollments", json={"username": "student"})
-    path = f"/identity/classrooms/{room_id}"
-    request(u.other, "DELETE", path, 403)
-    request(u.student, "DELETE", path, 403)
-    request(u.teacher, "DELETE", path)
+    enroll(u, room_id, "student")
+    path, managed = f"/identity/classrooms/{room_id}", f"/identity/admin/classrooms/{room_id}"
+    for person in [u.other, u.student, u.teacher]:
+        request(person, "DELETE", managed, 403)
+    assert u.teacher.delete(path).status_code == 404
+    request(u.admin, "DELETE", managed)
     CREATED_CLASSROOMS.remove(room_id)
-    request(u.teacher, "DELETE", path, 403)
+    request(u.admin, "DELETE", managed, 404)
     for user in [u.teacher, u.student]:
         request(user, "GET", f"{path}/access", 403)
         assert room_id not in [r["id"] for r in request(user, "GET", "/identity/classrooms")]
@@ -1185,7 +1327,9 @@ def delete_classroom(u: Users, room_id: str, graded: Graded) -> None:
     # its students are unenrolled, so none stays tied to it.
     assert sql_value("identity", f"SELECT count(*) FROM enrollments WHERE classroom_id='{room_id}'") == "0"
     # the students themselves are kept and can still be enrolled elsewhere.
-    assert request(u.teacher, "GET", "/identity/students?search=STUDENT%20local")["total"] >= 1
+    assert (
+        request(u.admin, "GET", "/identity/admin/accounts?role=student&search=STUDENT%20local")["total"] >= 1
+    )
 
     for service, sql in kept.items():
         eventually(
@@ -1230,9 +1374,9 @@ def databases() -> None:
     versions = "SELECT string_agg(version::text, ',' ORDER BY version) FROM schema_migrations"
     for service, expected in [
         ("content", "1,2,3,4,5,6"),
-        ("identity", "1,2,3,4,5,6,7,8"),
+        ("identity", "1,2,3,4,5,6,7,8,9"),
         ("assessment", "1,2,3,4,5,6"),
-        ("grading", "1,2,3,4,5,6,7,8"),
+        ("grading", "1,2,3,4,5,6,7,8,9"),
         ("analytics", "1,2,3,4,5,6,7"),
         ("curriculum", "1,2"),
         ("chatbot", "1,2,3,4,5,6"),
@@ -1309,10 +1453,10 @@ def remove_leftovers() -> None:
     if CREATED_CLASSROOMS:
         with (
             contextlib.suppress(httpx.HTTPError, SystemExit),
-            login("teacher", "TEACHER_PASSWORD") as teacher,
+            login("admin", "ADMIN_PASSWORD") as admin,
         ):
             for room_id in CREATED_CLASSROOMS:
-                teacher.delete(f"/identity/classrooms/{room_id}")
+                admin.delete(f"/identity/admin/classrooms/{room_id}")
     with contextlib.suppress(subprocess.SubprocessError, ValueError):
         delete_test_topics(CREATED_TOPICS)
 
@@ -1349,7 +1493,7 @@ def main() -> None:
         remove_leftovers()
     print(f"Finished in {time.monotonic() - started:.0f}s{' with live AI' if LIVE_AI else ''}.")
     print(
-        "PASS: gateway auth, classroom isolation, enrollment by username, rosters, the school's student list, unenrollment, account deletion and its cross-service purge, classroom deletion and its cross-service purge, deleting a graded assessment with its grades, the question bank and resits for assigned students only, curriculum, "
+        "PASS: gateway auth, school admin accounts, classrooms and enrollment, classroom isolation, enrollment by username, rosters, unenrollment, account deletion and its cross-service purge, classroom deletion and its cross-service purge, deleting a graded assessment with its grades, the question bank and resits for assigned students only, curriculum, "
         "S3 upload/extraction, PDF indexing jobs, document deletion, search access, chat threads and streaming, "
         "teacher-only question generation and marking guidance, "
         "AI spend allowance, answer-key secrecy, submissions, draft grading, teacher finalization, students' own "
@@ -1385,30 +1529,27 @@ def run() -> None:
     step("Protected operational measurements", lambda: operational_metrics(users))
     step("Per-session rate limit", rate_limit_per_session)
     step("Removing this run's topics", remove_topics)
-    if password := os.environ.get("TEST_OPERATOR_PASSWORD"):
-        step("Platform monitoring and Kafka outage recovery", lambda: platform_monitoring(users, password))
+    if project() == TEST_PROJECT:
+        step("Platform monitoring and Kafka outage recovery", lambda: platform_monitoring(users))
     else:
         print(
-            "skipped: Platform monitoring and Kafka outage recovery (TEST_OPERATOR_PASSWORD is unset; "
-            "the disposable test stack provisions the operator).",
+            "skipped: Platform monitoring and Kafka outage recovery (it stops Kafka, so it runs on the "
+            "disposable test stack only).",
             flush=True,
         )
 
 
-def platform_monitoring(users: Users, password: str) -> None:
+def platform_monitoring(users: Users) -> None:
     route = "/monitoring/status"
     reader = service_token(MONITORING_CLIENT)
     request(users.teacher, "GET", route, 403)
     request(users.student, "GET", "/monitoring/ai-spend/users", 403)
     assert ai_core_status(reader) == 403
-    with (
-        httpx.Client(base_url=BASE, timeout=10) as client,
-        httpx.Client(
-            base_url=BASE,
-            headers={"Authorization": "Bearer " + password_token(TEST_OPERATOR_USERNAME, password)},
-            timeout=10,
-        ) as operator,
-    ):
+    operator = users.admin
+    # spend reports are the admin's own school's; another school's are refused.
+    request(operator, "GET", "/monitoring/ai-spend/users?org_id=another-school", 403)
+    assert request(operator, "GET", "/monitoring/ai-spend/users?org_id=local-school")["total"] >= 0
+    with httpx.Client(base_url=BASE, timeout=10) as client:
         assert client.get(route).status_code == 401
         assert client.get(route, headers={"Authorization": "Bearer " + reader}).status_code == 403
         assert client.get("/monitoring/internal/http-metrics").status_code == 404

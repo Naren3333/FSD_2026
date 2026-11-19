@@ -128,10 +128,12 @@ describe('the Profile page', () => {
     expect(page.logout).not.toHaveBeenCalled();
   });
 
-  it('asks a teacher to delete their classrooms first', () => {
+  it('sends a teacher who still owns classrooms to the school admin first', () => {
     const teacher: Profile = { ...student, role: 'teacher' };
     const page = render(teacher, [{ id: 'c1', name: '3A', teacher_id: 'u1' }]);
     expect(page.root.textContent).toContain('You still have 1 classroom.');
+    expect(page.root.textContent).toContain('Ask your school admin to reassign or delete it');
+    expect(page.root.textContent).not.toContain('from Classrooms');
     expect(page.button('Delete account').disabled).toBe(true);
     expect(page.button('Delete account').getAttribute('aria-describedby')).toBe('delete-account-blocked');
     expect(render(teacher).button('Delete account').disabled).toBe(false);

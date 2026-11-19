@@ -1,5 +1,5 @@
-@if (session.isOperator) {
-  <app-operator-shell />
+@if (session.isAdmin) {
+  <app-admin-shell />
 } @else {
   <a class="skip-link" href="#workspace" [attr.inert]="menuOpen() ? '' : null">Skip to workspace</a>
   @if (session.profile(); as profile) {
@@ -50,7 +50,7 @@
             </p>
           }
           @if (session.isTeacher() && noClassrooms()) {
-            <a routerLink="/classrooms" class="sidebar-create">Create a classroom</a>
+            <p class="sidebar-note">Your school admin assigns your classrooms.</p>
           }
         </div>
         <nav aria-label="Workspace">

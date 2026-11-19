@@ -45,7 +45,7 @@ func TestMonitoringHealthIsPrivateAndTracksCollection(t *testing.T) {
 	check("/health/ready", http.StatusServiceUnavailable)
 }
 
-func TestMonitoringRequiresDedicatedOperator(t *testing.T) {
+func TestMonitoringRequiresASchoolAdmin(t *testing.T) {
 	key, err := rsa.GenerateKey(rand.Reader, 2048)
 	if err != nil {
 		t.Fatal(err)
@@ -73,17 +73,17 @@ func TestMonitoringRequiresDedicatedOperator(t *testing.T) {
 		want           int
 	}{
 		{"missing", "", nil, 0, http.StatusUnauthorized},
-		{"expired", "learning", []string{"platform-operator"}, -time.Hour, http.StatusUnauthorized},
-		{"wrong audience", "other", []string{"platform-operator"}, time.Hour, http.StatusUnauthorized},
+		{"expired", "learning", []string{"admin"}, -time.Hour, http.StatusUnauthorized},
+		{"wrong audience", "other", []string{"admin"}, time.Hour, http.StatusUnauthorized},
 		{"teacher", "learning", []string{"teacher"}, time.Hour, http.StatusForbidden},
 		{"student", "learning", []string{"student"}, time.Hour, http.StatusForbidden},
 		{"reader", "learning", []string{platform.RoleMonitoringReader}, time.Hour, http.StatusForbidden},
 		{"AI client", "learning", []string{"ai-client"}, time.Hour, http.StatusForbidden},
-		{"teacher operator", "learning", []string{"teacher", "platform-operator"}, time.Hour, http.StatusForbidden},
-		{"student operator", "learning", []string{"student", "platform-operator"}, time.Hour, http.StatusForbidden},
-		{"reader operator", "learning", []string{platform.RoleMonitoringReader, "platform-operator"}, time.Hour, http.StatusForbidden},
-		{"AI client operator", "learning", []string{"ai-client", "platform-operator"}, time.Hour, http.StatusForbidden},
-		{"operator", "learning", []string{"platform-operator"}, time.Hour, http.StatusOK},
+		{"teacher admin", "learning", []string{"teacher", "admin"}, time.Hour, http.StatusForbidden},
+		{"student admin", "learning", []string{"student", "admin"}, time.Hour, http.StatusForbidden},
+		{"reader admin", "learning", []string{platform.RoleMonitoringReader, "admin"}, time.Hour, http.StatusForbidden},
+		{"AI client admin", "learning", []string{"ai-client", "admin"}, time.Hour, http.StatusForbidden},
+		{"admin", "learning", []string{"admin"}, time.Hour, http.StatusOK},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			paths := []string{"/api/monitoring/status"}
@@ -111,7 +111,7 @@ func TestMonitoringRequiresDedicatedOperator(t *testing.T) {
 				}
 				if tc.want == http.StatusOK {
 					var snapshot statusSnapshot
-					if json.Unmarshal(w.Body.Bytes(), &snapshot) != nil || len(snapshot.Services) != 10 || len(snapshot.DeadLetters) != 9 {
+					if json.Unmarshal(w.Body.Bytes(), &snapshot) != nil || len(snapshot.Services) != 10 || len(snapshot.DeadLetters) != 10 {
 						t.Fatalf("invalid status response %s", w.Body.String())
 					}
 				}
@@ -128,14 +128,17 @@ func TestBilledAccountProxyRetriesAndAuditsServedReports(t *testing.T) {
 		want         int
 		wantRequests int
 		code         string
+		forwarded    string
 	}{
-		{"recovered token", "?user_id=billed-account", http.StatusOK, http.StatusOK, 2, ""},
-		{"two rejected tokens", "", http.StatusUnauthorized, http.StatusBadGateway, 2, "MONITORING_READER_CONFIGURATION"},
-		{"missing role", "", http.StatusForbidden, http.StatusBadGateway, 1, "MONITORING_READER_CONFIGURATION"},
-		{"report failure", "", http.StatusInternalServerError, http.StatusBadGateway, 1, "SPEND_REPORT_FAILED"},
-		{"dependency failure", "", http.StatusServiceUnavailable, http.StatusServiceUnavailable, 1, "DEPENDENCY_UNAVAILABLE"},
-		{"invalid filter", "?period=invalid", http.StatusUnprocessableEntity, http.StatusUnprocessableEntity, 1, "VALIDATION_ERROR"},
-		{"duplicate filter", "?user_id=first&user_id=second", http.StatusOK, http.StatusUnprocessableEntity, 0, "VALIDATION_ERROR"},
+		{"recovered token", "?user_id=billed-account", http.StatusOK, http.StatusOK, 2, "", "org_id=school&user_id=billed-account"},
+		{"two rejected tokens", "", http.StatusUnauthorized, http.StatusBadGateway, 2, "MONITORING_READER_CONFIGURATION", "org_id=school"},
+		{"missing role", "", http.StatusForbidden, http.StatusBadGateway, 1, "MONITORING_READER_CONFIGURATION", "org_id=school"},
+		{"report failure", "", http.StatusInternalServerError, http.StatusBadGateway, 1, "SPEND_REPORT_FAILED", "org_id=school"},
+		{"dependency failure", "", http.StatusServiceUnavailable, http.StatusServiceUnavailable, 1, "DEPENDENCY_UNAVAILABLE", "org_id=school"},
+		{"invalid filter", "?period=invalid", http.StatusUnprocessableEntity, http.StatusUnprocessableEntity, 1, "VALIDATION_ERROR", "org_id=school&period=invalid"},
+		{"duplicate filter", "?user_id=first&user_id=second", http.StatusOK, http.StatusUnprocessableEntity, 0, "VALIDATION_ERROR", ""},
+		{"own school", "?org_id=school", http.StatusOK, http.StatusOK, 2, "", "org_id=school"},
+		{"another school", "?org_id=other-school", http.StatusOK, http.StatusForbidden, 0, "FORBIDDEN", ""},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			var tokens atomic.Int32
@@ -153,7 +156,7 @@ func TestBilledAccountProxyRetriesAndAuditsServedReports(t *testing.T) {
 				requests++
 				if r.Header.Get("X-Correlation-ID") != correlation ||
 					r.Header.Get("Authorization") != fmt.Sprintf("Bearer token-%d", requests) ||
-					r.URL.RawQuery != strings.TrimPrefix(tc.query, "?") {
+					r.URL.RawQuery != tc.forwarded {
 					t.Error("upstream request lost its query, correlation id or refreshed bearer token")
 				}
 				if tc.upstream == http.StatusOK && requests == 1 {
@@ -167,7 +170,7 @@ func TestBilledAccountProxyRetriesAndAuditsServedReports(t *testing.T) {
 			api := monitorAPI{client: client, token: token, aiCore: "http://ai-core.test"}
 			r := httptest.NewRequest(http.MethodGet, "/api/monitoring/ai-spend/users"+tc.query, nil)
 			r.Header.Set("X-Correlation-ID", correlation)
-			r = r.WithContext(platform.WithClaims(r.Context(), platform.Claims{Subject: "operator-id"}))
+			r = r.WithContext(platform.WithClaims(r.Context(), platform.Claims{Subject: "admin-id", Org: "school"}))
 			w := httptest.NewRecorder()
 			api.spend("users", true)(w, r)
 			if w.Code != tc.want || requests != tc.wantRequests {
@@ -176,7 +179,7 @@ func TestBilledAccountProxyRetriesAndAuditsServedReports(t *testing.T) {
 			if tc.code != "" && !strings.Contains(w.Body.String(), `"code":"`+tc.code+`"`) {
 				t.Fatalf("expected error code %q, got %s", tc.code, w.Body.String())
 			}
-			if tc.want == http.StatusUnprocessableEntity {
+			if tc.want == http.StatusUnprocessableEntity || tc.want == http.StatusForbidden {
 				if logs.Len() != 0 {
 					t.Fatalf("unexpected log entry: %s", logs.String())
 				}
@@ -191,7 +194,7 @@ func TestBilledAccountProxyRetriesAndAuditsServedReports(t *testing.T) {
 				if entry["msg"] != "monitoring_spend_upstream_failed" || entry["upstream_status"] != float64(tc.upstream) {
 					t.Fatalf("incorrect failure entry: %s", logs.String())
 				}
-			} else if entry["msg"] != "monitoring_billed_accounts_read" || entry["operator_id"] != "operator-id" {
+			} else if entry["msg"] != "monitoring_billed_accounts_read" || entry["admin_id"] != "admin-id" || entry["org_id"] != "school" {
 				t.Fatalf("incorrect audit entry: %s", logs.String())
 			}
 		})

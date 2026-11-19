@@ -273,6 +273,12 @@ async def test_operator_reports_group_exact_ledger_amounts_at_budget_midnight(
     assert report.reservations.count == 2 and report.reservations.expired_count == 1
     assert Decimal(report.reservations.reserved_usd) == 3 and Decimal(report.reservations.expired_usd) == 1
     assert report.ceiling and report.ceiling.remaining_usd == "39.9999999877"
+    # one school's report counts only its own spend and holds, and leaves out the platform-wide ceiling.
+    school = await spend_report.summary(pinned.ledger, "org-b")
+    assert school.today.calls == 1 and school.today.recorded_usd == "0.5000000000"
+    assert school.days[-2].calls == 0 and [row.operation for row in school.operations] == ["embed"]
+    assert school.reservations.count == 1 and Decimal(school.reservations.reserved_usd) == 2
+    assert school.ceiling is None
 
     todays_users = await spend_report.users(pinned.ledger, "today", None, "deleted-account", 0)
     assert todays_users.total == 2

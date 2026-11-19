@@ -87,6 +87,6 @@ export type $defs = Record<string, never>;
 export type operations = Record<string, never>;
 
 export const operatorPolicy = {
-  required_role: 'platform-operator',
+  required_role: 'admin',
   excluded_roles: ['teacher', 'student', 'monitoring-reader', 'ai-client'],
 };

@@ -21,13 +21,16 @@ AI_CLIENTS = [
     "student-performance-agent",
 ]
 MONITORING_CLIENT = "monitoring-reader"
-OPERATOR_ROLE = "platform-operator"
-TEST_OPERATOR_USERNAME = "monitoring-operator"
-# identity's service account for removing the sign-in account of a user who deleted theirs (adr 0011).
+# a school's admin manages its accounts and classrooms and reads platform monitoring (adr 0019).
+ADMIN_ROLE = "admin"
+PERSON_ROLES = [ADMIN_ROLE, "teacher", "student"]
+# identity's service account for creating a school's accounts (adr 0019) and removing the sign-in account of a
+# user who deleted theirs (adr 0011); view-realm lets it read the realm role it gives a new account.
 ACCOUNTS_CLIENT = "identity-accounts"
-ACCOUNTS_ROLE = ("realm-management", "manage-users")
+ACCOUNTS_ROLES = ("realm-management", ("manage-users", "view-realm"))
 # local people: username, realm role, and the .env key holding their password.
 PEOPLE = [
+    ("admin", ADMIN_ROLE, "ADMIN_PASSWORD"),
     ("teacher", "teacher", "TEACHER_PASSWORD"),
     ("student", "student", "STUDENT_PASSWORD"),
     ("other-teacher", "teacher", "OTHER_TEACHER_PASSWORD"),
@@ -213,23 +216,61 @@ def service_client(client: str, secret: str) -> dict[str, Any]:
     }
 
 
-def realm(
-    values: dict[str, str], web_origin: str = WEB_ORIGIN, *, operator_password: str | None = None
-) -> dict[str, Any]:
+def name_attribute(name: str, label: str) -> dict[str, Any]:
+    return {
+        "name": name,
+        "displayName": label,
+        "validations": {"length": {"max": 255}, "person-name-prohibited-characters": {}},
+        "required": {"roles": ["admin", "user"]},
+        "permissions": {"view": ["admin", "user"], "edit": ["admin", "user"]},
+        "multivalued": False,
+    }
+
+
+# keycloak's user profile: the standard attributes, email optional, and unmanaged attributes such as org_id
+# editable by realm admins only, so identity can give an account it creates its school and its user cannot
+# change it.
+USER_PROFILE = {
+    "unmanagedAttributePolicy": "ADMIN_EDIT",
+    "attributes": [
+        {
+            "name": "username",
+            "displayName": "${username}",
+            "validations": {
+                "length": {"min": 3, "max": 255},
+                "username-prohibited-characters": {},
+                "up-username-not-idn-homograph": {},
+            },
+            "permissions": {"view": ["admin", "user"], "edit": ["admin"]},
+            "multivalued": False,
+        },
+        {
+            "name": "email",
+            "displayName": "${email}",
+            "validations": {"email": {}, "length": {"max": 255}},
+            "permissions": {"view": ["admin", "user"], "edit": ["admin", "user"]},
+            "multivalued": False,
+        },
+        name_attribute("firstName", "${firstName}"),
+        name_attribute("lastName", "${lastName}"),
+    ],
+    "groups": [{"name": "user-metadata", "displayHeader": "User metadata"}],
+}
+
+
+def realm(values: dict[str, str], web_origin: str = WEB_ORIGIN) -> dict[str, Any]:
     """the learning realm's import, for a stack whose web app is at `web_origin`."""
     users = [person(username, role, values[key]) for username, role, key in PEOPLE]
     users += [service_account(client) for client in AI_CLIENTS]
     users.append(service_account(MONITORING_CLIENT, MONITORING_CLIENT))
-    if operator_password is not None:
-        users.append(person(TEST_OPERATOR_USERNAME, OPERATOR_ROLE, operator_password))
-    owner, role = ACCOUNTS_ROLE
+    owner, roles = ACCOUNTS_ROLES
     users.append(
         {
             "id": user_id(f"service-account-{ACCOUNTS_CLIENT}"),
             "username": f"service-account-{ACCOUNTS_CLIENT}",
             "enabled": True,
             "serviceAccountClientId": ACCOUNTS_CLIENT,
-            "clientRoles": {owner: [role]},
+            "clientRoles": {owner: list(roles)},
         }
     )
     return {
@@ -239,13 +280,18 @@ def realm(
         # from the compose networks and this computer.
         "sslRequired": "external",
         "registrationAllowed": False,
-        "roles": {
-            "realm": [
-                {"name": r} for r in ["teacher", "student", "ai-client", OPERATOR_ROLE, MONITORING_CLIENT]
-            ]
-        },
+        "roles": {"realm": [{"name": r} for r in [*PERSON_ROLES, "ai-client", MONITORING_CLIENT]]},
         "users": users,
         "clients": clients(values, web_origin),
+        "components": {
+            "org.keycloak.userprofile.UserProfileProvider": [
+                {
+                    "providerId": "declarative-user-profile",
+                    "subComponents": {},
+                    "config": {"kc.user.profile.config": [json.dumps(USER_PROFILE)]},
+                }
+            ]
+        },
     }
 
 

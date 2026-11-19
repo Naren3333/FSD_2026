@@ -26,6 +26,26 @@ func DecodeClassroomDeleted(event Event) (ClassroomDeleted, error) {
 	return v, nil
 }
 
+// TopicClassroomReassigned is identity's event announcing that a school admin gave a classroom another
+// teacher (adr 0019): work billed to the classroom's teacher is billed to the new one from then on.
+const TopicClassroomReassigned = "identity.classroom.reassigned.v1"
+
+// ClassroomReassigned is the TopicClassroomReassigned event's data.
+type ClassroomReassigned struct {
+	Classroom string `json:"classroom_id"`
+	Org       string `json:"org_id"`
+	Teacher   string `json:"teacher_id"`
+}
+
+// DecodeClassroomReassigned reads a reassigned classroom.
+func DecodeClassroomReassigned(event Event) (ClassroomReassigned, error) {
+	var v ClassroomReassigned
+	if json.Unmarshal(event.Data, &v) != nil || !ID(v.Classroom) || v.Org == "" || v.Teacher == "" || event.Resource != v.Classroom || event.Timestamp.IsZero() {
+		return ClassroomReassigned{}, InvalidEvent{Reason: "invalid classroom reassignment"}
+	}
+	return v, nil
+}
+
 // TopicEnrollmentRemoved is identity's event announcing that a teacher removed a student from a classroom.
 const TopicEnrollmentRemoved = "identity.enrollment.removed.v1"
 

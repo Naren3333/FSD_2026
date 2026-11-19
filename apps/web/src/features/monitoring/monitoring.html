@@ -260,10 +260,6 @@
             <option value="last_7_days">Last seven calendar days</option>
           </select></label
         >
-        <label for="spend-org"
-          >Organization ID
-          <input id="spend-org" formControlName="org_id" type="text" maxlength="200" autocomplete="off"
-        /></label>
         <label for="spend-user"
           >Billed user ID
           <input id="spend-user" formControlName="user_id" type="text" maxlength="200" autocomplete="off"
@@ -280,17 +276,15 @@
             <thead>
               <tr>
                 <th scope="col">Billed user ID</th>
-                <th scope="col">Organization ID</th>
                 <th scope="col">Recorded</th>
                 <th scope="col">Estimated portion</th>
                 <th scope="col">Calls</th>
               </tr>
             </thead>
             <tbody>
-              @for (row of result.items; track row.org_id.length + ':' + row.org_id + row.user_id) {
+              @for (row of result.items; track row.user_id) {
                 <tr>
                   <th scope="row" data-label="Billed user ID" class="identifier">{{ row.user_id }}</th>
-                  <td data-label="Organization ID" class="identifier">{{ row.org_id }}</td>
                   <td data-label="Recorded">{{ usd(row.recorded_usd) }}</td>
                   <td data-label="Estimated portion">{{ usd(row.estimated_usd) }}</td>
                   <td data-label="Calls">{{ row.calls | number }}</td>

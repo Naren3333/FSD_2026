@@ -43,20 +43,21 @@ def main() -> None:
     if profiles["student2"]["org_id"] != "local-school" or profiles["student2"]["role"] != "student":
         sys.exit(f"{STUDENT2} has no local-school student identity: {profiles['student2']}")
 
+    # the school's admin creates the classrooms for the teacher and enrolls the students (adr 0019).
+    admin = Session("admin", state)
     mine = {c["id"] for c in check(teacher.request("GET", "/identity/classrooms")).json()}
     classrooms = state.get("classrooms", {})
     for c in CLASSES:
         if classrooms.get(c) not in mine:
-            classrooms[c] = check(
-                teacher.request("POST", "/identity/classrooms", json={"name": f"Golden eval {c}"})
-            ).json()["id"]
+            body = {"name": f"Golden eval {c}", "teacher_id": profiles["teacher"]["id"]}
+            classrooms[c] = check(admin.request("POST", "/identity/admin/classrooms", json=body)).json()["id"]
     state["classrooms"] = classrooms
     save_state(state)
     for c, who in (("C1", "student"), ("C2", "student2")):
         check(
-            teacher.request(
+            admin.request(
                 "POST",
-                f"/identity/classrooms/{classrooms[c]}/enrollments",
+                f"/identity/admin/classrooms/{classrooms[c]}/enrollments",
                 json={"student_id": profiles[who]["id"]},
             )
         )

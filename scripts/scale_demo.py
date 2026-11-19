@@ -148,9 +148,10 @@ def consumer_group(group: str) -> list[dict[str, str]]:
 
 
 class Teacher:
-    """the local teacher, signing in again before kong's per-token limit is reached."""
+    """a local person (the teacher, or the school's admin), signing in again before kong's per-token limit is reached."""
 
-    def __init__(self) -> None:
+    def __init__(self, username: str = "teacher", password_key: str = "TEACHER_PASSWORD") -> None:
+        self.username, self.password_key = username, password_key
         self.token = ""
         self.used = TEACHER_BUDGET
         self.signed_in = 0.0
@@ -159,7 +160,7 @@ class Teacher:
         # keycloak's access tokens last five minutes; sign in again well before that, or before kong's
         # limit.
         if self.used >= TEACHER_BUDGET or time.monotonic() - self.signed_in > TOKEN_SECONDS:
-            self.token = password_token("teacher", env()["TEACHER_PASSWORD"])
+            self.token = password_token(self.username, env()[self.password_key])
             self.used, self.signed_in = 0, time.monotonic()
         self.used += 1
         headers = {"Authorization": "Bearer " + self.token}
@@ -195,9 +196,15 @@ def sign_in_all(names: list[str], sessions: int) -> list[str]:
 
 
 def classroom(teacher: Teacher, students: list[str]) -> str:
-    room = teacher.request("POST", "/identity/classrooms", json={"name": f"Scale demo {uuid4().hex[:8]}"})
+    """the school's admin creates the teacher's classroom and enrolls the students (adr 0019)."""
+    admin = Teacher("admin", "ADMIN_PASSWORD")
+    body = {
+        "name": f"Scale demo {uuid4().hex[:8]}",
+        "teacher_id": teacher.request("POST", "/identity/me", json={})["id"],
+    }
+    room = admin.request("POST", "/identity/admin/classrooms", json=body)
     for name in students:
-        teacher.request("POST", f"/identity/classrooms/{room['id']}/enrollments", json={"username": name})
+        admin.request("POST", f"/identity/admin/classrooms/{room['id']}/enrollments", json={"username": name})
     return str(room["id"])
 
 

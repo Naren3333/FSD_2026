@@ -5,7 +5,7 @@
     "version": "1.0.0"
   },
   "x-operator-policy": {
-    "required_role": "platform-operator",
+    "required_role": "admin",
     "excluded_roles": [
       "teacher",
       "student",
@@ -421,8 +421,8 @@
               ],
               "additionalProperties": false
             },
-            "minItems": 9,
-            "maxItems": 9
+            "minItems": 10,
+            "maxItems": 10
           }
         },
         "required": [

@@ -18,8 +18,8 @@ import (
 // signinEvery is how often identity looks for deleted accounts whose sign-in account is still in keycloak.
 const signinEvery = 15 * time.Second
 
-// keycloakUsers removes sign-in accounts from keycloak's admin api, as the identity-accounts service
-// account, whose only role is realm-management's manage-users.
+// keycloakUsers creates and removes sign-in accounts through keycloak's admin api, as the identity-accounts
+// service account, whose roles are realm-management's manage-users and view-realm.
 type keycloakUsers struct {
 	admin  string // the realm's admin api, such as http://keycloak:8080/admin/realms/learning
 	tokens *platform.ServiceToken

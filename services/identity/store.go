@@ -25,8 +25,12 @@ type store interface {
 	listStudents(ctx context.Context, classroom string, offset, limit int) ([]Student, int, error)
 	listStudentIDs(ctx context.Context, classroom string) ([]string, error)
 	deleteClassroom(ctx context.Context, classroom, org string) error
-	listOrgStudents(ctx context.Context, org, search string, offset, limit int) ([]Student, int, error)
 	deleteAccount(ctx context.Context, org, subject string) error
+	insertAccount(ctx context.Context, org, id, role, username, name string) error
+	listAccounts(ctx context.Context, org, role, search string, offset, limit int) ([]Account, int, error)
+	findAccount(ctx context.Context, org, id string) (Account, error)
+	listOrgClassrooms(ctx context.Context, org string, offset, limit int) ([]SchoolClassroom, int, error)
+	updateClassroom(ctx context.Context, org, id string, name, teacher *string) error
 }
 
 // pgStore is the store in the service's own postgres database.
@@ -82,29 +86,24 @@ func (p pgStore) isEnrolled(ctx context.Context, classroom, student string) (boo
 	return enrolled, err
 }
 
-// errProfileRequired is insertClassroom's answer when the teacher (or their organization) has not
-// registered yet, or the account was deleted.
-var errProfileRequired = errors.New("the teacher has not registered")
+// errNotATeacher is the answer of insertClassroom and updateClassroom when the chosen teacher is not a
+// teacher account of the organization, or was deleted.
+var errNotATeacher = errors.New("not a teacher of the organization")
 
-// insertClassroom creates the classroom for a registered teacher.
+// insertClassroom creates the classroom for a teacher of the organization.
 func (p pgStore) insertClassroom(ctx context.Context, id, name, org, teacher string) error {
 	tx, err := p.db.Begin(ctx)
 	if err != nil {
 		return err
 	}
 	defer tx.Rollback(ctx)
-	var found int
-	err = tx.QueryRow(ctx, "SELECT 1 FROM users WHERE id=$1 AND org_id=$2 AND deleted_at IS NULL FOR SHARE", teacher, org).Scan(&found)
-	if errors.Is(err, pgx.ErrNoRows) {
-		return errProfileRequired
-	}
-	if err != nil {
+	if err = lockTeacher(ctx, tx, org, teacher); err != nil {
 		return err
 	}
 	_, err = tx.Exec(ctx, "INSERT INTO classrooms(id,name,org_id,teacher_id) VALUES($1,$2,$3,$4)", id, name, org, teacher)
 	var pgErr *pgconn.PgError
 	if errors.As(err, &pgErr) && pgErr.Code == "23503" { // foreign_key_violation
-		return errProfileRequired
+		return errNotATeacher
 	}
 	if err != nil {
 		return err
@@ -159,9 +158,10 @@ func (p pgStore) insertEnrollment(ctx context.Context, classroom, student string
 	return tx.Commit(ctx)
 }
 
-// studentsNamed returns the ids of the organization's students with this username, ignoring case.
+// studentsNamed returns the ids of the organization's students with this username, ignoring case: the whole
+// sign-in username, or the one an admin chose, which follows the school's id and a dot (signInName).
 func (p pgStore) studentsNamed(ctx context.Context, org, username string) ([]string, error) {
-	rows, err := p.db.Query(ctx, "SELECT id FROM users WHERE org_id=$1 AND lower(username)=lower($2) AND role='student' AND deleted_at IS NULL LIMIT 2", org, username)
+	rows, err := p.db.Query(ctx, "SELECT id FROM users WHERE org_id=$1 AND lower(username) IN (lower($2),lower($1||'.'||$2)) AND role='student' AND deleted_at IS NULL LIMIT 2", org, username)
 	if err != nil {
 		return nil, err
 	}
@@ -211,21 +211,6 @@ func (p pgStore) listStudentIDs(ctx context.Context, classroom string) ([]string
 		return nil, err
 	}
 	return pgx.CollectRows(rows, pgx.RowTo[string])
-}
-
-// page signed-in organization students with case-insensitive name and username filtering.
-func (p pgStore) listOrgStudents(ctx context.Context, org, search string, offset, limit int) ([]Student, int, error) {
-	const match = `FROM users WHERE org_id=$1 AND role='student' AND deleted_at IS NULL AND username IS NOT NULL AND ($2='' OR strpos(lower(COALESCE(display_name,'')||' '||username),lower($2))>0)`
-	var total int
-	if err := p.db.QueryRow(ctx, "SELECT count(*) "+match, org, search).Scan(&total); err != nil {
-		return nil, 0, err
-	}
-	rows, err := p.db.Query(ctx, "SELECT id,username,COALESCE(display_name,username) "+match+" ORDER BY lower(COALESCE(display_name,username)),id OFFSET $3 LIMIT $4", org, search, offset, limit)
-	if err != nil {
-		return nil, 0, err
-	}
-	students, err := pgx.CollectRows(rows, scanStudent)
-	return students, total, err
 }
 
 func scanStudent(row pgx.CollectableRow) (Student, error) {
