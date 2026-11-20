@@ -115,8 +115,11 @@ type SuggestedCriterion struct {
 // suggestion statuses.
 const (
 	suggestionPending = "pending"
-	suggestionReady   = "ready"
-	suggestionFailed  = "failed"
+	// reasonStudentRemoved is a suggestion's failure reason while its student is out of the classroom
+	// (restoreStudent queues it again on their return).
+	reasonStudentRemoved = "STUDENT_REMOVED"
+	suggestionReady      = "ready"
+	suggestionFailed     = "failed"
 )
 
 // evidence is one question's marks in an evaluation.

@@ -6,7 +6,9 @@ import (
 	"errors"
 	"fmt"
 	"slices"
+	"strings"
 	"testing"
+	"time"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -244,7 +246,7 @@ func TestDiscardPendingByRemovesOnlyTheMatchingEvents(t *testing.T) {
 	if err = ExecAll(ctx, tx, []string{"SELECT $1::text", "SELECT length($1::text)"}, "x"); err != nil {
 		t.Fatal(err)
 	}
-	if err = DiscardPendingBy(ctx, tx, "a.submitted.%", "student_id", "s1", "o"); err != nil {
+	if err = DiscardPendingBy(ctx, tx, "a.submitted.%", PurgeByStudent, "s1", "o"); err != nil {
 		t.Fatal(err)
 	}
 	var left []string
@@ -256,5 +258,213 @@ func TestDiscardPendingByRemovesOnlyTheMatchingEvents(t *testing.T) {
 	}
 	if err = ExecAll(ctx, tx, []string{"SELECT 1", "SELECT * FROM missing_table", "DELETE FROM outbox"}); err == nil {
 		t.Fatal("a failing statement was not reported")
+	}
+}
+
+// purges and prunes find their events through the outbox's indexes, and a key that is no purge key is refused.
+func TestPurgesAndPrunesUseTheOutboxIndexes(t *testing.T) {
+	db := eventDB(t)
+	ctx := context.Background()
+	indexes := append(OutboxIndexes(), allPurgeIndexes()...)
+	// built twice, as by a restarted service: the second build finds the indexes and changes nothing.
+	for range 2 {
+		if err := BuildIndexes(ctx, db, indexes); err != nil {
+			t.Fatal(err)
+		}
+	}
+	var valid int
+	if err := db.QueryRow(ctx, "SELECT count(*) FROM pg_index WHERE indexrelid IN (to_regclass('outbox_published'),to_regclass('outbox_data_classroom'),to_regclass('outbox_data_assessment'),to_regclass('outbox_data_student')) AND indisvalid").Scan(&valid); err != nil || valid != 4 {
+		t.Fatalf("valid outbox indexes = %d, %v", valid, err)
+	}
+	tx, err := db.Begin(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer tx.Rollback(ctx)
+	if err = DiscardPendingBy(ctx, tx, "%", PurgeKey{}, "a/1", "o"); err == nil {
+		t.Fatal("discarded by no purge key")
+	}
+	if _, err = tx.Exec(ctx, "SET LOCAL enable_seqscan=off"); err != nil {
+		t.Fatal(err)
+	}
+	statements := []struct {
+		sql, index string
+		args       []any
+	}{{pruneSQL, "outbox_published", []any{OutboxRetention.Seconds(), pruneBatch}}}
+	for _, key := range purgeKeys {
+		statements = append(statements, struct {
+			sql, index string
+			args       []any
+		}{discardSQL(key), key.index, []any{"%", "v", "o"}})
+	}
+	for _, s := range statements {
+		var plan []string
+		rows, err := tx.Query(ctx, "EXPLAIN "+s.sql, s.args...)
+		if err == nil {
+			plan, err = pgx.CollectRows(rows, pgx.RowTo[string])
+		}
+		if err != nil || !slices.ContainsFunc(plan, func(line string) bool { return strings.Contains(line, s.index) }) {
+			t.Fatalf("%s: plan %v, %v", s.index, plan, err)
+		}
+	}
+}
+
+// the purge indexes build while the outbox takes events, and a build interrupted earlier is replaced.
+func TestPurgeIndexesBuildBesideInsertsAndReplaceAnInvalidOne(t *testing.T) {
+	db := eventDB(t)
+	ctx := context.Background()
+	insert := `INSERT INTO outbox(id,topic,partition_key,body) VALUES(gen_random_uuid(),'t','k','{"data":{"student_id":"s"}}')`
+	held, err := db.Begin(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer held.Rollback(ctx)
+	// an uncommitted insert, as a business transaction under way: the concurrent build waits for it.
+	if _, err = held.Exec(ctx, insert); err != nil {
+		t.Fatal(err)
+	}
+	buildCtx, stop := context.WithCancel(ctx)
+	built := make(chan error, 1)
+	go func() { built <- BuildIndexes(buildCtx, db, allPurgeIndexes()) }()
+	validity := func(name string) (exists, valid bool) {
+		_ = db.QueryRow(ctx, "SELECT count(*)>0,coalesce(bool_and(indisvalid),false) FROM pg_index WHERE indexrelid=to_regclass($1)", name).Scan(&exists, &valid)
+		return exists, valid
+	}
+	eventually(t, func() bool { exists, _ := validity("outbox_data_assessment"); return exists }, "the build did not start")
+	// a build that held inserts, as a plain create index does, would block this one.
+	inserted, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+	if _, err = db.Exec(inserted, insert); err != nil {
+		t.Fatalf("an insert waited on the build: %v", err)
+	}
+	// interrupted, as by a restart, the build leaves its index invalid.
+	stop()
+	if err = <-built; err == nil {
+		t.Fatal("the interrupted build reported success")
+	}
+	if exists, valid := validity("outbox_data_assessment"); !exists || valid {
+		t.Fatalf("interrupted index: exists %v, valid %v", exists, valid)
+	}
+	if err = held.Commit(ctx); err != nil {
+		t.Fatal(err)
+	}
+	// the interrupted session may hold its lock a moment longer, until its server process has ended.
+	eventually(t, func() bool {
+		err = BuildIndexes(ctx, db, allPurgeIndexes())
+		return !errors.Is(err, errIndexesBusy)
+	}, "the interrupted build's lock was never released")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, key := range purgeKeys {
+		if exists, valid := validity(key.index); !exists || !valid {
+			t.Fatalf("%s: exists %v, valid %v", key.index, exists, valid)
+		}
+	}
+}
+
+func TestOutboxDrainSendsAKeysEventsInOrderWithoutWaitingForATick(t *testing.T) {
+	db := eventDB(t)
+	emit(t, db, "a/1", "a/2", "a/3", "b/1", "a/4")
+	w := &fakeWriter{}
+	(Outbox{DB: db}).drain(context.Background(), w, time.Now().Add(time.Minute))
+	got := names(t, w.sent)
+	if !slices.Equal(got, []string{"a/1", "b/1", "a/2", "a/3", "a/4"}) {
+		t.Fatalf("drained %v", got)
+	}
+}
+
+func TestOutboxDrainStopsWhenAnEventFails(t *testing.T) {
+	db := eventDB(t)
+	emit(t, db, "a/1", "a/2", "b/1")
+	w := &fakeWriter{fail: func(m kafka.Message) bool { return string(m.Key) == "a" }}
+	(Outbox{DB: db}).drain(context.Background(), w, time.Now().Add(time.Minute))
+	if got := names(t, w.given); !slices.Equal(got, []string{"a/1", "b/1"}) {
+		t.Fatalf("given %v; a failed batch must end the drain until the retry is due", got)
+	}
+}
+
+// past its deadline a drain stops after the batch under way, leaving the rest for the next tick.
+func TestOutboxDrainStopsAtItsDeadline(t *testing.T) {
+	db := eventDB(t)
+	emit(t, db, "a/1", "a/2", "a/3")
+	w := &fakeWriter{}
+	(Outbox{DB: db}).drain(context.Background(), w, time.Now())
+	if got := names(t, w.sent); !slices.Equal(got, []string{"a/1"}) {
+		t.Fatalf("drained %v past its deadline", got)
+	}
+}
+
+// eventually fails the test unless done holds within five seconds.
+func eventually(t *testing.T, done func() bool, failure string) {
+	t.Helper()
+	for deadline := time.Now().Add(5 * time.Second); !done(); time.Sleep(50 * time.Millisecond) {
+		if time.Now().After(deadline) {
+			t.Fatal(failure)
+		}
+	}
+}
+
+// events go out while a prune waits on a lock, and the relay stops only once its housekeeping has.
+func TestOutboxPublishesWhileItPrunes(t *testing.T) {
+	db := eventDB(t)
+	ctx := context.Background()
+	if _, err := db.Exec(ctx, `INSERT INTO outbox(id,topic,partition_key,body,published_at) VALUES(gen_random_uuid(),'t','k','{}',now()-interval '8 days')`); err != nil {
+		t.Fatal(err)
+	}
+	held, err := db.Begin(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer held.Rollback(ctx)
+	if _, err = held.Exec(ctx, "SELECT 1 FROM outbox FOR UPDATE"); err != nil {
+		t.Fatal(err)
+	}
+	emit(t, db, "a/1")
+	w := &fakeWriter{}
+	runCtx, stop := context.WithCancel(ctx)
+	done := make(chan struct{})
+	go func() {
+		(Outbox{DB: db}).run(runCtx, w)
+		close(done)
+	}()
+	pruneWaiting := func() bool {
+		var waiting bool
+		err := db.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM pg_stat_activity WHERE datname=current_database() AND pid<>pg_backend_pid()
+			AND wait_event_type='Lock' AND query LIKE 'DELETE FROM outbox WHERE id IN%')`).Scan(&waiting)
+		return err == nil && waiting
+	}
+	sent := func() bool {
+		w.mu.Lock()
+		defer w.mu.Unlock()
+		return len(w.sent) == 1
+	}
+	eventually(t, pruneWaiting, "no prune waiting on the held row")
+	eventually(t, sent, "nothing published while the prune waited")
+	if !pruneWaiting() {
+		t.Fatal("the prune stopped waiting before the event was published")
+	}
+	stop()
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("the relay did not stop")
+	}
+}
+
+func TestOutboxPrunesEveryBatchOfOldEvents(t *testing.T) {
+	db := eventDB(t)
+	ctx := context.Background()
+	if _, err := db.Exec(ctx, `INSERT INTO outbox(id,topic,partition_key,body,published_at)
+		SELECT gen_random_uuid(),'t','k','{}',now()-interval '8 days' FROM generate_series(1,$1::int)`, 2*pruneBatch+5); err != nil {
+		t.Fatal(err)
+	}
+	pruned, err := pruneAll(ctx, db, OutboxRetention)
+	var left int
+	if err == nil {
+		err = db.QueryRow(ctx, "SELECT count(*) FROM outbox").Scan(&left)
+	}
+	if err != nil || pruned != 2*pruneBatch+5 || left != 0 {
+		t.Fatalf("pruned %d, left %d, %v", pruned, left, err)
 	}
 }

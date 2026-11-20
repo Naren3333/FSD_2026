@@ -21,6 +21,7 @@ func purge(ctx context.Context, tx pgx.Tx, event platform.Event) error {
 	statements := []string{
 		"INSERT INTO purged_classrooms(classroom_id,org_id) VALUES($1,$2) ON CONFLICT DO NOTHING",
 		"DELETE FROM removed_enrollments WHERE classroom_id=$1 AND org_id=$2",
+		"DELETE FROM enrollment_returns WHERE classroom_id=$1 AND org_id=$2",
 		"DELETE FROM assessment_due WHERE classroom_id=$1 AND org_id=$2",
 		"DELETE FROM classroom_teachers WHERE classroom_id=$1 AND org_id=$2",
 		// locked first, so a teacher's change holding one (with its audit entry) commits before the audit is
@@ -67,7 +68,7 @@ func purgeAssessment(ctx context.Context, tx pgx.Tx, event platform.Event) error
 	if err := platform.ExecAll(ctx, tx, statements, v.Assessment, v.Classroom, v.Org); err != nil {
 		return err
 	}
-	return platform.DiscardPendingBy(ctx, tx, "%", "assessment_id", v.Assessment, v.Org)
+	return platform.DiscardPendingBy(ctx, tx, "%", platform.PurgeByAssessment, v.Assessment, v.Org)
 }
 
 // purge deleted-student grades and jobs; remember deletion to reject late events.
@@ -82,6 +83,7 @@ func purgeUser(ctx context.Context, tx pgx.Tx, event platform.Event) error {
 	statements := []string{
 		"INSERT INTO deleted_users(user_id,org_id) VALUES($1,$2) ON CONFLICT DO NOTHING",
 		"DELETE FROM removed_enrollments WHERE student_id=$1 AND org_id=$2",
+		"DELETE FROM enrollment_returns WHERE student_id=$1 AND org_id=$2",
 		"SELECT 1 FROM evaluations WHERE student_id=$1 AND org_id=$2 FOR UPDATE", // as in purge
 		"DELETE FROM marking_jobs WHERE evaluation_id IN (SELECT id FROM evaluations WHERE student_id=$1 AND org_id=$2)",
 		"DELETE FROM audit WHERE evaluation_id IN (SELECT id FROM evaluations WHERE student_id=$1 AND org_id=$2)",
@@ -90,5 +92,5 @@ func purgeUser(ctx context.Context, tx pgx.Tx, event platform.Event) error {
 	if err = platform.ExecAll(ctx, tx, statements, v.User, v.Org); err != nil {
 		return err
 	}
-	return platform.DiscardPendingBy(ctx, tx, "%", "student_id", v.User, v.Org)
+	return platform.DiscardPendingBy(ctx, tx, "%", platform.PurgeByStudent, v.User, v.Org)
 }

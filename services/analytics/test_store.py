@@ -1,5 +1,6 @@
 """the consumer's sql against a real postgresql."""
 
+import asyncio
 import os
 import threading
 import time
@@ -9,6 +10,7 @@ from uuid import uuid4
 
 import psycopg
 import pytest
+from learning_transport import db
 from learning_transport.db import LOCK_CLASSROOM, lock, migrations
 from learning_transport.kafka import ClassroomDeletedEvent, UserDeletedEvent
 from psycopg.rows import dict_row
@@ -34,12 +36,41 @@ def pool() -> Iterator[ConnectionPool[Any]]:
             URL, min_size=1, max_size=4, kwargs=options, open=True
         )
         try:
-            with test_pool.connection() as conn, conn.transaction():
+            # each step on its own, as the service applies them: a concurrent build runs outside a transaction.
+            with psycopg.connect(URL, autocommit=True, options=f"-c search_path={schema}") as conn:
                 for m in migrations(MIGRATIONS):
                     conn.execute(m.sql)  # type: ignore[arg-type]  # the service's own migration files
             yield test_pool
         finally:
             test_pool.close()
+            admin.execute(f"DROP SCHEMA {schema} CASCADE")
+
+
+def test_the_service_migrates_a_step_at_a_time_and_builds_its_indexes_concurrently(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    if not URL:
+        pytest.skip("ANALYTICS_TEST_DATABASE_URL is not set")
+    schema = "test_" + uuid4().hex[:12]
+    with psycopg.connect(URL, autocommit=True) as admin:
+        admin.execute(f"CREATE SCHEMA {schema}")
+        try:
+            # the path open_migrated_pool takes, on a throwaway schema.
+            options = f"{db.CONNECTION_OPTIONS['options']} -c search_path={schema}"
+            monkeypatch.setitem(db.CONNECTION_OPTIONS, "options", options)
+            asyncio.run(db.migrate_with_concurrent_indexes(URL, migrations(MIGRATIONS)))
+            versions = admin.execute(
+                f"SELECT version FROM {schema}.schema_migrations ORDER BY version"
+            ).fetchall()
+            assert [v[0] for v in versions] == list(range(1, len(migrations(MIGRATIONS)) + 1))
+            row = admin.execute(
+                "SELECT count(*) FROM pg_index i JOIN pg_class c ON c.oid=i.indexrelid"
+                " JOIN pg_namespace n ON n.oid=c.relnamespace WHERE n.nspname=%s AND i.indisvalid"
+                " AND c.relname IN ('evaluations_classroom','evaluations_assessment','evaluations_student')",
+                (schema,),
+            ).fetchone()
+            assert row is not None and row[0] == 3
+        finally:
             admin.execute(f"DROP SCHEMA {schema} CASCADE")
 
 
@@ -219,8 +250,9 @@ def test_a_purge_waits_for_a_grade_of_its_classroom_in_progress(pool):
         wait_for_lock(pool, done)
         event = grade(room)
         conn.execute(
-            "INSERT INTO evaluations(evaluation_id,event_id) VALUES(%s,%s)",
-            (event.data.evaluation_id, event.event_id),
+            "INSERT INTO evaluations(evaluation_id,event_id,assessment_id,classroom_id,org_id,student_id)"
+            " VALUES(%s,%s,%s,%s,'org','s1')",
+            (event.data.evaluation_id, event.event_id, event.data.assessment_id, room),
         )
         e = event.data.evidence[0]
         conn.execute(

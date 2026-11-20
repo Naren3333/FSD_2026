@@ -46,7 +46,9 @@ func DecodeClassroomReassigned(event Event) (ClassroomReassigned, error) {
 	return v, nil
 }
 
-// TopicEnrollmentRemoved is identity's event announcing that a teacher removed a student from a classroom.
+// TopicEnrollmentRemoved is identity's event announcing that a student was removed from a classroom. its
+// timestamp, like TopicEnrollmentAdded's, is the database's clock when the enrollment changed, so the two
+// order one student's removals and returns.
 const TopicEnrollmentRemoved = "identity.enrollment.removed.v1"
 
 // EnrollmentRemoved is the TopicEnrollmentRemoved event's data.
@@ -61,6 +63,26 @@ func DecodeEnrollmentRemoved(event Event) (EnrollmentRemoved, error) {
 	var v EnrollmentRemoved
 	if json.Unmarshal(event.Data, &v) != nil || !ID(v.Classroom) || v.Org == "" || v.Student == "" || event.Resource != v.Classroom {
 		return EnrollmentRemoved{}, InvalidEvent{Reason: "invalid enrollment removal"}
+	}
+	return v, nil
+}
+
+// TopicEnrollmentAdded is identity's event announcing that a school admin enrolled a student in a
+// classroom: grading marks again the work a student removed earlier submitted, once they are back.
+const TopicEnrollmentAdded = "identity.enrollment.added.v1"
+
+// EnrollmentAdded is the TopicEnrollmentAdded event's data.
+type EnrollmentAdded struct {
+	Classroom string `json:"classroom_id"`
+	Org       string `json:"org_id"`
+	Student   string `json:"student_id"`
+}
+
+// DecodeEnrollmentAdded reads an added enrollment.
+func DecodeEnrollmentAdded(event Event) (EnrollmentAdded, error) {
+	var v EnrollmentAdded
+	if json.Unmarshal(event.Data, &v) != nil || !ID(v.Classroom) || v.Org == "" || v.Student == "" || event.Resource != v.Classroom || event.Timestamp.IsZero() {
+		return EnrollmentAdded{}, InvalidEvent{Reason: "invalid enrollment"}
 	}
 	return v, nil
 }
@@ -88,5 +110,5 @@ func DecodeUserDeleted(event Event) (UserDeleted, error) {
 // DiscardPending removes, inside tx, the outbox rows of events about the deleted classroom, so those not
 // yet published never are.
 func DiscardPending(ctx context.Context, tx pgx.Tx, v ClassroomDeleted) error {
-	return DiscardPendingBy(ctx, tx, "%", "classroom_id", v.Classroom, v.Org)
+	return DiscardPendingBy(ctx, tx, "%", PurgeByClassroom, v.Classroom, v.Org)
 }

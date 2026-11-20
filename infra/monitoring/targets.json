@@ -21,6 +21,7 @@
     "identity.enrollment.removed.v1.dlq",
     "assessment.due_changed.v1.dlq",
     "identity.user.deleted.v1.dlq",
-    "identity.classroom.reassigned.v1.dlq"
+    "identity.classroom.reassigned.v1.dlq",
+    "identity.enrollment.added.v1.dlq"
   ]
 }

@@ -232,7 +232,11 @@ def test_shutdown_waits_for_the_consumer_without_blocking_the_event_loop(
         monkeypatch.setenv(name, "http://test")
     closed: list[bool] = []
     pool = SimpleNamespace(close=lambda: closed.append(True))
-    monkeypatch.setattr(main, "open_pool", lambda url, migrations: pool)
+
+    async def opened(url: str, migrations: Any) -> Any:
+        return pool
+
+    monkeypatch.setattr(main, "open_migrated_pool", opened)
 
     def consumer(_: Any, stop: threading.Event, connected: threading.Event) -> None:
         stop.wait()

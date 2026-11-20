@@ -596,8 +596,12 @@ func (s server) save(w http.ResponseWriter, r *http.Request) {
 		closed(w)
 		return
 	}
-	at, err := s.store.saveAnswers(r.Context(), v.ID, platform.Actor(r).Subject, input.Answers)
+	at, err := s.store.saveAnswers(r.Context(), v.ID, platform.Actor(r).Subject, input.Answers, s.now().UTC())
 	switch {
+	case errors.Is(err, errClosed):
+		closed(w) // the teacher changed the due date or late policy meanwhile
+	case errors.Is(err, errAssessmentChanged):
+		assessmentChanged(w) // or replaced a question the work answers
 	case errors.Is(err, errAccountDeleted):
 		platform.Forbidden(w, "This account was deleted.")
 	case errors.Is(err, errAlreadySubmitted):

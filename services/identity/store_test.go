@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 )
 
 // these tests run the store against real postgresql, in a throwaway schema with every migration applied.
@@ -173,7 +174,8 @@ func TestADeletedClassroomIsGoneAndAnnounced(t *testing.T) {
 	}
 	var topic, key, classroomID, org string
 	var count int
-	err := s.db.QueryRow(ctx, "SELECT count(*) OVER (),topic,partition_key,body->'data'->>'classroom_id',body->'data'->>'org_id' FROM outbox").Scan(&count, &topic, &key, &classroomID, &org)
+	// besides the enrollment it announced when the student joined.
+	err := s.db.QueryRow(ctx, "SELECT count(*) OVER (),topic,partition_key,body->'data'->>'classroom_id',body->'data'->>'org_id' FROM outbox WHERE topic<>$1", platform.TopicEnrollmentAdded).Scan(&count, &topic, &key, &classroomID, &org)
 	if err != nil || count != 1 || topic != platform.TopicClassroomDeleted || key != id || classroomID != id || org != "org-a" {
 		t.Fatalf("outbox: %d %s %s %s %s %v", count, topic, key, classroomID, org, err)
 	}
@@ -245,6 +247,27 @@ func TestRostersAndRemoval(t *testing.T) {
 	var student, org string
 	if err = s.db.QueryRow(ctx, "SELECT count(*) OVER (), body->'data'->>'student_id', body->'data'->>'org_id' FROM outbox WHERE topic=$1 AND partition_key=$2", platform.TopicEnrollmentRemoved, id).Scan(&events, &student, &org); err != nil || events != 1 || student != "student-a" || org != "org-a" {
 		t.Fatalf("event = %d %s %s, %v", events, student, org, err)
+	}
+	// each new enrollment is announced once too, an enrollment already there not again, and enrolling the
+	// removed student again is announced after their removal.
+	if err = s.insertEnrollment(ctx, id, "student-b"); err != nil {
+		t.Fatal(err)
+	}
+	if err = s.insertEnrollment(ctx, id, "student-a"); err != nil {
+		t.Fatal(err)
+	}
+	var added []string
+	rows, err := s.db.Query(ctx, "SELECT body->'data'->>'student_id'||'/'||(body->'data'->>'org_id') FROM outbox WHERE topic=$1 AND partition_key=$2 ORDER BY created_at", platform.TopicEnrollmentAdded, id)
+	if err == nil {
+		added, err = pgx.CollectRows(rows, pgx.RowTo[string])
+	}
+	if err != nil || !slices.Equal(added, []string{"student-b/org-a", "student-a/org-a", "student-a/org-a"}) {
+		t.Fatalf("enrollments announced = %v, %v", added, err)
+	}
+	var ordered bool
+	if err = s.db.QueryRow(ctx, `SELECT (SELECT max((body->>'timestamp')::timestamptz) FROM outbox WHERE topic=$1 AND partition_key=$3)
+		> (SELECT max((body->>'timestamp')::timestamptz) FROM outbox WHERE topic=$2 AND partition_key=$3)`, platform.TopicEnrollmentAdded, platform.TopicEnrollmentRemoved, id).Scan(&ordered); err != nil || !ordered {
+		t.Fatalf("the return is not stamped after the removal: %v %v", ordered, err)
 	}
 	if students, total, err := s.listAccounts(ctx, "org-a", "student", "BE", 0, 10); err != nil || total != 1 || students[0].ID != "student-b" {
 		t.Fatalf("search = %v, %d, %v", students, total, err)

@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "urn:learning:identity.enrollment.removed.v1",
-  "description": "A teacher removed a student from a classroom. The student's submissions and grades are kept, and leave the teacher's lists and counts while the student is not enrolled; Grading makes no more AI suggestions for work they submitted before.",
+  "description": "A school admin removed a student from a classroom; the timestamp is when Identity's database removed them. The student's submissions and grades are kept, and leave the teacher's lists and counts while the student is not enrolled; Grading makes no more AI suggestions for work they submitted before, until a newer identity.enrollment.added.v1.",
   "type": "object",
   "properties": {
     "event_id": {

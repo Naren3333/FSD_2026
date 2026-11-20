@@ -9,7 +9,8 @@ from learning_transport.errors import UpstreamError
 
 _now = time.monotonic  # tests patch this
 
-EXPIRY_MARGIN = 30  # seconds: a token is replaced this long before it expires
+# seconds: a token is replaced this long before it expires, or halfway through a shorter one.
+EXPIRY_MARGIN = 30
 FETCH_TIMEOUT = 10  # seconds to wait for keycloak
 # seconds a failed fetch is remembered.
 FAILURE_TTL = 5
@@ -44,9 +45,10 @@ class ServiceToken:
             except (httpx.HTTPError, ValueError, KeyError, TypeError):
                 self._failed_until = _now() + FAILURE_TTL
                 raise UpstreamError("keycloak", 0, "TOKEN_UNAVAILABLE") from None
-            self._token, self._expires = token, _now() + lifetime - EXPIRY_MARGIN
+            self._token, self._expires = token, _now() + lifetime - min(EXPIRY_MARGIN, lifetime / 2)
             return token
 
-    def reset(self) -> None:
-        """forget the token after a service refused it, so the next call fetches a new one."""
-        self._token = None
+    def reset(self, token: str | None = None) -> None:
+        """forget the refused token, or the cached one when unknown, unless it was already replaced."""
+        if token is None or self._token == token:
+            self._token = None

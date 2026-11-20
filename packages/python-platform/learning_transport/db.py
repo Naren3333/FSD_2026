@@ -251,15 +251,28 @@ async def open_async_pool(url: str, directory: Path) -> AsyncConnectionPool[Any]
     return pool
 
 
-def open_pool(url: str, directory: Path) -> ConnectionPool[Any]:
-    steps = migrations(directory)
-    if any(step.concurrent_index is not None for step in steps):
-        raise ValueError("concurrent-index migrations need the async pool")
+def sync_pool(url: str) -> ConnectionPool[Any]:
+    """an open sync pool, without migrating."""
     minimum, maximum = pool_limits()
     pool: ConnectionPool[Any] = ConnectionPool(
         url, min_size=minimum, max_size=maximum, timeout=5, open=False, kwargs=CONNECTION_OPTIONS
     )
     pool.open(wait=True, timeout=CONNECT_TIMEOUT)
+    return pool
+
+
+async def open_migrated_pool(url: str, directory: Path) -> ConnectionPool[Any]:
+    """a sync pool for a service whose migrations build indexes concurrently: each step is applied and committed
+    on its own first (migrate_with_concurrent_indexes), so no table lock one takes is held through the next."""
+    await migrate_with_concurrent_indexes(url, migrations(directory))
+    return await asyncio.to_thread(sync_pool, url)
+
+
+def open_pool(url: str, directory: Path) -> ConnectionPool[Any]:
+    steps = migrations(directory)
+    if any(step.concurrent_index is not None for step in steps):
+        raise ValueError("concurrent-index migrations need open_migrated_pool or the async pool")
+    pool = sync_pool(url)
     try:
         with pool.connection() as conn:
             migrate(conn, steps)

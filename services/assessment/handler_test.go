@@ -219,9 +219,16 @@ func (m *memoryStore) findSaved(_ context.Context, assessment, student string) (
 	return SavedAnswers{Answers: answers, SavedAt: &at}, nil
 }
 
-func (m *memoryStore) saveAnswers(_ context.Context, assessment, student string, answers map[string]string) (time.Time, error) {
-	if _, ok := m.assessments[assessment]; !ok {
+func (m *memoryStore) saveAnswers(_ context.Context, assessment, student string, answers map[string]string, at time.Time) (time.Time, error) {
+	v, ok := m.assessments[assessment]
+	if !ok || !v.visibleToStudents(at) {
 		return time.Time{}, platform.ErrNotFound
+	}
+	if v.closed(at) {
+		return time.Time{}, errClosed
+	}
+	if !answersCurrent(v, answers) {
+		return time.Time{}, errAssessmentChanged
 	}
 	key := assessment + "/" + student
 	if _, done := m.submitted[key]; done {

@@ -20,6 +20,9 @@ func main() {
 		users := platform.Consumer{DB: a.DB, Group: "assessment-users-v1"}
 		return []func(context.Context){
 			platform.Outbox{DB: a.DB}.Run,
+			// the outbox's prune index, and those of the keys its purges discard outbox events by (purge.go,
+			// store.go, platform.DiscardPending).
+			platform.IndexBuilder(a.DB, append(platform.OutboxIndexes(), platform.PurgeIndexes(platform.PurgeByAssessment, platform.PurgeByClassroom, platform.PurgeByStudent)...)...),
 			func(ctx context.Context) { classrooms.Consume(ctx, platform.TopicClassroomDeleted, purge, nil) },
 			func(ctx context.Context) { users.Consume(ctx, platform.TopicUserDeleted, purgeUser, nil) },
 		}, nil

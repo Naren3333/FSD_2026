@@ -38,6 +38,9 @@ func main() {
 		purge := purger{}.purge
 		return []func(context.Context){
 			platform.Outbox{DB: a.DB}.Run, x.run, x.run, sweeper{a.DB, files}.run, cleaner{a.DB, files}.run,
+			// the outbox's prune index, and that of the one key its classroom purge discards outbox events by
+			// (platform.DiscardPending).
+			platform.IndexBuilder(a.DB, append(platform.OutboxIndexes(), platform.PurgeIndexes(platform.PurgeByClassroom)...)...),
 			func(ctx context.Context) { classrooms.Consume(ctx, platform.TopicClassroomDeleted, purge, nil) },
 		}, nil
 	})

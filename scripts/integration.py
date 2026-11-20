@@ -1190,11 +1190,62 @@ def resit_purges(u: Users, room_id: str, r: Resit) -> None:
     assert sql_value("assessment", owned) == "0"
 
 
-def unenroll(u: Users, room_id: str) -> None:
-    """removing a student keeps their grades but ends their access to the classroom."""
+def ai_marked_draft(u: Users, room_id: str, topic_id: str) -> str:
+    """the id of the student's draft grade for a new ai-marked answer, once its first marking attempt is made."""
+    rubric = {
+        "criteria": [
+            {
+                "title": "Accuracy",
+                "levels": [{"points": 0, "descriptor": "Wrong"}, {"points": 2, "descriptor": "Right"}],
+            }
+        ],
+        "model_answer": "Water evaporates, condenses into clouds and falls again as rain or snow.",
+    }
+    question = {
+        "prompt": "Describe the water cycle.",
+        "type": "free_response",
+        "rubric": rubric,
+        "max_length": 2000,
+        "topic_id": topic_id,
+    }
+    draft = {
+        "classroom_id": room_id,
+        "title": "Water cycle",
+        "status": "draft",
+        "questions": [question],
+        "due_at": timestamp(time.time() + 86400),
+        "late_policy": "accept_flagged",
+        "release_policy": "manual",
+        "ai_marking": True,
+    }
+    created = request(u.teacher, "POST", "/assessment/assessments", 201, json=draft)
+    path = f"/assessment/assessments/{created['id']}"
+    request(u.teacher, "POST", f"{path}/publish")
+    [answered] = [q["id"] for q in request(u.student, "GET", path)["questions"]]
+    answers = {answered: "Water evaporates, condenses into clouds and falls as rain."}
+    request(u.student, "POST", f"{path}/submissions", 201, json={"answers": answers})
+    evaluations = f"/grading/evaluations?classroom_id={room_id}&assessment_id={created['id']}"
+    [grade] = eventually(
+        lambda: request(u.teacher, "GET", evaluations)["evaluations"], lambda rows: len(rows) == 1, "draft"
+    )
+    # a suggestion, or a wait for the provider: either way the attempt is over and the job holds no lease.
+    eventually(
+        lambda: request(u.teacher, "GET", f"/grading/evaluations/{grade['id']}"),
+        lambda v: all(
+            e["suggestion"]["status"] != "pending" or e["suggestion"].get("reason") for e in v["evidence"]
+        ),
+        "AI marking attempt",
+    )
+    return str(UUID(grade["id"]))
+
+
+def unenroll(u: Users, room_id: str, late: Late) -> None:
+    """removing a student keeps their grades but ends their access to the classroom, and stops ai marking of their work until they are enrolled again."""
     room = str(UUID(room_id))  # returned by a verified api
     student = u.student_id
     assert student.replace("-", "").isalnum(), student  # an account id, safe in sql
+    draft = ai_marked_draft(u, room_id, late.topic_id)
+    reason = f"SELECT coalesce(evidence->0->'suggestion'->>'reason','') FROM evaluations WHERE id='{draft}'"
     remove = f"/identity/admin/classrooms/{room_id}/enrollments/{u.student_id}"
     for person in [u.other, u.student, u.teacher]:
         request(person, "DELETE", remove, 403)
@@ -1217,9 +1268,43 @@ def unenroll(u: Users, room_id: str) -> None:
         "total": 0,
     }
     kept = f"SELECT count(*) FROM evaluations WHERE classroom_id='{room}' AND student_id='{student}'"
-    assert sql_value("grading", kept) == "2"
+    assert sql_value("grading", kept) == "3"
     progress = request(u.teacher, "GET", f"/assessment/assessments/progress?classroom_id={room_id}")
     assert all(a["submissions"] == 0 for a in progress), progress
+    # the draft's marking as the marker settles it for a removed student (finish, STUDENT_REMOVED), written here
+    # because a configured provider may have marked it before the removal: the marker's own choice is covered by
+    # grading's tests, the return's path across identity, kafka and grading by what follows.
+    stopped = (
+        f"WITH j AS (DELETE FROM marking_jobs WHERE evaluation_id='{draft}'),"
+        " e AS (UPDATE evaluations SET evidence=jsonb_set(evidence,'{0,suggestion}',"
+        f'\'{{"status":"failed","reason":"STUDENT_REMOVED"}}\') WHERE id=\'{draft}\' RETURNING 1)'
+        " SELECT count(*) FROM e"
+    )
+    assert sql_value("grading", stopped) == "1"
+    assert sql_value("grading", reason) == "STUDENT_REMOVED"
+    # enrolled again, grading sees the return as newer than the removal and queues the stopped marking again,
+    # then the removal made after it.
+    enrolments = f"/identity/admin/classrooms/{room_id}/enrollments"
+    returned = (
+        "SELECT count(*) FROM enrollment_returns n JOIN removed_enrollments r USING(classroom_id,student_id)"
+        f" WHERE r.classroom_id='{room}' AND r.student_id='{student}' AND n.restored_at>r.removed_at"
+    )
+    request(u.admin, "POST", enrolments, json={"student_id": u.student_id})
+    eventually(
+        functools.partial(sql_value, "grading", returned), lambda value: value == "1", "return recorded"
+    )
+    # only the return's re-queue changes a stopped suggestion: the marker then marks it, or waits for a provider.
+    eventually(
+        functools.partial(sql_value, "grading", reason),
+        lambda value: value != "STUDENT_REMOVED",
+        "marking queued again by the return",
+    )
+    request(u.admin, "DELETE", remove)
+    eventually(
+        functools.partial(sql_value, "grading", returned),
+        lambda value: value == "0",
+        "removal recorded again",
+    )
 
 
 def delete_account(u: Users, room_id: str) -> None:
@@ -1376,8 +1461,8 @@ def databases() -> None:
         ("content", "1,2,3,4,5,6"),
         ("identity", "1,2,3,4,5,6,7,8,9"),
         ("assessment", "1,2,3,4,5,6"),
-        ("grading", "1,2,3,4,5,6,7,8,9"),
-        ("analytics", "1,2,3,4,5,6,7"),
+        ("grading", "1,2,3,4,5,6,7,8,9,10"),
+        ("analytics", "1,2,3,4,5,6,7,8,9,10,11,12,13"),
         ("curriculum", "1,2"),
         ("chatbot", "1,2,3,4,5,6"),
         ("aicore", "1,2,3,4,5,6"),
@@ -1520,7 +1605,7 @@ def run() -> None:
     late = step("Assessment lifecycle", lambda: lifecycle(users, room_id))
     step("Marking and release", lambda: marking(users, room_id, late))
     step("Question bank and resits", lambda: bank_and_resits(users, room_id))
-    step("Unenrollment", lambda: unenroll(users, room_id))
+    step("Unenrollment", lambda: unenroll(users, room_id, late))
     step("Deleting an account", lambda: delete_account(users, room_id))
     step("Deleting a graded assessment", lambda: delete_graded_assessment(users, room_id, late))
     step("Classroom deletion and purge", lambda: delete_classroom(users, room_id, graded))

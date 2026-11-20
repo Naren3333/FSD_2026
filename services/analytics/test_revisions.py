@@ -4,15 +4,27 @@ from itertools import permutations
 from typing import Any
 from uuid import uuid4
 
+import psycopg
 import pytest
+from learning_transport.kafka import PERMANENT_ERRORS
 from psycopg_pool import ConnectionPool
 from pydantic import ValidationError
 
 import test_store
-from consumer import REOPENED, ReopenedEvent, handler, process, purge, withdraw
+from consumer import (
+    REOPENED,
+    ReopenedEvent,
+    handler,
+    process,
+    purge,
+    purge_assessment,
+    purge_user,
+    withdraw,
+)
 from domain import Event
+from main import MIGRATIONS
 from test_domain import finalized
-from test_store import count, deletion
+from test_store import assessment_deletion, count, deletion, user_deletion
 
 pool = test_store.pool  # the database fixture
 
@@ -131,3 +143,62 @@ def test_a_reopen_for_a_purged_classroom_is_not_stored(pool):
     purge(pool, deletion(str(first.data.classroom_id)))
     withdraw(pool, reopening(first, 2))
     assert count(pool, "SELECT count(*) FROM evaluations") == 0
+
+
+@pytest.mark.parametrize("deleted", ["classroom", "assessment", "student"])
+def test_a_purge_removes_a_withdrawn_grade_with_no_evidence(pool, deleted):
+    grades = []
+    for _ in range(2):
+        body = finalized("grading.finalized.v3", 3)
+        body["data"]["student_id"] = str(uuid4())  # type: ignore[index]
+        grades.append(Event.model_validate(body))
+    first, other = grades
+    for event in grades:
+        process(pool, event)
+        withdraw(pool, reopening(event, 2))
+    if deleted == "classroom":
+        purge(pool, deletion(str(first.data.classroom_id)))
+    elif deleted == "assessment":
+        purge_assessment(pool, assessment_deletion(first))
+    else:
+        purge_user(pool, user_deletion(first.data.student_id))
+    assert (
+        count(pool, "SELECT count(*) FROM evaluations WHERE evaluation_id=%s", first.data.evaluation_id) == 0
+    )
+    assert (
+        count(pool, "SELECT count(*) FROM evaluations WHERE evaluation_id=%s", other.data.evaluation_id) == 1
+    )
+
+
+def test_migration_009_names_the_owners_of_evaluations_stored_before_008(pool):
+    first = Event.model_validate(finalized("grading.finalized.v3", 3))
+    process(pool, first)
+    with pool.connection() as conn:
+        conn.execute(
+            "UPDATE evaluations SET assessment_id=NULL,classroom_id=NULL,org_id=NULL,student_id=NULL"
+        )
+        conn.execute((MIGRATIONS / "009_evaluation_owners_backfill.sql").read_text())  # type: ignore[arg-type]
+    assert (
+        count(
+            pool,
+            "SELECT count(*) FROM evaluations WHERE classroom_id=%s AND assessment_id=%s AND org_id=%s AND student_id=%s",
+            first.data.classroom_id,
+            first.data.assessment_id,
+            first.data.org_id,
+            first.data.student_id,
+        )
+        == 1
+    )
+
+
+def test_an_evaluation_without_owners_waits_for_a_writer_that_names_them(pool):
+    """stored as an older replica would during a rolling upgrade: refused with an error the consumer retries rather than dead-letters, and stored by a replica that names its owners."""
+    event = Event.model_validate(finalized("grading.finalized.v3", 3))
+    with pytest.raises(psycopg.errors.ObjectNotInPrerequisiteState) as refused, pool.connection() as conn:
+        conn.execute(
+            "INSERT INTO evaluations(evaluation_id,event_id,revision,withdrawn) VALUES(%s,%s,1,true)",
+            (event.data.evaluation_id, event.event_id),
+        )
+    assert not isinstance(refused.value, PERMANENT_ERRORS)
+    process(pool, event)
+    assert count(pool, "SELECT count(*) FROM evaluations WHERE classroom_id=%s", event.data.classroom_id) == 1

@@ -28,7 +28,7 @@ from learning_transport import (
     require_relation,
     requires,
 )
-from learning_transport.db import open_pool
+from learning_transport.db import open_migrated_pool
 from psycopg_pool import ConnectionPool
 
 from consumer import run
@@ -42,7 +42,8 @@ ERRORS: dict[int | str, dict[str, Any]] = {code: {"model": ErrorResponse} for co
 @asynccontextmanager
 async def lifespan(app: Any) -> AsyncIterator[None]:
     require_env(*OIDC_SETTINGS, "IDENTITY_URL", "KAFKA_BROKERS", "DATABASE_URL")
-    pool = open_pool(os.environ["DATABASE_URL"], MIGRATIONS)
+    # migrated a step at a time, its indexes built concurrently, so reads go on through a rolling upgrade.
+    pool = await open_migrated_pool(os.environ["DATABASE_URL"], MIGRATIONS)
     stop, connected = threading.Event(), threading.Event()
     thread = threading.Thread(target=run, args=(pool, stop, connected), daemon=True)
     try:

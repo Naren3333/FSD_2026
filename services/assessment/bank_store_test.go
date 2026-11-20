@@ -122,7 +122,7 @@ func TestOnlyAssignedStudentsSeeAResit(t *testing.T) {
 	if err = submitAs(p, v, ben); !errors.Is(err, platform.ErrNotFound) {
 		t.Errorf("an unassigned student submitted: %v", err)
 	}
-	if _, err = p.saveAnswers(ctx, v.ID, ben, map[string]string{}); !errors.Is(err, platform.ErrNotFound) {
+	if _, err = p.saveAnswers(ctx, v.ID, ben, map[string]string{}, time.Now()); !errors.Is(err, platform.ErrNotFound) {
 		t.Errorf("an unassigned student saved work: %v", err)
 	}
 	if err = submitAs(p, v, amy); err != nil {
@@ -156,7 +156,7 @@ func TestChangingAResitsList(t *testing.T) {
 	if err := submitAs(p, v, amy); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := p.saveAnswers(ctx, v.ID, cat, map[string]string{v.Questions[0].ID: "1"}); err != nil {
+	if _, err := p.saveAnswers(ctx, v.ID, cat, map[string]string{v.Questions[0].ID: "1"}, time.Now()); err != nil {
 		t.Fatal(err)
 	}
 	if err := p.setAssignees(ctx, "org", v.ID, []string{ben}, nil); !errors.Is(err, errHasSubmissions) {
@@ -201,7 +201,7 @@ func TestARemovalIsSeenByAWaitingSubmissionAndSave(t *testing.T) {
 	var wg sync.WaitGroup
 	var submitErr, saveErr error
 	wg.Go(func() { submitErr = submitAs(p, v, amy) })
-	wg.Go(func() { _, saveErr = p.saveAnswers(ctx, v.ID, ben, map[string]string{}) })
+	wg.Go(func() { _, saveErr = p.saveAnswers(ctx, v.ID, ben, map[string]string{}, time.Now()) })
 	time.Sleep(300 * time.Millisecond) // both are waiting on the row lock
 	if err = tx.Commit(ctx); err != nil {
 		t.Fatal(err)
@@ -248,7 +248,7 @@ func TestARemovalAndThatStudentsPurgeBothFinish(t *testing.T) {
 	for range 5 {
 		leaving := uuid.NewString()
 		v := resitOf(t, p, stored(t, p, "org", statusPublished, nil), []string{amy, leaving})
-		if _, err := p.saveAnswers(ctx, v.ID, leaving, map[string]string{}); err != nil {
+		if _, err := p.saveAnswers(ctx, v.ID, leaving, map[string]string{}, time.Now()); err != nil {
 			t.Fatal(err)
 		}
 		var wg sync.WaitGroup

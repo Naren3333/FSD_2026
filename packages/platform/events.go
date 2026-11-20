@@ -12,11 +12,21 @@ import (
 )
 
 // EventMigration creates the outbox and inbox tables; services that publish or consume events pass it to
-// new.
+// new, which applies it once per text, as a migration once per version (migrate). the indexes prunes and
+// purges use are built apart, without holding inserts (OutboxIndexes, PurgeIndexes).
 const EventMigration = `
 CREATE TABLE IF NOT EXISTS outbox (id uuid PRIMARY KEY, topic text NOT NULL, partition_key text NOT NULL, body jsonb NOT NULL, created_at timestamptz NOT NULL DEFAULT clock_timestamp(), published_at timestamptz, attempts integer NOT NULL DEFAULT 0, next_attempt timestamptz NOT NULL DEFAULT now());
-ALTER TABLE outbox ALTER COLUMN created_at SET DEFAULT clock_timestamp();
-CREATE INDEX IF NOT EXISTS outbox_unpublished ON outbox (topic, partition_key, created_at) WHERE published_at IS NULL;
+DO $$ BEGIN
+  -- changed only when needed: even the one run of a changed text may meet a concurrent build (IndexBuilder)
+  -- of an older replica, and an alter or a plain index would queue behind it with every insert behind them.
+  IF (SELECT pg_get_expr(d.adbin, d.adrelid) FROM pg_attrdef d JOIN pg_attribute a ON a.attrelid=d.adrelid AND a.attnum=d.adnum
+      WHERE d.adrelid='outbox'::regclass AND a.attname='created_at') IS DISTINCT FROM 'clock_timestamp()' THEN
+    ALTER TABLE outbox ALTER COLUMN created_at SET DEFAULT clock_timestamp();
+  END IF;
+  IF to_regclass('outbox_unpublished') IS NULL THEN
+    CREATE INDEX outbox_unpublished ON outbox (topic, partition_key, created_at) WHERE published_at IS NULL;
+  END IF;
+END $$;
 CREATE TABLE IF NOT EXISTS inbox (event_id uuid PRIMARY KEY, processed_at timestamptz NOT NULL DEFAULT now());`
 
 // event is the envelope of every business event on kafka.

@@ -53,5 +53,5 @@ func purgeUser(ctx context.Context, tx pgx.Tx, event platform.Event) error {
 		return err
 	}
 	// published or not, as for a deleted assessment: no copy of the student's answers stays in the outbox.
-	return platform.DiscardPendingBy(ctx, tx, topicSubmittedAll, "student_id", v.User, v.Org)
+	return platform.DiscardPendingBy(ctx, tx, topicSubmittedAll, platform.PurgeByStudent, v.User, v.Org)
 }

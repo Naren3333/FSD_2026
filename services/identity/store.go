@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"learning/platform"
+	"time"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
@@ -141,10 +142,11 @@ func (p pgStore) insertEnrollment(ctx context.Context, classroom, student string
 		return err
 	}
 	defer tx.Rollback(ctx)
-	var found int
-	if err = tx.QueryRow(ctx, "SELECT 1 FROM classrooms WHERE id=$1 AND deleted_at IS NULL FOR SHARE", classroom).Scan(&found); err != nil {
+	var org string
+	if err = tx.QueryRow(ctx, "SELECT org_id FROM classrooms WHERE id=$1 AND deleted_at IS NULL FOR SHARE", classroom).Scan(&org); err != nil {
 		return err
 	}
+	var found int
 	err = tx.QueryRow(ctx, "SELECT 1 FROM users WHERE id=$1 AND deleted_at IS NULL FOR SHARE", student).Scan(&found)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return errStudentDeleted
@@ -152,10 +154,19 @@ func (p pgStore) insertEnrollment(ctx context.Context, classroom, student string
 	if err != nil {
 		return err
 	}
-	if _, err = tx.Exec(ctx, "INSERT INTO enrollments(classroom_id,student_id) VALUES($1,$2) ON CONFLICT DO NOTHING", classroom, student); err != nil {
-		return err
+	// a new enrollment is announced, stamped like removals with the database's clock (removeEnrollment).
+	var at time.Time
+	err = tx.QueryRow(ctx, "INSERT INTO enrollments(classroom_id,student_id) VALUES($1,$2) ON CONFLICT DO NOTHING RETURNING clock_timestamp()", classroom, student).Scan(&at)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return tx.Commit(ctx) // already enrolled
 	}
-	return tx.Commit(ctx)
+	if err == nil {
+		err = platform.EmitAt(ctx, tx, platform.TopicEnrollmentAdded, classroom, at, platform.EnrollmentAdded{Classroom: classroom, Org: org, Student: student})
+	}
+	if err == nil {
+		err = tx.Commit(ctx)
+	}
+	return err
 }
 
 // studentsNamed returns the ids of the organization's students with this username, ignoring case: the whole
@@ -176,11 +187,15 @@ func (p pgStore) removeEnrollment(ctx context.Context, classroom, org, student s
 		return false, err
 	}
 	defer tx.Rollback(ctx)
-	tag, err := tx.Exec(ctx, "DELETE FROM enrollments WHERE classroom_id=$1 AND student_id=$2", classroom, student)
-	if err != nil || tag.RowsAffected() == 0 {
+	var at time.Time
+	err = tx.QueryRow(ctx, "DELETE FROM enrollments WHERE classroom_id=$1 AND student_id=$2 RETURNING clock_timestamp()", classroom, student).Scan(&at)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return false, nil
+	}
+	if err != nil {
 		return false, err
 	}
-	if err = platform.Emit(ctx, tx, platform.TopicEnrollmentRemoved, classroom, platform.EnrollmentRemoved{Classroom: classroom, Org: org, Student: student}); err != nil {
+	if err = platform.EmitAt(ctx, tx, platform.TopicEnrollmentRemoved, classroom, at, platform.EnrollmentRemoved{Classroom: classroom, Org: org, Student: student}); err != nil {
 		return false, err
 	}
 	return true, tx.Commit(ctx)

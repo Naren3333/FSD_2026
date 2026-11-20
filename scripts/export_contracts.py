@@ -1122,6 +1122,7 @@ payloads = {
     "identity.classroom.deleted.v1": obj({"classroom_id": UUID, "org_id": TEXT}),
     "identity.classroom.reassigned.v1": obj({"classroom_id": UUID, "org_id": TEXT, "teacher_id": TEXT}),
     "identity.enrollment.removed.v1": obj({"classroom_id": UUID, "org_id": TEXT, "student_id": TEXT}),
+    "identity.enrollment.added.v1": obj({"classroom_id": UUID, "org_id": TEXT, "student_id": TEXT}),
     "identity.user.deleted.v1": obj(
         {"user_id": UUID, "org_id": TEXT, "role": {"enum": ["teacher", "student"]}}
     ),
@@ -1209,9 +1210,13 @@ descriptions = {
     "identity.classroom.reassigned.v1": "A school admin gave a classroom another teacher (ADR 0019); the resource is "
     "the classroom and the event's timestamp orders reassignments. Grading bills the classroom's AI marking to "
     "teacher_id from then on, draft grades included, and ignores a reassignment older than one it has applied.",
-    "identity.enrollment.removed.v1": "A teacher removed a student from a classroom. The student's submissions and "
-    "grades are kept, and leave the teacher's lists and counts while the student is not enrolled; Grading makes no "
-    "more AI suggestions for work they submitted before.",
+    "identity.enrollment.removed.v1": "A school admin removed a student from a classroom; the timestamp is when "
+    "Identity's database removed them. The student's submissions and grades are kept, and leave the teacher's lists "
+    "and counts while the student is not enrolled; Grading makes no more AI suggestions for work they submitted "
+    "before, until a newer identity.enrollment.added.v1.",
+    "identity.enrollment.added.v1": "A school admin enrolled a student in a classroom; the timestamp is when "
+    "Identity's database enrolled them, so it orders the student's removals and returns. Grading makes AI "
+    "suggestions again for work the student submitted before an older removal.",
     "assessment.due_changed.v1": "A published assessment's teacher changed its due date, or removed it (null). "
     "Grading sets each evaluation's late flag again: late only when submitted after the new due date.",
     "assessment.deleted.v1": "A published assessment its teacher deleted, with any submissions (ADR 0008). Grading "

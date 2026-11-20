@@ -78,6 +78,24 @@ func TestMigrateTwiceIsANoOp(t *testing.T) {
 	}
 }
 
+// a bootstrap that fails when run twice runs once per text: a restart skips it, a changed one runs once.
+func TestABootstrapRunsOncePerText(t *testing.T) {
+	db := testSchema(t)
+	ordered, err := Migrations(twoMigrations)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, bootstrap := range []string{"CREATE TABLE booted(id int)", "CREATE TABLE booted(id int)", "CREATE TABLE booted_again(id int)", "CREATE TABLE booted_again(id int)"} {
+		if err = applyMigrations(context.Background(), db, ordered, bootstrap); err != nil {
+			t.Fatalf("%s: %v", bootstrap, err)
+		}
+	}
+	var digests int
+	if err = db.QueryRow(context.Background(), "SELECT count(*) FROM schema_bootstraps").Scan(&digests); err != nil || digests != 2 {
+		t.Fatalf("bootstraps recorded %d, %v", digests, err)
+	}
+}
+
 func TestConcurrentStartsMigrateOnce(t *testing.T) {
 	db := testSchema(t)
 	ordered, err := Migrations(twoMigrations)

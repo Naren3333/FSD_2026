@@ -370,7 +370,7 @@ func (m marker) work(ctx context.Context, j job) error {
 	}
 	if t.removed {
 		// the student left the classroom: their work stays, but is not worth the teacher's allowance.
-		return m.finish(ctx, j, &Suggestion{Status: suggestionFailed, Reason: "STUDENT_REMOVED"})
+		return m.finish(ctx, j, &Suggestion{Status: suggestionFailed, Reason: reasonStudentRemoved})
 	}
 	if t.marked {
 		// the teacher has marked it already: a suggestion would only cost their allowance.
@@ -407,6 +407,11 @@ func (m marker) work(ctx context.Context, j job) error {
 	return m.finish(ctx, j, &s)
 }
 
+// studentRemoved is whether evaluation e's student was removed from the classroom after they submitted
+// (removeStudent), and has not been enrolled again since (restoreStudent).
+const studentRemoved = `EXISTS(SELECT 1 FROM removed_enrollments r WHERE r.classroom_id=e.classroom_id AND r.student_id=e.student_id AND r.removed_at>=coalesce(e.submitted_at,e.created_at)
+	AND NOT EXISTS(SELECT 1 FROM enrollment_returns n WHERE n.classroom_id=r.classroom_id AND n.student_id=r.student_id AND n.restored_at>r.removed_at))`
+
 // markingTask is what a job needs from its evaluation: the student's answer to the job's question, and
 // whether the teacher has marked that question already.
 type markingTask struct {
@@ -419,9 +424,7 @@ func (m marker) task(ctx context.Context, j job) (markingTask, error) {
 	var t markingTask
 	var evidence []Evidence
 	var questions, marks []byte
-	// removed: the teacher removed the student from the classroom after they submitted (removeStudent).
-	err := m.db.QueryRow(ctx, `SELECT status,coalesce(teacher_id,''),org_id,coalesce(answers->>$2::text,''),coalesce(questions,'[]'::jsonb),evidence,
-		EXISTS(SELECT 1 FROM removed_enrollments r WHERE r.classroom_id=e.classroom_id AND r.student_id=e.student_id AND r.removed_at>=coalesce(e.submitted_at,e.created_at))
+	err := m.db.QueryRow(ctx, `SELECT status,coalesce(teacher_id,''),org_id,coalesce(answers->>$2::text,''),coalesce(questions,'[]'::jsonb),evidence,`+studentRemoved+`
 		FROM evaluations e WHERE id=$1`, j.evaluation, j.question).Scan(&t.status, &t.teacher, &t.org, &t.answer, &questions, &marks, &t.removed)
 	if err == nil {
 		err = json.Unmarshal(questions, &t.questions)
@@ -478,6 +481,17 @@ func (m marker) retry(ctx context.Context, j job, at time.Time, attempts int, re
 	return m.settle(ctx, j, s, "UPDATE marking_jobs SET run_after=$4,attempts=$5,last_error=$6,leased_until=NULL WHERE evaluation_id=$1 AND question_id=$2 AND leased_until=$3", j.evaluation, j.question, j.lease, at, attempts, reason)
 }
 
+// backSince reports whether s settles the job as STUDENT_REMOVED although the student has returned since the
+// task was read (restoreStudent), as seen under the evaluation's lock.
+func backSince(ctx context.Context, tx pgx.Tx, j job, s *Suggestion) (bool, error) {
+	if s == nil || s.Reason != reasonStudentRemoved {
+		return false, nil
+	}
+	var removed bool
+	err := tx.QueryRow(ctx, "SELECT "+studentRemoved+" FROM evaluations e WHERE id=$1", j.evaluation).Scan(&removed)
+	return !removed, err
+}
+
 func (m marker) settle(ctx context.Context, j job, s *Suggestion, sql string, args ...any) error {
 	tx, err := m.db.Begin(ctx)
 	if err != nil {
@@ -492,6 +506,12 @@ func (m marker) settle(ctx context.Context, j job, s *Suggestion, sql string, ar
 	}
 	if err != nil {
 		return err
+	}
+	if returned, err := backSince(ctx, tx, j, s); err != nil {
+		return err
+	} else if returned {
+		// the job runs again at once instead, without counting this attempt, which made no ai call.
+		sql, args, s = "UPDATE marking_jobs SET run_after=now(),attempts=attempts-1,leased_until=NULL WHERE evaluation_id=$1 AND question_id=$2 AND leased_until=$3", []any{j.evaluation, j.question, j.lease}, nil
 	}
 	result, err := tx.Exec(ctx, sql, args...)
 	if err != nil {

@@ -111,7 +111,7 @@ func TestMonitoringRequiresASchoolAdmin(t *testing.T) {
 				}
 				if tc.want == http.StatusOK {
 					var snapshot statusSnapshot
-					if json.Unmarshal(w.Body.Bytes(), &snapshot) != nil || len(snapshot.Services) != 10 || len(snapshot.DeadLetters) != 10 {
+					if json.Unmarshal(w.Body.Bytes(), &snapshot) != nil || len(snapshot.Services) != 10 || len(snapshot.DeadLetters) != 11 {
 						t.Fatalf("invalid status response %s", w.Body.String())
 					}
 				}

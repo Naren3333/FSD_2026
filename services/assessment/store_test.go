@@ -7,6 +7,7 @@ import (
 	"learning/platform"
 	"learning/platform/platformtest"
 	"slices"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -103,7 +104,15 @@ func TestAnAssessmentChangesUntilAStudentSubmits(t *testing.T) {
 	if err = p.updateAssessment(ctx, "org", before, got); err != nil {
 		t.Fatalf("a published assessment nobody has submitted: %v", err)
 	}
-	if _, err = p.saveAnswers(ctx, v.ID, "s", map[string]string{got.Questions[0].ID: "4"}); err != nil {
+	// work on the question as it was before the edit replaced it is refused as stored.
+	if _, err = p.saveAnswers(ctx, v.ID, "s", map[string]string{"replaced-" + got.Questions[0].ID: "4"}, time.Now()); !errors.Is(err, errAssessmentChanged) {
+		t.Fatalf("saved work on a replaced question: %v", err)
+	}
+	// and so is work over its question's limit as stored, which the handler checked against its earlier read.
+	if _, err = p.saveAnswers(ctx, v.ID, "s", map[string]string{got.Questions[0].ID: strings.Repeat("4", maxAnswer+1)}, time.Now()); !errors.Is(err, errAssessmentChanged) {
+		t.Fatalf("saved work over its question's limit: %v", err)
+	}
+	if _, err = p.saveAnswers(ctx, v.ID, "s", map[string]string{got.Questions[0].ID: "4"}, time.Now()); err != nil {
 		t.Fatal(err)
 	}
 	sub := Submission{ID: uuid.NewString(), Org: "org", Student: "s", Answers: map[string]string{got.Questions[0].ID: "4"}, SubmittedAt: time.Now()}
@@ -133,7 +142,7 @@ func TestAnUnsubmittedAssessmentIsDeletedWithItsSavedWork(t *testing.T) {
 	for _, status := range []string{statusDraft, statusPublished} {
 		v := stored(t, p, "org", status, nil)
 		if status == statusPublished {
-			if _, err := p.saveAnswers(ctx, v.ID, "s", map[string]string{v.Questions[0].ID: "1"}); err != nil {
+			if _, err := p.saveAnswers(ctx, v.ID, "s", map[string]string{v.Questions[0].ID: "1"}, time.Now()); err != nil {
 				t.Fatal(err)
 			}
 		}
@@ -141,7 +150,7 @@ func TestAnUnsubmittedAssessmentIsDeletedWithItsSavedWork(t *testing.T) {
 			t.Fatalf("%s: %v", status, err)
 		}
 		// a save that checked the assessment before the deletion finds it gone, not a broken reference.
-		if _, err := p.saveAnswers(ctx, v.ID, "s", map[string]string{v.Questions[0].ID: "1"}); !errors.Is(err, platform.ErrNotFound) {
+		if _, err := p.saveAnswers(ctx, v.ID, "s", map[string]string{v.Questions[0].ID: "1"}, time.Now()); !errors.Is(err, platform.ErrNotFound) {
 			t.Fatalf("%s: saved work on a deleted assessment: %v", status, err)
 		}
 	}
@@ -161,7 +170,7 @@ func TestAnAssessmentIsDeletedWithItsSubmissions(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	if _, err := p.saveAnswers(ctx, v.ID, "s3", map[string]string{v.Questions[0].ID: "1"}); err != nil {
+	if _, err := p.saveAnswers(ctx, v.ID, "s3", map[string]string{v.Questions[0].ID: "1"}, time.Now()); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := p.db.Exec(ctx, "UPDATE outbox SET published_at=now() WHERE id=(SELECT id FROM outbox LIMIT 1)"); err != nil {
@@ -497,7 +506,7 @@ func TestASubmissionTakesTheLatePolicyAsStored(t *testing.T) {
 func TestOneSubmissionOneEvent(t *testing.T) {
 	p, ctx := testStore(t), context.Background()
 	v := stored(t, p, "org", statusPublished, nil)
-	if _, err := p.saveAnswers(ctx, v.ID, "s", map[string]string{v.Questions[0].ID: "1"}); err != nil {
+	if _, err := p.saveAnswers(ctx, v.ID, "s", map[string]string{v.Questions[0].ID: "1"}, time.Now()); err != nil {
 		t.Fatal(err)
 	}
 	var wg sync.WaitGroup
@@ -522,7 +531,7 @@ func TestOneSubmissionOneEvent(t *testing.T) {
 	if n := count(t, p, "SELECT count(*) FROM saved_answers"); n != 0 {
 		t.Fatalf("saved work kept after submitting: %d", n)
 	}
-	if _, err := p.saveAnswers(ctx, v.ID, "s", map[string]string{v.Questions[0].ID: "3"}); !errors.Is(err, errAlreadySubmitted) {
+	if _, err := p.saveAnswers(ctx, v.ID, "s", map[string]string{v.Questions[0].ID: "3"}, time.Now()); !errors.Is(err, errAlreadySubmitted) {
 		t.Fatalf("saved after submitting: %v", err)
 	}
 	if n := count(t, p, "SELECT count(*) FROM saved_answers"); n != 0 {
@@ -557,7 +566,7 @@ func TestTheOutboxEventMatchesItsContract(t *testing.T) {
 func TestAFailedEventLeavesNoSubmission(t *testing.T) {
 	p, ctx := testStore(t), context.Background()
 	v := stored(t, p, "org", statusPublished, nil)
-	if _, err := p.saveAnswers(ctx, v.ID, "s", map[string]string{v.Questions[0].ID: "1"}); err != nil {
+	if _, err := p.saveAnswers(ctx, v.ID, "s", map[string]string{v.Questions[0].ID: "1"}, time.Now()); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := p.db.Exec(ctx, "ALTER TABLE outbox ADD CONSTRAINT refuse CHECK (topic <> '"+topicSubmitted+"')"); err != nil {
@@ -656,7 +665,7 @@ func TestADeletedAccountsWorkIsPurged(t *testing.T) {
 		}
 	}
 	other := stored(t, p, "org", statusPublished, nil)
-	if _, err := p.saveAnswers(ctx, other.ID, gone, map[string]string{other.Questions[0].ID: "1"}); err != nil {
+	if _, err := p.saveAnswers(ctx, other.ID, gone, map[string]string{other.Questions[0].ID: "1"}, time.Now()); err != nil {
 		t.Fatal(err)
 	}
 	data, _ := json.Marshal(platform.UserDeleted{User: gone, Org: "org", Role: "student"})
@@ -687,7 +696,7 @@ func TestADeletedAccountsWorkIsPurged(t *testing.T) {
 	if _, _, err := p.insertSubmission(ctx, other, Submission{ID: uuid.NewString(), Org: "org", Student: gone, Answers: map[string]string{other.Questions[0].ID: "2"}, SubmittedAt: time.Now()}); !errors.Is(err, errAccountDeleted) {
 		t.Errorf("a deleted account submitted: %v", err)
 	}
-	if _, err := p.saveAnswers(ctx, other.ID, gone, map[string]string{other.Questions[0].ID: "1"}); !errors.Is(err, errAccountDeleted) {
+	if _, err := p.saveAnswers(ctx, other.ID, gone, map[string]string{other.Questions[0].ID: "1"}, time.Now()); !errors.Is(err, errAccountDeleted) {
 		t.Errorf("a deleted account saved work: %v", err)
 	}
 	invalid, _ := json.Marshal(platform.UserDeleted{User: gone, Org: "org"})
@@ -719,5 +728,26 @@ func TestAStudentReadsTheirOwnSubmission(t *testing.T) {
 	}
 	if _, err = p.findSubmission(ctx, v.ID, "another"); !errors.Is(err, platform.ErrNotFound) {
 		t.Fatalf("another student's: %v", err)
+	}
+}
+
+// a save is checked against the assessment as stored when it commits, as a submission is.
+func TestASaveFollowsTheStoredOpeningDueDateAndLatePolicy(t *testing.T) {
+	p, ctx := testStore(t), context.Background()
+	now := time.Now()
+	later := now.Add(time.Hour)
+	unopened := stored(t, p, "org", statusPublished, &later)
+	if _, err := p.saveAnswers(ctx, unopened.ID, "s", map[string]string{unopened.Questions[0].ID: "1"}, now); !errors.Is(err, platform.ErrNotFound) {
+		t.Fatalf("saved before the opening: %v", err)
+	}
+	v := stored(t, p, "org", statusPublished, nil)
+	past := now.Add(-time.Hour).UTC().Truncate(time.Microsecond)
+	for policy, want := range map[string]error{lateAccept: nil, lateReject: errClosed} {
+		if err := p.updateDetails(ctx, "org", v.ID, Details{Title: v.Title, DueAt: &past, LatePolicy: policy}); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := p.saveAnswers(ctx, v.ID, "s", map[string]string{v.Questions[0].ID: "1"}, now); !errors.Is(err, want) {
+			t.Fatalf("%s past due: %v", policy, err)
+		}
 	}
 }

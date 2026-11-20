@@ -52,6 +52,28 @@ func TestDecodeEnrollmentRemovedRejectsMalformedRemovals(t *testing.T) {
 	}
 }
 
+func TestDecodeEnrollmentAddedRejectsMalformedEnrollments(t *testing.T) {
+	classroom, other := "6f1c5d2e-8a4b-4c3d-9e2f-1a2b3c4d5e6f", "7a2d6e3f-9b5c-4d4e-8f3a-2b3c4d5e6f70"
+	at := time.Date(2026, 11, 20, 9, 0, 0, 0, time.UTC)
+	valid := `{"classroom_id":"` + classroom + `","org_id":"o","student_id":"s"}`
+	for _, e := range []Event{
+		{Resource: classroom, Timestamp: at, Data: json.RawMessage(`{}`)},
+		{Resource: classroom, Timestamp: at, Data: json.RawMessage(`{"classroom_id":"` + classroom + `","org_id":"o"}`)},
+		{Resource: classroom, Timestamp: at, Data: json.RawMessage(`{"classroom_id":"` + other + `","org_id":"o","student_id":"s"}`)},
+		{Resource: classroom, Data: json.RawMessage(valid)},
+	} {
+		_, err := DecodeEnrollmentAdded(e)
+		var invalid InvalidEvent
+		if !errors.As(err, &invalid) {
+			t.Errorf("%s at %v was not rejected: %v", e.Data, e.Timestamp, err)
+		}
+	}
+	v, err := DecodeEnrollmentAdded(Event{Resource: classroom, Timestamp: at, Data: json.RawMessage(valid)})
+	if err != nil || v.Classroom != classroom || v.Org != "o" || v.Student != "s" {
+		t.Fatalf("%+v %v", v, err)
+	}
+}
+
 func TestDecodeClassroomReassignedRejectsMalformedReassignments(t *testing.T) {
 	classroom, other := "6f1c5d2e-8a4b-4c3d-9e2f-1a2b3c4d5e6f", "7a2d6e3f-9b5c-4d4e-8f3a-2b3c4d5e6f70"
 	at := time.Date(2026, 11, 19, 9, 0, 0, 0, time.UTC)

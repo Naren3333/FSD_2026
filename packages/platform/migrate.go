@@ -2,6 +2,8 @@ package platform
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 	"io/fs"
 	"path"
@@ -55,7 +57,7 @@ func Migrations(fsys fs.FS) ([]Migration, error) {
 	return out, nil
 }
 
-// apply bootstrap statements and pending numbered migrations under the transaction lock.
+// apply pending numbered migrations and, once per text, the bootstrap statements under the transaction lock.
 func migrate(ctx context.Context, tx pgx.Tx, migrations []Migration, bootstrap string) error {
 	if _, err := tx.Exec(ctx, "CREATE TABLE IF NOT EXISTS schema_migrations(version integer PRIMARY KEY, applied_at timestamptz NOT NULL DEFAULT now())"); err != nil {
 		return err
@@ -75,10 +77,23 @@ func migrate(ctx context.Context, tx pgx.Tx, migrations []Migration, bootstrap s
 			return err
 		}
 	}
-	if bootstrap != "" {
-		if _, err := tx.Exec(ctx, bootstrap); err != nil {
-			return err
-		}
+	if bootstrap == "" {
+		return nil
 	}
-	return nil
+	// recorded by its digest, so a start with the same text takes none of the locks its ddl would, and a change
+	// to it runs once, at the upgrade that brings it.
+	sum := sha256.Sum256([]byte(bootstrap))
+	digest := hex.EncodeToString(sum[:])
+	if _, err := tx.Exec(ctx, "CREATE TABLE IF NOT EXISTS schema_bootstraps(digest text PRIMARY KEY, applied_at timestamptz NOT NULL DEFAULT now())"); err != nil {
+		return err
+	}
+	var applied bool
+	if err := tx.QueryRow(ctx, "SELECT EXISTS(SELECT 1 FROM schema_bootstraps WHERE digest=$1)", digest).Scan(&applied); err != nil || applied {
+		return err
+	}
+	if _, err := tx.Exec(ctx, bootstrap); err != nil {
+		return err
+	}
+	_, err := tx.Exec(ctx, "INSERT INTO schema_bootstraps(digest) VALUES($1) ON CONFLICT DO NOTHING", digest)
+	return err
 }

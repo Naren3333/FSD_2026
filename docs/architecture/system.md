@@ -36,7 +36,8 @@ flowchart LR
   Kafka -->|purge deleted assessment| Analytics
   Identity -->|outbox: enrollment removed| Kafka
   Identity -->|outbox: user deleted| Kafka
-  Kafka -->|stop marking removed student| Grading
+  Identity -->|outbox: enrollment added| Kafka
+  Kafka -->|stop marking removed student, resume on return| Grading
   Assessment -->|outbox: due date changed| Kafka
   Kafka -->|recompute late| Grading
   Content -->|outbox: document deleted| Kafka

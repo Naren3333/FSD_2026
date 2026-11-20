@@ -15,6 +15,10 @@ func main() {
 	platform.Serve("identity", migrations, platform.EventMigration, func(a *platform.App) ([]func(context.Context), error) {
 		keycloak := newKeycloakUsers()
 		server{store: pgStore{a.DB}, accounts: keycloak}.routes(a.Mux)
-		return []func(context.Context){platform.Outbox{DB: a.DB}.Run, signInCleanup{a.DB, keycloak}.run}, nil
+		return []func(context.Context){
+			platform.Outbox{DB: a.DB}.Run, signInCleanup{a.DB, keycloak}.run,
+			// the outbox's prune index: identity discards no events, so it needs no purge index.
+			platform.IndexBuilder(a.DB, platform.OutboxIndexes()...),
+		}, nil
 	})
 }

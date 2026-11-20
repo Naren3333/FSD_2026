@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"sync"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -39,29 +40,53 @@ type messageWriter interface {
 func (o Outbox) Run(ctx context.Context) {
 	writer := Writer()
 	defer writer.Close()
+	o.run(ctx, writer)
+}
+
+// run publishes through writer, and housekeeps beside it, until ctx ends and housekeeping has stopped.
+func (o Outbox) run(ctx context.Context, writer messageWriter) {
+	var housekeeping sync.WaitGroup
+	housekeeping.Go(func() { o.housekeep(ctx) })
+	defer housekeeping.Wait()
 	ticker := time.NewTicker(time.Second)
 	defer ticker.Stop()
-	var reported time.Time
 	for {
 		select {
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
 		}
-		for ctx.Err() == nil {
-			sent, err := o.publishBatch(ctx, writer)
-			if err != nil {
-				slog.Error("outbox_batch_failed", "error_category", fmt.Sprintf("%T", err))
-				break
-			}
-			if sent < OutboxBatch {
-				break
-			}
+		o.drain(ctx, writer, time.Now().Add(time.Second))
+	}
+}
+
+// housekeep reports and prunes the outbox every minute until ctx ends, apart from publishing, so a long
+// prune never holds events back.
+func (o Outbox) housekeep(ctx context.Context) {
+	ticker := time.NewTicker(time.Minute)
+	defer ticker.Stop()
+	for {
+		o.reportOutbox(ctx)
+		o.prune(ctx)
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
 		}
-		if time.Since(reported) >= time.Minute {
-			reported = time.Now()
-			o.reportOutbox(ctx)
-			o.prune(ctx)
+	}
+}
+
+// drain publishes batches until none is due or the deadline passes. a batch holds only the oldest event of each key, so a key's later events go out in the following batches,
+// not a tick later each.
+func (o Outbox) drain(ctx context.Context, writer messageWriter, deadline time.Time) {
+	for ctx.Err() == nil {
+		sent, err := o.publishBatch(ctx, writer)
+		if err != nil {
+			slog.Error("outbox_batch_failed", "error_category", fmt.Sprintf("%T", err))
+			return
+		}
+		if sent == 0 || !time.Now().Before(deadline) {
+			return
 		}
 	}
 }
@@ -190,24 +215,92 @@ func (o Outbox) reportOutbox(ctx context.Context) {
 	}
 }
 
-// prune deletes published events older than OutboxRetention, a batch at a time so a large first prune never
-// holds a long lock.
+// pruneBatch is how many published events one prune statement deletes.
+const pruneBatch = 1000
+
+// prune deletes published events older than OutboxRetention, a batch at a time so no statement holds a long
+// lock, until none is left or ten seconds have passed.
 func (o Outbox) prune(ctx context.Context) {
 	pruneCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
-	if _, err := pruneOutbox(pruneCtx, o.DB, OutboxRetention); err != nil {
+	pruned, err := pruneAll(pruneCtx, o.DB, OutboxRetention)
+	switch {
+	case err != nil && ctx.Err() == nil && errors.Is(pruneCtx.Err(), context.DeadlineExceeded):
+		// a large backlog takes more than one window; the next minute carries on.
+		slog.Info("outbox_prune_continues", "pruned", pruned)
+	case err != nil && ctx.Err() == nil:
 		slog.Error("outbox_prune_failed", "error_category", fmt.Sprintf("%T", err))
 	}
 }
 
-// pruneOutbox deletes up to 1000 rows published more than retention ago and reports how many it deleted.
+// pruneAll runs pruneOutbox until a batch comes back short, and reports how many it deleted in all.
+func pruneAll(ctx context.Context, db *pgxpool.Pool, retention time.Duration) (int64, error) {
+	var total int64
+	for {
+		n, err := pruneOutbox(ctx, db, retention)
+		total += n
+		if err != nil || n < pruneBatch {
+			return total, err
+		}
+	}
+}
+
+// pruneSQL deletes up to $2 events published more than $1 seconds ago, found through outbox_published.
+const pruneSQL = "DELETE FROM outbox WHERE id IN (SELECT id FROM outbox WHERE published_at<now()-make_interval(secs=>$1) LIMIT $2)"
+
+// pruneOutbox deletes up to pruneBatch rows published more than retention ago and reports how many it
+// deleted.
 func pruneOutbox(ctx context.Context, db *pgxpool.Pool, retention time.Duration) (int64, error) {
-	tag, err := db.Exec(ctx, "DELETE FROM outbox WHERE id IN (SELECT id FROM outbox WHERE published_at<now()-make_interval(secs=>$1) LIMIT 1000)", retention.Seconds())
+	tag, err := db.Exec(ctx, pruneSQL, retention.Seconds(), pruneBatch)
 	return tag.RowsAffected(), err
 }
 
-// remove matching outbox events in the same transaction as the data purge.
-func DiscardPendingBy(ctx context.Context, tx pgx.Tx, topics, key, value, org string) error {
-	_, err := tx.Exec(ctx, "DELETE FROM outbox WHERE topic LIKE $1 AND body->'data'->>$2::text=$3::text AND body->'data'->>'org_id'=$4", topics, key, value, org)
+// OutboxIndexes are the outbox's own indexes, for every service with an outbox to build (IndexBuilder): the
+// one its prune finds published events through, so each batch reads only the events it deletes. its prunes
+// scan the outbox until it is built.
+func OutboxIndexes() []Index {
+	return []Index{{Name: "outbox_published", Table: "outbox", Definition: "(published_at) WHERE published_at IS NOT NULL"}}
+}
+
+// PurgeKey is a data field DiscardPendingBy matches outbox events by, with the partial expression index over
+// the events that carry it (PurgeIndexes), so a purge reads only its own events instead of every body the
+// outbox keeps. only the keys below exist, so a purge by another field does not compile.
+type PurgeKey struct{ field, index string }
+
+// the fields outbox events are discarded by.
+var (
+	PurgeByAssessment = PurgeKey{"assessment_id", "outbox_data_assessment"}
+	PurgeByClassroom  = PurgeKey{"classroom_id", "outbox_data_classroom"}
+	PurgeByStudent    = PurgeKey{"student_id", "outbox_data_student"}
+)
+
+// expression is what a purge by the key matches and its index covers.
+func (k PurgeKey) expression() string { return "(body->'data'->>'" + k.field + "')" }
+
+// discardSQL is DiscardPendingBy's statement for the key.
+func discardSQL(key PurgeKey) string {
+	return "DELETE FROM outbox WHERE " + key.expression() + "=$2 AND topic LIKE $1 AND body->'data'->>'org_id'=$3"
+}
+
+// remove matching outbox events, published or not, in the same transaction as the data purge.
+func DiscardPendingBy(ctx context.Context, tx pgx.Tx, topics string, key PurgeKey, value, org string) error {
+	if key.field == "" {
+		return errors.New("outbox events are discarded by one of the purge keys")
+	}
+	_, err := tx.Exec(ctx, discardSQL(key), topics, value, org)
 	return err
+}
+
+// PurgeIndexes are the outbox indexes for the keys a service discards its events by (DiscardPendingBy), for it
+// to build (IndexBuilder); its purges scan the outbox until they are built.
+func PurgeIndexes(keys ...PurgeKey) []Index {
+	indexes := make([]Index, 0, len(keys))
+	for _, key := range keys {
+		if key.field == "" {
+			panic("outbox indexes are built for the purge keys")
+		}
+		field := key.expression()
+		indexes = append(indexes, Index{Name: key.index, Table: "outbox", Definition: "(" + field + ") WHERE " + field + " IS NOT NULL"})
+	}
+	return indexes
 }

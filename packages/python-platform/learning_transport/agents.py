@@ -219,8 +219,17 @@ class AgentClients:
     def ai_core_refused(self, resp: httpx.Response) -> UpstreamError:
         """ai-core's error; a refused token is dropped so the next call fetches a new one."""
         if resp.status_code == 401:
-            self.token.reset()
+            self.token.reset(refused_token(resp))
         return upstream_error("ai-core", resp)
+
+
+def refused_token(resp: httpx.Response) -> str | None:
+    """the bearer token the refused request carried, or none when the response has no request to read."""
+    try:
+        authorization = resp.request.headers.get("authorization", "")
+    except RuntimeError:  # a response built without its request
+        return None
+    return authorization.removeprefix("Bearer ") or None
 
 
 def _hit(result: object) -> bool:

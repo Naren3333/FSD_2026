@@ -11,6 +11,7 @@ func TestIdentityEventsMatchTheirSchemas(t *testing.T) {
 	for topic, value := range map[string]any{
 		platform.TopicClassroomDeleted:  platform.ClassroomDeleted{},
 		platform.TopicEnrollmentRemoved: platform.EnrollmentRemoved{},
+		platform.TopicEnrollmentAdded:   platform.EnrollmentAdded{},
 		platform.TopicUserDeleted:       platform.UserDeleted{},
 	} {
 		t.Run(topic, func(t *testing.T) { MatchesSchema(t, EventData(t, topic), value) })

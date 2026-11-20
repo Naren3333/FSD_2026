@@ -51,6 +51,15 @@ class ReopenedEvent(Envelope):
         return self
 
 
+# an evaluation's row: its newest revision, whether it is withdrawn, and whose it is, so purges find it.
+EVALUATION_COLUMNS = "evaluation_id,event_id,revision,withdrawn,assessment_id,classroom_id,org_id,student_id"
+EVALUATION_UPDATE = ",".join(f"{c}=EXCLUDED.{c}" for c in EVALUATION_COLUMNS.split(",")[1:])
+
+
+def owners(data: Finalized | Reopened) -> tuple[UUID, UUID, str, str]:
+    return data.assessment_id, data.classroom_id, data.org_id, data.student_id
+
+
 def admit(conn: Connection[Any], event_id: UUID, data: Finalized | Reopened) -> bool:
     """whether an event is new and its classroom, assessment and student are not deleted; takes their locks."""
     inserted = conn.execute(
@@ -77,12 +86,12 @@ def process(pool: ConnectionPool[Any], event: Event) -> None:
         if not admit(conn, event.event_id, data):
             return
         newer = conn.execute(
-            "INSERT INTO evaluations(evaluation_id,event_id,revision) VALUES(%s,%s,%s)"
-            " ON CONFLICT(evaluation_id) DO UPDATE SET event_id=EXCLUDED.event_id,revision=EXCLUDED.revision,withdrawn=false"
+            f"INSERT INTO evaluations({EVALUATION_COLUMNS}) VALUES(%s,%s,%s,false,%s,%s,%s,%s)"
+            f" ON CONFLICT(evaluation_id) DO UPDATE SET {EVALUATION_UPDATE}"
             " WHERE evaluations.revision<EXCLUDED.revision"
             " OR (evaluations.revision=EXCLUDED.revision AND evaluations.withdrawn)"
             " RETURNING evaluation_id",
-            (data.evaluation_id, event.event_id, data.revision),
+            (data.evaluation_id, event.event_id, data.revision, *owners(data)),
         ).fetchone()
         if newer is None:
             return
@@ -113,17 +122,17 @@ def withdraw(pool: ConnectionPool[Any], event: ReopenedEvent) -> None:
         if not admit(conn, event.event_id, data):
             return
         newer = conn.execute(
-            "INSERT INTO evaluations(evaluation_id,event_id,revision,withdrawn) VALUES(%s,%s,%s,true)"
-            " ON CONFLICT(evaluation_id) DO UPDATE SET event_id=EXCLUDED.event_id,revision=EXCLUDED.revision,withdrawn=true"
+            f"INSERT INTO evaluations({EVALUATION_COLUMNS}) VALUES(%s,%s,%s,true,%s,%s,%s,%s)"
+            f" ON CONFLICT(evaluation_id) DO UPDATE SET {EVALUATION_UPDATE}"
             " WHERE evaluations.revision<EXCLUDED.revision RETURNING evaluation_id",
-            (data.evaluation_id, event.event_id, data.revision),
+            (data.evaluation_id, event.event_id, data.revision, *owners(data)),
         ).fetchone()
         if newer is not None:
             conn.execute("DELETE FROM evidence WHERE evaluation_id=%s", (data.evaluation_id,))
 
 
 def remove_evidence(conn: Connection[Any], where: str, params: tuple[Any, ...]) -> None:
-    """delete the evidence `where` picks (a condition with %s placeholders for `params`) and the evaluations it was stored under."""
+    """delete the evidence and evaluations `where` picks (a condition on columns both tables have, with %s placeholders for `params`), withdrawn ones included, and the evaluations the evidence was stored under, which may predate those columns (migration 008)."""
     evaluations = conn.execute(
         f"DELETE FROM evidence WHERE {where} RETURNING evaluation_id", params
     ).fetchall()
@@ -132,6 +141,7 @@ def remove_evidence(conn: Connection[Any], where: str, params: tuple[Any, ...]) 
             "DELETE FROM evaluations WHERE evaluation_id = ANY(%s)",
             ([row["evaluation_id"] for row in evaluations],),
         )
+    conn.execute(f"DELETE FROM evaluations WHERE {where}", params)  # withdrawn ones, through its index
 
 
 def purge(pool: ConnectionPool[Any], event: ClassroomDeletedEvent) -> None:

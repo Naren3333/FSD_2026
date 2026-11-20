@@ -23,9 +23,9 @@ func (r racingStore) insertSubmission(ctx context.Context, v Assessment, sub Sub
 	return r.memoryStore.insertSubmission(ctx, v, sub)
 }
 
-func (r racingStore) saveAnswers(ctx context.Context, assessment, student string, answers map[string]string) (time.Time, error) {
+func (r racingStore) saveAnswers(ctx context.Context, assessment, student string, answers map[string]string, at time.Time) (time.Time, error) {
 	r.meanwhile()
-	return r.memoryStore.saveAnswers(ctx, assessment, student, answers)
+	return r.memoryStore.saveAnswers(ctx, assessment, student, answers, at)
 }
 
 func (r racingStore) updateAssessment(ctx context.Context, org string, before, v Assessment) error {
@@ -50,6 +50,13 @@ func changeIt(m *memoryStore, v Assessment) {
 	m.assessments[v.ID] = v
 }
 
+// replaceIt gives the first question a new identity, as replacing it in an edit would.
+func replaceIt(m *memoryStore, v Assessment) {
+	v.Questions = append([]Question(nil), v.Questions...)
+	v.Questions[0].ID = "replaced"
+	m.assessments[v.ID] = v
+}
+
 // pastDue moves the due date an hour back, with the given late policy, as a teacher's details change would.
 func pastDue(policy string) func(*memoryStore, Assessment) {
 	return func(m *memoryStore, v Assessment) {
@@ -57,6 +64,13 @@ func pastDue(policy string) func(*memoryStore, Assessment) {
 		v.DueAt, v.LatePolicy = &due, policy
 		m.assessments[v.ID] = v
 	}
+}
+
+// opensLater moves the opening an hour ahead, as a teacher's edit of a published assessment would.
+func opensLater(m *memoryStore, v Assessment) {
+	opens := time.Now().Add(time.Hour)
+	v.OpensAt = &opens
+	m.assessments[v.ID] = v
 }
 
 func TestAStudentRacingTheTeachersChangeIsToldWhatHappened(t *testing.T) {
@@ -75,6 +89,9 @@ func TestAStudentRacingTheTeachersChangeIsToldWhatHappened(t *testing.T) {
 		// stored.
 		{"submit while late work becomes refused", pastDue(lateReject), http.MethodPost, "/submissions", http.StatusConflict, "CLOSED"},
 		{"submit while the due date passes", pastDue(lateAccept), http.MethodPost, "/submissions", http.StatusCreated, `"late":true`},
+		{"save while late work becomes refused", pastDue(lateReject), http.MethodPut, "/saved-answers", http.StatusConflict, "CLOSED"},
+		{"save while the opening moves later", opensLater, http.MethodPut, "/saved-answers", http.StatusNotFound, "NOT_FOUND"},
+		{"save while its question is replaced", replaceIt, http.MethodPut, "/saved-answers", http.StatusConflict, "ASSESSMENT_CHANGED"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

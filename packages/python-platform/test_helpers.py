@@ -26,6 +26,7 @@ from learning_transport import (
     requires,
     sse_event,
 )
+from learning_transport.agents import refused_token
 from learning_transport.kafka import Envelope, parse
 from learning_transport.logs import JsonFormatter
 from learning_transport.testing import as_caller, token_claims
@@ -176,8 +177,50 @@ def test_a_service_token_is_cached_until_reset() -> None:
         async with httpx.AsyncClient(transport=httpx.MockTransport(answer)) as http:
             token = ServiceToken(http, "http://kc/token", "id", "secret")
             first, second = await token.get(), await token.get()
-            token.reset()
-            return [first, second, await token.get()]
+            token.reset(first)
+            replaced = await token.get()
+            token.reset(first)  # a late refusal of the old token
+            return [first, second, replaced, await token.get()]
+
+    assert run(scenario()) == ["t1", "t1", "t2", "t2"]
+
+
+def test_a_refusal_without_its_request_still_drops_the_token() -> None:
+    assert refused_token(httpx.Response(401)) is None
+    sent = httpx.Request("POST", "http://ai-core/v1/inference", headers={"Authorization": "Bearer t1"})
+    assert refused_token(httpx.Response(401, request=sent)) == "t1"
+
+    def answer(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json={"access_token": "t", "expires_in": 300})
+
+    async def scenario() -> bool:
+        async with httpx.AsyncClient(transport=httpx.MockTransport(answer)) as http:
+            token = ServiceToken(http, "http://kc/token", "id", "secret")
+            await token.get()
+            token.reset(None)
+            return token._token is None
+
+    assert run(scenario())
+
+
+def test_a_short_lived_service_token_is_reused_until_halfway(monkeypatch: pytest.MonkeyPatch) -> None:
+    clock = [100.0]
+    monkeypatch.setattr("learning_transport.tokens._now", lambda: clock[0])
+    calls = 0
+
+    def answer(request: httpx.Request) -> httpx.Response:
+        nonlocal calls
+        calls += 1
+        return httpx.Response(200, json={"access_token": f"t{calls}", "expires_in": 20})
+
+    async def scenario() -> list[str]:
+        async with httpx.AsyncClient(transport=httpx.MockTransport(answer)) as http:
+            token = ServiceToken(http, "http://kc/token", "id", "secret")
+            first = await token.get()
+            clock[0] += 9
+            reused = await token.get()
+            clock[0] += 2
+            return [first, reused, await token.get()]
 
     assert run(scenario()) == ["t1", "t1", "t2"]
 
@@ -279,6 +322,32 @@ def test_migrations_reject_gaps_and_bad_names(tmp_path: Path, names: list[str]) 
         (tmp_path / name).write_text("SELECT 1;")
     with pytest.raises(ValueError):
         migrations(tmp_path)
+
+
+def test_a_migrated_sync_pool_opens_only_after_every_step_is_applied(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from learning_transport import db
+
+    (tmp_path / "001_init.sql").write_text("CREATE TABLE usage (created_at timestamptz);")
+    (tmp_path / "002_index.sql").write_text(
+        f"{db.CONCURRENT_DIRECTIVE}\nCREATE INDEX CONCURRENTLY usage_by_date ON usage (created_at);\n"
+    )
+    calls: list[Any] = []
+
+    async def migrate(url: str, steps: list[db.Migration]) -> None:
+        calls.append(("migrated", url, [s.version for s in steps]))
+
+    def opened(url: str) -> Any:
+        calls.append(("opened", url))
+        return "pool"
+
+    monkeypatch.setattr(db, "migrate_with_concurrent_indexes", migrate)
+    monkeypatch.setattr(db, "sync_pool", opened)
+    assert run(db.open_migrated_pool("postgresql://x", tmp_path)) == "pool"
+    assert calls == [("migrated", "postgresql://x", [1, 2]), ("opened", "postgresql://x")]
+    with pytest.raises(ValueError, match="open_migrated_pool"):
+        db.open_pool("postgresql://x", tmp_path)
 
 
 @pytest.mark.parametrize(

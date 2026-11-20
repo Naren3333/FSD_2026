@@ -6,11 +6,13 @@ import (
 	"errors"
 	"learning/platform"
 	"learning/platform/platformtest"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
 	"time"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
@@ -673,6 +675,214 @@ func TestARemovedStudentsWorkIsKeptButNotMarked(t *testing.T) {
 	}
 }
 
+// enrollment is identity.enrollment.added.v1 for student-a in the test submissions' classroom, made at the
+// given time.
+func enrollment(t *testing.T, at time.Time) platform.Event {
+	t.Helper()
+	data, err := json.Marshal(platform.EnrollmentAdded{Classroom: submissionID, Org: "org", Student: "student-a"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return platform.Event{Type: platform.TopicEnrollmentAdded, Resource: submissionID, Timestamp: at, Data: data}
+}
+
+// a student enrolled again after their removal gets ai suggestions for the work they submitted before it,
+// whichever of the two events arrives first, until a newer removal.
+func TestAStudentEnrolledAgainIsMarkedAgain(t *testing.T) {
+	for _, returnFirst := range []bool{false, true} {
+		db := testDB(t)
+		submitted := time.Date(2026, 10, 1, 9, 0, 0, 0, time.UTC)
+		submit(t, db, submissionA, "student-a", map[string]any{"submitted_at": submitted})
+		events := []struct {
+			handle platform.Handler
+			event  platform.Event
+		}{{removeStudent, removal(t, submitted.Add(time.Hour))}, {restoreStudent, enrollment(t, submitted.Add(2*time.Hour))}}
+		if returnFirst {
+			events[0], events[1] = events[1], events[0]
+		}
+		for _, e := range events {
+			for range 2 { // a repeated event changes nothing
+				if err := apply(t, db, e.handle, e.event); err != nil {
+					t.Fatal(err)
+				}
+			}
+		}
+		// an older, replayed enrollment does not move the latest one back.
+		if err := apply(t, db, restoreStudent, enrollment(t, submitted)); err != nil {
+			t.Fatal(err)
+		}
+		ai := &fakeSuggester{output: grounded3(t)}
+		markOnce(t, marker{db, ai})
+		if e := load(t, db, submissionA).evidence[0]; ai.calls != 1 || e.Suggestion == nil || e.Suggestion.Status != suggestionReady {
+			t.Fatalf("return first %v: calls %d, suggestion %+v", returnFirst, ai.calls, e.Suggestion)
+		}
+	}
+	db := testDB(t)
+	submitted := time.Date(2026, 10, 1, 9, 0, 0, 0, time.UTC)
+	submit(t, db, submissionA, "student-a", map[string]any{"submitted_at": submitted})
+	for _, e := range []struct {
+		handle platform.Handler
+		event  platform.Event
+	}{{restoreStudent, enrollment(t, submitted.Add(time.Hour))}, {removeStudent, removal(t, submitted.Add(2*time.Hour))}} {
+		if err := apply(t, db, e.handle, e.event); err != nil {
+			t.Fatal(err)
+		}
+	}
+	ai := &fakeSuggester{output: grounded3(t)}
+	markOnce(t, marker{db, ai})
+	if e := load(t, db, submissionA).evidence[0]; ai.calls != 0 || e.Suggestion == nil || e.Suggestion.Reason != "STUDENT_REMOVED" {
+		t.Fatalf("removed after returning: calls %d, suggestion %+v", ai.calls, e.Suggestion)
+	}
+	malformed := enrollment(t, time.Time{})
+	var invalid platform.InvalidEvent
+	if err := apply(t, db, restoreStudent, malformed); !errors.As(err, &invalid) {
+		t.Fatalf("an enrollment without a time: %v", err)
+	}
+}
+
+// work whose suggestion stopped while its student was out is queued again by a return newer than the removal,
+// once however often it is delivered, and gets the suggestion; an older return leaves it stopped.
+func TestAReturnQueuesAgainTheMarkingStoppedByARemoval(t *testing.T) {
+	db := testDB(t)
+	submitted := time.Date(2026, 10, 1, 9, 0, 0, 0, time.UTC)
+	submit(t, db, submissionA, "student-a", map[string]any{"submitted_at": submitted})
+	if err := apply(t, db, removeStudent, removal(t, submitted.Add(time.Hour))); err != nil {
+		t.Fatal(err)
+	}
+	ai := &fakeSuggester{output: grounded3(t)}
+	markOnce(t, marker{db, ai})
+	if e := load(t, db, submissionA).evidence[0]; ai.calls != 0 || jobs(t, db) != 0 || e.Suggestion.Reason != reasonStudentRemoved {
+		t.Fatalf("removed: calls %d, jobs %d, %+v", ai.calls, jobs(t, db), e.Suggestion)
+	}
+	if err := apply(t, db, restoreStudent, enrollment(t, submitted.Add(30*time.Minute))); err != nil {
+		t.Fatal(err)
+	}
+	if e := load(t, db, submissionA).evidence[0]; jobs(t, db) != 0 || e.Suggestion.Reason != reasonStudentRemoved {
+		t.Fatalf("a return older than the removal queued it: jobs %d, %+v", jobs(t, db), e.Suggestion)
+	}
+	for range 2 { // a repeated return queues it once
+		if err := apply(t, db, restoreStudent, enrollment(t, submitted.Add(2*time.Hour))); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if jobs(t, db) != 1 {
+		t.Fatalf("jobs %d", jobs(t, db))
+	}
+	markOnce(t, marker{db, ai})
+	if e := load(t, db, submissionA).evidence[0]; ai.calls != 1 || e.Suggestion.Status != suggestionReady {
+		t.Fatalf("back in the classroom: calls %d, %+v", ai.calls, e.Suggestion)
+	}
+}
+
+// a first enrollment, with no removal before it, queues nothing again: only a return does.
+func TestAFirstEnrollmentQueuesNothingAgain(t *testing.T) {
+	db := testDB(t)
+	submitted := time.Date(2026, 10, 1, 9, 0, 0, 0, time.UTC)
+	submit(t, db, submissionA, "student-a", map[string]any{"submitted_at": submitted})
+	// a stopped suggestion with no removal recorded, which only a return would queue again.
+	if _, err := db.Exec(t.Context(), `DELETE FROM marking_jobs`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(t.Context(), `UPDATE evaluations SET evidence=jsonb_set(evidence,'{0,suggestion}',jsonb_build_object('status','failed','reason',$1::text)) WHERE id=$2`, reasonStudentRemoved, submissionA); err != nil {
+		t.Fatal(err)
+	}
+	if err := apply(t, db, restoreStudent, enrollment(t, submitted.Add(time.Hour))); err != nil {
+		t.Fatal(err)
+	}
+	if e := load(t, db, submissionA).evidence[0]; jobs(t, db) != 0 || e.Suggestion == nil || e.Suggestion.Reason != reasonStudentRemoved {
+		t.Fatalf("a first enrollment queued work again: jobs %d, %+v", jobs(t, db), e.Suggestion)
+	}
+}
+
+// a worker that read the student as removed just before their return was recorded does not stop the
+// suggestion: settling finds them back and runs the job again.
+func TestASettlementRacingAReturnRunsTheJobAgain(t *testing.T) {
+	db := testDB(t)
+	submitted := time.Date(2026, 10, 1, 9, 0, 0, 0, time.UTC)
+	submit(t, db, submissionA, "student-a", map[string]any{"submitted_at": submitted})
+	if err := apply(t, db, removeStudent, removal(t, submitted.Add(time.Hour))); err != nil {
+		t.Fatal(err)
+	}
+	ai := &fakeSuggester{output: grounded3(t)}
+	m := marker{db, ai}
+	j, found, err := m.lease(t.Context())
+	if err != nil || !found {
+		t.Fatalf("no job leased: %v", err)
+	}
+	if err = apply(t, db, restoreStudent, enrollment(t, submitted.Add(2*time.Hour))); err != nil {
+		t.Fatal(err)
+	}
+	if err = m.finish(t.Context(), j, &Suggestion{Status: suggestionFailed, Reason: reasonStudentRemoved}); err != nil {
+		t.Fatal(err)
+	}
+	if e := load(t, db, submissionA).evidence[0]; jobs(t, db) != 1 || e.Suggestion.Status != suggestionPending {
+		t.Fatalf("settled as removed after the return: jobs %d, %+v", jobs(t, db), e.Suggestion)
+	}
+	// the attempt that made no ai call is not counted.
+	var attempts int
+	if err = db.QueryRow(t.Context(), "SELECT attempts FROM marking_jobs").Scan(&attempts); err != nil || attempts != j.attempts-1 {
+		t.Fatalf("attempts %d after leasing at %d, %v", attempts, j.attempts, err)
+	}
+	markOnce(t, m)
+	if e := load(t, db, submissionA).evidence[0]; ai.calls != 1 || e.Suggestion.Status != suggestionReady {
+		t.Fatalf("calls %d, %+v", ai.calls, e.Suggestion)
+	}
+}
+
+// an enrollment or removal arriving after its classroom's purge or its student's deletion records nothing.
+func TestAnEnrollmentAfterAPurgeIsNotRecorded(t *testing.T) {
+	for _, purged := range []string{
+		"INSERT INTO purged_classrooms(classroom_id,org_id) VALUES('" + submissionID + "','org')",
+		"INSERT INTO deleted_users(user_id,org_id) VALUES('student-a','org')",
+	} {
+		db := testDB(t)
+		if _, err := db.Exec(t.Context(), purged); err != nil {
+			t.Fatal(err)
+		}
+		if err := apply(t, db, restoreStudent, enrollment(t, time.Now())); err != nil {
+			t.Fatal(err)
+		}
+		if err := apply(t, db, removeStudent, removal(t, time.Now())); err != nil {
+			t.Fatal(err)
+		}
+		if n := count(t, db, "SELECT count(*) FROM enrollment_returns") + count(t, db, "SELECT count(*) FROM removed_enrollments"); n != 0 {
+			t.Fatalf("%s: %d rows recorded after it", purged, n)
+		}
+	}
+}
+
+// a classroom's purge and its student's account deletion both remove the returns recorded for them.
+func TestPurgesRemoveEnrollmentReturns(t *testing.T) {
+	student := "b1b2c3d4-0000-4000-8000-0000000000ee"
+	for _, deleted := range []string{"classroom", "student"} {
+		db := testDB(t)
+		returned := enrollment(t, time.Now())
+		data, err := json.Marshal(platform.EnrollmentAdded{Classroom: submissionID, Org: "org", Student: student})
+		if err != nil {
+			t.Fatal(err)
+		}
+		returned.Data = data
+		if err = apply(t, db, restoreStudent, returned); err != nil {
+			t.Fatal(err)
+		}
+		handle, event := purge, platform.Event{Type: platform.TopicClassroomDeleted, Resource: submissionID}
+		event.Data, err = json.Marshal(platform.ClassroomDeleted{Classroom: submissionID, Org: "org"})
+		if deleted == "student" {
+			handle, event = purgeUser, platform.Event{Type: platform.TopicUserDeleted, Resource: student}
+			event.Data, err = json.Marshal(platform.UserDeleted{User: student, Org: "org", Role: "student"})
+		}
+		if err == nil {
+			err = apply(t, db, handle, event)
+		}
+		if err != nil {
+			t.Fatal(err)
+		}
+		if n := count(t, db, "SELECT count(*) FROM enrollment_returns"); n != 0 {
+			t.Fatalf("the %s purge left %d returns", deleted, n)
+		}
+	}
+}
+
 // dueChange is assessment.due_changed.v1 for the test submissions' assessment, made at the given time.
 func dueChange(t *testing.T, due *time.Time, at time.Time) platform.Event {
 	t.Helper()
@@ -934,5 +1144,47 @@ func TestAReopenedGradeOfAReassignedClassroomBillsItsNewTeacher(t *testing.T) {
 	}
 	if p := payer(t, db, submissionA); p == nil || *p != "teacher-new" {
 		t.Fatalf("a reopened grade's payer = %v", p)
+	}
+}
+
+// a return finds the student's drafts, an account's purge its evaluations, and purges their audit entries,
+// through the indexes grading builds beside its work.
+func TestGradingFindsItsRowsThroughTheIndexesItBuilds(t *testing.T) {
+	db := testDB(t)
+	ctx := t.Context()
+	if err := platform.BuildIndexes(ctx, db, indexes()); err != nil {
+		t.Fatal(err)
+	}
+	tx, err := db.Begin(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer tx.Rollback(ctx)
+	if _, err = tx.Exec(ctx, "SET LOCAL enable_seqscan=off"); err != nil {
+		t.Fatal(err)
+	}
+	classroom := "6f1c5d2e-8a4b-4c3d-9e2f-1a2b3c4d5e6f"
+	// a student's drafts in a classroom may come through either index that leads with one of the two.
+	for _, c := range []struct {
+		sql     string
+		indexes []string
+		args    []any
+	}{
+		{draftsOfStudent, []string{"evaluations_classroom_student", "evaluations_student"}, []any{classroom, "s", "o", statusDraft}},
+		{"SELECT 1 FROM evaluations WHERE student_id=$1 AND org_id=$2 FOR UPDATE", []string{"evaluations_student"}, []any{"s", "o"}},
+		{"SELECT 1 FROM evaluations WHERE classroom_id=$1 AND org_id=$2 FOR UPDATE", []string{"evaluations_classroom_student"}, []any{classroom, "o"}},
+		{"DELETE FROM audit WHERE evaluation_id IN (SELECT id FROM evaluations WHERE classroom_id=$1 AND org_id=$2)", []string{"audit_evaluation"}, []any{classroom, "o"}},
+	} {
+		rows, err := tx.Query(ctx, "EXPLAIN "+c.sql, c.args...)
+		var plan []string
+		if err == nil {
+			plan, err = pgx.CollectRows(rows, pgx.RowTo[string])
+		}
+		indexed := slices.ContainsFunc(plan, func(line string) bool {
+			return slices.ContainsFunc(c.indexes, func(index string) bool { return strings.Contains(line, index) })
+		})
+		if err != nil || !indexed || slices.ContainsFunc(plan, func(line string) bool { return strings.Contains(line, "Seq Scan") }) {
+			t.Fatalf("%s: plan %v, %v", c.sql, plan, err)
+		}
 	}
 }
