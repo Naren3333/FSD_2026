@@ -104,29 +104,16 @@
                 }
               </p>
             </div>
-            @if (grade.status === 'draft') {
-              <button
-                type="button"
-                class="secondary"
-                [id]="'open-' + grade.id"
-                [attr.aria-describedby]="'grade-name-' + grade.id"
-                (click)="show(grade)"
-                [disabled]="state.busy()"
-              >
-                Review grade
-              </button>
-            } @else {
-              <button
-                type="button"
-                class="secondary"
-                [id]="'open-' + grade.id"
-                [attr.aria-describedby]="'grade-name-' + grade.id"
-                (click)="show(grade)"
-                [disabled]="state.busy()"
-              >
-                View grade
-              </button>
-            }
+            <button
+              type="button"
+              class="secondary"
+              [id]="'open-' + grade.id"
+              [attr.aria-describedby]="'grade-name-' + grade.id"
+              (click)="show(grade)"
+              [disabled]="state.busy()"
+            >
+              {{ grade.status === 'draft' ? 'Review grade' : 'View grade' }}
+            </button>
           </article>
         } @empty {
           @if (grades.value()?.grades?.length) {

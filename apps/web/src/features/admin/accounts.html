@@ -60,7 +60,7 @@
     <h3 #createdHeading id="created-title" tabindex="-1">
       {{
         passwordReset()
-          ? 'New temporary password for ' + (account.display_name || account.username)
+          ? 'New temporary password for ' + studentName(account)
           : account.display_name + ' can now sign in'
       }}
     </h3>
@@ -128,7 +128,7 @@
             @for (account of accounts.value()?.accounts ?? []; track account.id) {
               <tr>
                 <th scope="row">
-                  <strong>{{ account.display_name || account.username || 'Name not recorded yet' }}</strong>
+                  <strong>{{ studentName(account) || 'Name not recorded yet' }}</strong>
                 </th>
                 <td data-label="Username" class="identifier">{{ account.username || '–' }}</td>
                 <td class="actions-cell">

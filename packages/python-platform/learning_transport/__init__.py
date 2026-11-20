@@ -1,6 +1,6 @@
 """shared transport, authentication and operational helpers for the python services."""
 
-from learning_transport.app import OIDC_SETTINGS, application, placeholder_app, require_env
+from learning_transport.app import OIDC_SETTINGS, application, require_env
 from learning_transport.auth import (
     AI_CLIENT,
     MONITORING_READER,
@@ -45,7 +45,6 @@ __all__ = [
     "caller",
     "failure",
     "keyset",
-    "placeholder_app",
     "read_events",
     "require_env",
     "require_relation",

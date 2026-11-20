@@ -3,20 +3,16 @@
 import logging
 import os
 import time
-from collections.abc import AsyncIterator
-from contextlib import asynccontextmanager
 from typing import Any
 from uuid import UUID, uuid4
 
 from fastapi import Depends, FastAPI, HTTPException, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
-from pydantic import BaseModel
 from starlette.responses import Response
 
 from learning_transport import logs, metrics
 from learning_transport.auth import AI_CLIENT, MONITORING_READER, Claims, requires
-from learning_transport.errors import ErrorResponse, unavailable
 
 OIDC_SETTINGS = ("OIDC_ISSUER", "OIDC_AUDIENCE", "OIDC_JWKS_URL")
 
@@ -85,7 +81,7 @@ def application(name: str, **kwargs: Any) -> FastAPI:
             "request",
             extra={
                 **ids,
-                "duration_ms": round((time.monotonic() - start) * 1000),
+                "duration_ms": round(elapsed * 1000),
                 "status": response.status_code,
                 "error_category": "http_error" if response.status_code >= 400 else None,
             },
@@ -107,31 +103,5 @@ def application(name: str, **kwargs: Any) -> FastAPI:
     @app.get("/internal/http-metrics", include_in_schema=False)
     async def http_headers(_caller: Claims = Depends(requires(MONITORING_READER))) -> JSONResponse:
         return JSONResponse(metrics.header_histogram(), headers={"Cache-Control": "no-store"})
-
-    return app
-
-
-def placeholder_app(
-    name: str, path: str, capability: str, request_model: type[BaseModel], response_model: type[BaseModel]
-) -> FastAPI:
-    """an ai agent whose capability is not authorized yet: `post path` validates the versioned request contract for an ai-client caller, then answers 501 for `capability`."""
-
-    @asynccontextmanager
-    async def lifespan(app: FastAPI) -> AsyncIterator[None]:
-        require_env(*OIDC_SETTINGS)
-        yield
-
-    app = application(name, lifespan=lifespan)
-
-    @app.get("/health/ready")
-    def ready() -> dict[str, str]:
-        return {"status": "ready", "capability": "not_implemented"}
-
-    @app.post(path, response_model=response_model, responses={501: {"model": ErrorResponse}})
-    def execute(
-        request: request_model,  # type: ignore[valid-type]
-        _caller: Claims = Depends(requires(AI_CLIENT)),
-    ) -> JSONResponse:
-        return unavailable(capability)
 
     return app

@@ -269,17 +269,16 @@ class Workspace:
         """the rest of the class's pooled accuracy on each of the student's topics, next to the student's own; the student is left out so their own marks do not pull the class figure toward theirs."""
         students = [s for s in students if s.get("student_id") != student_id]
         wanted = [t for t in self.summary if topic is None or t["topic_id"] == topic.topic_id]
+        ids = {t["topic_id"] for t in wanted}
+        pooled: dict[str, tuple[int, int, int]] = {}
+        for s in students:
+            for m in s.get("topics") or []:
+                if (topic_id := m.get("topic_id")) in ids:
+                    attempted, correct, learners = pooled.get(topic_id, (0, 0, 0))
+                    pooled[topic_id] = (attempted + m["attempted"], correct + m["correct"], learners + 1)
         rows = []
         for t in wanted:
-            attempted = correct = learners = 0
-            for s in students:
-                for m in s.get("topics") or []:
-                    if m.get("topic_id") == t["topic_id"]:
-                        attempted, correct, learners = (
-                            attempted + m["attempted"],
-                            correct + m["correct"],
-                            learners + 1,
-                        )
+            attempted, correct, learners = pooled.get(t["topic_id"], (0, 0, 0))
             rows.append(
                 {
                     "topic": self.topics[t["topic_id"]].ref,

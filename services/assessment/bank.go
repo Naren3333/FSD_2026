@@ -75,14 +75,14 @@ type bankFilter struct {
 // bankSource is the assessment question a bank question is saved from.
 type bankSource struct{ assessment, question string }
 
-// lockOwner holds the teacher's account lock shared until tx ends and refuses a deleted account, so no bank
-// row lands after the account's purge.
-func lockOwner(ctx context.Context, tx pgx.Tx, owner string) error {
-	if err := platform.LockShared(ctx, tx, platform.LockUser, owner); err != nil {
+// lockLiveUser holds the user's account lock shared until tx ends and refuses a deleted account, so nothing
+// of theirs lands after the account's purge.
+func lockLiveUser(ctx context.Context, tx pgx.Tx, user string) error {
+	if err := platform.LockShared(ctx, tx, platform.LockUser, user); err != nil {
 		return err
 	}
 	var deleted bool
-	if err := tx.QueryRow(ctx, "SELECT EXISTS(SELECT 1 FROM deleted_users WHERE user_id=$1)", owner).Scan(&deleted); err != nil {
+	if err := tx.QueryRow(ctx, "SELECT EXISTS(SELECT 1 FROM deleted_users WHERE user_id=$1)", user).Scan(&deleted); err != nil {
 		return err
 	}
 	if deleted {
@@ -105,7 +105,7 @@ func (p pgStore) insertBankQuestion(ctx context.Context, org, owner string, q Qu
 		return "", err
 	}
 	defer tx.Rollback(ctx)
-	if err = lockOwner(ctx, tx, owner); err != nil {
+	if err = lockLiveUser(ctx, tx, owner); err != nil {
 		return "", err
 	}
 	if err = platform.Lock(ctx, tx, lockBank, owner); err != nil {
@@ -182,7 +182,7 @@ func (p pgStore) ownerWrite(ctx context.Context, owner string, write func(tx pgx
 		return err
 	}
 	defer tx.Rollback(ctx)
-	if err = lockOwner(ctx, tx, owner); err != nil {
+	if err = lockLiveUser(ctx, tx, owner); err != nil {
 		return err
 	}
 	n, err := write(tx)

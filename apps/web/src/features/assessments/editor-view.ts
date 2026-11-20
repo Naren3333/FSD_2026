@@ -20,6 +20,7 @@ import {
   forBank,
   markWrittenBy,
   marksText,
+  sizeText,
   parseLevels,
   questionForm,
   rubricTotal,
@@ -252,9 +253,8 @@ export class AssessmentEditorComponent {
 
   /* "3 questions · 8 marks", for the save bar. */
   size(): string {
-    const count = this.questions.length;
     const marks = this.questions.controls.reduce((sum, q) => sum + this.marksOf(q), 0);
-    return `${count} ${count === 1 ? 'question' : 'questions'} · ${marksText(marks)}`;
+    return sizeText(this.questions.length, marks);
   }
 
   /* the outline's line for a question: the start of its prompt. */

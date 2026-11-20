@@ -28,7 +28,7 @@ type keycloakUsers struct {
 
 func newKeycloakUsers() keycloakUsers {
 	base, realm := strings.TrimRight(platform.Required("KEYCLOAK_URL"), "/"), platform.Env("KEYCLOAK_REALM", "learning")
-	client := &http.Client{Timeout: 10 * time.Second}
+	client := &http.Client{Timeout: 10 * time.Second, Transport: platform.Transport}
 	return keycloakUsers{
 		admin:  base + "/admin/realms/" + url.PathEscape(realm),
 		tokens: &platform.ServiceToken{URL: base + "/realms/" + url.PathEscape(realm) + "/protocol/openid-connect/token", ID: platform.Env("ACCOUNTS_CLIENT_ID", "identity-accounts"), Secret: platform.Required("ACCOUNTS_CLIENT_SECRET"), Client: client},

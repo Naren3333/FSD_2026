@@ -13,7 +13,7 @@ import { ConfirmDialogComponent } from '../../shared/confirm-dialog';
 import { FieldComponent, FieldControlDirective } from '../../shared/field';
 import { IconComponent } from '../../shared/icon';
 import { documentLimit, documentMime, isIndexable, openOriginal } from '../../shared/files';
-import { date } from '../../shared/format';
+import { date, plural } from '../../shared/format';
 import { NoClassroomComponent } from '../../shared/no-classroom';
 import { rereadAfterDelete } from '../../shared/section';
 import { SectionStateComponent } from '../../shared/section-state';
@@ -51,8 +51,6 @@ export function typeName(doc: DocumentRecord): string {
   return TYPE_NAMES[doc.mime_type] ?? (doc.mime_type.split('/').pop() ?? doc.mime_type).toUpperCase();
 }
 
-const count = (n: number | undefined, noun: string) => `${n ?? 0} ${noun}${n === 1 ? '' : 's'}`;
-
 /* what a document's status means for the reader; never implies text extraction is search indexing. */
 export function describe(doc: DocumentRecord): { label: string; detail: string } {
   switch (doc.status) {
@@ -66,7 +64,7 @@ export function describe(doc: DocumentRecord): { label: string; detail: string }
     case 'indexed':
       return {
         label: 'Indexed',
-        detail: `${doc.mime_type === 'application/pdf' ? count(doc.page_count, 'page') + ', ' : doc.mime_type.endsWith('presentation') ? count(doc.page_count, 'slide') + ', ' : ''}${count(doc.chunk_count, 'passage')}. Available to the assistant.`,
+        detail: `${doc.mime_type === 'application/pdf' ? plural(doc.page_count ?? 0, 'page') + ', ' : doc.mime_type.endsWith('presentation') ? plural(doc.page_count ?? 0, 'slide') + ', ' : ''}${plural(doc.chunk_count ?? 0, 'passage')}. Available to the assistant.`,
       };
     case 'failed':
       return {

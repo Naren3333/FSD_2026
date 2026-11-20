@@ -49,5 +49,4 @@ def cached(root: Path, names: list[str]) -> dict[str, list[float]]:
 
 
 def store(root: Path, vectors: dict[str, list[float]]) -> None:
-    for name, vector in vectors.items():
-        local_cache.write(root / f"{name}.json", vector)
+    local_cache.write_many([(root / f"{name}.json", vector) for name, vector in vectors.items()])

@@ -54,34 +54,55 @@ def read(path: Path) -> Any:
 
 def write(path: Path, value: Any) -> None:
     """cache/storage failures never fail successful provider work."""
+    write_many([(path, value)])
+
+
+def write_many(entries: list[tuple[Path, Any]]) -> None:
+    """write each entry, then prune at most once for the batch."""
     global _writes, _last_prune
+    written = [path.parent for path, value in entries if _put(path, value)]
+    if not written:
+        return
+    with _maintenance:
+        before, _writes = _writes, _writes + len(written)
+        prune = before // 64 != _writes // 64 or time.monotonic() - _last_prune > 60
+        if prune:
+            _last_prune = time.monotonic()
+    if not prune:
+        return
+    try:
+        for folder in set(written):
+            _prune(folder)
+    except OSError:
+        log.warning("cache_write_failed")
+
+
+def _put(path: Path, value: Any) -> bool:
     tmp = path.with_suffix(f".{uuid.uuid4().hex}.tmp")
     try:
         path.parent.mkdir(parents=True, exist_ok=True)
         tmp.write_text(json.dumps(value, separators=(",", ":")), encoding="utf-8")
         if tmp.stat().st_size > MAX_BYTES:
-            return
+            return False
         os.replace(tmp, path)
-        with _maintenance:
-            _writes += 1
-            prune = _writes % 64 == 0 or time.monotonic() - _last_prune > 60
-            if prune:
-                _last_prune = time.monotonic()
-        if not prune:
-            return
-        entries = sorted(
-            ((entry, entry.stat()) for entry in path.parent.glob("*.json")),
-            key=lambda e: e[1].st_mtime,
-            reverse=True,
-        )
-        size = 0
-        now = time.time()
-        for entry, stat in entries:
-            size += stat.st_size
-            if size > MAX_BYTES or now - stat.st_mtime > TTL:
-                entry.unlink(missing_ok=True)
+        return True
     except OSError:
         log.warning("cache_write_failed")
+        return False
     finally:
         with suppress(OSError):
             tmp.unlink(missing_ok=True)
+
+
+def _prune(folder: Path) -> None:
+    entries = sorted(
+        ((entry, entry.stat()) for entry in folder.glob("*.json")),
+        key=lambda e: e[1].st_mtime,
+        reverse=True,
+    )
+    size = 0
+    now = time.time()
+    for entry, stat in entries:
+        size += stat.st_size
+        if size > MAX_BYTES or now - stat.st_mtime > TTL:
+            entry.unlink(missing_ok=True)

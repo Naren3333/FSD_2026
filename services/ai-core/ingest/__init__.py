@@ -218,7 +218,9 @@ def _parse_and_chunk(path: Path, seen: list[vision.PageVision | None] | None) ->
         # landscape decks use page boundaries; prose keeps section-aware packing across pages.
         slides = (
             settings.slide_chunks
-            and sum(raw.load_page(n).rect.width > raw.load_page(n).rect.height for n in range(raw.page_count))
+            and sum(
+                rect.width > rect.height for rect in (raw.load_page(n).rect for n in range(raw.page_count))
+            )
             > raw.page_count / 2
         )
     return document, chunk_paras(

@@ -37,6 +37,7 @@ import { AnswerSheetComponent, schedule } from './answer-sheet';
 import { AssessmentEditorComponent } from './editor-view';
 import { ResitBuilderComponent } from './resit-builder';
 import { focusLater } from '../../shared/focus';
+import { plural } from '../../shared/format';
 
 /* why a published assessment's replacement was refused, after which the editor keeps only its details. */
 const LOCKED =
@@ -388,7 +389,7 @@ export class AssessmentsComponent {
     const count = saved.assignees?.length ?? 0;
     this.announce = {
       id: saved.id,
-      message: `Resit draft created for ${count} ${count === 1 ? 'student' : 'students'}. Review it, then publish it.`,
+      message: `Resit draft created for ${plural(count, 'student')}. Review it, then publish it.`,
     };
     // the newest assessment is first on page one.
     this.assessments.page.set(0);

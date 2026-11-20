@@ -20,7 +20,7 @@ from learning_transport.kafka import (
 )
 from psycopg import Connection
 from psycopg_pool import ConnectionPool
-from pydantic import Field, model_validator
+from pydantic import Field
 
 from domain import FINALIZED, AssessmentDeletedEvent, Event, Finalized
 
@@ -41,14 +41,9 @@ class Reopened(Contract):
 class ReopenedEvent(Envelope):
     """a released grade its teacher reopened to correct; a draft again at `revision` (adr 0016)."""
 
+    resource = "evaluation_id"
     event_type: Literal["grading.reopened.v1"]
     data: Reopened
-
-    @model_validator(mode="after")
-    def keyed(self) -> "ReopenedEvent":
-        if self.resource_id != self.data.evaluation_id:
-            raise ValueError("Not a reopened grading event")
-        return self
 
 
 # an evaluation's row: its newest revision, whether it is withdrawn, and whose it is, so purges find it.

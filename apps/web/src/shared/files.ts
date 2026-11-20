@@ -23,11 +23,6 @@ export function documentLimit(file: { name: string }): number {
     : 50 * 1024 * 1024;
 }
 
-/* whether a chosen file is a pdf, by its name. */
-export function isPdf(file: { name: string }): boolean {
-  return /\.pdf$/i.test(file.name);
-}
-
 /* opens a document's original in a new tab, at `fragment`: the tab opens before the read so it isn't blocked as
 a pop-up, and the file's url is revoked a minute later. */
 export function openOriginal(

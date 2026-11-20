@@ -21,6 +21,11 @@ export function resetTime(iso: string, now = new Date()): string {
     : `${time} on ${at.toLocaleDateString(LOCALE, { day: 'numeric', month: 'short' })}`;
 }
 
+/* a count and its noun, such as "1 question" or "3 questions". */
+export function plural(n: number, noun: string): string {
+  return `${n} ${n === 1 ? noun : `${noun}s`}`;
+}
+
 /* a day, such as "13 oct 2026". */
 export function date(iso: string): string {
   return new Date(iso).toLocaleDateString(LOCALE, { dateStyle: 'medium' });

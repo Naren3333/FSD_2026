@@ -29,6 +29,7 @@ import {
   suggestedQuestions,
   weakTopics,
 } from './resit';
+import { plural } from '../../shared/format';
 
 /* the resit builder (`/assessments?resit=<id>`, adr 0017): students and topics suggested from the original's finalized grades, then its questions and the bank's, created as a draft for the teacher to review and publish. */
 @Component({
@@ -353,7 +354,7 @@ export class ResitBuilderComponent implements OnChanges {
         });
         this.created.emit(saved);
       },
-      `Resit draft created for ${count} ${count === 1 ? 'student' : 'students'}.`,
+      `Resit draft created for ${plural(count, 'student')}.`,
     );
   }
 

@@ -5,7 +5,7 @@ import os
 import threading
 from collections.abc import Callable
 from datetime import datetime
-from typing import Any, Literal
+from typing import Any, ClassVar, Literal, Self
 from uuid import UUID
 
 from confluent_kafka import Consumer, KafkaException, Message, Producer
@@ -38,6 +38,9 @@ class Envelope(Contract):
     timestamp: datetime
     correlation_id: UUID
     resource_id: UUID
+    # the data field an event's resource_id names, checked for every event that sets it.
+    resource: ClassVar[str | None] = None
+    data: Any
 
     @field_validator("timestamp")
     @classmethod
@@ -45,6 +48,12 @@ class Envelope(Contract):
         if timestamp.tzinfo is None:
             raise ValueError("Timestamp must have a timezone")
         return timestamp
+
+    @model_validator(mode="after")
+    def keyed(self) -> Self:
+        if self.resource is not None and self.resource_id != getattr(self.data, self.resource):
+            raise ValueError("The resource is not the event's subject")
+        return self
 
 
 # identity's events that every service keeping data for a classroom or a user consumes to purge it
@@ -61,14 +70,9 @@ class ClassroomDeleted(Contract):
 class ClassroomDeletedEvent(Envelope):
     """a deleted classroom: every service that keeps data for it purges it."""
 
+    resource = "classroom_id"
     event_type: Literal["identity.classroom.deleted.v1"]
     data: ClassroomDeleted
-
-    @model_validator(mode="after")
-    def deleted(self) -> "ClassroomDeletedEvent":
-        if self.resource_id != self.data.classroom_id:
-            raise ValueError("Not this classroom's deletion")
-        return self
 
 
 class UserDeleted(Contract):
@@ -80,14 +84,9 @@ class UserDeleted(Contract):
 class UserDeletedEvent(Envelope):
     """a user who deleted their own account (adr 0011): every service that keeps data for them purges it."""
 
+    resource = "user_id"
     event_type: Literal["identity.user.deleted.v1"]
     data: UserDeleted
-
-    @model_validator(mode="after")
-    def deleted(self) -> "UserDeletedEvent":
-        if self.resource_id != self.data.user_id:
-            raise ValueError("Not this user's deletion")
-        return self
 
 
 def parse[M: BaseModel](model: type[M], value: bytes | None) -> M | None:

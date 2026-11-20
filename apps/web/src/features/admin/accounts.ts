@@ -7,6 +7,7 @@ import { ActionState } from '../../shared/action-state';
 import { ConfirmDialogComponent } from '../../shared/confirm-dialog';
 import { FieldComponent, FieldControlDirective } from '../../shared/field';
 import { PageHeaderComponent } from '../../shared/page-header';
+import { studentName } from '../../shared/names';
 import { readPage } from '../../shared/paged-section';
 import { PagerComponent } from '../../shared/pager';
 import { RefreshButtonComponent } from '../../shared/refresh-button';
@@ -44,6 +45,7 @@ export class AdminAccountsComponent {
   private readonly admin = inject(AdminApi);
   private readonly unsaved = inject(UnsavedChanges);
   readonly roles = ROLES;
+  readonly studentName = studentName;
   readonly state = new ActionState();
   readonly form = new FormGroup({
     role: new FormControl<PersonRole>('student', { nonNullable: true, validators: Validators.required }),
@@ -122,7 +124,7 @@ export class AdminAccountsComponent {
 
   /* the account's name, or its username before it has one. */
   accountName(account: Account): string {
-    return account.display_name || account.username || 'this account';
+    return studentName(account) || 'this account';
   }
 
   confirmReset(account: Account): void {

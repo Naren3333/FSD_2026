@@ -29,6 +29,7 @@ import { Section } from '../../shared/section';
 import { SectionStateComponent } from '../../shared/section-state';
 import { MAX_PROMPT, clipText, draftQuestion, excerptLabel, fromAgent, marksText } from './editor';
 import { focusLater } from '../../shared/focus';
+import { plural } from '../../shared/format';
 
 /* the agent's limits (adr 0006). */
 export const MAX_SOURCE_DOCUMENTS = 10;
@@ -145,9 +146,7 @@ export class QuestionGeneratorComponent implements OnChanges {
       0,
     ),
   );
-  readonly totalText = computed(
-    () => `${this.total()} ${this.total() === 1 ? 'question' : 'questions'} in total (up to ${MAX_COUNT}).`,
-  );
+  readonly totalText = computed(() => `${plural(this.total(), 'question')} in total (up to ${MAX_COUNT}).`);
   readonly topic = new FormControl('', { nonNullable: true });
   readonly difficulty = new FormControl<Difficulty>('intermediate', { nonNullable: true });
   readonly focus = new FormControl('', { nonNullable: true });
@@ -177,8 +176,7 @@ export class QuestionGeneratorComponent implements OnChanges {
     const found = this.result.value();
     if (!found) return '';
     const asked = Object.entries(found.requested_by_type);
-    if (asked.length < 2)
-      return `${found.returned} of ${found.requested} ${found.requested === 1 ? 'question' : 'questions'} drafted.`;
+    if (asked.length < 2) return `${found.returned} of ${plural(found.requested, 'question')} drafted.`;
     const parts = asked.map(
       ([type, n]) =>
         `${this.typeName(type)} ${found.questions.filter((q) => q.question.type === type).length} of ${n}`,

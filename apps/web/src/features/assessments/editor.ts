@@ -25,6 +25,7 @@ import type {
   ReleasePolicy,
 } from '../../api/models';
 import { requiredText } from '../../shared/validators';
+import { plural } from '../../shared/format';
 
 /* the assessment editor's form and its conversion to and from what assessment stores. */
 
@@ -246,7 +247,12 @@ export function untouched(question: QuestionForm): boolean {
 
 /* "1 mark" or "n marks". */
 export function marksText(points: number): string {
-  return points === 1 ? '1 mark' : `${points} marks`;
+  return plural(points, 'mark');
+}
+
+/* "3 questions · 7 marks". */
+export function sizeText(questions: number, marks: number): string {
+  return `${plural(questions, 'question')} · ${marksText(marks)}`;
 }
 
 /* who wrote each of a question's marking points, for this session: ai (drafted guidance or a kept generated question) or the teacher. */

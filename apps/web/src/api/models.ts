@@ -63,8 +63,6 @@ export interface StreamEvent {
 export type Usage = Chatbot['Usage'];
 
 export type QuestionType = Assessments['Question']['type'];
-/* one level of a rubric criterion: its points and what work at that level looks like. */
-export type Level = Assessments['Level'];
 /* how a free response is marked; for the classroom's teacher only. */
 export type Rubric = Assessments['RubricInput'];
 export type Criterion = Rubric['criteria'][number];
@@ -125,7 +123,6 @@ export interface BankFilter {
   excludeAnswered?: boolean;
 }
 
-export type CriterionScore = Grading['CriterionScore'];
 /* an ai-suggested mark for a question the teacher marks. */
 export type Suggestion = Grading['Suggestion'];
 export type Evidence = Grading['EvaluationEvidence'];

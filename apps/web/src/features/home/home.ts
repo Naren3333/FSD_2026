@@ -8,7 +8,7 @@ import { onSectionShown, rereadQuietly } from '../../core/section-shown';
 import { CurriculumNames } from '../../core/curriculum-names';
 import { Session } from '../../core/session';
 import { dueState } from '../../shared/due';
-import { dateTime } from '../../shared/format';
+import { dateTime, plural } from '../../shared/format';
 import { MarksPipe } from '../../shared/marks';
 import { EvidenceNames } from '../../shared/names';
 import { NoClassroomComponent } from '../../shared/no-classroom';
@@ -70,7 +70,7 @@ export class HomeComponent {
     if (!assessments.length) return 'No assessments in this classroom yet.';
     const missed = assessments.filter((a) => !a.submitted).length;
     if (!missed) return 'All caught up. You have submitted every assessment.';
-    return `Nothing left to submit. ${missed} ${missed === 1 ? 'assessment' : 'assessments'} closed before you submitted.`;
+    return `Nothing left to submit. ${plural(missed, 'assessment')} closed before you submitted.`;
   });
   /* no finalized result and no topic evidence: one note in place of two empty panels. */
   readonly noEvidenceYet = computed(

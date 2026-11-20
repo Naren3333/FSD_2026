@@ -118,11 +118,13 @@ func (p pgStore) loadAssignees(ctx context.Context, items []Assessment) error {
 	if err != nil {
 		return err
 	}
+	index := make(map[string]int, len(items))
+	for i := range items {
+		index[items[i].ID] = i
+	}
 	for _, pair := range pairs {
-		for i := range items {
-			if items[i].ID == pair[0] {
-				items[i].Assignees = append(items[i].Assignees, pair[1])
-			}
+		if i, ok := index[pair[0]]; ok {
+			items[i].Assignees = append(items[i].Assignees, pair[1])
 		}
 	}
 	return nil
@@ -562,17 +564,7 @@ func lockStudentWork(ctx context.Context, tx pgx.Tx, assessment, student string)
 	if err := platform.Lock(ctx, tx, platform.LockStudentWork, assessment+"/"+student); err != nil {
 		return err
 	}
-	if err := platform.LockShared(ctx, tx, platform.LockUser, student); err != nil {
-		return err
-	}
-	var deleted bool
-	if err := tx.QueryRow(ctx, "SELECT EXISTS(SELECT 1 FROM deleted_users WHERE user_id=$1)", student).Scan(&deleted); err != nil {
-		return err
-	}
-	if deleted {
-		return errAccountDeleted
-	}
-	return nil
+	return lockLiveUser(ctx, tx, student)
 }
 
 // saveAnswers replaces the student's saved work, unless they have already submitted (errAlreadySubmitted),

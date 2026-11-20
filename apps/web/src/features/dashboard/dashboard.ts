@@ -20,7 +20,7 @@ import { SectionStateComponent } from '../../shared/section-state';
 import { PageHeaderComponent } from '../../shared/page-header';
 import { RefreshButtonComponent } from '../../shared/refresh-button';
 import { IconComponent } from '../../shared/icon';
-import { dateTime } from '../../shared/format';
+import { dateTime, plural } from '../../shared/format';
 
 @Component({
   selector: 'app-dashboard',
@@ -93,7 +93,7 @@ export class DashboardComponent {
     const enrolled = this.enrolledTotal();
     const published = this.assessments.value()?.length;
     const parts = [
-      enrolled !== undefined ? `${enrolled} ${enrolled === 1 ? 'student' : 'students'}` : '',
+      enrolled !== undefined ? plural(enrolled, 'student') : '',
       published !== undefined
         ? `${published} published ${published === 1 ? 'assessment' : 'assessments'}`
         : '',

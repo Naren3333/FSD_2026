@@ -36,7 +36,7 @@
       <select appFieldControl id="class-teacher" formControlName="teacher">
         <option value="">Choose a teacher</option>
         @for (teacher of teachers.value() ?? []; track teacher.id) {
-          <option [value]="teacher.id">{{ teacher.display_name || teacher.username }}</option>
+          <option [value]="teacher.id">{{ studentName(teacher) }}</option>
         }
       </select>
     </app-field>

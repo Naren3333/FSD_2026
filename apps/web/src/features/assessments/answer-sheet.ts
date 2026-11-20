@@ -28,7 +28,7 @@ import { dueState, type DueState } from '../../shared/due';
 import { dateTime, time } from '../../shared/format';
 import type { Section } from '../../shared/section';
 import { requiredText } from '../../shared/validators';
-import { marksText } from './editor';
+import { marksText, sizeText } from './editor';
 import { focusLater } from '../../shared/focus';
 
 /* how long a student's typing rests before their work is saved. */
@@ -293,11 +293,11 @@ export class AnswerSheetComponent {
     clearTimeout(this.saveTimer);
     this.edits++;
     this.saveNote.set('Saving…');
+    const stillOpen = () => this.selected()?.id === assessmentId && !this.submitted();
     this.saveTimer = setTimeout(() => {
-      if (this.selected()?.id !== assessmentId || this.submitted()) return;
+      if (!stillOpen()) return;
       const upTo = this.edits;
       const answers = this.answersToSave();
-      const stillOpen = () => this.selected()?.id === assessmentId && !this.submitted();
       this.persist(assessmentId, answers).then(
         (r) => {
           if (!stillOpen()) return;
@@ -320,10 +320,8 @@ export class AnswerSheetComponent {
 
   /* replaces the student's saved work, after any save still on its way. */
   private persist(assessmentId: string, answers: Record<string, string>): Promise<SavedAnswers> {
-    const save = this.saving.then(
-      () => this.assessmentApi.save(assessmentId, answers),
-      () => this.assessmentApi.save(assessmentId, answers),
-    );
+    // saving never rejects: each save is chained after the last one's outcome.
+    const save = this.saving.then(() => this.assessmentApi.save(assessmentId, answers));
     this.saving = save.catch(() => undefined);
     return save;
   }
@@ -418,9 +416,8 @@ export class AnswerSheetComponent {
 
   /* "3 questions · 7 marks". */
   size(assessment: Assessment): string {
-    const count = assessment.questions.length;
     const marks = assessment.questions.reduce((sum, q) => sum + q.points, 0);
-    return `${count} ${count === 1 ? 'question' : 'questions'} · ${marksText(marks)}`;
+    return sizeText(assessment.questions.length, marks);
   }
 
   /* the help line under a written answer: how much of its length is used. */

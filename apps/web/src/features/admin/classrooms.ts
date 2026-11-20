@@ -25,6 +25,7 @@ import { Section } from '../../shared/section';
 import { SectionStateComponent } from '../../shared/section-state';
 import { StatusComponent } from '../../shared/status';
 import { requiredText } from '../../shared/validators';
+import { plural } from '../../shared/format';
 
 /* the school admin's classrooms (adr 0019): create one for a teacher, rename it or give it another teacher, delete it, and enroll or remove its students. */
 @Component({
@@ -97,7 +98,7 @@ export class AdminClassroomsComponent {
     const total = this.classrooms.ready() ? this.classrooms.value()?.total : undefined;
     return total === undefined
       ? 'Create classrooms, give each one a teacher and enroll its students.'
-      : `${total} ${total === 1 ? 'classroom' : 'classrooms'} in your school`;
+      : `${plural(total, 'classroom')} in your school`;
   });
   readonly noTeachers = computed(() => this.teachers.ready() && !this.teachers.value()?.length);
 

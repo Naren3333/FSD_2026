@@ -197,18 +197,22 @@ func (p pgStore) assessmentClassroom(ctx context.Context, org, assessment string
 	return classroom, err
 }
 
-// lockDraft locks a draft evaluation with its questions for a change.
-func lockDraft(ctx context.Context, tx pgx.Tx, org, id string) (Evaluation, []Question, []byte, error) {
+// lockDraft locks a draft evaluation for a change and applies the teacher's marks to its evidence; before
+// is the evidence as stored.
+func lockDraft(ctx context.Context, tx pgx.Tx, org, id string, marks map[string]Mark) (v Evaluation, before []byte, err error) {
 	var data []byte
-	v, before, err := scanEvaluation(tx.QueryRow(ctx, "SELECT "+evaluationColumns+",coalesce(questions,'[]'::jsonb) FROM evaluations WHERE id=$1 AND org_id=$2 FOR UPDATE", id, org), &data)
+	v, before, err = scanEvaluation(tx.QueryRow(ctx, "SELECT "+evaluationColumns+",coalesce(questions,'[]'::jsonb) FROM evaluations WHERE id=$1 AND org_id=$2 FOR UPDATE", id, org), &data)
 	if err != nil {
-		return v, nil, nil, err
+		return v, nil, err
 	}
 	if v.Status != statusDraft {
-		return v, nil, nil, errAlreadyFinalized
+		return v, nil, errAlreadyFinalized
 	}
 	var questions []Question
-	return v, questions, before, json.Unmarshal(data, &questions)
+	if err = json.Unmarshal(data, &questions); err != nil {
+		return v, nil, err
+	}
+	return v, before, applyMarks(v.Evidence, questions, marks)
 }
 
 // saveMarks records the teacher's marks on a draft without finalizing it, with an audit entry.
@@ -218,11 +222,8 @@ func (p pgStore) saveMarks(ctx context.Context, org, id, actor string, marks map
 		return Evaluation{}, err
 	}
 	defer tx.Rollback(ctx)
-	v, questions, before, err := lockDraft(ctx, tx, org, id)
+	v, before, err := lockDraft(ctx, tx, org, id, marks)
 	if err != nil {
-		return v, err
-	}
-	if err = applyMarks(v.Evidence, questions, marks); err != nil {
 		return v, err
 	}
 	after, err := json.Marshal(v.Evidence)
@@ -246,11 +247,8 @@ func (p pgStore) finalizeEvaluation(ctx context.Context, org, id, actor, reason 
 		return Evaluation{}, err
 	}
 	defer tx.Rollback(ctx)
-	v, questions, before, err := lockDraft(ctx, tx, org, id)
+	v, before, err := lockDraft(ctx, tx, org, id, marks)
 	if err != nil {
-		return v, err
-	}
-	if err = applyMarks(v.Evidence, questions, marks); err != nil {
 		return v, err
 	}
 	if unmarked(v.Evidence) {

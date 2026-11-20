@@ -16,7 +16,7 @@ from learning_transport.kafka import (
     parse,
 )
 from psycopg_pool import ConnectionPool
-from pydantic import Field, model_validator
+from pydantic import Field
 
 from store import LOCK_DOCUMENT
 
@@ -36,14 +36,9 @@ class DocumentDeleted(Contract):
 
 
 class DocumentDeletedEvent(Envelope):
+    resource = "document_id"
     event_type: Literal["content.deleted.v1"]
     data: DocumentDeleted
-
-    @model_validator(mode="after")
-    def deleted(self) -> "DocumentDeletedEvent":
-        if self.resource_id != self.data.document_id:
-            raise ValueError("Not this document's deletion")
-        return self
 
 
 def purge(pool: ConnectionPool[Any], value: bytes | None) -> bool:

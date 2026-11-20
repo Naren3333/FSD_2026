@@ -51,13 +51,9 @@ class Finalized(Contract):
 
 
 class Event(Envelope):
+    resource = "evaluation_id"
+    event_type: Literal["grading.finalized.v3"]
     data: Finalized
-
-    @model_validator(mode="after")
-    def finalized(self) -> "Event":
-        if self.event_type != FINALIZED or self.resource_id != self.data.evaluation_id:
-            raise ValueError("Not a finalized grading event")
-        return self
 
 
 class AssessmentDeleted(Contract):
@@ -69,14 +65,9 @@ class AssessmentDeleted(Contract):
 class AssessmentDeletedEvent(Envelope):
     """a published assessment its teacher deleted with its submissions (adr 0008)."""
 
+    resource = "assessment_id"
     event_type: Literal["assessment.deleted.v1"]
     data: AssessmentDeleted
-
-    @model_validator(mode="after")
-    def deleted(self) -> "AssessmentDeletedEvent":
-        if self.resource_id != self.data.assessment_id:
-            raise ValueError("Not this assessment's deletion")
-        return self
 
 
 class TopicMetric(Contract):
