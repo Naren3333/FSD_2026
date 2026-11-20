@@ -328,6 +328,7 @@ func TestTopicBatchIncludesArchivedAndRejectsInvalidRequests(t *testing.T) {
 	delete(store.topics, topicB)
 	run(t, store,
 		step{"archived name", http.MethodPost, "/v1/topics/batch", `{"ids":["` + topicB + `"]}`, "teacher", http.StatusOK, "Compare fractions"},
+		step{"another spelling", http.MethodPost, "/v1/topics/batch", `{"ids":["` + strings.ToUpper(topicB) + `"]}`, "teacher", http.StatusOK, "Compare fractions"},
 		step{"missing topic", http.MethodPost, "/v1/topics/batch", `{"ids":["00000000-0000-4000-8000-000000000001"]}`, "student", http.StatusOK, "[]"},
 		step{"empty batch", http.MethodPost, "/v1/topics/batch", `{"ids":[]}`, "teacher", http.StatusUnprocessableEntity, ""},
 		step{"invalid id", http.MethodPost, "/v1/topics/batch", `{"ids":["bad"]}`, "teacher", http.StatusUnprocessableEntity, ""},

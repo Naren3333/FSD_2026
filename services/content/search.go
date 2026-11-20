@@ -114,9 +114,11 @@ func (s server) search(w http.ResponseWriter, r *http.Request) {
 	platform.JSON(w, http.StatusOK, result)
 }
 
-// normalize trims the query and applies the defaults (top 8, reranked).
+// normalize trims the query, spells its ids canonically and applies the defaults (top 8, reranked).
 func (req *searchRequest) normalize() (topK int, rerank bool, problem string) {
 	req.Query = strings.TrimSpace(req.Query)
+	req.Classroom = platform.CanonicalID(req.Classroom)
+	platform.CanonicalList(req.DocumentIDs)
 	topK, rerank = 8, true
 	if req.TopK != nil {
 		topK = *req.TopK

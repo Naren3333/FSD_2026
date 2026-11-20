@@ -92,6 +92,20 @@ func TestSavingToTheBankKeepsNoPassagesAndLinksTheQuestion(t *testing.T) {
 	}
 }
 
+// an older version saved the question's topic as the teacher's client sent it.
+func TestSavingAnOlderQuestionToTheBankChecksItsTopicCanonically(t *testing.T) {
+	s, store := bankServer(t)
+	s.topics = answersByTopic{topic: topicValid}
+	v := post(t, s, mixed)
+	stored := store.assessments[v.ID]
+	stored.Questions[0].Topic = strings.ToUpper(stored.Questions[0].Topic)
+	store.assessments[v.ID] = stored
+	body := `{"assessment_id":"` + v.ID + `","question_id":"` + v.Questions[0].ID + `"}`
+	if saved := bankQuestion(t, call(t, s, http.MethodPost, "/v1/bank/questions", body, "teacher"), http.StatusCreated); saved.Topic != topic {
+		t.Fatalf("%+v", saved)
+	}
+}
+
 func TestOnlyItsTeacherReachesABankQuestion(t *testing.T) {
 	s, store := bankServer(t)
 	written := `{"question":{"prompt":"Why?","type":"free_response","topic_id":"` + topic + `","rubric":{"criteria":[{"title":"Reason","levels":[{"points":0,"descriptor":"None"},{"points":3,"descriptor":"Clear"}]}]}}}`

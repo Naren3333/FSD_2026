@@ -16,10 +16,11 @@ type ListPage[T any] struct {
 
 // servelist answers a list route registered twice: its /page variant reads one window (offset, limit 1 to
 // most, default 20) and answers a ListPage with count's total; the legacy route answers list's bare array,
-// which list bounds itself when given no window.
+// which list bounds itself when given no window. the variant is the route the mux matched, never the path's
+// own text, so a path value of "page" cannot switch the answer's shape.
 func ServeList[T any](w http.ResponseWriter, r *http.Request, most int, list func(...ListWindow) ([]T, error), count func() (int, error)) {
 	var paging []ListWindow
-	if strings.HasSuffix(r.URL.Path, "/page") {
+	if strings.HasSuffix(r.Pattern, "/page") {
 		offset, limit, ok := Page(w, r, 20, most)
 		if !ok {
 			return

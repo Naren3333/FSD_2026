@@ -111,6 +111,9 @@ func decodeEvent(value []byte, topic string) (Event, bool) {
 	if json.Unmarshal(value, &event) != nil {
 		return event, false
 	}
+	// an older version may have published another spelling, e.g. an id taken from a path or header as given;
+	// each decoder reads its data's ids the same way (ReadData).
+	event.ID, event.Correlation, event.Resource = CanonicalID(event.ID), CanonicalID(event.Correlation), CanonicalID(event.Resource)
 	return event, ID(event.ID) && event.Type == topic && event.Version == 1 && ID(event.Correlation) && !event.Timestamp.IsZero() && event.Resource != ""
 }
 
@@ -155,4 +158,16 @@ func (c Consumer) handleOnce(ctx context.Context, event Event, handler Handler) 
 		}
 	}
 	return tx.Commit(workCtx)
+}
+
+// readdata decodes event's data into v, then spells canonically each id field of v that ids points at: an
+// older version may have published an id as a path, header or body gave it, and locks, purges and matches
+// need one spelling. a user id is one too, since every account id the identity provider issues is a
+// lowercase uuid.
+func ReadData(event Event, v any, ids ...*string) bool {
+	if json.Unmarshal(event.Data, v) != nil {
+		return false
+	}
+	CanonicalIDs(ids...)
+	return true
 }

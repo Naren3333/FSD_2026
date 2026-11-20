@@ -4,6 +4,7 @@ import asyncio
 import json
 import os
 from collections.abc import AsyncIterator
+from datetime import UTC, datetime
 from typing import Any
 from uuid import uuid4
 
@@ -16,6 +17,8 @@ from store import MIGRATIONS, PostgresStore, _hold_thread
 pytestmark = pytest.mark.anyio
 URL = os.environ.get("CHATBOT_TEST_DATABASE_URL")
 ROOM = "00000000-0000-4000-8000-000000000001"
+# a claim no turn holds, for saving an answer that claimed nothing.
+UNCLAIMED = datetime(2000, 1, 1, tzinfo=UTC)
 
 
 @pytest.fixture
@@ -59,7 +62,7 @@ async def test_turns_keep_history_title_and_answers(store: PostgresStore) -> Non
         "sub_queries": ["light reactions", "Calvin cycle"],
         "is_on_topic": True, "retrieved_chunk_ids": [chunk], "citations": [citation],
         "prompt_version": "teacher.v1", "model": "gpt-test", "usage_tokens": 42, "latency_ms": 900,
-    })  # fmt: skip
+    }, UNCLAIMED)  # fmt: skip
     history = await store.start_turn(tid, "and then?", 6)
     assert [h["role"] for h in history] == ["user", "assistant"]
     messages = await store.messages(tid, 200)
@@ -79,7 +82,7 @@ async def test_turns_keep_history_title_and_answers(store: PostgresStore) -> Non
 async def test_an_error_answer_without_retrieval_is_saved(store: PostgresStore) -> None:
     tid = str((await store.create_thread("org", str(uuid4()), "student", ROOM))["id"])
     await store.start_turn(tid, "q", 6)
-    await store.save_answer(tid, {"content": "", "outcome": "error"})
+    await store.save_answer(tid, {"content": "", "outcome": "error"}, UNCLAIMED)
     assert [m["outcome"] for m in await store.messages(tid, 200)] == [None, "error"]
 
 
@@ -95,7 +98,7 @@ async def test_a_purged_thread_takes_no_more_messages(store: PostgresStore) -> N
     async with store.pool.connection() as conn:
         await conn.execute("DELETE FROM threads WHERE id=%s", (tid,))
     assert await store.start_turn(tid, "q", 6) is None
-    assert await store.save_answer(tid, {"content": "A.", "outcome": "answered"}) is None
+    assert await store.save_answer(tid, {"content": "A.", "outcome": "answered"}, UNCLAIMED) is None
     assert await store.messages(tid, 200) == []
 
 
@@ -108,7 +111,9 @@ async def test_a_turn_racing_a_purge_waits_for_it_instead_of_breaking_the_foreig
     async with store.pool.connection() as purge, purge.transaction():
         await purge.execute("DELETE FROM threads WHERE id=%s", (tid,))
         turn = asyncio.ensure_future(store.start_turn(tid, "again", 6))
-        answer = asyncio.ensure_future(store.save_answer(tid, {"content": "A.", "outcome": "answered"}))
+        answer = asyncio.ensure_future(
+            store.save_answer(tid, {"content": "A.", "outcome": "answered"}, UNCLAIMED)
+        )
         await asyncio.sleep(0.3)
         assert not turn.done() and not answer.done()  # held behind the purge's delete
     assert await turn is None and await answer is None
@@ -159,7 +164,9 @@ async def test_a_deleted_documents_passages_leave_past_and_later_answers(store: 
     async def answer(*documents: str) -> None:
         await store.start_turn(tid, "q", 6)
         await store.save_answer(
-            tid, {"content": "A.", "outcome": "answered", "citations": [cite(d) for d in documents]}
+            tid,
+            {"content": "A.", "outcome": "answered", "citations": [cite(d) for d in documents]},
+            UNCLAIMED,
         )
 
     await answer(deleted, kept)
@@ -205,26 +212,37 @@ async def test_one_answer_at_a_time_per_user(store: PostgresStore) -> None:
     first, second = [str((await store.create_thread("org", user, "student", ROOM))["id"]) for _ in range(2)]
     other = str((await store.create_thread("org", str(uuid4()), "student", ROOM))["id"])
     # two tabs at once: exactly one gets the answer slot, in either thread.
-    assert sorted(await asyncio.gather(store.claim_turn(first), store.claim_turn(second))) == [False, True]
-    assert await store.claim_turn(other) is True  # another user isn't held up
-    assert await store.claim_turn(first) is False
-    for tid in (first, second):  # the answer in progress is saved, in whichever thread it was
-        await store.save_answer(tid, {"content": "A.", "outcome": "answered"})
-    assert await store.claim_turn(second) is True  # the saved answer ended it
+    claims = await asyncio.gather(store.claim_turn(first), store.claim_turn(second))
+    assert sorted(c is not None for c in claims) == [False, True]
+    assert await store.claim_turn(other) is not None  # another user isn't held up
+    assert await store.claim_turn(first) is None
+    # the answer in progress is saved, in whichever thread it was.
+    [(tid, claim)] = [(t, c) for t, c in zip((first, second), claims, strict=True) if c is not None]
+    await store.save_answer(tid, {"content": "A.", "outcome": "answered"}, claim)
+    assert await store.claim_turn(second) is not None  # the saved answer ended it
 
 
 async def test_a_lost_answer_stops_holding_the_user_up(store: PostgresStore) -> None:
     assert URL is not None
     user = str(uuid4())
     tid = str((await store.create_thread("org", user, "student", ROOM))["id"])
-    assert await store.claim_turn(tid) is True
-    assert await store.claim_turn(tid) is False
+    assert await store.claim_turn(tid) is not None
+    assert await store.claim_turn(tid) is None
     pool = open_pool(URL, MIGRATIONS)
     try:
         with pool.connection() as conn:
-            conn.execute(
-                "UPDATE active_turns SET started_at = now() - interval '4 minutes' WHERE user_id=%s", (user,)
-            )
+            # the answer started four minutes ago and is still running: its claim is that start.
+            lost = conn.execute(
+                "UPDATE active_turns SET started_at = now() - interval '4 minutes' WHERE user_id=%s"
+                " RETURNING started_at",
+                (user,),
+            ).fetchone()["started_at"]
     finally:
         pool.close()
-    assert await store.claim_turn(tid) is True
+    newer = await store.claim_turn(tid)
+    assert newer is not None and newer != lost
+    # the slow answer finishing after the takeover leaves the newer answer's claim in place.
+    await store.save_answer(tid, {"content": "A.", "outcome": "answered"}, lost)
+    assert await store.claim_turn(tid) is None
+    await store.release_turn(tid, newer)
+    assert await store.claim_turn(tid) is not None

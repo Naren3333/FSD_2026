@@ -249,6 +249,7 @@ func (s server) finalizeAll(w http.ResponseWriter, r *http.Request) {
 	if !platform.Decode(w, r, &input) {
 		return
 	}
+	input.Assessment = platform.CanonicalID(input.Assessment)
 	if !platform.ID(input.Assessment) {
 		platform.Invalid(w, "assessment_id must be an assessment identifier.")
 		return
@@ -317,6 +318,7 @@ func (s server) release(w http.ResponseWriter, r *http.Request) {
 	if !platform.Decode(w, r, &input) {
 		return
 	}
+	input.Assessment = platform.CanonicalID(input.Assessment)
 	if !platform.ID(input.Assessment) {
 		platform.Invalid(w, "assessment_id must be an assessment identifier.")
 		return

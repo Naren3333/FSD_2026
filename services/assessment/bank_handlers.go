@@ -91,6 +91,7 @@ func (s server) bankCreate(w http.ResponseWriter, r *http.Request) {
 	if !platform.Decode(w, r, &in) {
 		return
 	}
+	platform.CanonicalIDs(&in.AssessmentID, &in.QuestionID)
 	var q Question
 	var from *bankSource
 	switch {

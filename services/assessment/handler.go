@@ -64,6 +64,7 @@ func (s server) batch(w http.ResponseWriter, r *http.Request) {
 		platform.Invalid(w, "Provide 1–50 assessment ids.")
 		return
 	}
+	platform.CanonicalList(input.IDs)
 	seen := map[string]bool{}
 	for _, id := range input.IDs {
 		if !platform.ID(id) || seen[id] {

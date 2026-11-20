@@ -67,7 +67,7 @@ def test_a_token_with_both_person_roles_is_refused() -> None:
             asyncio.run(caller(token_claims(*pair, sub="u1", org="o1")))
 
 
-def identity(status: int, body: dict[str, Any] | None = None) -> IdentityClient:
+def identity(status: int, body: Any = None) -> IdentityClient:
     seen: list[httpx.Request] = []
 
     def answer(request: httpx.Request) -> httpx.Response:
@@ -92,6 +92,10 @@ def test_identity_denial_is_none_and_an_outage_raises() -> None:
     with pytest.raises(UpstreamError) as error:
         run(identity(503).relation("Bearer t", "c1", "corr"))
     assert (error.value.service, error.value.status) == ("identity", 503)
+    for body in (["student"], "student"):  # an answer that is not an object is unreadable, not a crash
+        with pytest.raises(UpstreamError) as error:
+            run(identity(200, body).relation("Bearer t", "c1", "corr"))
+        assert (error.value.service, error.value.status) == ("identity", 502)
 
 
 @pytest.mark.parametrize(

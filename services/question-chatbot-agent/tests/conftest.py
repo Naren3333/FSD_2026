@@ -38,7 +38,8 @@ class MemoryStore:
         self.rows: list[dict[str, Any]] = []
         self.purged: set[str] = set()
         self.gone: set[str] = set()  # threads purged since a turn read them
-        self.active: dict[str, str] = {}  # user → the thread whose answer is in progress
+        # user → the thread and claim of their answer in progress
+        self.active: dict[str, tuple[str, datetime]] = {}
 
     async def create_thread(self, org: str, user: str, role: str, classroom_id: str) -> dict[str, Any] | None:
         if classroom_id in self.purged:
@@ -67,14 +68,18 @@ class MemoryStore:
         keys = ("id", "role", "content", "outcome", "citations", "created_at")
         return [{k: r.get(k) for k in keys} for r in self.all(thread_id)][-limit:]
 
-    async def claim_turn(self, thread_id: str) -> bool:
+    async def claim_turn(self, thread_id: str) -> datetime | None:
+        claim = datetime.now(UTC)
         if thread_id in self.gone:
-            return True
+            return claim
         user = self.threads[thread_id]["user"]
         if user in self.active:
-            return False
-        self.active[user] = thread_id
-        return True
+            return None
+        self.active[user] = (thread_id, claim)
+        return claim
+
+    async def release_turn(self, thread_id: str, claim: datetime) -> None:
+        self.active = {u: c for u, c in self.active.items() if c != (thread_id, claim)}
 
     async def start_turn(
         self, thread_id: str, content: str, history_turns: int
@@ -88,10 +93,10 @@ class MemoryStore:
             self.threads[thread_id]["title"] = content[:80]
         return history
 
-    async def save_answer(self, thread_id: str, answer: dict[str, Any]) -> str | None:
+    async def save_answer(self, thread_id: str, answer: dict[str, Any], claim: datetime) -> str | None:
         if thread_id in self.gone:
             return None
-        self.active = {u: t for u, t in self.active.items() if t != thread_id}
+        await self.release_turn(thread_id, claim)
         row = {"id": str(uuid4()), "thread_id": thread_id, "role": "assistant", "created_at": datetime.now(UTC),
                **answer}  # fmt: skip
         self.rows.append(row)

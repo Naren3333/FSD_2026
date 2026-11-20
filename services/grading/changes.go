@@ -153,7 +153,7 @@ type DueChanged struct {
 // late only when submitted after it, never when there is none.
 func changeDue(ctx context.Context, tx pgx.Tx, event platform.Event) error {
 	var v DueChanged
-	if json.Unmarshal(event.Data, &v) != nil || !platform.ID(v.Assessment) || !platform.ID(v.Classroom) || v.Org == "" || event.Resource != v.Assessment {
+	if !platform.ReadData(event, &v, &v.Assessment, &v.Classroom) || !platform.ID(v.Assessment) || !platform.ID(v.Classroom) || v.Org == "" || event.Resource != v.Assessment {
 		return platform.InvalidEvent{Reason: "invalid due date change"}
 	}
 	if err := platform.Lock(ctx, tx, platform.LockAssessment, v.Assessment); err != nil {

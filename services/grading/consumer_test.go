@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"learning/platform"
+	"strings"
 	"testing"
 )
 
@@ -125,5 +126,20 @@ func TestMalformedQuestionsAreInvalidEvents(t *testing.T) {
 		if err := consume(context.Background(), nil, submittedEvent(t, change)); !errors.As(err, &invalid) {
 			t.Errorf("%s: %v", name, err)
 		}
+	}
+}
+
+// an older assessment published ids as teachers' clients sent them; they are scored and stored canonically.
+func TestASubmissionsIDsAreReadCanonically(t *testing.T) {
+	upper := strings.ToUpper(questionID)
+	event := submittedEvent(t, map[string]any{"submission_id": "{" + submissionID + "}", "classroom_id": strings.ToUpper(submissionID),
+		"questions": []map[string]any{{"id": upper, "prompt": "1+1?", "type": "numerical", "options": nil, "answer": "2", "tolerance": "0", "points": 1, "topic_id": strings.ToUpper(topicID)}},
+		"answers":   map[string]string{upper: "2"}})
+	v, ok := decodeSubmitted(event)
+	if !ok || v.Submission != submissionID || v.Classroom != submissionID || v.Questions[0].ID != questionID || v.Questions[0].Topic != topicID || v.Answers[questionID] != "2" {
+		t.Fatalf("%v %+v", ok, v)
+	}
+	if evidence, err := v.score(); err != nil || evidence[0].Topic != topicID {
+		t.Fatalf("%+v %v", evidence, err)
 	}
 }

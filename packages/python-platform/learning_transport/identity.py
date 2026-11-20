@@ -23,7 +23,7 @@ class IdentityClient:
         body = await self._get(f"/v1/classrooms/{classroom_id}/access", authorization, correlation, params)
         if body is None:
             return None
-        relation = body.get("relation")
+        relation = body.get("relation") if isinstance(body, dict) else None
         if relation not in (RELATION_TEACHER, RELATION_STUDENT):
             raise UpstreamError("identity", 502)
         return str(relation)

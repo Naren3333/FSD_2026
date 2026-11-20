@@ -236,7 +236,7 @@ type AssessmentInput struct {
 
 // assessment is the input as an assessment, its links declared for owner.
 func (in AssessmentInput) assessment(owner string) Assessment {
-	v := Assessment{Classroom: in.Classroom, Title: in.Title, Status: in.Status, OpensAt: in.OpensAt, DueAt: in.DueAt,
+	v := Assessment{Classroom: platform.CanonicalID(in.Classroom), Title: in.Title, Status: in.Status, OpensAt: in.OpensAt, DueAt: in.DueAt,
 		LatePolicy: in.LatePolicy, ReleasePolicy: in.ReleasePolicy, AIMarking: in.AIMarking, LinkOwner: owner}
 	for _, q := range in.Questions {
 		v.Questions = append(v.Questions, q.Question)
@@ -245,8 +245,13 @@ func (in AssessmentInput) assessment(owner string) Assessment {
 	return v
 }
 
-// fill omitted policies, points, rubric defaults and criterion identifiers.
+// fill omitted policies, points, rubric defaults and criterion identifiers, and spell ids canonically: an
+// older version saved them as given, and an edit sends them back.
 func (v *Assessment) normalize() {
+	v.Classroom = platform.CanonicalID(v.Classroom)
+	for i := range v.BankLinks {
+		v.BankLinks[i] = platform.CanonicalID(v.BankLinks[i])
+	}
 	if v.Status == "" {
 		v.Status = statusPublished
 	}
@@ -258,6 +263,12 @@ func (v *Assessment) normalize() {
 	}
 	for i := range v.Questions {
 		q := &v.Questions[i]
+		q.Topic = platform.CanonicalID(q.Topic)
+		for _, excerpts := range [][]Excerpt{q.Sources, q.MarkingScheme} {
+			for j := range excerpts {
+				excerpts[j].Document, excerpts[j].Chunk = platform.CanonicalID(excerpts[j].Document), platform.CanonicalID(excerpts[j].Chunk)
+			}
+		}
 		if q.Type == typeFreeResponse {
 			if q.MaxLength == 0 {
 				q.MaxLength = defaultMaxLength

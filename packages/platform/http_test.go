@@ -33,6 +33,19 @@ func TestOversizedJSONIsTooLarge(t *testing.T) {
 	}
 }
 
+// another spelling of the same uuid would hash to another advisory lock and miss text matches on events.
+func TestIDTakesOnlyTheCanonicalSpelling(t *testing.T) {
+	if !ID("a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11") {
+		t.Fatal("canonical uuid refused")
+	}
+	for _, other := range []string{"A0EEBC99-9C0B-4EF8-BB6D-6BB9BD380A11", "{a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11}",
+		"urn:uuid:a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11", "a0eebc999c0b4ef8bb6d6bb9bd380a11", ""} {
+		if ID(other) {
+			t.Errorf("%q accepted", other)
+		}
+	}
+}
+
 func TestPageReadsOffsetAndLimit(t *testing.T) {
 	cases := []struct {
 		query         string
@@ -51,6 +64,28 @@ func TestPageReadsOffsetAndLimit(t *testing.T) {
 		offset, limit, ok := Page(w, httptest.NewRequest(http.MethodGet, "/"+tc.query, nil), 20, 100)
 		if offset != tc.offset || limit != tc.limit || ok != tc.ok || (!ok && w.Code != http.StatusUnprocessableEntity) {
 			t.Errorf("%q: %d %d %v (%d)", tc.query, offset, limit, ok, w.Code)
+		}
+	}
+}
+
+// the answer's shape follows the route the mux matched, not the path's text.
+func TestServeListPagesOnlyThePageRoute(t *testing.T) {
+	mux := http.NewServeMux()
+	serve := func(w http.ResponseWriter, r *http.Request) {
+		ServeList(w, r, 100, func(paging ...ListWindow) ([]string, error) { return []string{r.PathValue("id")}, nil },
+			func() (int, error) { return 7, nil })
+	}
+	mux.HandleFunc("GET /v1/things/{id}", serve)
+	mux.HandleFunc("GET /v1/things/{id}/items/page", serve)
+	for path, want := range map[string]string{
+		"/v1/things/page":            `["page"]`,
+		"/v1/things/a/items/page":    `{"items":["a"],"total":7}`,
+		"/v1/things/a/items/page?x=": `{"items":["a"],"total":7}`,
+	} {
+		w := httptest.NewRecorder()
+		mux.ServeHTTP(w, httptest.NewRequest(http.MethodGet, path, nil))
+		if got := strings.TrimSpace(w.Body.String()); w.Code != http.StatusOK || got != want {
+			t.Errorf("%s: %d %s, want %s", path, w.Code, got, want)
 		}
 	}
 }
@@ -272,5 +307,34 @@ func TestForwardCarriesTheCallersTokenAndCorrelation(t *testing.T) {
 	req, err := Forward(r, http.MethodGet, "http://curriculum/v1/topics/x")
 	if err != nil || req.Header.Get("Authorization") != "Bearer caller" || req.Header.Get("X-Correlation-ID") != "corr-1" || req.Method != http.MethodGet {
 		t.Fatalf("%v %v", err, req)
+	}
+}
+
+// a client's other spelling of an id in the path or query reaches the handler canonically; other text doesn't change.
+func TestAnIDInThePathOrQueryReachesHandlersCanonically(t *testing.T) {
+	a := &App{Mux: http.NewServeMux(), slow: map[string]time.Duration{}}
+	a.Mux.HandleFunc("GET /health/things/{id}", func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte(r.PathValue("id") + " " + r.URL.Query().Get("topic_id") + " " + r.URL.Query().Get("hash")))
+	})
+	id, hash := "a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11", "A0EEBC999C0B4EF8BB6D6BB9BD380A11"
+	req := httptest.NewRequest(http.MethodGet, "/health/things/"+strings.ToUpper(id)+"?topic_id="+strings.ToUpper(id)+"&hash="+hash, nil)
+	w := httptest.NewRecorder()
+	a.Handler().ServeHTTP(w, req)
+	if want := id + " " + id + " " + hash; w.Code != http.StatusOK || w.Body.String() != want {
+		t.Fatalf("%d %q, want %q", w.Code, w.Body.String(), want)
+	}
+}
+
+// another spelling of a caller's correlation id is the same trace, so it is respelled rather than replaced.
+func TestACorrelationIDIsRespelledNotReplaced(t *testing.T) {
+	a := &App{Mux: http.NewServeMux(), slow: map[string]time.Duration{}}
+	a.Mux.HandleFunc("GET /health/live", func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusOK) })
+	id := "a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11"
+	req := httptest.NewRequest(http.MethodGet, "/health/live", nil)
+	req.Header.Set("X-Correlation-ID", strings.ToUpper(id))
+	w := httptest.NewRecorder()
+	a.Handler().ServeHTTP(w, req)
+	if got := w.Header().Get("X-Correlation-ID"); got != id {
+		t.Fatalf("correlation %q, want %q", got, id)
 	}
 }

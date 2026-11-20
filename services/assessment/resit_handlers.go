@@ -30,6 +30,9 @@ func (s server) resit(w http.ResponseWriter, r *http.Request) {
 	if !platform.Decode(w, r, &in) {
 		return
 	}
+	for _, ids := range [][]string{in.StudentIDs, in.CopyQuestionIDs, in.BankQuestionIDs} {
+		platform.CanonicalList(ids)
+	}
 	if !resitable(w, original, in.CopyQuestionIDs, in.BankQuestionIDs) {
 		return
 	}
@@ -119,6 +122,7 @@ func (s server) assignees(w http.ResponseWriter, r *http.Request) {
 	if !platform.Decode(w, r, &in) {
 		return
 	}
+	platform.CanonicalList(in.StudentIDs)
 	if !v.Assigned {
 		notAssigned(w)
 		return

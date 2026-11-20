@@ -56,9 +56,10 @@ func (b BankQuestion) question() Question {
 }
 
 // bankCopy is q as the bank keeps it. passages and marking points quote one classroom's documents, so they
-// stay with that classroom's assessments.
+// stay with that classroom's assessments. its topic is spelled canonically: an older version saved it as given.
 func bankCopy(q Question) Question {
 	q.ID, q.Sources, q.MarkingScheme = "", nil, nil
+	q.Topic = platform.CanonicalID(q.Topic)
 	return q
 }
 

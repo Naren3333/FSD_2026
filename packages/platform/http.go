@@ -142,8 +142,32 @@ func decodeFailed(w http.ResponseWriter, err error, message string) {
 	Invalid(w, message)
 }
 
-// id reports whether value is a uuid.
-func ID(value string) bool { _, err := uuid.Parse(value); return err == nil }
+// id reports whether value is a uuid in its canonical lowercase form, the only spelling lock keys, events and
+// outbox matches use, so one classroom can't take two different locks.
+func ID(value string) bool { u, err := uuid.Parse(value); return err == nil && u.String() == value }
+
+// canonicalid is value's canonical spelling when it is a uuid in any spelling, else value unchanged. data an
+// older version committed or published may spell an id otherwise, so reads of it canonicalize before ID.
+func CanonicalID(value string) string {
+	if u, err := uuid.Parse(value); err == nil {
+		return u.String()
+	}
+	return value
+}
+
+// canonicalids spells each id that ids points at canonically (CanonicalID), for ids a request body sends.
+func CanonicalIDs(ids ...*string) {
+	for _, id := range ids {
+		*id = CanonicalID(*id)
+	}
+}
+
+// canonicallist spells each of ids canonically, in place.
+func CanonicalList(ids []string) {
+	for i := range ids {
+		ids[i] = CanonicalID(ids[i])
+	}
+}
 
 // page reads a list's ?offset= and ?limit= query values: offset defaults to 0 and limit to fallback, and
 // limit must be 1–most.

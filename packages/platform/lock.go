@@ -21,15 +21,16 @@ const (
 	sharedLockSQL = "SELECT pg_advisory_xact_lock_shared(hashtextextended($1::text || ':' || $2::text, 0))"
 )
 
-// lock takes the exclusive advisory lock on (scope, key) until tx ends.
+// lock takes the exclusive advisory lock on (scope, key) until tx ends. a uuid key is hashed in its
+// canonical spelling, so another spelling of the same id takes the same lock.
 func Lock(ctx context.Context, tx pgx.Tx, scope, key string) error {
-	_, err := tx.Exec(ctx, lockSQL, scope, key)
+	_, err := tx.Exec(ctx, lockSQL, scope, CanonicalID(key))
 	return err
 }
 
 // LockShared takes the advisory lock on (scope, key) shared until tx ends: shared holders run together, and
 // lock waits for all of them.
 func LockShared(ctx context.Context, tx pgx.Tx, scope, key string) error {
-	_, err := tx.Exec(ctx, sharedLockSQL, scope, key)
+	_, err := tx.Exec(ctx, sharedLockSQL, scope, CanonicalID(key))
 	return err
 }

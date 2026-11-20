@@ -6,6 +6,7 @@ import (
 	"io/fs"
 	"log/slog"
 	"net/http"
+	"net/url"
 	"os"
 	"os/signal"
 	"strings"
@@ -94,7 +95,7 @@ func (a *App) Handler() http.Handler {
 				CountMetric("learning_http_server_errors_total", 1)
 			}
 		}()
-		correlation := r.Header.Get("X-Correlation-ID")
+		correlation := CanonicalID(r.Header.Get("X-Correlation-ID")) // another spelling is the same trace
 		if !ID(correlation) {
 			correlation = uuid.NewString()
 		}
@@ -123,6 +124,9 @@ func (a *App) Handler() http.Handler {
 		ctx, cancel := context.WithTimeout(context.WithValue(r.Context(), correlationKey, correlation), timeout)
 		defer cancel()
 		r = r.WithContext(ctx)
+		u := *r.URL
+		canonicalURL(&u)
+		r.URL = &u
 		if strings.HasPrefix(r.URL.Path, "/health/") {
 			a.Mux.ServeHTTP(recorder, r)
 			return
@@ -208,4 +212,48 @@ func Serve(name string, migrations fs.FS, bootstrap string, wire func(a *App) ([
 		slog.Error("server_failed", "error", err.Error())
 		os.Exit(1)
 	}
+}
+
+// canonicalurl spells each uuid path segment and query value of u canonically, so another spelling a client
+// sends reaches handlers, locks and matches as the one spelling they take (ID).
+func canonicalURL(u *url.URL) {
+	u.Path = canonicalSegments(u.Path)
+	if u.RawPath != "" {
+		u.RawPath = canonicalSegments(u.RawPath)
+	}
+	if u.RawQuery == "" {
+		return
+	}
+	query, err := url.ParseQuery(u.RawQuery)
+	if err != nil {
+		return
+	}
+	changed := false
+	for _, values := range query {
+		for i, value := range values {
+			if c := hyphenatedID(value); c != value {
+				values[i], changed = c, true
+			}
+		}
+	}
+	if changed {
+		u.RawQuery = query.Encode()
+	}
+}
+
+func canonicalSegments(path string) string {
+	segments := strings.Split(path, "/")
+	for i, segment := range segments {
+		segments[i] = hyphenatedID(segment)
+	}
+	return strings.Join(segments, "/")
+}
+
+// hyphenatedid is value canonically when it is a uuid in the hyphenated form clients send, in any case; any
+// other text, a 32-digit hash say, is left as it is.
+func hyphenatedID(value string) string {
+	if len(value) == 36 {
+		return CanonicalID(value)
+	}
+	return value
 }

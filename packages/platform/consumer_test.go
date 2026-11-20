@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"strings"
 	"testing"
 	"time"
 
@@ -150,5 +151,38 @@ func TestAnAttemptGetsTheConsumersTimeout(t *testing.T) {
 		if left <= want-5*time.Second || left > want {
 			t.Fatalf("an attempt had %v left, want about %v", left, want)
 		}
+	}
+}
+
+// an older version published correlation ids as callers sent them; those events still settle.
+func TestAnEventWithAnotherIDSpellingIsReadCanonically(t *testing.T) {
+	id, correlation := uuid.NewString(), uuid.NewString()
+	msg := envelope(t, func(e map[string]any) {
+		e["event_id"], e["correlation_id"] = strings.ToUpper(id), "{"+correlation+"}"
+	})
+	event, ok := decodeEvent(msg.Value, consumerTopic)
+	if !ok || event.ID != id || event.Correlation != correlation {
+		t.Fatalf("%v %+v", ok, event)
+	}
+	if CanonicalID("not-a-uuid") != "not-a-uuid" {
+		t.Fatal("a non-uuid changed")
+	}
+}
+
+// identity's admin routes once published a classroom id as the path gave it; its deletion still purges, by the
+// canonical id locks and outbox matches use, while the event's data keeps its bytes for the decoders to read.
+func TestAnEventsDataIDsAreReadCanonically(t *testing.T) {
+	room := uuid.NewString()
+	msg := envelope(t, func(e map[string]any) {
+		e["resource_id"] = strings.ToUpper(room)
+		e["data"] = map[string]any{"classroom_id": "{" + room + "}", "org_id": "ORG"}
+	})
+	event, ok := decodeEvent(msg.Value, consumerTopic)
+	if !ok || event.Resource != room || !strings.Contains(string(event.Data), "{"+room+"}") {
+		t.Fatalf("%v %+v", ok, event)
+	}
+	deleted, err := DecodeClassroomDeleted(event)
+	if err != nil || deleted.Classroom != room || deleted.Org != "ORG" {
+		t.Fatalf("%+v %v", deleted, err)
 	}
 }

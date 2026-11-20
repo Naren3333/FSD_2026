@@ -237,3 +237,19 @@ func TestIdenticalQuestionsKeepTheirOwnPreviousLinks(t *testing.T) {
 		t.Fatalf("moved: kept %v", kept)
 	}
 }
+
+// an older version saved ids as the teacher's client sent them, and an edit sends them back.
+func TestAnEditSpellsItsIDsCanonically(t *testing.T) {
+	chunk := "0b1c2d3e-4f50-4617-8293-a4b5c6d7e8f9"
+	v := Assessment{Classroom: "{" + topicID + "}", Title: "Fractions", Questions: []Question{{ID: "q1", Prompt: "1 + 1?", Type: "numerical", Answer: "2", Tolerance: "0.01", Topic: strings.ToUpper(topicID),
+		Sources: []Excerpt{{Document: strings.ToUpper(chunk), Chunk: strings.ToUpper(chunk), Text: "Two."}}}},
+		BankLinks: []string{strings.ToUpper(chunk)}}
+	v.normalize()
+	if err := v.Validate(); err != nil {
+		t.Fatal(err)
+	}
+	// a bank link in another spelling would otherwise be dropped as no link at all.
+	if q := v.Questions[0]; v.Classroom != topicID || q.Topic != topicID || q.Sources[0].Document != chunk || q.Sources[0].Chunk != chunk || v.BankLinks[0] != chunk {
+		t.Fatalf("%+v", v)
+	}
+}

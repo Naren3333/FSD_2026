@@ -6,9 +6,10 @@ import json
 import logging
 import re
 import time
-from collections.abc import AsyncGenerator, AsyncIterator, Callable
+from collections.abc import AsyncGenerator, AsyncIterator, Callable, Coroutine
 from contextlib import aclosing
 from dataclasses import dataclass
+from datetime import datetime
 from typing import Any
 
 from fastapi.responses import StreamingResponse
@@ -97,6 +98,7 @@ class TurnRequest:
     content: str
     history: list[dict[str, str]]
     billed_to: dict[str, str]  # whose daily ai allowance pays for this turn's model calls
+    claim: datetime  # the user's turn this answer holds (store.claim_turn), ended when it is saved
 
 
 class Turn:
@@ -111,7 +113,7 @@ class Turn:
         request: TurnRequest,
     ) -> None:
         self.services, self.store, self.settings, self.pending = services, store, settings, pending
-        self.billed_to = request.billed_to
+        self.billed_to, self.claim = request.billed_to, request.claim
         self.thread, self.authorization, self.correlation = (
             request.thread,
             request.authorization,
@@ -417,23 +419,12 @@ class Turn:
         return [{k: by_id[cid].get(k) for k in CITATION_FIELDS} for cid in self.rewriter.cited]
 
     async def _save(self, outcome: str) -> str | None:
-        if self.rewriter is not None and (held := self.rewriter.flush()):
-            self.parts.append(held)  # an error or disconnect mid-tag: keep the text as written
-        decided = self.searched or self.version is not None or outcome == "no_results"
-        answer = {
-            "content": "".join(self.parts),
-            "outcome": outcome,
-            "rewritten_query": self.rewritten_query,
-            "sub_queries": self.sub_queries or None,
-            "is_on_topic": self.is_on_topic,
-            "retrieved_chunk_ids": [str(r["chunk_id"]) for r in self.results] if decided else None,
-            "citations": self._citations() if decided else None,
-            "prompt_version": self.version,
-            "model": self.model,
-            "usage_tokens": self.usage_tokens,
-            "latency_ms": round((time.perf_counter() - self.started) * 1000),
-        }
-        message_id = await self.store.save_answer(str(self.thread["id"]), answer)
+        try:
+            answer, message_id = await self._store(outcome)
+        except Exception:
+            # nothing else ends the claim, so the user could not ask again until it went stale.
+            await release(self.store, str(self.thread["id"]), self.claim)
+            raise
         if message_id is None:
             log.info("chat_thread_gone", extra={"thread_id": str(self.thread["id"]), "outcome": outcome})
             return None
@@ -454,13 +445,47 @@ class Turn:
         )
         return message_id
 
+    async def _store(self, outcome: str) -> tuple[dict[str, Any], str | None]:
+        """the answer as saved, and its id; none when the thread is gone."""
+        if self.rewriter is not None and (held := self.rewriter.flush()):
+            self.parts.append(held)  # an error or disconnect mid-tag: keep the text as written
+        decided = self.searched or self.version is not None or outcome == "no_results"
+        answer = {
+            "content": "".join(self.parts),
+            "outcome": outcome,
+            "rewritten_query": self.rewritten_query,
+            "sub_queries": self.sub_queries or None,
+            "is_on_topic": self.is_on_topic,
+            "retrieved_chunk_ids": [str(r["chunk_id"]) for r in self.results] if decided else None,
+            "citations": self._citations() if decided else None,
+            "prompt_version": self.version,
+            "model": self.model,
+            "usage_tokens": self.usage_tokens,
+            "latency_ms": round((time.perf_counter() - self.started) * 1000),
+        }
+        return answer, await self.store.save_answer(str(self.thread["id"]), answer, self.claim)
+
     def _save_detached(self, outcome: str) -> asyncio.Task[str | None]:
         """save in a task of its own, which a cancelled request does not cancel."""
-        task = asyncio.get_running_loop().create_task(self._save(outcome))
-        self.pending.add(task)  # a strong reference until it finishes; the lifespan waits for these
-        task.add_done_callback(self.pending.discard)
+        task = detached(self.pending, self._save(outcome))
         task.add_done_callback(_log_failure)
         return task
+
+
+def detached[T](pending: set[asyncio.Task[Any]], work: Coroutine[Any, Any, T]) -> asyncio.Task[T]:
+    """runs work in a task of its own, which a cancelled request does not cancel."""
+    task = asyncio.get_running_loop().create_task(work)
+    pending.add(task)  # a strong reference until it finishes; the lifespan waits for these
+    task.add_done_callback(pending.discard)
+    return task
+
+
+async def release(store: Store, thread_id: str, claim: datetime) -> None:
+    """gives up a turn's claim; a failure leaves it to go stale, without hiding the error that ended the turn."""
+    try:
+        await store.release_turn(thread_id, claim)
+    except Exception:
+        log.warning("chat_turn_release_failed", extra={"thread_id": thread_id})
 
 
 def topics(value: Any, query: str) -> list[str]:

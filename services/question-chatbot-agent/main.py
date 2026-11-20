@@ -25,7 +25,7 @@ from learning_transport import (
 from learning_transport.db import open_pool
 
 import config
-from chat import HISTORY_TURNS, SSEResponse, Turn, TurnRequest
+from chat import HISTORY_TURNS, SSEResponse, Turn, TurnRequest, detached, release
 from clients import Services, billed
 from contracts import MAX_MESSAGES, MessageList, NewMessage, NewThread, Thread, ThreadList, Usage
 from purge import run as purge_deleted_classrooms
@@ -173,14 +173,21 @@ async def post_message(
     thread = {**thread, "role": relation}
     # one answer at a time per user: each holds several of their ai-core slots (AI_USER_CONCURRENCY) while
     # it searches, so questions from several tabs at once would fail as busy midway instead.
-    if not await store.claim_turn(str(thread_id)):
+    claim = await store.claim_turn(str(thread_id))
+    if claim is None:
         raise failure(
             409,
             "TURN_IN_PROGRESS",
             "Your other question is still being answered. Ask again once it finishes.",
         )
-    history = await store.start_turn(str(thread_id), body.content, HISTORY_TURNS)
-    if history is None:  # purged with its classroom or its user since it was read
+    try:
+        history = await store.start_turn(str(thread_id), body.content, HISTORY_TURNS)
+    except BaseException:
+        # no answer will save and end the claim, so the user isn't held up until it goes stale. a task of its
+        # own, so a cancelled request still gives the claim up, and the lifespan waits for it.
+        await asyncio.shield(detached(request.app.state.pending, release(store, str(thread_id), claim)))
+        raise
+    if history is None:  # purged with its classroom or its user since it was read, and the claim with it
         raise failure(404, "NOT_FOUND", "Thread not found.")
     asked = TurnRequest(
         thread=thread,
@@ -189,6 +196,7 @@ async def post_message(
         content=body.content,
         history=history,
         billed_to=billed(claims, relation),
+        claim=claim,
     )
     state = request.app.state
     turn = Turn(state.services, store, state.settings, state.pending, asked)

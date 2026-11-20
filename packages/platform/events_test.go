@@ -3,6 +3,7 @@ package platform
 import (
 	"encoding/json"
 	"errors"
+	"strings"
 	"testing"
 	"time"
 
@@ -108,6 +109,12 @@ func TestDecodeUserDeletedRejectsMalformedDeletions(t *testing.T) {
 	}
 	v, err := DecodeUserDeleted(Event{Resource: user, Data: json.RawMessage(`{"user_id":"` + user + `","org_id":"o","role":"teacher"}`)})
 	if err != nil || v.User != user || v.Org != "o" || v.Role != "teacher" {
+		t.Fatalf("%+v %v", v, err)
+	}
+	// an older version published the id as an admin's path gave it; every account id the identity provider
+	// issues is a lowercase uuid, so the purge matches that spelling.
+	v, err = DecodeUserDeleted(Event{Resource: user, Data: json.RawMessage(`{"user_id":"` + strings.ToUpper(user) + `","org_id":"o","role":"student"}`)})
+	if err != nil || v.User != user {
 		t.Fatalf("%+v %v", v, err)
 	}
 }

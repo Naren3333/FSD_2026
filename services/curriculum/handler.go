@@ -37,6 +37,7 @@ func (s server) batch(w http.ResponseWriter, r *http.Request) {
 		platform.Invalid(w, "Provide 1–50 topic ids.")
 		return
 	}
+	platform.CanonicalList(body.IDs)
 	for _, id := range body.IDs {
 		if !platform.ID(id) {
 			platform.Invalid(w, "Provide valid topic ids.")
@@ -174,6 +175,7 @@ func (s server) addPrerequisite(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	id := r.PathValue("id")
+	input.Prerequisite = platform.CanonicalID(input.Prerequisite)
 	if !platform.ID(input.Prerequisite) || id == input.Prerequisite {
 		platform.Error(w, http.StatusUnprocessableEntity, "INVALID_PREREQUISITE", "Choose a different topic.")
 		return

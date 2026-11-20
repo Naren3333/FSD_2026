@@ -4,8 +4,9 @@ import asyncio
 import json
 from collections.abc import AsyncIterator, Callable
 from dataclasses import replace
+from datetime import UTC, datetime
 from typing import Any
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 import anyio
 import httpx
@@ -13,11 +14,14 @@ import pytest
 from conftest import OTHER_ROOM, ROOM, SETTINGS, Fakes, MemoryStore, as_user, chat_stream, rewrite
 from fastapi.testclient import TestClient
 from learning_transport import sse_event
+from starlette.requests import Request
 
+import chat
 import main
 import prompts
 from chat import needs_rewrite
 from clients import Services
+from contracts import NewMessage
 
 C1, C2, C3 = str(uuid4()), str(uuid4()), str(uuid4())
 DOC = str(uuid4())
@@ -256,7 +260,7 @@ def test_a_client_gone_before_the_stream_starts_still_gets_an_answer_saved() -> 
     async def scenario() -> list[dict[str, Any]]:
         store, pending = MemoryStore(), set[asyncio.Task[Any]]()
         asked = TurnRequest(thread={"id": "t", "role": "student", "classroom_id": ROOM}, authorization="Bearer s1",
-                            correlation="c", content="q", history=[], billed_to={})  # fmt: skip
+                            correlation="c", content="q", history=[], billed_to={}, claim=datetime.now(UTC))  # fmt: skip
         turn = Turn(None, store, SETTINGS, pending, asked)  # type: ignore[arg-type]
         response = SSEResponse(turn.events(), turn.finish)
 
@@ -535,10 +539,10 @@ def test_a_disconnect_during_the_final_save_keeps_the_answer(fakes: Fakes) -> No
             super().__init__()
             self.saving, self.release = asyncio.Event(), asyncio.Event()
 
-        async def save_answer(self, thread_id: str, answer: dict[str, Any]) -> str:
+        async def save_answer(self, thread_id: str, answer: dict[str, Any], claim: datetime) -> str | None:
             self.saving.set()
             await self.release.wait()
-            return await super().save_answer(thread_id, answer)
+            return await super().save_answer(thread_id, answer, claim)
 
     async def answer() -> AsyncIterator[str]:
         yield sse_event("token", {"text": "Done."})
@@ -546,7 +550,7 @@ def test_a_disconnect_during_the_final_save_keeps_the_answer(fakes: Fakes) -> No
     async def scenario() -> list[dict[str, Any]]:
         store, pending = SlowStore(), set[asyncio.Task[Any]]()
         asked = TurnRequest(thread={"id": "t", "role": "student", "classroom_id": ROOM}, authorization="Bearer s1",
-                            correlation="c", content="q", history=[], billed_to={})  # fmt: skip
+                            correlation="c", content="q", history=[], billed_to={}, claim=datetime.now(UTC))  # fmt: skip
         turn = Turn(None, store, SETTINGS, pending, asked)  # type: ignore[arg-type]
         turn.parts.append("Done.")
         turn._answer = answer  # type: ignore[method-assign]
@@ -639,12 +643,37 @@ def test_an_answer_that_cannot_be_saved_ends_with_an_error_event(
     fakes.replies += [rewrite("light"), chat_stream(["Light is absorbed [S1]."])]
     tid = thread(api)
 
+    save_answer = store.save_answer
+
     async def broken(*_: Any) -> str:
         raise ConnectionError("database down")
 
     store.save_answer = broken  # type: ignore[method-assign]
     events = post(api, tid, "how do plants get energy?")
     assert events[-1] == ("error", {"code": "INTERNAL_ERROR", "message": "The answer could not be saved."})
+    assert store.active == {}  # the turn is given up, so asking again isn't refused as still being answered
+    store.save_answer = save_answer  # type: ignore[method-assign]
+    fakes.replies += [rewrite("light"), chat_stream(["Light is absorbed [S1]."])]
+    assert post(api, tid, "how do plants get energy?")[-1][0] == "done"
+
+
+def test_an_answer_that_fails_before_its_save_still_gives_its_turn_up(
+    api: TestClient, fakes: Fakes, store: MemoryStore, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    fakes.results = RESULTS
+    fakes.replies += [rewrite("light"), chat_stream(["Light is absorbed [S1]."])]
+    tid = thread(api)
+
+    def broken(*_: Any) -> list[dict[str, Any]]:
+        raise KeyError("chunk")
+
+    with monkeypatch.context() as patch:
+        patch.setattr(chat.Turn, "_citations", broken)
+        events = post(api, tid, "how do plants get energy?")
+    assert events[-1] == ("error", {"code": "INTERNAL_ERROR", "message": "The answer could not be saved."})
+    assert store.active == {}  # building the answer failed, and the turn was still given up
+    fakes.replies += [rewrite("light"), chat_stream(["Light is absorbed [S1]."])]
+    assert post(api, tid, "how do plants get energy?")[-1][0] == "done"
 
 
 def topic(n: int, document: str, score: float, title: str) -> list[dict[str, Any]]:
@@ -813,6 +842,64 @@ def test_a_second_question_while_one_is_answering_is_refused(
     # someone else's answer doesn't hold this user up.
     fakes.replies += [rewrite("stomata"), chat_stream(["Stomata let CO2 in [S2]."])]
     assert post(api, thread(api, "t1"), "and stomata?", "t1")[-1][0] == "done"
+
+
+def test_a_question_that_fails_before_its_answer_starts_gives_its_turn_up(
+    api: TestClient, fakes: Fakes, store: MemoryStore
+) -> None:
+    fakes.results = RESULTS
+    tid = thread(api)
+    start_turn = store.start_turn
+
+    async def broken(*_: Any) -> None:
+        raise ConnectionError("database down")
+
+    store.start_turn = broken  # type: ignore[method-assign]
+    failing = TestClient(main.app, raise_server_exceptions=False)
+    resp = failing.post(f"/v1/threads/{tid}/messages", json={"content": "q"}, headers=as_user())
+    assert resp.status_code == 500
+    assert store.active == {}  # the user isn't held up until the claim goes stale
+    store.start_turn = start_turn  # type: ignore[method-assign]
+    fakes.replies += [rewrite("light"), chat_stream(["Light is absorbed [S1]."])]
+    assert post(api, tid, "how do plants get energy?")[-1][0] == "done"
+
+
+def test_a_question_cancelled_before_its_answer_starts_still_gives_its_turn_up(
+    api: TestClient, store: MemoryStore, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    tid = thread(api)
+    pending: set[asyncio.Task[Any]] = main.app.state.pending
+    tracked: list[bool] = []
+    started = asyncio.Event()
+
+    async def accessible(*_: Any) -> tuple[dict[str, Any], str]:
+        return {"id": tid, "classroom_id": ROOM, "role": "student"}, "student"
+
+    async def hanging(*_: Any) -> None:
+        started.set()
+        await asyncio.Event().wait()
+
+    release_turn = store.release_turn
+
+    async def release(thread_id: str, claim: datetime) -> None:
+        tracked.append(asyncio.current_task() in pending)  # the shutdown waits for it
+        await asyncio.sleep(0.01)  # still running when the cancelled request has gone
+        await release_turn(thread_id, claim)
+
+    monkeypatch.setattr(main, "accessible_thread", accessible)
+    store.start_turn, store.release_turn = hanging, release  # type: ignore[method-assign,assignment]
+    request = Request({"type": "http", "app": main.app, "method": "POST", "path": "/", "headers": []})
+
+    async def scenario() -> None:
+        asking = asyncio.ensure_future(main.post_message(UUID(tid), NewMessage(content="q"), request, None))  # type: ignore[arg-type]
+        await started.wait()
+        asking.cancel()  # the client went away while the question was being saved
+        with pytest.raises(asyncio.CancelledError):
+            await asking
+        await asyncio.gather(*pending)
+
+    asyncio.run(scenario())
+    assert tracked == [True] and store.active == {}
 
 
 def test_the_next_question_is_accepted_once_the_answer_is_saved(api: TestClient, fakes: Fakes) -> None:

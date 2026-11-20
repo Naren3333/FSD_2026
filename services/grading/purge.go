@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"encoding/json"
 	"learning/platform"
 
 	"github.com/jackc/pgx/v5"
@@ -51,7 +50,7 @@ type AssessmentDeleted struct {
 // purge assessment grades and jobs; remember deletion to reject late events.
 func purgeAssessment(ctx context.Context, tx pgx.Tx, event platform.Event) error {
 	var v AssessmentDeleted
-	if json.Unmarshal(event.Data, &v) != nil || !platform.ID(v.Assessment) || !platform.ID(v.Classroom) || v.Org == "" || event.Resource != v.Assessment {
+	if !platform.ReadData(event, &v, &v.Assessment, &v.Classroom) || !platform.ID(v.Assessment) || !platform.ID(v.Classroom) || v.Org == "" || event.Resource != v.Assessment {
 		return platform.InvalidEvent{Reason: "invalid assessment deletion"}
 	}
 	if err := platform.Lock(ctx, tx, platform.LockAssessment, v.Assessment); err != nil {

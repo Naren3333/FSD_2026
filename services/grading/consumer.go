@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"encoding/json"
 	"learning/platform"
 	"slices"
 	"strings"
@@ -59,10 +58,29 @@ func validScheme(excerpts []Excerpt) bool {
 // decodeSubmitted reads a submission event.
 func decodeSubmitted(event platform.Event) (Submitted, bool) {
 	var v Submitted
-	if json.Unmarshal(event.Data, &v) != nil || event.Resource != v.Submission {
+	if !platform.ReadData(event, &v, &v.Submission, &v.Assessment, &v.Classroom, &v.Student, &v.Teacher) {
 		return v, false
 	}
-	return v, v.valid()
+	v.canonicalize()
+	return v, event.Resource == v.Submission && v.valid()
+}
+
+// canonicalize spells the questions' ids, their answers' keys and their passages' ids canonically, as
+// ReadData does the submission's own ids.
+func (v *Submitted) canonicalize() {
+	for i := range v.Questions {
+		q := &v.Questions[i]
+		q.ID, q.Topic = platform.CanonicalID(q.ID), platform.CanonicalID(q.Topic)
+		for j := range q.MarkingScheme {
+			e := &q.MarkingScheme[j]
+			e.Document, e.Chunk = platform.CanonicalID(e.Document), platform.CanonicalID(e.Chunk)
+		}
+	}
+	answers := make(map[string]string, len(v.Answers))
+	for id, answer := range v.Answers {
+		answers[platform.CanonicalID(id)] = answer // two spellings of one question shrink the map, so valid refuses them
+	}
+	v.Answers = answers
 }
 
 // score evaluates each answer against its question; a question without exactly one answer is an

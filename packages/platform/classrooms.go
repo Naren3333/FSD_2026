@@ -2,7 +2,6 @@ package platform
 
 import (
 	"context"
-	"encoding/json"
 
 	"github.com/jackc/pgx/v5"
 )
@@ -20,7 +19,7 @@ type ClassroomDeleted struct {
 // DecodeClassroomDeleted reads a classroom deletion.
 func DecodeClassroomDeleted(event Event) (ClassroomDeleted, error) {
 	var v ClassroomDeleted
-	if json.Unmarshal(event.Data, &v) != nil || !ID(v.Classroom) || v.Org == "" || event.Resource != v.Classroom {
+	if !ReadData(event, &v, &v.Classroom) || !ID(v.Classroom) || v.Org == "" || event.Resource != v.Classroom {
 		return ClassroomDeleted{}, InvalidEvent{Reason: "invalid classroom deletion"}
 	}
 	return v, nil
@@ -40,7 +39,7 @@ type ClassroomReassigned struct {
 // DecodeClassroomReassigned reads a reassigned classroom.
 func DecodeClassroomReassigned(event Event) (ClassroomReassigned, error) {
 	var v ClassroomReassigned
-	if json.Unmarshal(event.Data, &v) != nil || !ID(v.Classroom) || v.Org == "" || v.Teacher == "" || event.Resource != v.Classroom || event.Timestamp.IsZero() {
+	if !ReadData(event, &v, &v.Classroom, &v.Teacher) || !ID(v.Classroom) || v.Org == "" || v.Teacher == "" || event.Resource != v.Classroom || event.Timestamp.IsZero() {
 		return ClassroomReassigned{}, InvalidEvent{Reason: "invalid classroom reassignment"}
 	}
 	return v, nil
@@ -61,7 +60,7 @@ type EnrollmentRemoved struct {
 // DecodeEnrollmentRemoved reads a removed enrollment.
 func DecodeEnrollmentRemoved(event Event) (EnrollmentRemoved, error) {
 	var v EnrollmentRemoved
-	if json.Unmarshal(event.Data, &v) != nil || !ID(v.Classroom) || v.Org == "" || v.Student == "" || event.Resource != v.Classroom {
+	if !ReadData(event, &v, &v.Classroom, &v.Student) || !ID(v.Classroom) || v.Org == "" || v.Student == "" || event.Resource != v.Classroom {
 		return EnrollmentRemoved{}, InvalidEvent{Reason: "invalid enrollment removal"}
 	}
 	return v, nil
@@ -81,7 +80,7 @@ type EnrollmentAdded struct {
 // DecodeEnrollmentAdded reads an added enrollment.
 func DecodeEnrollmentAdded(event Event) (EnrollmentAdded, error) {
 	var v EnrollmentAdded
-	if json.Unmarshal(event.Data, &v) != nil || !ID(v.Classroom) || v.Org == "" || v.Student == "" || event.Resource != v.Classroom || event.Timestamp.IsZero() {
+	if !ReadData(event, &v, &v.Classroom, &v.Student) || !ID(v.Classroom) || v.Org == "" || v.Student == "" || event.Resource != v.Classroom || event.Timestamp.IsZero() {
 		return EnrollmentAdded{}, InvalidEvent{Reason: "invalid enrollment"}
 	}
 	return v, nil
@@ -101,7 +100,7 @@ type UserDeleted struct {
 // DecodeUserDeleted reads a deleted account.
 func DecodeUserDeleted(event Event) (UserDeleted, error) {
 	var v UserDeleted
-	if json.Unmarshal(event.Data, &v) != nil || !ID(v.User) || v.Org == "" || (v.Role != "teacher" && v.Role != "student") || event.Resource != v.User {
+	if !ReadData(event, &v, &v.User) || !ID(v.User) || v.Org == "" || (v.Role != "teacher" && v.Role != "student") || event.Resource != v.User {
 		return UserDeleted{}, InvalidEvent{Reason: "invalid account deletion"}
 	}
 	return v, nil
