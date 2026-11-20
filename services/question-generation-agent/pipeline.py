@@ -127,12 +127,10 @@ class Run:
 
     accepted: list[Generated] = field(default_factory=list)  # passed the checks and the review
     unreviewed: list[Generated] = field(default_factory=list)  # passed the checks; the review did not run
-    weak: list[tuple[Generated, str]] = field(
-        default_factory=list
-    )  # flagged drafts with their reason; kept if nothing better turns up
-    attempts: list[checks.Rejected] = field(
-        default_factory=list
-    )  # every refused question, fed back to the generator
+    # flagged drafts with their reason; kept if nothing better turns up
+    weak: list[tuple[Generated, str]] = field(default_factory=list)
+    # every refused question, fed back to the generator
+    attempts: list[checks.Rejected] = field(default_factory=list)
     dropped: Counter[str] = field(default_factory=Counter)
     rounds: list[Round] = field(default_factory=list)
     calls: int = 0
@@ -222,7 +220,6 @@ class Run:
 class Pipeline:
     def __init__(self, services: Services, request: Request, claims: Claims, settings: Settings) -> None:
         self.services, self.request, self.claims, self.settings = services, request, claims, settings
-        self.floor = settings.relevance_floor
         self.authorization = request.headers["authorization"]
         self.correlation: str = request.state.correlation_id
 
@@ -250,12 +247,11 @@ class Pipeline:
         tokens: int,
         schema: dict[str, Any],
         name: str,
-        deadline: float | None = None,
-        run: Run | None = None,
+        deadline: float | None,
+        run: Run,
     ) -> str:
         """one model call; with a deadline it is cut off then (OUT_OF_TIME, not a failure to report, only the end of the retries), so the request ends before the gateway gives up."""
-        if run is not None:
-            run.calls += 1
+        run.calls += 1
         return await self.services.generate(
             messages, tokens, schema, name, self.correlation, billed(self.claims), deadline
         )
@@ -325,7 +321,7 @@ class Pipeline:
             run.rounds.append(_round(generated, kept, counts, sent_back, len(kept)))
             return True
         try:
-            verdicts = await self._review(job.topic, job.body, kept, job.passages, run, job.deadline)
+            verdicts = await self._review(job, kept, run)
         except (UpstreamError, checks.UnreadableOutputError) as e:
             log.warning("review_failed", extra={"error": str(e), "round": n})
             run.unreviewed += [held(g, not_run(n)) for g in kept]
@@ -368,28 +364,20 @@ class Pipeline:
             model_calls=run.calls,
         )
 
-    async def _review(
-        self,
-        topic: str,
-        body: GenerateRequest,
-        kept: list[Generated],
-        passages: list[Passage],
-        run: Run,
-        deadline: float,
-    ) -> list[review.Verdict]:
+    async def _review(self, job: Job, kept: list[Generated], run: Run) -> list[review.Verdict]:
         """one reviewer call over the drafts that passed the checks; it sees the editor's questions and those held so far."""
         output = await self._ask(
             prompts.review_messages(
-                topic,
-                body.difficulty,
+                job.topic,
+                job.body.difficulty,
                 kept,
-                passages,
-                [*body.existing_prompts, *(g.question.prompt for g in run.accepted + run.unreviewed)],
+                job.passages,
+                [*job.body.existing_prompts, *(g.question.prompt for g in run.accepted + run.unreviewed)],
             ),
             REVIEW_TOKENS,
             prompts.review_schema(),
             "questions.reviewed",
-            deadline,
+            job.deadline,
             run,
         )
         return review.verdicts(output, len(kept))
@@ -433,7 +421,7 @@ class Pipeline:
             # without the reranker the results are in rrf order and the floor can't be applied, so the
             # drafts would rest on passages nobody scored.
             raise UpstreamError("content", 503, "RERANK_UNAVAILABLE")
-        passages = passages_of(results, self.floor)
+        passages = passages_of(results, self.settings.relevance_floor)
         if not passages:
             raise failure(
                 422,

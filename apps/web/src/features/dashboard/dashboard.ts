@@ -13,7 +13,7 @@ import { ClassroomContext, onClassroomChange } from '../../core/classroom-contex
 import { onSectionShown, rereadQuietly } from '../../core/section-shown';
 import { CurriculumNames } from '../../core/curriculum-names';
 import { studentNames } from '../../shared/names';
-import { PagerComponent, pageCount } from '../../shared/pager';
+import { PagerComponent, lastPage } from '../../shared/pager';
 import { NoClassroomComponent } from '../../shared/no-classroom';
 import { Section } from '../../shared/section';
 import { SectionStateComponent } from '../../shared/section-state';
@@ -120,21 +120,17 @@ export class DashboardComponent {
   private reread(): void {
     const classroomId = this.classroomId();
     if (!classroomId) return;
-    const offset = this.page() * this.pageSize;
+    const page = this.page();
     rereadQuietly(this.assessments, () => this.publishedProgress(classroomId));
     rereadQuietly(this.counts, () => this.grading.counts(classroomId));
-    rereadQuietly(this.roster, async () => {
-      const roster = await this.identity.rosterPage(classroomId, offset, this.pageSize);
-      if (this.classroomId() === classroomId) this.enrolledTotal.set(roster.total);
-      return roster.students;
-    });
-    rereadQuietly(this.performance, async () => {
-      const page = await this.analytics.classPerformance(classroomId, offset, this.pageSize);
-      await this.curriculum
-        .need(page.students.flatMap((s) => s.topics.map((m) => m.topic_id)))
-        .catch(() => undefined);
-      return page;
-    });
+    rereadQuietly(this.roster, () =>
+      this.readRoster(classroomId, page, () => this.classroomId() === classroomId),
+    );
+    rereadQuietly(this.performance, async () =>
+      this.withTopicNames(
+        await this.analytics.classPerformance(classroomId, page * this.pageSize, this.pageSize),
+      ),
+    );
   }
 
   // students never see drafts, so a draft has no submissions to count.
@@ -166,7 +162,7 @@ export class DashboardComponent {
         this.pageSize,
       );
       if (!page.students.length && this.page() > 0) {
-        const last = Math.max(0, pageCount(page.total, this.pageSize) - 1);
+        const last = lastPage(page.total, this.pageSize);
         if (page.total)
           page = await this.analytics.classPerformance(classroomId, last * this.pageSize, this.pageSize);
         if (current()) {
@@ -174,20 +170,27 @@ export class DashboardComponent {
           this.loadRoster(classroomId, last);
         }
       }
-      // without the curriculum, topics show their ids.
-      await this.curriculum
-        .need(page.students.flatMap((s) => s.topics.map((m) => m.topic_id)))
-        .catch(() => undefined);
-      return page;
+      return this.withTopicNames(page);
     });
   }
 
+  /* names the page's topics first; without the curriculum, topics show their ids. */
+  private async withTopicNames(page: ClassPerformance): Promise<ClassPerformance> {
+    await this.curriculum
+      .need(page.students.flatMap((s) => s.topics.map((m) => m.topic_id)))
+      .catch(() => undefined);
+    return page;
+  }
+
   private loadRoster(classroomId: string, page: number): void {
-    void this.roster.load(async (current) => {
-      const roster = await this.identity.rosterPage(classroomId, page * this.pageSize, this.pageSize);
-      if (current()) this.enrolledTotal.set(roster.total);
-      return roster.students;
-    });
+    void this.roster.load((current) => this.readRoster(classroomId, page, current));
+  }
+
+  /* one page of the roster by name, keeping the enrolled total while the read is still current. */
+  private async readRoster(classroomId: string, page: number, current: () => boolean): Promise<Student[]> {
+    const roster = await this.identity.rosterPage(classroomId, page * this.pageSize, this.pageSize);
+    if (current()) this.enrolledTotal.set(roster.total);
+    return roster.students;
   }
 
   studentName(studentId: string): string {

@@ -3,6 +3,7 @@
 import asyncio
 import math
 from contextlib import AsyncExitStack
+from pathlib import Path
 
 from learning_transport.metrics import increment
 
@@ -19,15 +20,7 @@ async def embed(texts: list[str], tally: openai_client.Tally) -> list[list[float
         # sorted input locks prevent overlapping batches from duplicating work or deadlocking.
         for name in sorted(set(names)):
             await locks.enter_async_context(local_cache.singleflight("embedding:" + name))
-        saved: dict[str, list[float]] = {}
-        for name in dict.fromkeys(names):
-            value = await asyncio.to_thread(local_cache.read, root / f"{name}.json")
-            if (
-                isinstance(value, list)
-                and len(value) == 1536
-                and all(isinstance(v, int | float) and math.isfinite(v) for v in value)
-            ):
-                saved[name] = value
+        saved = await asyncio.to_thread(cached, root, list(dict.fromkeys(names)))
         missing = {name: text for name, text in zip(names, texts, strict=True) if name not in saved}
         increment("learning_embedding_cache_hits_total", len(saved))
         increment("learning_embedding_cache_misses_total", len(missing))
@@ -35,7 +28,26 @@ async def embed(texts: list[str], tally: openai_client.Tally) -> list[list[float
         for start in range(0, len(todo), openai_client.EMBED_BATCH):
             keys = todo[start : start + openai_client.EMBED_BATCH]
             vectors, _ = await openai_client.embed([missing[k] for k in keys], tally)
-            for name, vector in zip(keys, vectors, strict=True):
-                saved[name] = vector
-                await asyncio.to_thread(local_cache.write, root / f"{name}.json", vector)
+            fresh = dict(zip(keys, vectors, strict=True))
+            saved.update(fresh)
+            await asyncio.to_thread(store, root, fresh)
         return [saved[name] for name in names]
+
+
+def cached(root: Path, names: list[str]) -> dict[str, list[float]]:
+    """the valid cached vector of each name that has one."""
+    saved: dict[str, list[float]] = {}
+    for name in names:
+        value = local_cache.read(root / f"{name}.json")
+        if (
+            isinstance(value, list)
+            and len(value) == 1536
+            and all(isinstance(v, int | float) and math.isfinite(v) for v in value)
+        ):
+            saved[name] = value
+    return saved
+
+
+def store(root: Path, vectors: dict[str, list[float]]) -> None:
+    for name, vector in vectors.items():
+        local_cache.write(root / f"{name}.json", vector)

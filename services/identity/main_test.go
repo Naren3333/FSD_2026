@@ -21,7 +21,6 @@ var claims = platformtest.Claims
 
 func TestDecideRelation(t *testing.T) {
 	enrolled := map[string]bool{"student-1": true, "student-2": true, "teacher-2": true}
-	lookup := func(id string) (bool, error) { return enrolled[id], nil }
 	cases := []struct {
 		name    string
 		caller  platform.Claims
@@ -43,9 +42,12 @@ func TestDecideRelation(t *testing.T) {
 		{"student named as the owner", claims("teacher-1", "student"), "org", "", ""},
 	}
 	for _, tc := range cases {
-		got, err := decide(tc.caller, tc.org, "teacher-1", tc.student, lookup)
-		if err != nil || got != tc.want {
-			t.Errorf("%s: got %q, %v; want %q", tc.name, got, err, tc.want)
+		target := tc.student
+		if target == "" {
+			target = tc.caller.Subject
+		}
+		if got := decide(tc.caller, tc.org, "teacher-1", tc.student, enrolled[target]); got != tc.want {
+			t.Errorf("%s: got %q; want %q", tc.name, got, tc.want)
 		}
 	}
 }

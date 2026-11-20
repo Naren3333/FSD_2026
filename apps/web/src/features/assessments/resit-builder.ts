@@ -3,7 +3,7 @@ import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { FormControl, FormGroup, ReactiveFormsModule, Validators } from '@angular/forms';
 import { RouterLink } from '@angular/router';
 import { AssessmentApi, GradingApi, IdentityApi } from '../../api/clients';
-import type { Assessment, BankQuestion, Evaluation, Question, QuestionType, Student } from '../../api/models';
+import type { Assessment, BankQuestion, Evaluation, Question, Student } from '../../api/models';
 import { CurriculumNames } from '../../core/curriculum-names';
 import { ActionState } from '../../shared/action-state';
 import { FieldComponent, FieldControlDirective } from '../../shared/field';
@@ -16,7 +16,7 @@ import { RefreshButtonComponent } from '../../shared/refresh-button';
 import { Section } from '../../shared/section';
 import { SectionStateComponent } from '../../shared/section-state';
 import { StatusComponent } from '../../shared/status';
-import { BANK_TYPES } from './bank-picker';
+import { questionTypeName } from './bank-picker';
 import { marksText } from './editor';
 import {
   type FinalizedGrades,
@@ -310,9 +310,7 @@ export class ResitBuilderComponent implements OnChanges {
     return this.curriculum.topicName(topicId) || topicId;
   }
 
-  typeName(type: QuestionType): string {
-    return BANK_TYPES.find((t) => t.value === type)?.label ?? type;
-  }
+  readonly typeName = questionTypeName;
 
   /* a bank question on an archived topic cannot go into an assessment. */
   archived(question: Pick<BankQuestion, 'topic_id'>): boolean {

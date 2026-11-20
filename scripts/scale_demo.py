@@ -19,6 +19,7 @@ from local_stack import (
     ROOT,
     admin_client,
     check,
+    compose,
     ensure_person,
     env,
     password_token,
@@ -27,6 +28,7 @@ from local_stack import (
 )
 
 SCALED = ["identity", "assessment", "grading"]  # the services docker-compose.scale.yml replicates
+COMPOSE_TIMEOUT = 600  # seconds for one compose command: scaling up and the k6 run take minutes
 WORK = ROOT / ".local" / "scale-demo"  # run.json for k6, and the report
 MARKED_TIMEOUT = 180  # seconds for every submission of a run to be marked
 WARM_UP_REQUESTS = 200  # reads spread over the last tokens, a few per session
@@ -64,21 +66,11 @@ class Run:
 # -------------------------------------------------------------------------------------------------------
 
 
-def compose(*args: str, timeout: float = 600) -> subprocess.CompletedProcess[str]:
-    return subprocess.run(
-        ["docker", "compose", *args],
-        cwd=ROOT,
-        text=True,
-        encoding="utf-8",
-        capture_output=True,
-        check=True,
-        timeout=timeout,
-    )
-
-
 def containers(service: str) -> list[str]:
     """the names of a service's running containers."""
-    out = compose("ps", "--status", "running", "--format", "{{.Name}}", service).stdout
+    out = compose(
+        "ps", "--status", "running", "--format", "{{.Name}}", service, timeout=COMPOSE_TIMEOUT
+    ).stdout
     return sorted(out.split())
 
 
@@ -86,7 +78,16 @@ def scale(replicas: int) -> None:
     """runs `replicas` of each scaled service and waits until every one of them is healthy."""
     flags = [arg for service in SCALED for arg in ("--scale", f"{service}={replicas}")]
     compose(
-        "up", "--detach", "--no-build", "--no-recreate", "--wait", "--wait-timeout", "300", *flags, *SCALED
+        "up",
+        "--detach",
+        "--no-build",
+        "--no-recreate",
+        "--wait",
+        "--wait-timeout",
+        "300",
+        *flags,
+        *SCALED,
+        timeout=COMPOSE_TIMEOUT,
     )
     for service in SCALED:
         running = containers(service)
@@ -116,7 +117,7 @@ def consumer_group(group: str) -> list[dict[str, str]]:
     """each partition of a consumer group's topic: its lag, and the container whose consumer holds it."""
     out = compose(
         "exec", "-T", "kafka", "/opt/kafka/bin/kafka-consumer-groups.sh",
-        "--bootstrap-server", "localhost:9092", "--describe", "--group", group,
+        "--bootstrap-server", "localhost:9092", "--describe", "--group", group, timeout=COMPOSE_TIMEOUT,
     ).stdout  # fmt: skip
     # a consumer id is "app@<container hostname> (github.com/segmentio/kafka-go)-<uuid>"; the hostname is
     # the container's short id.
@@ -232,7 +233,7 @@ def run_k6(run_file: dict[str, Any], args: argparse.Namespace) -> tuple[dict[str
         done = compose(
             "run", "--rm", "--no-deps", "-T",
             "-e", f"BROWSE_RATE={args.browse_rate}", "-e", f"BROWSE_SECONDS={args.browse_seconds}",
-            "k6", "run", "--quiet", "--no-color", "/scripts/deadline.js",
+            "k6", "run", "--quiet", "--no-color", "/scripts/deadline.js", timeout=COMPOSE_TIMEOUT,
         )  # fmt: skip
     finally:
         path.unlink()  # it holds signed-in tokens

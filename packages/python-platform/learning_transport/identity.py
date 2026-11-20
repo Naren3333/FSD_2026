@@ -1,6 +1,7 @@
 """classroom access, decided by the identity service."""
 
 from collections.abc import Collection
+from typing import Any
 
 import httpx
 from fastapi import Request
@@ -18,32 +19,32 @@ class IdentityClient:
         self, authorization: str, classroom_id: str, correlation: str, student_id: str | None = None
     ) -> str | None:
         """how the caller may access the classroom (optionally on behalf of a student): RELATION_TEACHER for its own teacher, RELATION_STUDENT for an enrolled student, none when access is denied."""
-        try:
-            resp = await self.http.get(
-                f"{self.base_url}/v1/classrooms/{classroom_id}/access",
-                params={"student_id": student_id} if student_id else None,
-                headers={"Authorization": authorization, "X-Correlation-ID": correlation},
-                timeout=5,
-            )
-        except httpx.HTTPError:
-            raise UpstreamError("identity", 0) from None
-        if resp.status_code >= 500:
-            raise UpstreamError("identity", resp.status_code)
-        if resp.status_code != 200:
+        params = {"student_id": student_id} if student_id else None
+        body = await self._get(f"/v1/classrooms/{classroom_id}/access", authorization, correlation, params)
+        if body is None:
             return None
-        try:
-            relation = resp.json().get("relation")
-        except ValueError:
-            raise UpstreamError("identity", 502) from None
+        relation = body.get("relation")
         if relation not in (RELATION_TEACHER, RELATION_STUDENT):
             raise UpstreamError("identity", 502)
         return str(relation)
 
     async def roster(self, authorization: str, classroom_id: str, correlation: str) -> list[str] | None:
         """the ids of all the classroom's students, in identity's order (by name), for its own teacher: none when access is denied."""
+        ids = await self._get(f"/v1/classrooms/{classroom_id}/student-ids", authorization, correlation)
+        if ids is None:
+            return None
+        if not isinstance(ids, list) or not all(isinstance(i, str) and i for i in ids):
+            raise UpstreamError("identity", 502)
+        return ids
+
+    async def _get(
+        self, path: str, authorization: str, correlation: str, params: dict[str, str] | None = None
+    ) -> Any:
+        """a 200 answer's json, or none when identity refuses (any other status under 500); upstreamerror when it can't answer or answers null."""
         try:
             resp = await self.http.get(
-                f"{self.base_url}/v1/classrooms/{classroom_id}/student-ids",
+                f"{self.base_url}{path}",
+                params=params,
                 headers={"Authorization": authorization, "X-Correlation-ID": correlation},
                 timeout=5,
             )
@@ -54,12 +55,12 @@ class IdentityClient:
         if resp.status_code != 200:
             return None
         try:
-            ids = resp.json()
+            body = resp.json()
         except ValueError:
             raise UpstreamError("identity", 502) from None
-        if not isinstance(ids, list) or not all(isinstance(i, str) and i for i in ids):
+        if body is None:
             raise UpstreamError("identity", 502)
-        return ids
+        return body
 
 
 async def require_relation(

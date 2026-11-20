@@ -185,11 +185,8 @@ func (s server) create(w http.ResponseWriter, r *http.Request) {
 // update replaces an assessment until a student submits it, and publishes a draft when the new version says
 // so; without a status it keeps the one it has.
 func (s server) update(w http.ResponseWriter, r *http.Request) {
-	if !platform.Teacher(w, r) {
-		return
-	}
-	existing, ok := s.findAssessment(w, r)
-	if !ok || !platform.TeacherOf(s.access, w, r, existing.Classroom) {
+	existing, ok := s.forTeacher(w, r)
+	if !ok {
 		return
 	}
 	var in AssessmentInput
@@ -221,11 +218,8 @@ func (s server) update(w http.ResponseWriter, r *http.Request) {
 
 // details changes an assessment's title, due date and late policy.
 func (s server) details(w http.ResponseWriter, r *http.Request) {
-	if !platform.Teacher(w, r) {
-		return
-	}
-	v, ok := s.findAssessment(w, r)
-	if !ok || !platform.TeacherOf(s.access, w, r, v.Classroom) {
+	v, ok := s.forTeacher(w, r)
+	if !ok {
 		return
 	}
 	var change struct {
@@ -262,11 +256,8 @@ func (s server) details(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s server) publish(w http.ResponseWriter, r *http.Request) {
-	if !platform.Teacher(w, r) {
-		return
-	}
-	v, ok := s.findAssessment(w, r)
-	if !ok || !platform.TeacherOf(s.access, w, r, v.Classroom) {
+	v, ok := s.forTeacher(w, r)
+	if !ok {
 		return
 	}
 	if v.Status != statusDraft {
@@ -287,11 +278,8 @@ func (s server) publish(w http.ResponseWriter, r *http.Request) {
 
 // remove deletes an assessment.
 func (s server) remove(w http.ResponseWriter, r *http.Request) {
-	if !platform.Teacher(w, r) {
-		return
-	}
-	v, ok := s.findAssessment(w, r)
-	if !ok || !platform.TeacherOf(s.access, w, r, v.Classroom) {
+	v, ok := s.forTeacher(w, r)
+	if !ok {
 		return
 	}
 	withSubmissions := r.URL.Query().Get("with_submissions") == "true"
@@ -362,29 +350,11 @@ func (s server) list(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	var paging []platform.ListWindow
-	if r.URL.Path == "/v1/assessments/page" {
-		offset, limit, valid := platform.Page(w, r, 20, 100)
-		if !valid {
-			return
-		}
-		paging = []platform.ListWindow{{Offset: offset, Limit: limit}}
-	}
-	result, err := s.store.listAssessments(r.Context(), actor.Org, id, actor.Subject, teacher, enrolled, s.now(), paging...)
-	if err != nil {
-		platform.Fail(w, err)
-		return
-	}
-	if len(paging) > 0 {
-		total, err := s.store.countAssessments(r.Context(), actor.Org, id, actor.Subject, teacher, s.now())
-		if err != nil {
-			platform.Fail(w, err)
-			return
-		}
-		platform.JSON(w, http.StatusOK, platform.ListPage[Summary]{Items: result, Total: total})
-		return
-	}
-	platform.JSON(w, http.StatusOK, result)
+	platform.ServeList(w, r, 100, func(paging ...platform.ListWindow) ([]Summary, error) {
+		return s.store.listAssessments(r.Context(), actor.Org, id, actor.Subject, teacher, enrolled, s.now(), paging...)
+	}, func() (int, error) {
+		return s.store.countAssessments(r.Context(), actor.Org, id, actor.Subject, teacher, s.now())
+	})
 }
 
 // progress is, for the classroom's teacher only, each assessment with how many of its enrolled students
@@ -398,29 +368,10 @@ func (s server) progress(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	var paging []platform.ListWindow
-	if r.URL.Path == "/v1/assessments/progress/page" {
-		offset, limit, valid := platform.Page(w, r, 20, 100)
-		if !valid {
-			return
-		}
-		paging = []platform.ListWindow{{Offset: offset, Limit: limit}}
-	}
-	result, err := s.store.listProgress(r.Context(), platform.Actor(r).Org, id, enrolled, paging...)
-	if err != nil {
-		platform.Fail(w, err)
-		return
-	}
-	if len(paging) > 0 {
-		total, err := s.store.countAssessments(r.Context(), platform.Actor(r).Org, id, "", true, s.now())
-		if err != nil {
-			platform.Fail(w, err)
-			return
-		}
-		platform.JSON(w, http.StatusOK, platform.ListPage[Progress]{Items: result, Total: total})
-		return
-	}
-	platform.JSON(w, http.StatusOK, result)
+	org := platform.Actor(r).Org
+	platform.ServeList(w, r, 100, func(paging ...platform.ListWindow) ([]Progress, error) {
+		return s.store.listProgress(r.Context(), org, id, enrolled, paging...)
+	}, func() (int, error) { return s.store.countAssessments(r.Context(), org, id, "", true, s.now()) })
 }
 
 // findAssessment looks up the assessment the path names in the caller's organization.
@@ -432,6 +383,15 @@ func (s server) findAssessment(w http.ResponseWriter, r *http.Request) (Assessme
 	}
 	v, err := s.store.findAssessment(r.Context(), platform.Actor(r).Org, id)
 	return v, platform.Found(w, err, "Assessment not found.")
+}
+
+// forteacher is the assessment the path names, for its classroom's teacher only.
+func (s server) forTeacher(w http.ResponseWriter, r *http.Request) (Assessment, bool) {
+	if !platform.Teacher(w, r) {
+		return Assessment{}, false
+	}
+	v, ok := s.findAssessment(w, r)
+	return v, ok && platform.TeacherOf(s.access, w, r, v.Classroom)
 }
 
 func (s server) get(w http.ResponseWriter, r *http.Request) {
@@ -457,7 +417,7 @@ func (s server) get(w http.ResponseWriter, r *http.Request) {
 // forStudent finds the assessment for an enrolled student who may answer it: published and open.
 func (s server) forStudent(w http.ResponseWriter, r *http.Request) (Assessment, bool) {
 	c := platform.Actor(r)
-	if !c.Has("student") || c.Has("teacher") {
+	if !c.Has(platform.RoleStudent) || c.Has(platform.RoleTeacher) {
 		platform.Forbidden(w, "Only enrolled students may submit.")
 		return Assessment{}, false
 	}
@@ -507,21 +467,7 @@ func (s server) submit(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	inserted, late, err := s.store.insertSubmission(r.Context(), v, sub)
-	switch {
-	case errors.Is(err, errClosed):
-		closed(w) // the teacher changed the due date or late policy meanwhile
-		return
-	case errors.Is(err, errAccountDeleted):
-		platform.Forbidden(w, "This account was deleted.")
-		return
-	case errors.Is(err, errAssessmentChanged):
-		assessmentChanged(w)
-		return
-	case errors.Is(err, platform.ErrNotFound):
-		platform.NotFound(w, "Assessment not found.") // deleted while the student was answering
-		return
-	case err != nil:
-		platform.Fail(w, err)
+	if workFailed(w, err) {
 		return
 	}
 	if !inserted {
@@ -597,7 +543,16 @@ func (s server) save(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	at, err := s.store.saveAnswers(r.Context(), v.ID, platform.Actor(r).Subject, input.Answers, s.now().UTC())
+	if !workFailed(w, err) {
+		platform.JSON(w, http.StatusOK, SavedAnswers{Answers: input.Answers, SavedAt: &at})
+	}
+}
+
+// workfailed answers the store's refusal to save or submit a student's work, reporting whether there was one.
+func workFailed(w http.ResponseWriter, err error) bool {
 	switch {
+	case err == nil:
+		return false
 	case errors.Is(err, errClosed):
 		closed(w) // the teacher changed the due date or late policy meanwhile
 	case errors.Is(err, errAssessmentChanged):
@@ -608,9 +563,8 @@ func (s server) save(w http.ResponseWriter, r *http.Request) {
 		alreadySubmitted(w)
 	case errors.Is(err, platform.ErrNotFound):
 		platform.NotFound(w, "Assessment not found.") // deleted while the student was answering
-	case err != nil:
-		platform.Fail(w, err)
 	default:
-		platform.JSON(w, http.StatusOK, SavedAnswers{Answers: input.Answers, SavedAt: &at})
+		platform.Fail(w, err)
 	}
+	return true
 }

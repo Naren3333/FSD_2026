@@ -29,7 +29,7 @@ import {
   type AssessmentForm,
   type QuestionForm,
 } from './editor';
-import { BankPickerComponent } from './bank-picker';
+import { BankPickerComponent, questionTypeName } from './bank-picker';
 import { QuestionGeneratorComponent } from './generator';
 import { MarkingGuidanceComponent } from './guidance';
 import { MarkingPointsComponent } from './marking-points';
@@ -264,9 +264,7 @@ export class AssessmentEditorComponent {
     return prompt.length > 60 ? prompt.slice(0, 57).trimEnd() + '…' : prompt;
   }
 
-  typeName(type: string): string {
-    return TYPE_NAMES[type] ?? type;
-  }
+  readonly typeName = questionTypeName;
 
   /* a question's topic name, archived ones included, or ''. */
   topicName(topicId: string): string {
@@ -379,13 +377,6 @@ export class AssessmentEditorComponent {
     focusLater(id);
   }
 }
-
-const TYPE_NAMES: Record<string, string> = {
-  numerical: 'Numerical',
-  multiple_choice: 'Multiple choice',
-  short_answer: 'Short answer',
-  free_response: 'Written response',
-};
 
 /* whether an enabled control in `control` is invalid (and, with `touched`, touched). */
 function invalidControl(control: AbstractControl, touched: boolean): boolean {

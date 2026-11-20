@@ -16,7 +16,7 @@ type store interface {
 	countClassrooms(ctx context.Context, org, subject string, teacher bool) (int, error)
 	registerUser(ctx context.Context, org, subject, role, username, name string) error
 	findClassroomOwner(ctx context.Context, classroom string) (org, teacher string, err error)
-	isEnrolled(ctx context.Context, classroom, student string) (bool, error)
+	classroomAccess(ctx context.Context, classroom, student string) (org, teacher string, enrolled bool, err error)
 	insertClassroom(ctx context.Context, id, name, org, teacher string) error
 	listClassrooms(ctx context.Context, org, subject string, isTeacher bool, paging ...platform.ListWindow) ([]Classroom, error)
 	studentExists(ctx context.Context, student, org string) (bool, error)
@@ -81,10 +81,12 @@ func (p pgStore) findClassroomOwner(ctx context.Context, classroom string) (org,
 	return org, teacher, err
 }
 
-func (p pgStore) isEnrolled(ctx context.Context, classroom, student string) (bool, error) {
-	var enrolled bool
-	err := p.db.QueryRow(ctx, "SELECT EXISTS(SELECT 1 FROM enrollments WHERE classroom_id=$1 AND student_id=$2)", classroom, student).Scan(&enrolled)
-	return enrolled, err
+// classroomAccess returns, in one query, what relation decides on: the classroom's organization and
+// teacher, and whether the student is enrolled in it.
+func (p pgStore) classroomAccess(ctx context.Context, classroom, student string) (org, teacher string, enrolled bool, err error) {
+	err = p.db.QueryRow(ctx, `SELECT c.org_id,c.teacher_id,EXISTS(SELECT 1 FROM enrollments e WHERE e.classroom_id=c.id AND e.student_id=$2)
+		FROM classrooms c WHERE c.id=$1 AND c.deleted_at IS NULL`, classroom, student).Scan(&org, &teacher, &enrolled)
+	return org, teacher, enrolled, err
 }
 
 // errNotATeacher is the answer of insertClassroom and updateClassroom when the chosen teacher is not a

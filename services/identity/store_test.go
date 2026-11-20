@@ -15,6 +15,13 @@ import (
 
 // these tests run the store against real postgresql, in a throwaway schema with every migration applied.
 
+// isenrolled reports whether the student has an enrollment row in the classroom, deleted or not.
+func isEnrolled(ctx context.Context, s pgStore, classroom, student string) (bool, error) {
+	var enrolled bool
+	err := s.db.QueryRow(ctx, "SELECT EXISTS(SELECT 1 FROM enrollments WHERE classroom_id=$1 AND student_id=$2)", classroom, student).Scan(&enrolled)
+	return enrolled, err
+}
+
 func testStore(t *testing.T) pgStore {
 	t.Helper()
 	return pgStore{platformtest.DB(t, "IDENTITY_TEST_DATABASE_URL", migrations)}
@@ -158,6 +165,12 @@ func TestADeletedClassroomIsGoneAndAnnounced(t *testing.T) {
 	if org, teacher, err := s.findClassroomOwner(ctx, id); err != nil || org != "org-a" || teacher != "teacher-a" {
 		t.Fatalf("owner = %s %s %v", org, teacher, err)
 	}
+	if org, teacher, enrolled, err := s.classroomAccess(ctx, id, "student-a"); err != nil || org != "org-a" || teacher != "teacher-a" || !enrolled {
+		t.Fatalf("access = %s %s %v %v", org, teacher, enrolled, err)
+	}
+	if _, _, enrolled, err := s.classroomAccess(ctx, id, "teacher-a"); err != nil || enrolled {
+		t.Fatalf("teacher enrolled = %v %v", enrolled, err)
+	}
 	for range 2 { // deleting twice announces once
 		if err := s.deleteClassroom(ctx, id, "org-a"); err != nil {
 			t.Fatal(err)
@@ -166,10 +179,13 @@ func TestADeletedClassroomIsGoneAndAnnounced(t *testing.T) {
 	if _, _, err := s.findClassroomOwner(ctx, id); !errors.Is(err, platform.ErrNotFound) {
 		t.Errorf("owner of a deleted classroom: %v", err)
 	}
+	if _, _, _, err := s.classroomAccess(ctx, id, "student-a"); !errors.Is(err, platform.ErrNotFound) {
+		t.Errorf("access to a deleted classroom: %v", err)
+	}
 	if err := s.insertEnrollment(ctx, id, "student-a"); !errors.Is(err, platform.ErrNotFound) {
 		t.Errorf("enrolling in a deleted classroom: %v", err)
 	}
-	if enrolled, err := s.isEnrolled(ctx, id, "student-a"); err != nil || enrolled {
+	if enrolled, err := isEnrolled(ctx, s, id, "student-a"); err != nil || enrolled {
 		t.Errorf("still enrolled: %v %v", enrolled, err)
 	}
 	var topic, key, classroomID, org string
@@ -298,7 +314,7 @@ func TestADeletedAccountIsClearedAnnouncedAndNeverReturns(t *testing.T) {
 	if v := user(t, s, student); v[2] != "" || v[3] != "" {
 		t.Errorf("names kept: %v", v)
 	}
-	if enrolled, err := s.isEnrolled(ctx, id, student); err != nil || enrolled {
+	if enrolled, err := isEnrolled(ctx, s, id, student); err != nil || enrolled {
 		t.Errorf("still enrolled: %v %v", enrolled, err)
 	}
 	if err := s.registerUser(ctx, "org-a", student, "student", "ada", "Ada"); !errors.Is(err, errAccountDeleted) {

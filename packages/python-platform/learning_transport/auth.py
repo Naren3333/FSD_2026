@@ -4,7 +4,7 @@ import logging
 import os
 import threading
 import time
-from collections.abc import Callable, Mapping
+from collections.abc import Awaitable, Callable, Mapping
 from dataclasses import dataclass
 from functools import lru_cache
 from typing import Any
@@ -135,7 +135,8 @@ class Claims:
         return next((role for role in PERSON_ROLES if self.has(role)), None)
 
 
-def caller(claims: dict[str, Any] = Depends(actor)) -> Claims:
+# async, as are requires' dependencies: they do no i/o, so fastapi runs them without a worker thread.
+async def caller(claims: dict[str, Any] = Depends(actor)) -> Claims:
     """fastapi dependency: the verified caller. an account is exactly one of a school admin, a teacher or a student: a token holding more than one of those roles is refused with 403."""
     verified = Claims.from_token(claims)
     if sum(verified.has(role) for role in PERSON_ROLES) > 1:
@@ -145,10 +146,10 @@ def caller(claims: dict[str, Any] = Depends(actor)) -> Claims:
     return verified
 
 
-def requires(*roles: str) -> Callable[..., Claims]:
+def requires(*roles: str) -> Callable[..., Awaitable[Claims]]:
     """fastapi dependency factory: the verified caller, who must hold at least one of `roles` (403 otherwise)."""
 
-    def dependency(claims: Claims = Depends(caller)) -> Claims:
+    async def dependency(claims: Claims = Depends(caller)) -> Claims:
         if not any(claims.has(role) for role in roles):
             raise failure(403, "FORBIDDEN", "Your role cannot perform this operation.")
         return claims

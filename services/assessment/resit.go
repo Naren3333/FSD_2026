@@ -60,15 +60,8 @@ func (p pgStore) createResit(ctx context.Context, org string, v Assessment) erro
 	if err = lockStudents(ctx, tx, v.Assignees); err != nil {
 		return err
 	}
-	if err = platform.LockShared(ctx, tx, platform.LockClassroom, v.Classroom); err != nil {
+	if err = lockLiveClassroom(ctx, tx, v.Classroom); err != nil {
 		return err
-	}
-	var purged bool
-	if err = tx.QueryRow(ctx, "SELECT EXISTS(SELECT 1 FROM purged_classrooms WHERE classroom_id=$1)", v.Classroom).Scan(&purged); err != nil {
-		return err
-	}
-	if purged {
-		return errClassroomPurged
 	}
 	var banks []string
 	for _, bank := range v.BankLinks {
@@ -180,16 +173,6 @@ func removeAssignees(ctx context.Context, tx pgx.Tx, id string, students []strin
 // findLinks is the bank question each of the assessment's questions came from, by question id, leaving out
 // links to bank questions owner no longer has.
 func (p pgStore) findLinks(ctx context.Context, org, assessment, owner string) (map[string]string, error) {
-	rows, err := p.db.Query(ctx, `SELECT l.question_id::text,l.bank_question_id::text FROM question_bank_links l
-		JOIN bank_questions b ON b.id=l.bank_question_id AND b.owner_id=$2 AND b.org_id=$3 WHERE l.assessment_id=$1`, assessment, owner, org)
-	if err != nil {
-		return nil, err
-	}
-	links := map[string]string{}
-	var question, bank string
-	_, err = pgx.ForEachRow(rows, []any{&question, &bank}, func() error {
-		links[question] = bank
-		return nil
-	})
-	return links, err
+	return linkMap(p.db.Query(ctx, `SELECT l.question_id::text,l.bank_question_id::text FROM question_bank_links l
+		JOIN bank_questions b ON b.id=l.bank_question_id AND b.owner_id=$2 AND b.org_id=$3 WHERE l.assessment_id=$1`, assessment, owner, org))
 }

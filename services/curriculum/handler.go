@@ -38,7 +38,7 @@ func (s server) batch(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	for _, id := range body.IDs {
-		if _, err := uuid.Parse(id); err != nil {
+		if !platform.ID(id) {
 			platform.Invalid(w, "Provide valid topic ids.")
 			return
 		}
@@ -59,29 +59,10 @@ func (s server) list(w http.ResponseWriter, r *http.Request) {
 		platform.Invalid(w, "archived must be true or false.")
 		return
 	}
-	var paging []platform.ListWindow
-	if r.URL.Path == "/v1/topics/page" {
-		offset, limit, valid := platform.Page(w, r, 20, 100)
-		if !valid {
-			return
-		}
-		paging = []platform.ListWindow{{Offset: offset, Limit: limit}}
-	}
-	result, err := s.store.listTopics(r.Context(), platform.Actor(r).Org, archived == "true", paging...)
-	if err != nil {
-		platform.Fail(w, err)
-		return
-	}
-	if len(paging) > 0 {
-		total, err := s.store.countTopics(r.Context(), platform.Actor(r).Org, archived == "true")
-		if err != nil {
-			platform.Fail(w, err)
-			return
-		}
-		platform.JSON(w, http.StatusOK, platform.ListPage[Topic]{Items: result, Total: total})
-		return
-	}
-	platform.JSON(w, http.StatusOK, result)
+	org := platform.Actor(r).Org
+	platform.ServeList(w, r, 100, func(paging ...platform.ListWindow) ([]Topic, error) {
+		return s.store.listTopics(r.Context(), org, archived == "true", paging...)
+	}, func() (int, error) { return s.store.countTopics(r.Context(), org, archived == "true") })
 }
 
 func (s server) get(w http.ResponseWriter, r *http.Request) {

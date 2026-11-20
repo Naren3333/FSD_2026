@@ -43,10 +43,8 @@ func (p purger) purge(ctx context.Context, tx pgx.Tx, event platform.Event) erro
 	if err = platform.DiscardPending(ctx, tx, v); err != nil {
 		return err
 	}
-	for _, document := range documents {
-		if _, err = tx.Exec(ctx, "INSERT INTO object_cleanup_jobs(prefix) VALUES($1) ON CONFLICT DO NOTHING", v.Org+"/"+document+"/"); err != nil {
-			return err
-		}
+	if len(documents) > 0 {
+		_, err = tx.Exec(ctx, "INSERT INTO object_cleanup_jobs(prefix) SELECT $1::text||'/'||unnest($2::text[])||'/' ON CONFLICT DO NOTHING", v.Org, documents)
 	}
-	return nil
+	return err
 }

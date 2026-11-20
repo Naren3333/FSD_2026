@@ -58,13 +58,14 @@ const id = encodeURIComponent;
 /* the most students one page of a classroom's roster holds. */
 const ROSTER_PAGE = 500;
 
-/* full metadata reads for pickers/counts still use bounded server pages; visible lists request a single page. */
+/* full metadata reads for pickers/counts still use bounded server pages, `size` at a time; visible lists request a single page. */
 async function allPages<T>(
   fetch: (offset: number, limit: number) => Promise<{ items: T[]; total: number }>,
+  size = 100,
 ): Promise<T[]> {
   const items: T[] = [];
   for (;;) {
-    const page = await fetch(items.length, 100);
+    const page = await fetch(items.length, size);
     items.push(...page.items);
     if (!page.items.length || items.length >= page.total) return items;
   }
@@ -94,13 +95,15 @@ export class IdentityApi {
     return this.gateway.request('identity', `/classrooms/${id(classroomId)}/students?${query}`);
   }
   /* every student of the classroom by name, for its teacher only, read a page of 500 at a time. */
-  async roster(classroomId: string): Promise<Student[]> {
-    const students: Student[] = [];
-    for (;;) {
-      const page = await this.rosterPage(classroomId, students.length, ROSTER_PAGE);
-      students.push(...page.students);
-      if (!page.students.length || students.length >= page.total) return students;
-    }
+  roster(classroomId: string): Promise<Student[]> {
+    return allPages(
+      (offset, limit) =>
+        this.rosterPage(classroomId, offset, limit).then((page) => ({
+          items: page.students,
+          total: page.total,
+        })),
+      ROSTER_PAGE,
+    );
   }
 }
 

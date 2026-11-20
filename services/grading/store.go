@@ -113,12 +113,10 @@ func insertEvaluation(ctx context.Context, tx pgx.Tx, v Submitted, evidence []Ev
 	if err != nil || result.RowsAffected() == 0 {
 		return err
 	}
-	for _, question := range queued {
-		if _, err = tx.Exec(ctx, "INSERT INTO marking_jobs(evaluation_id,question_id) VALUES($1,$2) ON CONFLICT DO NOTHING", v.Submission, question); err != nil {
-			return err
-		}
+	if len(queued) > 0 {
+		_, err = tx.Exec(ctx, "INSERT INTO marking_jobs(evaluation_id,question_id) SELECT $1::uuid,unnest($2::uuid[]) ON CONFLICT DO NOTHING", v.Submission, queued)
 	}
-	return nil
+	return err
 }
 
 // evaluationColumns are the columns scanEvaluation reads first.
@@ -233,7 +231,7 @@ func (p pgStore) saveMarks(ctx context.Context, org, id, actor string, marks map
 	}
 	_, err = tx.Exec(ctx, "UPDATE evaluations SET evidence=$1 WHERE id=$2", after, v.ID)
 	if err == nil {
-		_, err = tx.Exec(ctx, "INSERT INTO audit(evaluation_id,actor_id,action,reason,before_evidence,after_evidence) VALUES($1,$2,'mark','Marks saved',$3,$4)", v.ID, actor, before, after)
+		err = audit(ctx, tx, v.ID, actor, "mark", "Marks saved", before, after)
 	}
 	if err == nil {
 		err = tx.Commit(ctx)
@@ -264,6 +262,25 @@ func (p pgStore) finalizeEvaluation(ctx context.Context, org, id, actor, reason 
 	return v, err
 }
 
+// audit records a change to an evaluation with its evidence before and after it.
+func audit(ctx context.Context, tx pgx.Tx, evaluation, actor, action, reason string, before, after []byte) error {
+	_, err := tx.Exec(ctx, "INSERT INTO audit(evaluation_id,actor_id,action,reason,before_evidence,after_evidence) VALUES($1,$2,$3,$4,$5,$6)", evaluation, actor, action, reason, before, after)
+	return err
+}
+
+// withEvidence is an evaluation read with its stored evidence as written.
+type withEvidence struct {
+	v        Evaluation
+	evidence []byte
+}
+
+func collectWithEvidence(rows pgx.Rows) ([]withEvidence, error) {
+	return pgx.CollectRows(rows, func(row pgx.CollectableRow) (withEvidence, error) {
+		v, evidence, err := scanEvaluation(row)
+		return withEvidence{v, evidence}, err
+	})
+}
+
 // finalizeLocked finalizes a draft locked in tx with its evidence as marked, with an audit entry, and
 // publishes it when released.
 func finalizeLocked(ctx context.Context, tx pgx.Tx, org, actor, reason string, v Evaluation, before []byte) (Evaluation, error) {
@@ -281,7 +298,7 @@ func finalizeLocked(ctx context.Context, tx pgx.Tx, org, actor, reason string, v
 		_, err = tx.Exec(ctx, "DELETE FROM marking_jobs WHERE evaluation_id=$1", v.ID)
 	}
 	if err == nil {
-		_, err = tx.Exec(ctx, "INSERT INTO audit(evaluation_id,actor_id,action,reason,before_evidence,after_evidence) VALUES($1,$2,'finalize',$3,$4,$5)", v.ID, actor, reason, before, after)
+		err = audit(ctx, tx, v.ID, actor, "finalize", reason, before, after)
 	}
 	if err == nil && v.ReleasedAt != nil {
 		err = emitFinalized(ctx, tx, org, v)
@@ -302,14 +319,7 @@ func (p pgStore) finalizeAssessment(ctx context.Context, org, assessment, actor,
 	if err != nil {
 		return 0, 0, err
 	}
-	type draft struct {
-		v        Evaluation
-		evidence []byte
-	}
-	list, err := pgx.CollectRows(rows, func(row pgx.CollectableRow) (draft, error) {
-		v, evidence, err := scanEvaluation(row)
-		return draft{v, evidence}, err
-	})
+	list, err := collectWithEvidence(rows)
 	if err != nil {
 		return 0, 0, err
 	}
@@ -348,7 +358,7 @@ func (p pgStore) reopenEvaluation(ctx context.Context, org, id, actor, reason st
 		teacher_id=CASE WHEN teacher_id IS NOT NULL THEN coalesce((SELECT t.teacher_id FROM classroom_teachers t WHERE t.classroom_id=$3::uuid AND t.org_id=$4::text),teacher_id) END
 		WHERE id=$2`, v.Revision, v.ID, v.Classroom, org)
 	if err == nil {
-		_, err = tx.Exec(ctx, "INSERT INTO audit(evaluation_id,actor_id,action,reason,before_evidence,after_evidence) VALUES($1,$2,'reopen',$3,$4,$4)", v.ID, actor, reason, evidence)
+		err = audit(ctx, tx, v.ID, actor, "reopen", reason, evidence, evidence)
 	}
 	if err == nil && released {
 		err = platform.Emit(ctx, tx, topicReopened, v.ID, Reopened{v.ID, v.Assessment, v.Classroom, org, v.Student, v.Revision})
@@ -387,19 +397,12 @@ func (p pgStore) release(ctx context.Context, org, assessment, actor string, stu
 	if err != nil {
 		return 0, err
 	}
-	type released struct {
-		v        Evaluation
-		evidence []byte
-	}
-	list, err := pgx.CollectRows(rows, func(row pgx.CollectableRow) (released, error) {
-		v, evidence, err := scanEvaluation(row)
-		return released{v, evidence}, err
-	})
+	list, err := collectWithEvidence(rows)
 	if err != nil {
 		return 0, err
 	}
 	for _, r := range list {
-		if _, err = tx.Exec(ctx, "INSERT INTO audit(evaluation_id,actor_id,action,reason,before_evidence,after_evidence) VALUES($1,$2,'release','Results released',$3,$3)", r.v.ID, actor, r.evidence); err != nil {
+		if err = audit(ctx, tx, r.v.ID, actor, "release", "Results released", r.evidence, r.evidence); err != nil {
 			return 0, err
 		}
 		if err = emitFinalized(ctx, tx, org, r.v); err != nil {

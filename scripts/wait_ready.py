@@ -9,7 +9,7 @@ import urllib.error
 import urllib.request
 from collections.abc import Callable
 
-from local_stack import EDGE_PORT, KEYCLOAK_PORT, KONG_PORT, ROOT
+from local_stack import EDGE_PORT, KEYCLOAK_PORT, KONG_PORT, compose
 
 TIMEOUT = 180  # seconds for both phases together, unless --timeout says otherwise
 SERVICES = [
@@ -62,11 +62,8 @@ def status(url: str, host: str | None = None) -> int:
 
 def applications_ready() -> bool:
     """whether every application answers ready."""
-    command = ["docker", "compose", "exec", "-T", "analytics", "python", "-c", PROBE]
     try:
-        result = subprocess.run(
-            command, cwd=ROOT, text=True, encoding="utf-8", capture_output=True, timeout=40, check=False
-        )
+        result = compose("exec", "-T", "analytics", "python", "-c", PROBE, check=False, timeout=40)
         statuses = json.loads(result.stdout) if result.returncode == 0 else {}
     except (subprocess.TimeoutExpired, ValueError):
         return False

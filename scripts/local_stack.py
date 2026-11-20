@@ -87,6 +87,22 @@ def project() -> str:
     return os.environ.get("COMPOSE_PROJECT_NAME") or DEV_PROJECT
 
 
+def compose(
+    *args: str, input: str | None = None, check: bool = True, timeout: float = 90
+) -> subprocess.CompletedProcess[str]:
+    """runs `docker compose` with these arguments from the repository root, capturing its text output."""
+    return subprocess.run(
+        ["docker", "compose", *args],
+        cwd=ROOT,
+        input=input,
+        text=True,
+        encoding="utf-8",
+        capture_output=True,
+        check=check,
+        timeout=timeout,
+    )
+
+
 def require_test_stack(*, dev: bool) -> None:
     """stops a script that creates and deletes data unless it is aimed at the running test stack, or `dev` (the script's --dev flag) says to use the development stack's data anyway."""
     if dev:
@@ -106,15 +122,7 @@ def require_test_stack(*, dev: bool) -> None:
             f"({', '.join(f'{name}={TEST_PORTS[name]}' for name in published)}). "
             "Run it through python scripts/stack_tests.py."
         )
-    running = subprocess.run(
-        ["docker", "compose", "ps", "--status", "running", "--quiet", "postgres"],
-        cwd=ROOT,
-        text=True,
-        encoding="utf-8",
-        capture_output=True,
-        check=False,
-        timeout=PSQL_TIMEOUT,
-    )
+    running = compose("ps", "--status", "running", "--quiet", "postgres", check=False, timeout=PSQL_TIMEOUT)
     if not running.stdout.strip():
         raise SystemExit(
             f"The {TEST_PROJECT} stack is not running. Start it with python scripts/stack_tests.py."
@@ -219,17 +227,9 @@ def psql(
     sql: str, *, database: str = "postgres", user: str = "postgres", check: bool = True
 ) -> subprocess.CompletedProcess[str]:
     """runs one statement in the compose postgresql as `user` (the superuser unless a service's own role is named): unaligned, tuples only, tab-separated columns."""
-    command = ["docker", "compose", "exec", "-T", "postgres", "psql", "-U", user, "-d", database]
+    command = ["exec", "-T", "postgres", "psql", "-U", user, "-d", database]
     command += ["-v", "ON_ERROR_STOP=1", "-At", "-F", "\t", "-c", sql]
-    return subprocess.run(
-        command,
-        cwd=ROOT,
-        text=True,
-        encoding="utf-8",
-        capture_output=True,
-        check=check,
-        timeout=PSQL_TIMEOUT,
-    )
+    return compose(*command, check=check, timeout=PSQL_TIMEOUT)
 
 
 def psql_value(sql: str, *, database: str = "postgres", user: str = "postgres") -> str:

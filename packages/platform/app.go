@@ -43,7 +43,7 @@ func New(name string, migrations fs.FS, bootstrap string) (*App, error) {
 	if err != nil {
 		return nil, err
 	}
-	client := &http.Client{Timeout: 5 * time.Second}
+	client := &http.Client{Timeout: 5 * time.Second, Transport: Transport}
 	a := &App{Name: name, DB: db, Mux: http.NewServeMux(), Client: client, auth: NewAuthenticator(client), slow: map[string]time.Duration{}}
 	a.Mux.HandleFunc("GET /health/live", func(w http.ResponseWriter, _ *http.Request) {
 		JSON(w, http.StatusOK, map[string]string{"status": "alive"})

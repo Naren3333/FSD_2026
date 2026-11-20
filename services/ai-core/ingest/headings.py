@@ -34,9 +34,8 @@ TOC_MIN_ENTRIES = 3  # an outline is used when it has at least this many entries
 TOC_MIN_LEVELS = 2  # ...on at least this many levels...
 TOC_MIN_MATCHED = 0.7  # ...and at least this share of them is found as a heading on the page
 TOC_REACH = 5  # an entry is looked for from the previous one's page up to this many pages past its own
-TOC_SIMILAR = (
-    0.85  # how alike an entry and its heading must be (difflib ratio), when neither starts the other
-)
+# how alike an entry and its heading must be (difflib ratio), when neither starts the other
+TOC_SIMILAR = 0.85
 NUMBERING = re.compile(
     r"^((part|chapter|section|appendix)\s+)?([0-9]+|[ivxlc]+|[a-z])([.:)]|(\.[0-9]+)+\.?)?\s+"
 )

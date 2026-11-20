@@ -280,7 +280,7 @@
           </span>
           <span class="caption">
             {{ item.question_count }} {{ item.question_count === 1 ? 'question' : 'questions' }} ·
-            {{ item.points }} {{ item.points === 1 ? 'mark' : 'marks' }}
+            {{ marksText(item.points) }}
             @if (schedule(item); as when) {
               · {{ when }}
             }

@@ -71,29 +71,10 @@ func (s server) access(w http.ResponseWriter, r *http.Request) {
 
 func (s server) list(w http.ResponseWriter, r *http.Request) {
 	c := platform.Actor(r)
-	var paging []platform.ListWindow
-	if r.URL.Path == "/v1/classrooms/page" {
-		offset, limit, valid := platform.Page(w, r, 20, 100)
-		if !valid {
-			return
-		}
-		paging = []platform.ListWindow{{Offset: offset, Limit: limit}}
-	}
-	result, err := s.store.listClassrooms(r.Context(), c.Org, c.Subject, c.Has("teacher"), paging...)
-	if err != nil {
-		platform.Fail(w, err)
-		return
-	}
-	if len(paging) > 0 {
-		total, err := s.store.countClassrooms(r.Context(), c.Org, c.Subject, c.Has("teacher"))
-		if err != nil {
-			platform.Fail(w, err)
-			return
-		}
-		platform.JSON(w, http.StatusOK, platform.ListPage[Classroom]{Items: result, Total: total})
-		return
-	}
-	platform.JSON(w, http.StatusOK, result)
+	teacher := c.Has(platform.RoleTeacher)
+	platform.ServeList(w, r, 100, func(paging ...platform.ListWindow) ([]Classroom, error) {
+		return s.store.listClassrooms(r.Context(), c.Org, c.Subject, teacher, paging...)
+	}, func() (int, error) { return s.store.countClassrooms(r.Context(), c.Org, c.Subject, teacher) })
 }
 
 // owner reports whether the caller is the classroom's teacher, who may read its roster, writing the refusal

@@ -96,10 +96,11 @@ def process(pool: ConnectionPool[Any], event: Event) -> None:
         if newer is None:
             return
         conn.execute("DELETE FROM evidence WHERE evaluation_id=%s", (data.evaluation_id,))
-        for e in data.evidence:
-            conn.execute(
-                "INSERT INTO evidence(evaluation_id,question_id,assessment_id,classroom_id,org_id,student_id,"
-                "topic_id,correct,awarded,possible) VALUES(%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)",
+        # one pipelined statement batch rather than a round trip per question.
+        conn.cursor().executemany(
+            "INSERT INTO evidence(evaluation_id,question_id,assessment_id,classroom_id,org_id,student_id,"
+            "topic_id,correct,awarded,possible) VALUES(%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)",
+            [
                 (
                     data.evaluation_id,
                     e.question_id,
@@ -111,8 +112,10 @@ def process(pool: ConnectionPool[Any], event: Event) -> None:
                     e.correct,
                     e.awarded,
                     e.possible,
-                ),
-            )
+                )
+                for e in data.evidence
+            ],
+        )
 
 
 def withdraw(pool: ConnectionPool[Any], event: ReopenedEvent) -> None:
@@ -223,12 +226,11 @@ def handler(pool: ConnectionPool[Any]) -> Handler:
     return handle
 
 
-def run(pool: ConnectionPool[Any], stop: threading.Event, connected: threading.Event) -> None:
+def run(pool: ConnectionPool[Any], stop: threading.Event) -> None:
     group = os.environ.get("KAFKA_GROUP") or DEFAULT_GROUP
     consume(
         group,
         [FINALIZED, REOPENED, CLASSROOM_DELETED, ASSESSMENT_DELETED, USER_DELETED],
         handler(pool),
         stop,
-        connected,
     )

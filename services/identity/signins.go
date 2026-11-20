@@ -38,25 +38,13 @@ func newKeycloakUsers() keycloakUsers {
 
 // remove deletes the user's sign-in account.
 func (k keycloakUsers) remove(ctx context.Context, user string) error {
-	token, err := k.tokens.Get(ctx)
-	if err != nil {
-		return err
-	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodDelete, k.admin+"/users/"+url.PathEscape(user), nil)
-	if err != nil {
-		return err
-	}
-	req.Header.Set("Authorization", "Bearer "+token)
-	res, err := k.client.Do(req)
+	res, err := k.do(ctx, http.MethodDelete, "/users/"+url.PathEscape(user), nil)
 	if err != nil {
 		return err
 	}
 	res.Body.Close()
-	switch res.StatusCode {
-	case http.StatusNoContent, http.StatusNotFound:
+	if res.StatusCode == http.StatusNoContent || res.StatusCode == http.StatusNotFound {
 		return nil
-	case http.StatusUnauthorized:
-		k.tokens.Reject(token)
 	}
 	return fmt.Errorf("keycloak answered %d", res.StatusCode)
 }

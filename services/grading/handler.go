@@ -116,33 +116,17 @@ func (s server) mine(w http.ResponseWriter, r *http.Request) {
 		platform.Forbidden(w, "Only enrolled students have results here.")
 		return
 	}
-	var paging []platform.ListWindow
-	if r.URL.Path == "/v1/evaluations/mine/page" {
-		offset, limit, valid := platform.Page(w, r, 20, maxPage)
-		if !valid {
-			return
+	platform.ServeList(w, r, maxPage, func(paging ...platform.ListWindow) ([]OwnResult, error) {
+		result, err := s.store.listReleased(r.Context(), c.Org, classroom, c.Subject, paging...)
+		if err != nil {
+			return nil, err
 		}
-		paging = []platform.ListWindow{{Offset: offset, Limit: limit}}
-	}
-	result, err := s.store.listReleased(r.Context(), c.Org, classroom, c.Subject, paging...)
-	if err != nil {
-		platform.Fail(w, err)
-		return
-	}
-	own := make([]OwnResult, len(result))
-	for i, v := range result {
-		own[i] = v.own()
-	}
-	if len(paging) == 0 {
-		platform.JSON(w, http.StatusOK, own)
-		return
-	}
-	total, err := s.store.countReleased(r.Context(), c.Org, classroom, c.Subject)
-	if err != nil {
-		platform.Fail(w, err)
-		return
-	}
-	platform.JSON(w, http.StatusOK, platform.ListPage[OwnResult]{Items: own, Total: total})
+		own := make([]OwnResult, len(result))
+		for i, v := range result {
+			own[i] = v.own()
+		}
+		return own, nil
+	}, func() (int, error) { return s.store.countReleased(r.Context(), c.Org, classroom, c.Subject) })
 }
 
 // teacherOfEvaluation checks the caller is the teacher of the classroom of the evaluation the path names.
@@ -243,6 +227,15 @@ func (s server) reopen(w http.ResponseWriter, r *http.Request) {
 // bulkReason is a bulk finalize's audit reason when the teacher gives none.
 const bulkReason = "Finalized with the assessment's other fully marked grades"
 
+// assessmentroster is, for the teacher of the classroom the assessment's grades are in, its current roster.
+func (s server) assessmentRoster(w http.ResponseWriter, r *http.Request, org, assessment string) ([]string, bool) {
+	classroom, err := s.store.assessmentClassroom(r.Context(), org, assessment)
+	if !platform.Found(w, err, "No grades for this assessment.") || !platform.TeacherOf(s.access, w, r, classroom) {
+		return nil, false
+	}
+	return s.roster.Roster(w, r, classroom)
+}
+
 // finalizeAll finalizes an assessment's drafts of enrolled students that need no more marking, for the
 // classroom's teacher only (adr 0016).
 func (s server) finalizeAll(w http.ResponseWriter, r *http.Request) {
@@ -266,11 +259,7 @@ func (s server) finalizeAll(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	org := platform.Actor(r).Org
-	classroom, err := s.store.assessmentClassroom(r.Context(), org, input.Assessment)
-	if !platform.Found(w, err, "No grades for this assessment.") || !platform.TeacherOf(s.access, w, r, classroom) {
-		return
-	}
-	students, ok := s.roster.Roster(w, r, classroom)
+	students, ok := s.assessmentRoster(w, r, org, input.Assessment)
 	if !ok {
 		return
 	}
@@ -333,11 +322,7 @@ func (s server) release(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	org := platform.Actor(r).Org
-	classroom, err := s.store.assessmentClassroom(r.Context(), org, input.Assessment)
-	if !platform.Found(w, err, "No grades for this assessment.") || !platform.TeacherOf(s.access, w, r, classroom) {
-		return
-	}
-	students, ok := s.roster.Roster(w, r, classroom)
+	students, ok := s.assessmentRoster(w, r, org, input.Assessment)
 	if !ok {
 		return
 	}

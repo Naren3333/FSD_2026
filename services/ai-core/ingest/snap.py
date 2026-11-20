@@ -15,31 +15,21 @@ SNAP_GROW = 60.0  # a snapped figure box grows at most this much on each side
 SNAP_COVER = 0.5  # a drawing or picture at least this much inside the (padded) box is part of the figure
 
 
-SNAP_REACH = 1.5  # a label line this close (x its height) outside an edge is part of the figure...
+# a label line this close (x its height) outside an edge is part of the figure if it has at most
+# snap_max_words words and is a label: at most snap_label_ratio of the page's body text size (captions are
+# only a bit smaller), or at most snap_short_chars characters and snap_short_words words; not a bullet, and
+# nearer this figure than any other.
+SNAP_REACH = 1.5
+SNAP_MAX_WORDS = 12
+SNAP_LABEL_RATIO = 0.8
+SNAP_SHORT_CHARS = 25
+SNAP_SHORT_WORDS = 3
 
 
-SNAP_MAX_WORDS = 12  # ...if it is at most this many words...
-
-
-SNAP_LABEL_RATIO = (
-    0.8  # ...and a label: at most this size relative to the page's body text (captions are only
-)
-
-
-SNAP_SHORT_CHARS = (
-    25  # a bit smaller), or at most this many characters and snap_short_words words; not a bullet,
-)
-
-
-SNAP_SHORT_WORDS = 3  # and nearer this figure than any other
-
-
-SNAP_MARGIN = (
-    0.07  # a grown box never takes in a line in the top or bottom share of the page (running headers),
-)
-
-
-SNAP_PROSE_CHARS = 40  # a caption, a bullet, or a line this long at near body size (running text)
+# a grown box never takes in a line in the top or bottom snap_margin share of the page (running headers), a
+# caption, a bullet, or a line snap_prose_chars long at near body size (running text).
+SNAP_MARGIN = 0.07
+SNAP_PROSE_CHARS = 40
 
 
 CAPTION_START = re.compile(r"(figure|fig\.?|table|exhibit|chart)\s*[0-9A-Z]", re.IGNORECASE)

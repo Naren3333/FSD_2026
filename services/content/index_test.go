@@ -7,8 +7,8 @@ import (
 	"errors"
 	"io"
 	"learning/platform"
+	"learning/platform/platformtest"
 	"net/http"
-	"os"
 	"strings"
 	"sync"
 	"testing"
@@ -53,49 +53,6 @@ func (m *memoryStore) removeAll(_ context.Context, prefix string) error {
 	return nil
 }
 
-func testDB(t *testing.T) *pgxpool.Pool {
-	url := os.Getenv("CONTENT_TEST_DATABASE_URL")
-	if url == "" {
-		t.Skip("CONTENT_TEST_DATABASE_URL is not set")
-	}
-	ctx := context.Background()
-	schema := "test_" + strings.ReplaceAll(uuid.NewString(), "-", "")[:12]
-	admin, err := pgxpool.New(ctx, url)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err = admin.Exec(ctx, "CREATE SCHEMA "+schema); err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() {
-		admin.Exec(context.Background(), "DROP SCHEMA "+schema+" CASCADE")
-		admin.Close()
-	})
-	config, err := pgxpool.ParseConfig(url)
-	if err != nil {
-		t.Fatal(err)
-	}
-	config.ConnConfig.RuntimeParams["search_path"] = schema + ",public"
-	db, err := pgxpool.NewWithConfig(ctx, config)
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(db.Close)
-	ordered, err := platform.Migrations(migrations)
-	if err != nil {
-		t.Fatal(err)
-	}
-	for _, m := range ordered {
-		if _, err = db.Exec(ctx, m.SQL); err != nil {
-			t.Fatalf("%s: %v", m.Name, err)
-		}
-	}
-	if _, err = db.Exec(ctx, platform.EventMigration); err != nil {
-		t.Fatal(err)
-	}
-	return db
-}
-
 type fixture struct {
 	t     *testing.T
 	db    *pgxpool.Pool
@@ -108,7 +65,7 @@ type fixture struct {
 }
 
 func newFixture(t *testing.T) *fixture {
-	db := testDB(t)
+	db := platformtest.DB(t, "CONTENT_TEST_DATABASE_URL", migrations)
 	f := &fixture{t: t, db: db, store: &memoryStore{objects: map[string][]byte{}}, ai: newFakeAICore(t), org: "org-1", room: uuid.NewString()}
 	f.x = indexer{db, f.store, f.ai.client(), 0}
 	f.s = server{store: pgStore{db}, ai: f.ai.client()}

@@ -1,4 +1,5 @@
 import { signal } from '@angular/core';
+import { lastPage } from './pager';
 import { Section } from './section';
 
 export interface ListPage<T> {
@@ -15,7 +16,7 @@ export async function readPage<R extends { total: number }>(
 ): Promise<{ result: R; page: number }> {
   let result = await fetch(page * size, size);
   if (isEmpty(result) && result.total && page > 0) {
-    page = Math.max(0, Math.ceil(result.total / size) - 1);
+    page = lastPage(result.total, size);
     result = await fetch(page * size, size);
   }
   return { result, page };

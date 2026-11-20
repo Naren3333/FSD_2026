@@ -263,7 +263,13 @@ def marking_points(item: dict[str, Any]) -> Excerpt:
 
 
 def similar(a: str, b: str, ratio: float = DUPLICATE_RATIO) -> bool:
-    return SequenceMatcher(None, normalize(a), normalize(b)).ratio() >= ratio
+    return alike(normalize(a), normalize(b), ratio)
+
+
+def alike(a: str, b: str, ratio: float) -> bool:
+    """whether two normalized texts are at least `ratio` alike; the cheap upper bounds rule most pairs out first."""
+    m = SequenceMatcher(None, a, b)
+    return m.real_quick_ratio() >= ratio and m.quick_ratio() >= ratio and m.ratio() >= ratio
 
 
 def long_key(draft: DraftQuestion) -> bool:
@@ -275,20 +281,21 @@ def long_key(draft: DraftQuestion) -> bool:
 
 
 def question(item: Any, request: GenerateRequest, passages: list[Passage], seen: list[str]) -> Generated:
-    """one question of the reply, checked; raises RuleBrokenError with the first rule it breaks."""
+    """one question of the reply, checked against the normalized prompts `seen`; raises RuleBrokenError with the first rule it breaks."""
     if not isinstance(item, dict):
         raise RuleBrokenError(INVALID_PROMPT)
     prompt, kind = _text(item, "prompt"), item.get("type")
     if not prompt or len(prompt) > MAX_PROMPT:
         raise RuleBrokenError(INVALID_PROMPT)
-    if NEEDS_MATERIALS_PATTERN.search(normalize(prompt)):
+    normalized = normalize(prompt)
+    if NEEDS_MATERIALS_PATTERN.search(normalized):
         raise RuleBrokenError(NEEDS_MATERIALS)
     if kind not in request.question_types:
         raise RuleBrokenError(WRONG_TYPE)
     sources = cited(item, passages)
     evidence = _text(item, "evidence")
     stored = evidenced_excerpts(evidence, sources)
-    if any(similar(prompt, other) for other in seen):
+    if any(alike(normalized, other, DUPLICATE_RATIO) for other in seen):
         raise RuleBrokenError(DUPLICATE)
     base: dict[str, Any] = {"prompt": prompt, "type": kind, "topic_id": request.topic_id, "sources": stored}
     if kind == "multiple_choice":
@@ -327,7 +334,7 @@ def questions(
     kept: list[Generated] = []
     dropped: Counter[str] = Counter()
     rejected: list[Rejected] = []
-    seen = [p for p in request.existing_prompts if p.strip()]
+    seen = [normalize(p) for p in request.existing_prompts if p.strip()]
     room = dict(request.counts)
     for item in items:
         if not any(room.values()):
@@ -347,7 +354,7 @@ def questions(
             continue
         kept.append(generated)
         room[generated.question.type] -= 1
-        seen.append(generated.question.prompt)
+        seen.append(normalize(generated.question.prompt))
     return kept, dropped, rejected, len(items)
 
 

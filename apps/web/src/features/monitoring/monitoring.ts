@@ -6,7 +6,7 @@ import { ApiError, Gateway } from '../../core/gateway';
 import { Session } from '../../core/session';
 import { ActionState } from '../../shared/action-state';
 import { messageOf } from '../../shared/errors';
-import { PagerComponent } from '../../shared/pager';
+import { PagerComponent, lastPage } from '../../shared/pager';
 import { RefreshButtonComponent } from '../../shared/refresh-button';
 import { StatusComponent } from '../../shared/status';
 
@@ -152,8 +152,8 @@ export class MonitoringComponent implements OnInit {
     if (user_id) query.set('user_id', user_id);
     void this.read(this.users, `/ai-spend/users?${query}`, true).then((value) => {
       if (value && this.users.data() === value && this.page > 0 && value.items.length === 0) {
-        const lastPage = Math.max(0, Math.ceil(value.total / this.pageSize) - 1);
-        if (lastPage < this.page) this.changePage(lastPage);
+        const last = lastPage(value.total, this.pageSize);
+        if (last < this.page) this.changePage(last);
       }
     });
   }

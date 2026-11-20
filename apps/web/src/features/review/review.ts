@@ -24,6 +24,7 @@ import { StatusComponent } from '../../shared/status';
 import { requiredText } from '../../shared/validators';
 import { PageHeaderComponent } from '../../shared/page-header';
 import { RefreshButtonComponent } from '../../shared/refresh-button';
+import { marksText } from '../assessments/editor';
 import {
   applySuggestion,
   collapsible,
@@ -72,6 +73,7 @@ export class ReviewComponent {
   private readonly curriculum = inject(CurriculumNames);
   private readonly router = inject(Router);
   private readonly reader = new GradeReader();
+  readonly marksText = marksText;
   readonly classroomId = inject(ClassroomContext).classroomId;
   readonly state = new ActionState();
   readonly grades = new Section<Grades>();
@@ -249,11 +251,8 @@ export class ReviewComponent {
 
   /* the first page of the grades chosen, with nothing open and every grade shown. */
   private showFirstPage(): void {
-    this.firstDraft = false;
     this.page.set(0);
-    this.gradeFilter.set('all');
-    this.stopMarking();
-    this.loadGrades();
+    this.showAllGrades();
   }
 
   /* shows the page the pager moved to. */
@@ -262,11 +261,16 @@ export class ReviewComponent {
       this.page.set(this.grades.value()?.page ?? 0);
       return;
     }
+    this.showAllGrades();
+    this.putAddress(true);
+  }
+
+  /* reads the page on show with nothing open and every grade shown. */
+  private showAllGrades(): void {
     this.firstDraft = false;
     this.gradeFilter.set('all');
     this.stopMarking();
     this.loadGrades();
-    this.putAddress(true);
   }
 
   /* an assessment the address names that is not one of the classroom's published ones falls back to the newest grades. */

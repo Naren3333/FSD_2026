@@ -768,12 +768,8 @@ def test_merge_stops_at_merged_top_k() -> None:
     searches = [topic(8, str(uuid4()), 0.9, f"Doc {n}") for n in range(3)]
     merged = merge(searches, 0.61, 0.5)
     assert len(merged) == MERGED_TOP_K
-    assert [(r["title"], n) for r, n in merged[:4]] == [
-        ("Doc 0", 0),
-        ("Doc 1", 1),
-        ("Doc 2", 2),
-        ("Doc 0", 0),
-    ]
+    # the searches take turns: each search's documents are titled by its index.
+    assert [r["title"] for r in merged[:4]] == ["Doc 0", "Doc 1", "Doc 2", "Doc 0"]
 
 
 def test_a_topic_search_has_the_lower_topic_floor() -> None:
@@ -782,14 +778,14 @@ def test_a_topic_search_has_the_lower_topic_floor() -> None:
 
     whole, narrow = topic(2, str(uuid4()), 0.56, "Whole"), topic(2, str(uuid4()), 0.56, "Narrow")
     strong = topic(2, str(uuid4()), 0.9, "Strong")
-    assert {r["title"] for r, _ in merge([whole, strong, narrow], 0.61, 0.5)} == {"Strong", "Narrow"}
+    assert {r["title"] for r in merge([whole, strong, narrow], 0.61, 0.5)} == {"Strong", "Narrow"}
 
 
 def test_merge_leaves_out_passages_under_the_topic_floor() -> None:
     from chat import merge
 
     strong = [*topic(1, str(uuid4()), 0.9, "Strong"), *topic(1, str(uuid4()), 0.2, "Weak")]
-    assert [r["title"] for r, _ in merge([strong], 0.61, 0.5)] == ["Strong"]
+    assert [r["title"] for r in merge([strong], 0.61, 0.5)] == ["Strong"]
 
 
 def test_the_turn_log_says_where_the_time_went(

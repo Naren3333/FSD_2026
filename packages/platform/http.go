@@ -19,6 +19,14 @@ import (
 // rolemonitoringreader grants private telemetry reads.
 const RoleMonitoringReader = "monitoring-reader"
 
+// transport is shared by the clients services use to call each other: the default keeps only two idle
+// connections per host, so concurrent calls to identity or ai-core would otherwise reconnect.
+var Transport = func() *http.Transport {
+	t := http.DefaultTransport.(*http.Transport).Clone()
+	t.MaxIdleConnsPerHost = 64
+	return t
+}()
+
 // person roles: an account holds exactly one (see Authenticator.Wrap).
 const (
 	RoleAdmin   = "admin"
@@ -161,7 +169,7 @@ func whole(value string, fallback int) (int, bool) {
 
 // teacher requires the token's teacher role, writing a 403 otherwise.
 func Teacher(w http.ResponseWriter, r *http.Request) bool {
-	if !Actor(r).Has("teacher") {
+	if !Actor(r).Has(RoleTeacher) {
 		Forbidden(w, "Teacher access is required.")
 		return false
 	}

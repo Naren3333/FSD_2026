@@ -30,6 +30,7 @@ from clients import Services, billed
 from contracts import MAX_MESSAGES, MessageList, NewMessage, NewThread, Thread, ThreadList, Usage
 from purge import run as purge_deleted_classrooms
 from store import MIGRATIONS, PostgresStore, Store
+from token_count import encoding as tokenizer
 
 ERRORS: dict[int | str, dict[str, Any]] = {
     code: {"model": ErrorResponse} for code in (401, 403, 404, 422, 503)
@@ -42,13 +43,13 @@ CONSUMER_STOP_GRACE = 35  # seconds shutdown waits for the classroom-deletion co
 async def lifespan(app: Any) -> AsyncIterator[None]:
     require_env(*OIDC_SETTINGS, "KAFKA_BROKERS")
     settings = config.load()
+    # the tokenizer loads here, off the event loop, rather than during the first turn.
+    await asyncio.to_thread(tokenizer)
     store = await PostgresStore.open(settings.database_url)
     # deleted classrooms' threads are purged by a consumer thread, with its own small synchronous pool.
     purge_pool = open_pool(settings.database_url, MIGRATIONS)
-    stop, connected = threading.Event(), threading.Event()
-    consumer = threading.Thread(
-        target=purge_deleted_classrooms, args=(purge_pool, stop, connected), daemon=True
-    )
+    stop = threading.Event()
+    consumer = threading.Thread(target=purge_deleted_classrooms, args=(purge_pool, stop), daemon=True)
     async with httpx.AsyncClient() as http:
         app.state.settings, app.state.store = settings, store
         app.state.services = Services(settings, http)

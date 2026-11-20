@@ -10,10 +10,9 @@ import { Session } from '../../core/session';
 import { UnsavedChanges } from '../../core/unsaved-changes';
 import { ActionState } from '../../shared/action-state';
 import { ConfirmDialogComponent } from '../../shared/confirm-dialog';
-import { messageOf } from '../../shared/errors';
 import { FieldComponent, FieldControlDirective } from '../../shared/field';
 import { IconComponent } from '../../shared/icon';
-import { documentLimit, documentMime, isIndexable } from '../../shared/files';
+import { documentLimit, documentMime, isIndexable, openOriginal } from '../../shared/files';
 import { date } from '../../shared/format';
 import { NoClassroomComponent } from '../../shared/no-classroom';
 import { rereadAfterDelete } from '../../shared/section';
@@ -197,18 +196,7 @@ export class MaterialsComponent implements OnDestroy {
   /* the original file in a new tab; the tab opens on the click so it isn't blocked as a pop-up. */
   view(doc: DocumentRecord): void {
     this.state.error.set('');
-    const tab = window.open('', '_blank');
-    this.content
-      .original(doc.id)
-      .then((url) => {
-        if (tab) tab.location.href = url;
-        else this.state.error.set('Allow pop-ups for this site to open the document.');
-        setTimeout(() => URL.revokeObjectURL(url), 60000);
-      })
-      .catch((error: unknown) => {
-        tab?.close();
-        this.state.error.set(`The document could not be opened. ${messageOf(error, '')}`.trim());
-      });
+    openOriginal(() => this.content.original(doc.id), this.state.error);
   }
   typeLabel(type: DocType): string {
     return DOC_TYPES[type] ?? type;

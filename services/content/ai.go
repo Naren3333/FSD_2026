@@ -50,9 +50,9 @@ var (
 
 // caller bills the signed-in user, at the teacher allowance when their token holds the teacher role.
 func caller(c platform.Claims) billed {
-	role := "student"
-	if c.Has("teacher") {
-		role = "teacher"
+	role := platform.RoleStudent
+	if c.Has(platform.RoleTeacher) {
+		role = platform.RoleTeacher
 	}
 	return billed{UserID: c.Subject, OrgID: c.Org, Role: role}
 }

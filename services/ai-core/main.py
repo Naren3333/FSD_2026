@@ -323,7 +323,7 @@ class ClosingStream(StreamingResponse):
 async def events(
     first: str | openai_client.Usage,
     stream: AsyncGenerator[str | openai_client.Usage, None],
-    bill: StreamBill | None = None,
+    bill: StreamBill,
 ) -> AsyncIterator[str]:
     """`delta` events with the text, then `done` with the usage; `error` if the provider fails mid-stream."""
     model = get_settings().chat_model
@@ -331,25 +331,22 @@ async def events(
     try:
         while item is not None:
             if isinstance(item, openai_client.Usage):
-                if bill:
-                    await bill.close(item)
+                await bill.close(item)
                 yield sse_event("done", {"model_version": model, "usage_tokens": total(item)})
                 return
-            if bill:
-                bill.text.append(item)
+            bill.text.append(item)
             yield sse_event("delta", {"text": item})
             item = await anext(stream, None)
     except openai.OpenAIError as error:
         log.warning("provider_failed", extra={"error": type(error).__name__})
-        if bill and isinstance(error, openai.APITimeoutError):
+        if isinstance(error, openai.APITimeoutError):
             await bill.timed_out()  # charged as a non-streamed timeout is
         yield sse_event(
             "error", {"code": "AI_PROVIDER_FAILED", "message": "The AI provider stopped responding."}
         )
     finally:
         try:
-            if bill:
-                await bill.close()
+            await bill.close()
         finally:
             await stream.aclose()
 
@@ -406,13 +403,13 @@ async def ingest_pdf(
     billed_org: str = Query(min_length=1, max_length=200),
     billed_role: spend.Role = Query(),
     _caller: Claims = Depends(SERVICE),
-) -> IngestResponse:
+) -> IngestResponse | Response:
     """one supported document (the raw body) → chunks with embeddings and the figure crops they point at."""
     billed = spend.Billed(user_id=billed_user, org_id=billed_org, role=billed_role)
     return await budgeted(request, billed, lambda: ingest_reserved(request, title, billed))
 
 
-async def ingest_reserved(request: Request, title: str, billed: spend.Billed) -> IngestResponse:
+async def ingest_reserved(request: Request, title: str, billed: spend.Billed) -> IngestResponse | Response:
     mime = request.headers.get("content-type", "").split(";")[0].strip()
     if mime not in {"application/pdf", *FORMATS}:
         raise failure(415, "UNSUPPORTED_MEDIA_TYPE", "Send a PDF, Markdown, PPTX or DOCX document.")
@@ -451,7 +448,9 @@ async def ingest_reserved(request: Request, title: str, billed: spend.Billed) ->
             finally:
                 costs.write(record, None)
                 await billing.charge(billed, correlation_of(request), *ingest_charges(record))
-    return indexed_response(result)
+    # up to 5000 vectors: built and encoded in a worker thread, so other requests' streams keep flowing.
+    body = await asyncio.to_thread(lambda: indexed_response(result).model_dump_json())
+    return Response(body, media_type="application/json")
 
 
 async def budgeted(http: Request, billed: spend.Billed, work: Callable[[], Awaitable[Any]]) -> Any:
@@ -531,7 +530,7 @@ async def _ingest(
     path: Path,
     title: str,
     check: Callable[[], Awaitable[None]],
-    mime: str = "application/pdf",
+    mime: str,
 ) -> IngestResult:
     """the ingest, once one of the slots is free."""
     with costs.stage("queued"):
@@ -568,11 +567,11 @@ async def unless_disconnected[T](
 
 async def receive(request: Request, path: Path, max_bytes: int | None = None) -> None:
     """stream the body to disk, refusing more than MAX_PDF_BYTES without reading it all into memory."""
-    size = 0
+    size, most = 0, min(MAX_PDF_BYTES, max_bytes if max_bytes is not None else MAX_PDF_BYTES)
     with path.open("wb") as out:
         async for part in request.stream():
             size += len(part)
-            if size > min(MAX_PDF_BYTES, max_bytes if max_bytes is not None else MAX_PDF_BYTES):
+            if size > most:
                 raise failure(413, "PAYLOAD_TOO_LARGE", "The document exceeds its upload size limit.")
             await asyncio.to_thread(out.write, part)
     if size == 0:

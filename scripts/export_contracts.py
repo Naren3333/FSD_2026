@@ -363,6 +363,19 @@ chunk = obj(
 DOC_TYPE = {"enum": ["teaching_material", "rubric", "marking_scheme"]}
 TITLE = {"type": "string", "minLength": 1, "maxLength": 160}
 FIGURE = {"type": "string", "pattern": "^[a-f0-9]{16}\\.png$"}
+PPTX = "application/vnd.openxmlformats-officedocument.presentationml.presentation"
+DOCX = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+REVISION = {"type": "integer", "minimum": 1}
+PAGE_COUNT = {
+    "type": "integer",
+    "minimum": 0,
+    "description": "PDF pages, PPTX slides, or internal Markdown/DOCX section units.",
+}
+PAGE_START = {
+    "type": "integer",
+    "minimum": 1,
+    "description": "PDF page, PPTX slide, or internal Markdown/DOCX section anchor; interpret using source.",
+}
 document = obj(
     {
         "id": UUID,
@@ -373,20 +386,16 @@ document = obj(
                 "text/plain",
                 "application/pdf",
                 "text/markdown",
-                "application/vnd.openxmlformats-officedocument.presentationml.presentation",
-                "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                PPTX,
+                DOCX,
             ]
         },
         "status": {"enum": ["extracted", "extraction_unsupported", "indexing", "indexed", "failed"]},
-        "revision": {"type": "integer", "minimum": 1},
+        "revision": REVISION,
         "sha256": {"type": "string", "pattern": "^[a-f0-9]{64}$"},
         "doc_type": DOC_TYPE,
         "chunks": array(chunk, maximum=10000),
-        "page_count": {
-            "type": "integer",
-            "minimum": 0,
-            "description": "PDF pages, PPTX slides, or internal Markdown/DOCX section units.",
-        },
+        "page_count": PAGE_COUNT,
         "chunk_count": {"type": "integer", "minimum": 0},
         "embedding_model": TEXT,
         "indexed_at": {"type": "string", "format": "date-time"},
@@ -402,11 +411,7 @@ related = obj(
         "chunk_id": UUID,
         "kind": {"enum": ["table", "figure", "text"]},
         "label": NULLABLE_TEXT,
-        "page_start": {
-            "type": "integer",
-            "minimum": 1,
-            "description": "PDF page, PPTX slide, or internal Markdown/DOCX section anchor; interpret using source.",
-        },
+        "page_start": PAGE_START,
         "image": {"type": ["string", "null"], "pattern": FIGURE["pattern"]},
         "content": TEXT,
     }
@@ -418,11 +423,7 @@ search_hit = obj(
         "title": TEXT,
         "doc_type": DOC_TYPE,
         "section_path": NULLABLE_TEXT,
-        "page_start": {
-            "type": "integer",
-            "minimum": 1,
-            "description": "PDF page, PPTX slide, or internal Markdown/DOCX section anchor; interpret using source.",
-        },
+        "page_start": PAGE_START,
         "page_end": {
             "type": "integer",
             "minimum": 1,
@@ -1012,8 +1013,8 @@ for name, routes in operations.items():
                     ("text/plain", 5242880),
                     ("text/markdown", 5242880),
                     ("application/pdf", 52428800),
-                    ("application/vnd.openxmlformats-officedocument.presentationml.presentation", 52428800),
-                    ("application/vnd.openxmlformats-officedocument.wordprocessingml.document", 52428800),
+                    (PPTX, 52428800),
+                    (DOCX, 52428800),
                 ]
             },
         }
@@ -1081,8 +1082,8 @@ for name, routes in operations.items():
                                 "application/pdf",
                                 "text/plain",
                                 "text/markdown",
-                                "application/vnd.openxmlformats-officedocument.presentationml.presentation",
-                                "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                                PPTX,
+                                DOCX,
                             ]
                         },
                     },
@@ -1135,7 +1136,7 @@ payloads = {
             "document_id": UUID,
             "classroom_id": UUID,
             "org_id": TEXT,
-            "revision": {"type": "integer", "minimum": 1},
+            "revision": REVISION,
             "status": {"enum": ["extracted", "extraction_unsupported", "indexing"]},
         }
     ),
@@ -1144,13 +1145,9 @@ payloads = {
             "document_id": UUID,
             "classroom_id": UUID,
             "org_id": TEXT,
-            "revision": {"type": "integer", "minimum": 1},
+            "revision": REVISION,
             "doc_type": DOC_TYPE,
-            "page_count": {
-                "type": "integer",
-                "minimum": 0,
-                "description": "PDF pages, PPTX slides, or internal Markdown/DOCX section units.",
-            },
+            "page_count": PAGE_COUNT,
             "chunk_count": {"type": "integer", "minimum": 1},
             "embedding_model": TEXT,
         }
@@ -1181,7 +1178,7 @@ payloads = {
             "student_id": TEXT,
             "evidence": array(final_evidence, 1, 50),
             # absent before adr 0016, meaning 1.
-            "revision": {"type": "integer", "minimum": 1},
+            "revision": REVISION,
         },
         ["evaluation_id", "assessment_id", "classroom_id", "org_id", "student_id", "evidence"],
     ),

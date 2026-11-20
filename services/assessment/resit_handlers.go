@@ -17,11 +17,8 @@ const maxAssignees = 100
 // resit makes a draft resit of a published assessment for chosen students, from its questions, the
 // teacher's bank questions, or both. curriculum and identity are asked before the store takes any lock.
 func (s server) resit(w http.ResponseWriter, r *http.Request) {
-	if !platform.Teacher(w, r) {
-		return
-	}
-	original, ok := s.findAssessment(w, r)
-	if !ok || !platform.TeacherOf(s.access, w, r, original.Classroom) {
+	original, ok := s.forTeacher(w, r)
+	if !ok {
 		return
 	}
 	var in struct {
@@ -112,11 +109,8 @@ func (s server) resitQuestions(w http.ResponseWriter, r *http.Request, original 
 // assignees replaces a resit's list of students; those already on it stay without a roster check, so a
 // student who submitted and then left the class never blocks the list.
 func (s server) assignees(w http.ResponseWriter, r *http.Request) {
-	if !platform.Teacher(w, r) {
-		return
-	}
-	v, ok := s.findAssessment(w, r)
-	if !ok || !platform.TeacherOf(s.access, w, r, v.Classroom) {
+	v, ok := s.forTeacher(w, r)
+	if !ok {
 		return
 	}
 	var in struct {

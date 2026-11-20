@@ -53,6 +53,15 @@ func (m *memoryStore) findClassroomOwner(_ context.Context, classroom string) (s
 	return "org", teacher, nil
 }
 
+func (m *memoryStore) classroomAccess(ctx context.Context, classroom, student string) (string, string, bool, error) {
+	org, teacher, err := m.findClassroomOwner(ctx, classroom)
+	if err != nil {
+		return "", "", false, err
+	}
+	enrolled, err := m.isEnrolled(ctx, classroom, student)
+	return org, teacher, enrolled, err
+}
+
 func (m *memoryStore) isEnrolled(_ context.Context, classroom, student string) (bool, error) {
 	for _, s := range m.enrolled[classroom] {
 		if s == student {

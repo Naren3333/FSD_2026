@@ -111,11 +111,10 @@ def handle(pool: ConnectionPool[Any], topic: str, value: bytes | None) -> bool:
     return purge(pool, value)
 
 
-def run(pool: ConnectionPool[Any], stop: threading.Event, connected: threading.Event) -> None:
+def run(pool: ConnectionPool[Any], stop: threading.Event) -> None:
     consume(
         GROUP,
         [CLASSROOM_DELETED, DOCUMENT_DELETED, USER_DELETED],
         lambda topic, value: handle(pool, topic, value),
         stop,
-        connected,
     )

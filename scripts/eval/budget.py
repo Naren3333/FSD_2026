@@ -4,8 +4,8 @@ import subprocess
 import uuid
 from datetime import UTC, datetime, timedelta
 
-from common import ROOT
-from local_stack import psql_json
+import common  # noqa: F401 - puts scripts/ on sys.path for local_stack
+from local_stack import compose, psql_json
 
 DEFAULT_CAP = 0.50  # usd per run
 # what one case of each kind is assumed to cost before any has been measured.
@@ -50,13 +50,8 @@ def spent_since(user_id: str, since: datetime) -> float:
 def teacher_limit() -> float:
     """the teacher allowance the running ai-core enforces, or the compose default when it can't be read."""
     try:
-        out = subprocess.run(
-            ["docker", "compose", "exec", "-T", "ai-core", "printenv", "SPEND_LIMIT_TEACHER_USD"],
-            cwd=ROOT,
-            text=True,
-            capture_output=True,
-            timeout=30,
-            check=True,
+        out = compose(
+            "exec", "-T", "ai-core", "printenv", "SPEND_LIMIT_TEACHER_USD", timeout=30
         ).stdout.strip()
         return float(out)
     except (OSError, subprocess.SubprocessError, ValueError):

@@ -5,6 +5,16 @@ export function pageCount(total: number, pageSize: number): number {
   return Math.max(1, Math.ceil(total / pageSize));
 }
 
+/* the last page's index for `total` items, counted from 0; 0 when there are none. */
+export function lastPage(total: number, pageSize: number): number {
+  return pageCount(total, pageSize) - 1;
+}
+
+/* the items on page `page`, `pageSize` at a time. */
+export function pageItems<T>(items: readonly T[], page: number, pageSize: number): T[] {
+  return items.slice(page * pageSize, (page + 1) * pageSize);
+}
+
 /* previous and next controls for a list the server pages, with the page on show and how many items match. */
 @Component({ selector: 'app-pager', standalone: true, templateUrl: './pager.html' })
 export class PagerComponent {

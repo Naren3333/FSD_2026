@@ -23,6 +23,7 @@ from local_stack import (
     TEST_PROJECT,
     TOKEN_URL,
     admin_client,
+    compose,
     delete_topics,
     ensure_person,
     env,
@@ -59,19 +60,6 @@ LIVE_AI = False  # --live-ai: the ai paths must work, not just answer "unavailab
 
 # --- helpers
 # -------------------------------------------------------------------------------------------------
-
-
-def docker(*args: str, input: str | None = None, check: bool = True) -> subprocess.CompletedProcess[str]:
-    return subprocess.run(
-        ["docker", "compose", *args],
-        cwd=ROOT,
-        input=input,
-        text=True,
-        encoding="utf-8",
-        capture_output=True,
-        check=check,
-        timeout=90,
-    )
 
 
 def sql_value(service: str, sql: str) -> str:
@@ -132,7 +120,7 @@ except urllib.error.HTTPError as e:
 
 
 def ai_core_status(token: str) -> int:
-    return int(docker("exec", "-T", "ai-core", "python", "-c", AI_CORE_PROBE, input=token).stdout.strip())
+    return int(compose("exec", "-T", "ai-core", "python", "-c", AI_CORE_PROBE, input=token).stdout.strip())
 
 
 def request(client: httpx.Client, method: str, path: str, status: int = 200, **kwargs: Any) -> Any:
@@ -221,7 +209,7 @@ def reassigned_billing(room_id: str, teacher_id: str) -> None:
 def publish(topic: str, key: str, event: dict[str, Any]) -> None:
     """puts an event straight on a kafka topic under `key`, as the outbox relay does (its partition key), so it keeps its order with the other events for the same resource."""
     producer = "/opt/kafka/bin/kafka-console-producer.sh"
-    docker(
+    compose(
         "exec", "-T", "kafka", producer, "--bootstrap-server", "kafka:9092", "--topic", topic,
         "--property", "parse.key=true", "--property", "key.separator=|",
         input=f"{key}|{json.dumps(event)}\n",
@@ -230,7 +218,7 @@ def publish(topic: str, key: str, event: dict[str, Any]) -> None:
 
 def restart(*services: str) -> None:
     """restarts containers and waits until every application is ready again, so the next request is not a 502."""
-    docker("restart", *services)
+    compose("restart", *services)
     wait_ready(f"restarting {', '.join(services)}")
 
 
@@ -1653,7 +1641,7 @@ def platform_monitoring(users: Users) -> None:
             return next(service for service in data["services"] if service["name"] == "identity")
 
         expected_replicas = len(
-            docker("ps", "--status", "running", "--quiet", "identity").stdout.splitlines()
+            compose("ps", "--status", "running", "--quiet", "identity").stdout.splitlines()
         )
         assert expected_replicas > 0
         snapshot = eventually(
@@ -1685,7 +1673,7 @@ def platform_monitoring(users: Users) -> None:
         joined = {name for name, (_, members) in consumer_groups().items() if members > 0}
         assert joined, "no consumer group has members before the broker outage"
         try:
-            docker("stop", "kafka")
+            compose("stop", "kafka")
             eventually(
                 submission_dlq,
                 lambda t: t["state"] == "stale"
@@ -1694,7 +1682,7 @@ def platform_monitoring(users: Users) -> None:
                 "a broker outage preserves the last retained estimate",
             )
         finally:
-            docker("start", "kafka")
+            compose("start", "kafka")
         eventually(
             submission_dlq,
             lambda t: t["state"] == "available" and t["estimated_retained"] == retained,
@@ -1719,7 +1707,7 @@ def platform_monitoring(users: Users) -> None:
 
 def consumer_groups() -> dict[str, tuple[str, int]]:
     """each consumer group's state and member count, as the broker reports them."""
-    out = docker(
+    out = compose(
         "exec", "-T", "kafka", "/opt/kafka/bin/kafka-consumer-groups.sh",
         "--bootstrap-server", "kafka:9092", "--describe", "--all-groups", "--state",
         check=False,
@@ -1807,7 +1795,7 @@ for name in ['content','identity','ai-core','question-chatbot-agent']:
 print(json.dumps(results))
 """
     allowed = json.loads(
-        docker("exec", "-T", "ai-core", "python", "-c", probe, input=service_token("content-indexer")).stdout
+        compose("exec", "-T", "ai-core", "python", "-c", probe, input=service_token("content-indexer")).stdout
     )
     assert all(
         isinstance(value, str) and "learning_http_requests_total" in value for value in allowed.values()
@@ -1816,7 +1804,7 @@ print(json.dumps(results))
         "learning_content_cleanup_jobs" in allowed["content"] and "learning_ai_reserved" in allowed["ai-core"]
     )
     denied = json.loads(
-        docker(
+        compose(
             "exec",
             "-T",
             "ai-core",

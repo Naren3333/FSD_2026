@@ -171,17 +171,8 @@ func (p pgStore) insertAssessment(ctx context.Context, org string, v Assessment)
 		return err
 	}
 	defer tx.Rollback(ctx)
-	// shared with other inserts, exclusive against the classroom's purge: an insert either commits before the
-	// purge (which then deletes it) or sees the classroom in purged_classrooms.
-	if err = platform.LockShared(ctx, tx, platform.LockClassroom, v.Classroom); err != nil {
+	if err = lockLiveClassroom(ctx, tx, v.Classroom); err != nil {
 		return err
-	}
-	var purged bool
-	if err = tx.QueryRow(ctx, "SELECT EXISTS(SELECT 1 FROM purged_classrooms WHERE classroom_id=$1)", v.Classroom).Scan(&purged); err != nil {
-		return err
-	}
-	if purged {
-		return errClassroomPurged
 	}
 	if _, err = tx.Exec(ctx, "INSERT INTO assessments(id,classroom_id,org_id,title,questions,status,opens_at,due_at,late_policy,release_policy,ai_marking,published_at,created_by) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)",
 		v.ID, v.Classroom, org, v.Title, data, v.Status, v.OpensAt, v.DueAt, v.LatePolicy, v.ReleasePolicy, v.AIMarking, v.PublishedAt, v.CreatedBy); err != nil {
@@ -235,8 +226,12 @@ func writeLinks(ctx context.Context, tx pgx.Tx, org string, v Assessment, before
 
 // othersLinks is the assessment's links to bank questions of teachers other than owner, by question id.
 func othersLinks(ctx context.Context, tx pgx.Tx, org, assessment, owner string) (map[string]string, error) {
-	rows, err := tx.Query(ctx, `SELECT l.question_id::text,l.bank_question_id::text FROM question_bank_links l
-		JOIN bank_questions b ON b.id=l.bank_question_id AND b.owner_id<>$2 AND b.org_id=$3 WHERE l.assessment_id=$1`, assessment, owner, org)
+	return linkMap(tx.Query(ctx, `SELECT l.question_id::text,l.bank_question_id::text FROM question_bank_links l
+		JOIN bank_questions b ON b.id=l.bank_question_id AND b.owner_id<>$2 AND b.org_id=$3 WHERE l.assessment_id=$1`, assessment, owner, org))
+}
+
+// linkmap reads (question_id, bank_question_id) rows into a map from each question to its bank question.
+func linkMap(rows pgx.Rows, err error) (map[string]string, error) {
 	if err != nil {
 		return nil, err
 	}
@@ -247,6 +242,22 @@ func othersLinks(ctx context.Context, tx pgx.Tx, org, assessment, owner string) 
 		return nil
 	})
 	return links, err
+}
+
+// lockLiveClassroom takes the classroom's lock shared with other inserts and exclusive against its purge, so
+// an insert either commits before the purge (which then deletes it) or sees the classroom purged.
+func lockLiveClassroom(ctx context.Context, tx pgx.Tx, classroom string) error {
+	if err := platform.LockShared(ctx, tx, platform.LockClassroom, classroom); err != nil {
+		return err
+	}
+	var purged bool
+	if err := tx.QueryRow(ctx, "SELECT EXISTS(SELECT 1 FROM purged_classrooms WHERE classroom_id=$1)", classroom).Scan(&purged); err != nil {
+		return err
+	}
+	if purged {
+		return errClassroomPurged
+	}
+	return nil
 }
 
 // keptLinks maps each of v's questions the editor sent no link for to the question of before whose link it

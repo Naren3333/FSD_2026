@@ -111,22 +111,14 @@ Rules:
 // markingMessages is the prompt: the instructions, then the question, rubric and answer as one json
 // document, so the answer stays a quoted value however it is written.
 func markingMessages(q Question, r Rubric, answer string) ([]message, error) {
-	type level struct {
-		Points     int    `json:"points"`
-		Descriptor string `json:"descriptor"`
-	}
 	type criterion struct {
 		ID     string  `json:"criterion_id"`
 		Title  string  `json:"title"`
-		Levels []level `json:"levels"`
+		Levels []Level `json:"levels"`
 	}
 	criteria := make([]criterion, len(r.Criteria))
 	for i, c := range r.Criteria {
-		levels := make([]level, len(c.Levels))
-		for j, l := range c.Levels {
-			levels[j] = level(l)
-		}
-		criteria[i] = criterion{c.ID, c.Title, levels}
+		criteria[i] = criterion(c)
 	}
 	content := map[string]any{"question": q.Prompt, "criteria": criteria, "model_answer": r.ModelAnswer, "student_answer": answer}
 	if len(q.MarkingScheme) > 0 {
@@ -176,6 +168,9 @@ func markingSchema() map[string]any {
 	}
 }
 
+// errInvalidOutput is a reply that is not a well-formed marking of every criterion.
+var errInvalidOutput = errors.New("INVALID_OUTPUT")
+
 var errUngrounded = errors.New("UNGROUNDED")
 
 // reject suggestions that award marks while quoting contradictory evidence.
@@ -199,23 +194,23 @@ func checkSuggestion(q Question, r Rubric, answer, output, model string) (Sugges
 		Flags      []string           `json:"flags"`
 	}
 	if json.Unmarshal([]byte(output), &reply) != nil || !slices.Contains([]string{"high", "medium", "low"}, reply.Confidence) {
-		return Suggestion{}, errors.New("INVALID_OUTPUT")
+		return Suggestion{}, errInvalidOutput
 	}
 	byID := map[string]repliedCriterion{}
 	for _, c := range reply.Criteria {
 		if _, repeated := byID[c.Criterion]; repeated {
-			return Suggestion{}, errors.New("INVALID_OUTPUT")
+			return Suggestion{}, errInvalidOutput
 		}
 		byID[c.Criterion] = c
 	}
 	s := Suggestion{Status: suggestionReady, Confidence: reply.Confidence, Model: model, SchemePassages: len(q.MarkingScheme)}
 	if len(byID) != len(r.Criteria) {
-		return Suggestion{}, errors.New("INVALID_OUTPUT")
+		return Suggestion{}, errInvalidOutput
 	}
 	for _, c := range r.Criteria {
 		got, ok := byID[c.ID]
 		if !ok {
-			return Suggestion{}, errors.New("INVALID_OUTPUT")
+			return Suggestion{}, errInvalidOutput
 		}
 		if err := checkCriterion(got, c, answer); err != nil {
 			return Suggestion{}, err
@@ -244,7 +239,7 @@ func checkSuggestion(q Question, r Rubric, answer, output, model string) (Sugges
 func checkCriterion(got repliedCriterion, c Criterion, answer string) error {
 	switch {
 	case !fits(got.SuggestedCriterion, c) || len(got.Against) > maxQuotes:
-		return errors.New("INVALID_OUTPUT")
+		return errInvalidOutput
 	case !grounded(got.SuggestedCriterion, c, answer) || !quoted(got.Against, answer):
 		return errUngrounded
 	case len(got.Against) > 0 && got.Points != lowest(c):

@@ -7,7 +7,7 @@ import { UnsavedChanges } from '../../core/unsaved-changes';
 import { ActionState } from '../../shared/action-state';
 import { NoClassroomComponent } from '../../shared/no-classroom';
 import { PageHeaderComponent } from '../../shared/page-header';
-import { PagerComponent } from '../../shared/pager';
+import { PagerComponent, lastPage, pageItems } from '../../shared/pager';
 import { RefreshButtonComponent } from '../../shared/refresh-button';
 import { StatusComponent } from '../../shared/status';
 
@@ -33,14 +33,12 @@ export class ClassroomsComponent {
   readonly classrooms = this.context.classrooms;
   readonly roomPage = signal(0);
   readonly roomPageSize = 20;
-  readonly effectiveRoomPage = computed(() => {
-    const last = Math.max(0, Math.ceil(this.classrooms().length / this.roomPageSize) - 1);
-    return Math.min(this.roomPage(), last);
-  });
-  readonly visibleRooms = computed(() => {
-    const page = this.effectiveRoomPage();
-    return this.classrooms().slice(page * this.roomPageSize, (page + 1) * this.roomPageSize);
-  });
+  readonly effectiveRoomPage = computed(() =>
+    Math.min(this.roomPage(), lastPage(this.classrooms().length, this.roomPageSize)),
+  );
+  readonly visibleRooms = computed(() =>
+    pageItems(this.classrooms(), this.effectiveRoomPage(), this.roomPageSize),
+  );
   readonly classroomId = this.context.classroomId;
   readonly classroomName = this.context.classroomName;
   readonly state = new ActionState();

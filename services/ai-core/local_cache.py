@@ -69,11 +69,14 @@ def write(path: Path, value: Any) -> None:
                 _last_prune = time.monotonic()
         if not prune:
             return
-        entries = sorted(path.parent.glob("*.json"), key=lambda p: p.stat().st_mtime, reverse=True)
+        entries = sorted(
+            ((entry, entry.stat()) for entry in path.parent.glob("*.json")),
+            key=lambda e: e[1].st_mtime,
+            reverse=True,
+        )
         size = 0
         now = time.time()
-        for entry in entries:
-            stat = entry.stat()
+        for entry, stat in entries:
             size += stat.st_size
             if size > MAX_BYTES or now - stat.st_mtime > TTL:
                 entry.unlink(missing_ok=True)

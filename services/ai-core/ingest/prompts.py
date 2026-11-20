@@ -3,12 +3,11 @@
 PROMPT_VERSION = 2  # part of the cache key: bump when prompt changes (v2: figures too)
 
 
-DESCRIBE_PROMPT_VERSION = (
-    5  # part of a description's cache key (v2: a strict "useful"; v3: untrusted; v4: context;
-)
+# part of a description's cache key (v2: a strict "useful"; v3: untrusted; v4: context; v5: series, ticks
+# and arrow order, after an accuracy review)
+DESCRIBE_PROMPT_VERSION = 5
 
 
-# v5: series, ticks and arrow order, after an accuracy review)
 TRANSCRIBE_PROMPT_VERSION = 2  # a table picture's transcript (v2: untrusted; v1 had no version in its name)
 
 

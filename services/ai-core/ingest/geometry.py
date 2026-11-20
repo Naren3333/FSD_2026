@@ -3,9 +3,8 @@
 from collections.abc import Sequence
 from typing import Any
 
-FULL_PAGE_SHARE = (
-    0.6  # a box covering this share of its page is the page itself: a scan, or a slide background
-)
+# a box covering this share of its page is the page itself: a scan, or a slide background
+FULL_PAGE_SHARE = 0.6
 
 Box = tuple[float, float, float, float]
 

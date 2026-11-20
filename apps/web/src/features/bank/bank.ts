@@ -21,7 +21,7 @@ import { RefreshButtonComponent } from '../../shared/refresh-button';
 import { Section, rereadAfterDelete } from '../../shared/section';
 import { SectionStateComponent } from '../../shared/section-state';
 import { StatusComponent } from '../../shared/status';
-import { BANK_TYPES } from '../assessments/bank-picker';
+import { BANK_TYPES, questionTypeName } from '../assessments/bank-picker';
 import {
   MAX_CRITERIA,
   criterionForm,
@@ -150,9 +150,7 @@ export class QuestionBankComponent {
     return this.curriculum.archived().some((t) => t.id === topicId);
   }
 
-  typeName(type: QuestionType): string {
-    return BANK_TYPES.find((t) => t.value === type)?.label ?? type;
-  }
+  readonly typeName = questionTypeName;
 
   // --- the form, chosen by the address
   // --------------------------------------------------------------------------------

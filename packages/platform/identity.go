@@ -56,38 +56,49 @@ func NewIdentity(base string, client *http.Client) *Identity {
 	return &Identity{base: base, client: client}
 }
 
-// relation asks identity how the caller may access the classroom.
-func (i *Identity) Relation(w http.ResponseWriter, r *http.Request, classroom, student string) (string, bool) {
+// ask sends identity the caller's own token for path under the classroom and returns its 200 answer, whose
+// body the caller closes; any other outcome is written as the refusal, with forbidden as a 403's message.
+func (i *Identity) ask(w http.ResponseWriter, r *http.Request, classroom, path, forbidden string) (*http.Response, bool) {
 	if !ID(classroom) {
 		Invalid(w, "A valid classroom identifier is required.")
-		return "", false
+		return nil, false
 	}
-	target := i.base + "/v1/classrooms/" + classroom + "/access"
-	if student != "" {
-		target += "?" + url.Values{"student_id": {student}}.Encode()
-	}
-	req, err := Forward(r, http.MethodGet, target)
+	req, err := Forward(r, http.MethodGet, i.base+"/v1/classrooms/"+classroom+path)
 	if err != nil {
 		Unavailable(w, "Authorization unavailable.")
-		return "", false
+		return nil, false
 	}
 	res, err := i.client.Do(req)
 	if err != nil {
 		Unavailable(w, "Authorization unavailable; retry later.")
-		return "", false
+		return nil, false
 	}
-	defer res.Body.Close()
 	if res.StatusCode != http.StatusOK {
+		res.Body.Close()
 		switch {
 		case res.StatusCode >= 500:
 			Unavailable(w, "Authorization unavailable.")
 		case res.StatusCode == http.StatusUnauthorized:
 			Unauthenticated(w, "The access token was not accepted.")
 		default:
-			Forbidden(w, "You do not have access to this classroom or student.")
+			Forbidden(w, forbidden)
 		}
+		return nil, false
+	}
+	return res, true
+}
+
+// relation asks identity how the caller may access the classroom.
+func (i *Identity) Relation(w http.ResponseWriter, r *http.Request, classroom, student string) (string, bool) {
+	path := "/access"
+	if student != "" {
+		path += "?" + url.Values{"student_id": {student}}.Encode()
+	}
+	res, ok := i.ask(w, r, classroom, path, "You do not have access to this classroom or student.")
+	if !ok {
 		return "", false
 	}
+	defer res.Body.Close()
 	var answer struct {
 		Relation string `json:"relation"`
 	}
@@ -110,35 +121,14 @@ type ClassroomRoster interface {
 // roster asks identity for the ids of the classroom's enrolled students with the caller's own token, so
 // only the classroom's teacher gets an answer.
 func (i *Identity) Roster(w http.ResponseWriter, r *http.Request, classroom string) ([]string, bool) {
-	if !ID(classroom) {
-		Invalid(w, "A valid classroom identifier is required.")
-		return nil, false
-	}
-	req, err := Forward(r, http.MethodGet, i.base+"/v1/classrooms/"+classroom+"/student-ids")
-	if err != nil {
-		Unavailable(w, "Authorization unavailable.")
-		return nil, false
-	}
-	res, err := i.client.Do(req)
-	if err != nil {
-		Unavailable(w, "Authorization unavailable; retry later.")
+	res, ok := i.ask(w, r, classroom, "/student-ids", "Only the classroom's teacher may do this.")
+	if !ok {
 		return nil, false
 	}
 	defer res.Body.Close()
-	if res.StatusCode != http.StatusOK {
-		switch {
-		case res.StatusCode >= 500:
-			Unavailable(w, "Authorization unavailable.")
-		case res.StatusCode == http.StatusUnauthorized:
-			Unauthenticated(w, "The access token was not accepted.")
-		default:
-			Forbidden(w, "Only the classroom's teacher may do this.")
-		}
-		return nil, false
-	}
 	var ids []string
 	body := &countingReader{r: io.LimitReader(res.Body, maxRoster)}
-	if err = json.NewDecoder(body).Decode(&ids); err != nil || ids == nil || slices.Contains(ids, "") {
+	if err := json.NewDecoder(body).Decode(&ids); err != nil || ids == nil || slices.Contains(ids, "") {
 		// a roster larger than maxRoster is cut off and fails to decode; say so, since its answer is a 503 like
 		// any other unreadable roster.
 		cause := "unreadable"

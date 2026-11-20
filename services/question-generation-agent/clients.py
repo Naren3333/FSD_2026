@@ -3,7 +3,7 @@
 from dataclasses import dataclass
 
 import httpx
-from learning_transport import Claims, UpstreamError
+from learning_transport import TEACHER, Claims, UpstreamError
 from learning_transport.agents import AgentClients, billed_to
 
 from config import Settings
@@ -17,7 +17,7 @@ GENERATE_TIMEOUT = 135.0
 
 def billed(claims: Claims) -> dict[str, str]:
     """whose daily ai allowance pays: the teacher who asked (adr 0003)."""
-    return billed_to(claims, "teacher")
+    return billed_to(claims, TEACHER)
 
 
 @dataclass(frozen=True)

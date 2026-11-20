@@ -23,8 +23,8 @@ type AICore struct {
 func NewAICore() AICore {
 	return AICore{
 		Base:   strings.TrimRight(Required("AI_CORE_URL"), "/"),
-		Tokens: &ServiceToken{URL: Required("AI_TOKEN_URL"), ID: Required("AI_CLIENT_ID"), Secret: Required("AI_CLIENT_SECRET"), Client: &http.Client{Timeout: 10 * time.Second}},
-		Client: &http.Client{},
+		Tokens: &ServiceToken{URL: Required("AI_TOKEN_URL"), ID: Required("AI_CLIENT_ID"), Secret: Required("AI_CLIENT_SECRET"), Client: &http.Client{Timeout: 10 * time.Second, Transport: Transport}},
+		Client: &http.Client{Transport: Transport},
 	}
 }
 

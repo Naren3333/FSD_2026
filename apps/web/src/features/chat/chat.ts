@@ -16,6 +16,7 @@ import { ClassroomContext, onClassroomChange } from '../../core/classroom-contex
 import { UnsavedChanges } from '../../core/unsaved-changes';
 import { ActionState } from '../../shared/action-state';
 import { messageOf } from '../../shared/errors';
+import { openOriginal } from '../../shared/files';
 import { FieldComponent, FieldControlDirective } from '../../shared/field';
 import { IconComponent } from '../../shared/icon';
 import { dateTime, resetTime } from '../../shared/format';
@@ -378,20 +379,12 @@ export class ChatComponent {
   }
   /* open the original file; create the tab synchronously to avoid popup blocking. */
   openPage(source: Citation): void {
-    const tab = window.open('', '_blank');
-    this.content
-      .original(source.document_id)
-      .then((url) => {
-        if (tab)
-          tab.location.href =
-            source.source === 'pdf' || source.source === 'vision' ? `${url}#page=${source.page_start}` : url;
-        else this.state.error.set('Allow pop-ups for this site to open the document.');
-        setTimeout(() => URL.revokeObjectURL(url), 60000);
-      })
-      .catch((error: unknown) => {
-        tab?.close();
-        this.state.error.set(`The document could not be opened. ${messageOf(error, '')}`.trim());
-      });
+    const paged = source.source === 'pdf' || source.source === 'vision';
+    openOriginal(
+      () => this.content.original(source.document_id),
+      this.state.error,
+      paged ? `#page=${source.page_start}` : '',
+    );
   }
   when(iso: string): string {
     return dateTime(iso);

@@ -105,13 +105,11 @@ def restart_wait(previous: float | None, progressed: bool) -> float:
     return min(2 * previous, RESTART_MAX)
 
 
-def consume(
-    group: str, topics: list[str], handle: Handler, stop: threading.Event, connected: threading.Event
-) -> None:
+def consume(group: str, topics: list[str], handle: Handler, stop: threading.Event) -> None:
     """keep consuming until shutdown."""
     wait: float | None = None
     while not stop.is_set():
-        progressed = consume_session(group, topics, handle, stop, connected)
+        progressed = consume_session(group, topics, handle, stop)
         if stop.is_set():
             return
         wait = restart_wait(wait, progressed)
@@ -152,9 +150,7 @@ def attempt(handle: Handler, topic: str, value: bytes | None, stop: threading.Ev
     return "failed"
 
 
-def consume_session(
-    group: str, topics: list[str], handle: Handler, stop: threading.Event, connected: threading.Event
-) -> bool:
+def consume_session(group: str, topics: list[str], handle: Handler, stop: threading.Event) -> bool:
     """one consumer session; returns whether it committed anything."""
     progressed = False
     consumer = Consumer(
@@ -172,7 +168,6 @@ def consume_session(
     consumer.subscribe(topics)
     try:
         consumer.list_topics(timeout=10)
-        connected.set()
         while not stop.is_set():
             msg = consumer.poll(1)
             if msg is None:
@@ -192,6 +187,5 @@ def consume_session(
     except Exception:
         log.error("consumer_stopped_uncommitted")
     finally:
-        connected.clear()
         consumer.close()
     return progressed

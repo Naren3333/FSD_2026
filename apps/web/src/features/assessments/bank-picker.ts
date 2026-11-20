@@ -17,6 +17,11 @@ export const BANK_TYPES: { value: QuestionType; label: string }[] = [
   { value: 'free_response', label: 'Written response' },
 ];
 
+/* a question type's label, or the type itself when it has none. */
+export function questionTypeName(type: string): string {
+  return BANK_TYPES.find((t) => t.value === type)?.label ?? type;
+}
+
 /* the editor's "add from your bank" panel: the teacher's bank, searched and paged, each question added as a copy linked to it (adr 0017). */
 @Component({
   selector: 'app-bank-picker',
@@ -77,9 +82,7 @@ export class BankPickerComponent {
     return this.curriculum.archived().some((t) => t.id === question.topic_id);
   }
 
-  typeName(type: QuestionType): string {
-    return BANK_TYPES.find((t) => t.value === type)?.label ?? type;
-  }
+  readonly typeName = questionTypeName;
 
   choose(question: BankQuestion): void {
     if (!this.room || this.archived(question)) return;

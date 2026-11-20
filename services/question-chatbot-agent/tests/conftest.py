@@ -8,10 +8,9 @@ from uuid import uuid4
 
 import httpx
 import pytest
-from fastapi import Request
 from fastapi.testclient import TestClient
-from learning_transport import sse_event
-from learning_transport.testing import as_caller, token_claims
+from learning_transport import sse_event, testing
+from learning_transport.testing import as_caller
 
 import main
 from clients import Services
@@ -193,17 +192,9 @@ def api(fakes: Fakes, store: MemoryStore) -> Iterator[TestClient]:
     http = httpx.AsyncClient(transport=httpx.MockTransport(fakes.handle))
     main.app.state.settings, main.app.state.store = SETTINGS, store
     main.app.state.services, main.app.state.pending = Services(SETTINGS, http), set()
-    with as_caller(main.app, fake_actor):
+    with as_caller(main.app, testing.user_actor):
         yield TestClient(main.app)
 
 
-def fake_actor(request: Request) -> dict[str, Any]:
-    """verified claims for the user named in the test's authorization header: t… is a teacher, x… has neither role, anyone else is a student."""
-    user = request.headers["authorization"].removeprefix("Bearer ")
-    role = "teacher" if user.startswith("t") else "parent" if user.startswith("x") else "student"
-    return token_claims(role, sub=user, org="org")
-
-
 def as_user(user: str = "s1") -> dict[str, str]:
-    """the authorization header for a test user; the actor override reads the user (and t… = teacher) from it."""
-    return {"Authorization": f"Bearer {user}"}
+    return testing.as_user(user)

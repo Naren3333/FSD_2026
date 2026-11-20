@@ -49,21 +49,22 @@ def test_person_role_is_the_accounts_one_role() -> None:
 
 def test_requires_lets_any_listed_role_through() -> None:
     check = requires("teacher", "student")
-    assert check(claims("student")).subject == "u1"
+    assert asyncio.run(check(claims("student"))).subject == "u1"
     with pytest.raises(HTTPException) as error:
-        check(claims("ai-client"))
+        asyncio.run(check(claims("ai-client")))
     assert error.value.status_code == 403
 
 
 def test_a_token_with_both_person_roles_is_refused() -> None:
     with pytest.raises(HTTPException) as error:
-        caller(token_claims("teacher", "student", sub="u1", org="o1"))
+        asyncio.run(caller(token_claims("teacher", "student", sub="u1", org="o1")))
     assert error.value.status_code == 403
     assert error.value.detail["code"] == "ROLE_CONFLICT"  # type: ignore[index]
-    assert caller(token_claims("teacher", "ai-client", sub="u1", org="o1")).person_role == "teacher"
+    verified = asyncio.run(caller(token_claims("teacher", "ai-client", sub="u1", org="o1")))
+    assert verified.person_role == "teacher"
     for pair in (("admin", "teacher"), ("admin", "student")):
         with pytest.raises(HTTPException):
-            caller(token_claims(*pair, sub="u1", org="o1"))
+            asyncio.run(caller(token_claims(*pair, sub="u1", org="o1")))
 
 
 def identity(status: int, body: dict[str, Any] | None = None) -> IdentityClient:

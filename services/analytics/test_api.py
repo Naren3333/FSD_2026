@@ -238,7 +238,7 @@ def test_shutdown_waits_for_the_consumer_without_blocking_the_event_loop(
 
     monkeypatch.setattr(main, "open_migrated_pool", opened)
 
-    def consumer(_: Any, stop: threading.Event, connected: threading.Event) -> None:
+    def consumer(_: Any, stop: threading.Event) -> None:
         stop.wait()
         time.sleep(0.3)  # finishing the message in hand
 

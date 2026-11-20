@@ -90,7 +90,7 @@ def session(
 ) -> tuple[bool, Broker, Stop]:
     stop = Stop()
     broker = Broker(monkeypatch, stop, [FakeMessage(v) for v in values], dlq)
-    progressed = kafka.consume_session("group", ["test.happened"], handle, stop, threading.Event())
+    progressed = kafka.consume_session("group", ["test.happened"], handle, stop)
     return progressed, broker, stop
 
 

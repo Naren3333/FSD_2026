@@ -36,26 +36,21 @@ WRAP_MIN_WORDS = 4  # ...and continues a cell of running text (at least this man
 PROSE_WORDS = 6  # a line of at least this many words...
 GAP_FACTOR = 1.2  # ...with no gap wider than this (x word height) is prose, not a table row
 MIN_CHECK_ROWS = 4  # the model's row count is only checked for tables at least this long...
-ROW_RANGE = (
-    0.5,
-    2.5,
-)  # ...and the grid's must be within this factor of it (+2): rows collapsed or split apart
+# ...and the grid's must be within this factor of it (+2): rows collapsed or split apart
+ROW_RANGE = (0.5, 2.5)
 RULE_SHARE = 0.6  # a rule under the header spans at least this share of the table's width
 MAX_HEADER_LINES = 3  # a header spans at most this many lines...
 MAX_HEADER_WORDS = 4  # ...of short cells...
 NUMERIC = re.compile(r"\d[\d.,·%]*\d|\d")  # ...with no numbers in them
 CAPTION = re.compile(r"(table|exhibit|figure|fig\.)\s*[\dA-Z]", re.IGNORECASE)
-LAYOUT_FOUND = (
-    0.98  # a layout's cell words found among the box's pdf words, at least; and it uses every one of
-)
-# them but the caption's: a word left out is how a shifted header looks (clip table 11 lost "dtd", so every
-# dataset name from there on sat over its neighbour's column)
-LAYOUT_EMPTY = (
-    0.8  # a laid-out table may be this empty (attention's table 3 lists only what each variant changes)
-)
-LAYOUT_PLACED = (
-    0.5  # at least this share of its body cells must be found on the page, each nearest its own column
-)
+# a layout's cell words found among the box's pdf words, at least; and it uses every one of them but the
+# caption's: a word left out is how a shifted header looks (clip table 11 lost "dtd", so every dataset name
+# from there on sat over its neighbour's column)
+LAYOUT_FOUND = 0.98
+# a laid-out table may be this empty (attention's table 3 lists only what each variant changes)
+LAYOUT_EMPTY = 0.8
+# at least this share of its body cells must be found on the page, each nearest its own column
+LAYOUT_PLACED = 0.5
 LINE_REACH = 0.7  # a word is on a row's line when its middle is this close to it (x the median word height)
 
 
@@ -465,9 +460,8 @@ def _misplaced(rows: list[list[str]], words: list) -> str | None:
         at.setdefault(_token(w[4]), []).append(((w[0] + w[2]) / 2, (w[1] + w[3]) / 2))
     heights = sorted(w[3] - w[1] for w in words)
     reach = LINE_REACH * heights[len(heights) // 2] if heights else 0.0  # the same line: table rows sit close
-    in_rows: dict[
-        str, int
-    ] = {}  # how many layout rows a word starts a cell in (a merged cell repeats down its rows)
+    # how many layout rows a word starts a cell in (a merged cell repeats down its rows)
+    in_rows: dict[str, int] = {}
     for row in rows:
         for t in {_token(c.split()[0]) for c in row if c.strip()}:
             in_rows[t] = in_rows.get(t, 0) + 1

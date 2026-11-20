@@ -1,4 +1,4 @@
-import { PagerComponent } from '../../shared/pager';
+import { PagerComponent, lastPage, pageItems } from '../../shared/pager';
 import { Component, OnInit, ViewChild, computed, inject, signal } from '@angular/core';
 import { FormControl, FormGroup, ReactiveFormsModule } from '@angular/forms';
 import { CurriculumApi } from '../../api/clients';
@@ -50,23 +50,17 @@ export class CurriculumComponent implements OnInit {
   readonly archivePage = signal(0);
   readonly pageSize = 20;
   readonly effectiveTopicPage = computed(() =>
-    Math.min(
-      this.topicPage(),
-      Math.max(0, Math.ceil((this.topics.value()?.length ?? 0) / this.pageSize) - 1),
-    ),
+    Math.min(this.topicPage(), lastPage(this.topics.value()?.length ?? 0, this.pageSize)),
   );
   readonly effectiveArchivePage = computed(() =>
-    Math.min(this.archivePage(), Math.max(0, Math.ceil(this.archived().length / this.pageSize) - 1)),
+    Math.min(this.archivePage(), lastPage(this.archived().length, this.pageSize)),
   );
-  readonly visibleArchived = computed(() => {
-    const page = this.effectiveArchivePage();
-    return this.archived().slice(page * this.pageSize, (page + 1) * this.pageSize);
-  });
-  readonly visibleTopics = computed(() => {
-    const items = this.topics.value() ?? [];
-    const page = this.effectiveTopicPage();
-    return items.slice(page * this.pageSize, (page + 1) * this.pageSize);
-  });
+  readonly visibleArchived = computed(() =>
+    pageItems(this.archived(), this.effectiveArchivePage(), this.pageSize),
+  );
+  readonly visibleTopics = computed(() =>
+    pageItems(this.topics.value() ?? [], this.effectiveTopicPage(), this.pageSize),
+  );
   readonly form = new FormGroup({
     name: new FormControl('', { nonNullable: true, validators: requiredText(160) }),
   });

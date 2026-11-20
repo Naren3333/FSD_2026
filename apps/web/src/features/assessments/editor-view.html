@@ -145,6 +145,8 @@
         </app-field>
       </div>
       @if (!detailsOnly) {
+        <!-- counted once per check rather than once per question. -->
+        @let passages = markingPoints();
         @for (question of questions.controls; track question; let i = $index) {
           <fieldset class="question-set" [formGroup]="question" [id]="'question-' + i">
             <legend>Question {{ i + 1 }}</legend>
@@ -485,7 +487,7 @@
                 <app-marking-guidance
                   [question]="question"
                   [index]="i"
-                  [assessmentPassages]="markingPoints()"
+                  [assessmentPassages]="passages"
                   [classroomId]="classroomId"
                   [documents]="documents"
                   [disabled]="state.busy()"

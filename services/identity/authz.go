@@ -12,37 +12,34 @@ func (s server) relation(ctx context.Context, c platform.Claims, classroom, stud
 	if !platform.ID(classroom) {
 		return "", nil
 	}
-	org, teacher, err := s.store.findClassroomOwner(ctx, classroom)
+	target := student
+	if target == "" {
+		target = c.Subject
+	}
+	org, teacher, enrolled, err := s.store.classroomAccess(ctx, classroom, target)
 	if errors.Is(err, platform.ErrNotFound) {
 		return "", nil
 	}
 	if err != nil {
 		return "", err
 	}
-	return decide(c, org, teacher, student, func(target string) (bool, error) { return s.store.isEnrolled(ctx, classroom, target) })
+	return decide(c, org, teacher, student, enrolled), nil
 }
 
-// decide is relation's policy, given the classroom's organization and teacher and an enrollment lookup.
-func decide(c platform.Claims, org, teacher, student string, enrolled func(string) (bool, error)) (string, error) {
+// decide is relation's policy, given the classroom's organization and teacher and whether the student asked
+// about (the caller when none) is enrolled.
+func decide(c platform.Claims, org, teacher, student string, enrolled bool) string {
 	if org != c.Org {
-		return "", nil
+		return ""
 	}
-	if c.Has("teacher") && teacher == c.Subject {
-		if student == "" {
-			return platform.RelationTeacher, nil
+	if c.Has(platform.RoleTeacher) && teacher == c.Subject {
+		if student == "" || enrolled {
+			return platform.RelationTeacher
 		}
-		ok, err := enrolled(student)
-		if err != nil || !ok {
-			return "", err
-		}
-		return platform.RelationTeacher, nil
+		return ""
 	}
-	if !c.Has("student") || (student != "" && student != c.Subject) {
-		return "", nil
+	if !c.Has(platform.RoleStudent) || (student != "" && student != c.Subject) || !enrolled {
+		return ""
 	}
-	ok, err := enrolled(c.Subject)
-	if err != nil || !ok {
-		return "", err
-	}
-	return platform.RelationStudent, nil
+	return platform.RelationStudent
 }

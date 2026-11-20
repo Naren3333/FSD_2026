@@ -34,12 +34,10 @@ OCR_BAND = (0.2, 0.8)  # transcribed blocks are laid out within this share of th
 GUTTER_RANGE = (0.3, 0.7)  # a column gutter lies within this share of the page width...
 GUTTER_MIN_BLOCKS = 3  # ...with at least this many body-size blocks on each side...
 GUTTER_MIN_LINES = 5  # ...holding at least this many lines...
-GUTTER_MIN_SHARE = (
-    0.5  # ...and the two sides' text running over at least this share of the page's text height
-)
-SPAN_SHARE = (
-    0.55  # a block wider than this share of the text width spans both columns (a title, a wide figure)
-)
+# ...and the two sides' text running over at least this share of the page's text height
+GUTTER_MIN_SHARE = 0.5
+# a block wider than this share of the text width spans both columns (a title, a wide figure)
+SPAN_SHARE = 0.55
 
 
 @dataclass(frozen=True)

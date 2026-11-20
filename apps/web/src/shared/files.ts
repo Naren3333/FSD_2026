@@ -1,3 +1,6 @@
+import type { WritableSignal } from '@angular/core';
+import { messageOf } from './errors';
+
 /* choose an explicit mime type from the supported extension; browser mime guesses vary by os. */
 export const DOCUMENT_MIMES: Record<string, string> = {
   pdf: 'application/pdf',
@@ -23,4 +26,24 @@ export function documentLimit(file: { name: string }): number {
 /* whether a chosen file is a pdf, by its name. */
 export function isPdf(file: { name: string }): boolean {
   return /\.pdf$/i.test(file.name);
+}
+
+/* opens a document's original in a new tab, at `fragment`: the tab opens before the read so it isn't blocked as
+a pop-up, and the file's url is revoked a minute later. */
+export function openOriginal(
+  read: () => Promise<string>,
+  error: WritableSignal<string>,
+  fragment = '',
+): void {
+  const tab = window.open('', '_blank');
+  read()
+    .then((url) => {
+      if (tab) tab.location.href = url + fragment;
+      else error.set('Allow pop-ups for this site to open the document.');
+      setTimeout(() => URL.revokeObjectURL(url), 60000);
+    })
+    .catch((failure: unknown) => {
+      tab?.close();
+      error.set(`The document could not be opened. ${messageOf(failure, '')}`.trim());
+    });
 }

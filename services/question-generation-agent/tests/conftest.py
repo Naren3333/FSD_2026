@@ -6,9 +6,9 @@ from typing import Any
 
 import httpx
 import pytest
-from fastapi import Request
 from fastapi.testclient import TestClient
-from learning_transport.testing import as_caller, token_claims
+from learning_transport import testing
+from learning_transport.testing import as_caller
 
 import main
 from clients import Services
@@ -117,16 +117,9 @@ def api(fakes: Fakes) -> Iterator[TestClient]:
     http = httpx.AsyncClient(transport=httpx.MockTransport(fakes.handle))
     main.app.state.settings = SETTINGS
     main.app.state.services = Services(SETTINGS, http)
-    with as_caller(main.app, fake_actor):
+    with as_caller(main.app, testing.user_actor):
         yield TestClient(main.app)
 
 
-def fake_actor(request: Request) -> dict[str, Any]:
-    """verified claims for the user named in the test's authorization header: t… is a teacher, a… a service account, anyone else a student."""
-    user = request.headers["authorization"].removeprefix("Bearer ")
-    role = "teacher" if user.startswith("t") else "ai-client" if user.startswith("a") else "student"
-    return token_claims(role, sub=user, org="org")
-
-
 def as_user(user: str = "t1") -> dict[str, str]:
-    return {"Authorization": f"Bearer {user}"}
+    return testing.as_user(user)

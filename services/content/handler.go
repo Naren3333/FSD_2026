@@ -184,29 +184,10 @@ func (s server) list(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	var paging []platform.ListWindow
-	if r.URL.Path == "/v1/documents/page" {
-		offset, limit, valid := platform.Page(w, r, 20, 100)
-		if !valid {
-			return
-		}
-		paging = []platform.ListWindow{{Offset: offset, Limit: limit}}
-	}
-	result, err := s.store.listDocuments(r.Context(), platform.Actor(r).Org, classroom, relation == platform.RelationTeacher, paging...)
-	if err != nil {
-		platform.Fail(w, err)
-		return
-	}
-	if len(paging) > 0 {
-		total, err := s.store.countDocuments(r.Context(), platform.Actor(r).Org, classroom, relation == platform.RelationTeacher)
-		if err != nil {
-			platform.Fail(w, err)
-			return
-		}
-		platform.JSON(w, http.StatusOK, platform.ListPage[Document]{Items: result, Total: total})
-		return
-	}
-	platform.JSON(w, http.StatusOK, result)
+	org, teacher := platform.Actor(r).Org, relation == platform.RelationTeacher
+	platform.ServeList(w, r, 100, func(paging ...platform.ListWindow) ([]Document, error) {
+		return s.store.listDocuments(r.Context(), org, classroom, teacher, paging...)
+	}, func() (int, error) { return s.store.countDocuments(r.Context(), org, classroom, teacher) })
 }
 
 // visibledocument looks a document up and checks the caller may see it in its classroom.
@@ -283,21 +264,24 @@ func (s server) figure(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-// reindex queues a pdf for indexing again: after a failure, or a pdf uploaded before indexing existed.
-func (s server) reindex(w http.ResponseWriter, r *http.Request) {
-	// the role check comes first so a student is refused before any lookup; teacherof decides below.
+// teacherdocument is the document the path names, for its classroom's teacher only. the role check comes
+// first so a student is refused before any lookup.
+func (s server) teacherDocument(w http.ResponseWriter, r *http.Request) (Document, bool) {
 	if !platform.Teacher(w, r) {
-		return
+		return Document{}, false
 	}
-	org := platform.Actor(r).Org
 	v, ok := lookupDocument(w, r, "Document", func(org string) (Document, error) {
 		doc, _, err := s.store.findDocument(r.Context(), org, r.PathValue("id"))
 		return doc, err
 	})
+	return v, ok && platform.TeacherOf(s.access, w, r, v.Classroom)
+}
+
+// reindex queues a pdf for indexing again: after a failure, or a pdf uploaded before indexing existed.
+func (s server) reindex(w http.ResponseWriter, r *http.Request) {
+	org := platform.Actor(r).Org
+	v, ok := s.teacherDocument(w, r)
 	if !ok {
-		return
-	}
-	if !platform.TeacherOf(s.access, w, r, v.Classroom) {
 		return
 	}
 	if !indexable(v.Type) {
@@ -324,19 +308,9 @@ func (s server) reindex(w http.ResponseWriter, r *http.Request) {
 // remove deletes a document for good: its row with its chunks, vectors and indexing job, its original and
 // figure crops in object storage, and emits content.deleted.v1.
 func (s server) remove(w http.ResponseWriter, r *http.Request) {
-	// the role check comes first so a student is refused before any lookup; teacherof decides below.
-	if !platform.Teacher(w, r) {
-		return
-	}
 	org := platform.Actor(r).Org
-	v, ok := lookupDocument(w, r, "Document", func(org string) (Document, error) {
-		doc, _, err := s.store.findDocument(r.Context(), org, r.PathValue("id"))
-		return doc, err
-	})
+	v, ok := s.teacherDocument(w, r)
 	if !ok {
-		return
-	}
-	if !platform.TeacherOf(s.access, w, r, v.Classroom) {
 		return
 	}
 	// commit the logical deletion and cleanup job even if the caller disconnects.

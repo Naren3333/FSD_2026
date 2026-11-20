@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from typing import Any
 
 import httpx
-from learning_transport import Claims, UpstreamError, upstream_error
+from learning_transport import TEACHER, Claims, UpstreamError, upstream_error
 from learning_transport.agents import AgentClients, billed_to, gather_all
 
 import upstream
@@ -34,7 +34,7 @@ class ClassSample:
 
 def billed(claims: Claims) -> dict[str, str]:
     """whose daily ai allowance pays: the teacher who asked (adr 0003)."""
-    return billed_to(claims, "teacher")
+    return billed_to(claims, TEACHER)
 
 
 class Services(AgentClients):
@@ -42,13 +42,22 @@ class Services(AgentClients):
     generate_timeout = GENERATE_TIMEOUT
 
     async def _get(self, service: str, url: str, authorization: str, correlation: str, **params: Any) -> Any:
-        """a 200 response's json from a business service read with the teacher's token, or upstreamerror."""
+        return await self._call("GET", service, url, authorization, correlation, params=params or None)
+
+    async def _post(self, service: str, url: str, authorization: str, correlation: str, body: Any) -> Any:
+        return await self._call("POST", service, url, authorization, correlation, json=body)
+
+    async def _call(
+        self, method: str, service: str, url: str, authorization: str, correlation: str, **request: Any
+    ) -> Any:
+        """a 200 response's json from a business service called with the teacher's token, or upstreamerror."""
         try:
-            resp = await self.http.get(
+            resp = await self.http.request(
+                method,
                 url,
-                params=params or None,
                 headers={"Authorization": authorization, "X-Correlation-ID": correlation},
                 timeout=READ_TIMEOUT,
+                **request,
             )
         except httpx.HTTPError:
             raise UpstreamError(service, 0) from None
@@ -118,21 +127,8 @@ class Services(AgentClients):
         return found
 
     async def _batch(self, authorization: str, ids: list[str], correlation: str) -> list[upstream.Assessment]:
-        try:
-            resp = await self.http.post(
-                f"{self.settings.assessment_url}/v1/assessments/batch",
-                json={"ids": ids},
-                headers={"Authorization": authorization, "X-Correlation-ID": correlation},
-                timeout=READ_TIMEOUT,
-            )
-        except httpx.HTTPError:
-            raise UpstreamError("assessment", 0) from None
-        if resp.status_code != 200:
-            raise upstream_error("assessment", resp)
-        try:
-            items = resp.json()
-        except ValueError:
-            raise UpstreamError("assessment", 502) from None
+        url = f"{self.settings.assessment_url}/v1/assessments/batch"
+        items = await self._post("assessment", url, authorization, correlation, {"ids": ids})
         return upstream.read(upstream.assessments, items, "assessment")
 
     async def _one(self, authorization: str, assessment: str, correlation: str) -> upstream.Assessment | None:
@@ -155,21 +151,8 @@ class Services(AgentClients):
         unique = list(dict.fromkeys(ids))
         for start in range(0, len(unique), BATCH):
             chunk = unique[start : start + BATCH]
-            try:
-                response = await self.http.post(
-                    f"{self.settings.curriculum_url}/v1/topics/batch",
-                    json={"ids": chunk},
-                    headers={"Authorization": authorization, "X-Correlation-ID": correlation},
-                    timeout=READ_TIMEOUT,
-                )
-            except httpx.HTTPError:
-                raise UpstreamError("curriculum", 0) from None
-            if response.status_code != 200:
-                raise upstream_error("curriculum", response)
-            try:
-                items = response.json()
-            except ValueError:
-                raise UpstreamError("curriculum", 502) from None
+            url = f"{self.settings.curriculum_url}/v1/topics/batch"
+            items = await self._post("curriculum", url, authorization, correlation, {"ids": chunk})
             items = upstream.read(upstream.topic_names, items, "curriculum")
             if any(item["id"] not in chunk or not item["name"] for item in items):
                 raise UpstreamError("curriculum", 502)

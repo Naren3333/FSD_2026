@@ -4,7 +4,7 @@ import logging
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
-from typing import Literal, Protocol
+from typing import Any, Literal, Protocol
 from zoneinfo import ZoneInfo
 
 from learning_transport import Contract, failure
@@ -192,35 +192,14 @@ class PostgresLedger(AsyncPooled):
 
     async def adjust(self, reservation: str, unused: float) -> None:
         async with self.pool.connection() as conn:
-            await conn.execute(
-                "UPDATE budget_reservations SET amount=greatest(0,amount-%s) WHERE id=%s",
-                (unused, reservation),
-            )
+            await conn.execute(ADJUST_RESERVATION, (unused, reservation))
 
     async def record_reserved(
         self, reservation: str, billed: Billed, charge: Charge, correlation: str
     ) -> None:
         async with self.pool.connection() as conn, conn.transaction():
-            await conn.execute(
-                """INSERT INTO usage(org_id,user_id,role,operation,model,tokens_in,tokens_out,cost_usd,estimated,correlation_id)
-            VALUES(%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)""",
-                (
-                    billed.org_id,
-                    billed.user_id,
-                    billed.role,
-                    charge.operation,
-                    charge.model,
-                    charge.tokens_in,
-                    charge.tokens_out,
-                    charge.cost_usd,
-                    charge.estimated,
-                    correlation,
-                ),
-            )
-            await conn.execute(
-                "UPDATE budget_reservations SET amount=greatest(0,amount-%s) WHERE id=%s",
-                (charge.cost_usd, reservation),
-            )
+            await conn.execute(INSERT_USAGE, usage_row(billed, charge, correlation))
+            await conn.execute(ADJUST_RESERVATION, (charge.cost_usd, reservation))
 
     async def today(self, billed: Billed) -> Usage:
         # compute allowance boundaries from local calendar dates in the configured database time zone.
@@ -244,22 +223,30 @@ class PostgresLedger(AsyncPooled):
 
     async def record(self, billed: Billed, charge: Charge, correlation_id: str) -> None:
         async with self.pool.connection() as conn:
-            await conn.execute(
-                """INSERT INTO usage(org_id,user_id,role,operation,model,tokens_in,tokens_out,cost_usd,estimated,
-                correlation_id) VALUES(%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)""",
-                (
-                    billed.org_id,
-                    billed.user_id,
-                    billed.role,
-                    charge.operation,
-                    charge.model,
-                    charge.tokens_in,
-                    charge.tokens_out,
-                    charge.cost_usd,
-                    charge.estimated,
-                    correlation_id,
-                ),
-            )
+            await conn.execute(INSERT_USAGE, usage_row(billed, charge, correlation_id))
+
+
+INSERT_USAGE = (
+    "INSERT INTO usage(org_id,user_id,role,operation,model,tokens_in,tokens_out,cost_usd,estimated,correlation_id)"
+    " VALUES(%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)"
+)
+ADJUST_RESERVATION = "UPDATE budget_reservations SET amount=greatest(0,amount-%s) WHERE id=%s"
+
+
+def usage_row(billed: Billed, charge: Charge, correlation: str) -> tuple[Any, ...]:
+    """insert_usage's values, in its column order."""
+    return (
+        billed.org_id,
+        billed.user_id,
+        billed.role,
+        charge.operation,
+        charge.model,
+        charge.tokens_in,
+        charge.tokens_out,
+        charge.cost_usd,
+        charge.estimated,
+        correlation,
+    )
 
 
 def over_limit(usage: Usage) -> bool:

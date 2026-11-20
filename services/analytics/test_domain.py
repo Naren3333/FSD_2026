@@ -286,9 +286,9 @@ def test_consumer_group_can_be_overridden(monkeypatch):
     groups: list[str] = []
     monkeypatch.setattr(consumer, "consume", lambda group, *_: groups.append(group))
     monkeypatch.delenv("KAFKA_GROUP", raising=False)
-    consumer.run(None, None, None)  # type: ignore[arg-type]
+    consumer.run(None, None)  # type: ignore[arg-type]
     monkeypatch.setenv("KAFKA_GROUP", "analytics-rebuild-1")
-    consumer.run(None, None, None)  # type: ignore[arg-type]
+    consumer.run(None, None)  # type: ignore[arg-type]
     assert groups == ["analytics-v1", "analytics-rebuild-1"]
 
 
@@ -297,7 +297,7 @@ def test_the_consumer_reads_its_topics(monkeypatch):
 
     topics: list[list[str]] = []
     monkeypatch.setattr(consumer, "consume", lambda group, subscribed, *_: topics.append(subscribed))
-    consumer.run(None, None, None)  # type: ignore[arg-type]
+    consumer.run(None, None)  # type: ignore[arg-type]
     assert topics == [
         [
             "grading.finalized.v3",

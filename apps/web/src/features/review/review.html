@@ -229,10 +229,7 @@
                 <div class="mark-columns" [class.collapsed]="collapsed">
                   <div class="mark-evidence">
                     <div class="mark-question-head">
-                      <h4>
-                        Question {{ n + 1 }} · {{ evidence.possible }}
-                        {{ evidence.possible === 1 ? 'mark' : 'marks' }}
-                      </h4>
+                      <h4>Question {{ n + 1 }} · {{ marksText(evidence.possible) }}</h4>
                       @if (evidence.needs_marking) {
                         <span class="badge badge-warning">To mark</span>
                       }
@@ -433,10 +430,7 @@
           @for (evidence of grade.evidence; track evidence.question_id; let n = $index) {
             <section class="mark-question">
               <div class="mark-question-head">
-                <h4>
-                  Question {{ n + 1 }} · {{ evidence.possible }}
-                  {{ evidence.possible === 1 ? 'mark' : 'marks' }}
-                </h4>
+                <h4>Question {{ n + 1 }} · {{ marksText(evidence.possible) }}</h4>
                 <span class="badge badge-plain">{{ outcome(evidence) }}</span>
               </div>
               <p class="mark-prompt">

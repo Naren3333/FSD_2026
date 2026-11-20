@@ -47,7 +47,6 @@ export type Topic = Curriculum['Topic'];
 export type DocumentRecord = Content['Document'];
 /* teachers upload teaching material only; rubrics and marking schemes uploaded before adr 0009 keep their type and stay teacher-only. */
 export type DocType = DocumentRecord['doc_type'];
-export type DocumentStatus = DocumentRecord['status'];
 /* why indexing a pdf failed. */
 export type FailureReason = NonNullable<DocumentRecord['failure_reason']>;
 
@@ -55,7 +54,6 @@ export type FailureReason = NonNullable<DocumentRecord['failure_reason']>;
 export type Thread = Chatbot['Thread'];
 export type Citation = Chatbot['Citation'];
 export type ChatMessage = Chatbot['Message'];
-export type Outcome = NonNullable<ChatMessage['outcome']>;
 /* one server-sent event of a streamed answer. */
 export interface StreamEvent {
   event: string;
@@ -77,7 +75,6 @@ export type Question = Assessments['StudentQuestion'] &
   Partial<Omit<Assessments['Question'], keyof Assessments['StudentQuestion'] | 'rubric'>> & {
     rubric?: Rubric;
   };
-export type AssessmentStatus = Assessments['Assessment']['status'];
 /* late work is accepted and flagged for the teacher, or refused after the due date. */
 export type LatePolicy = Assessments['Assessment']['late_policy'];
 /* students see a finalized grade at once, or when the teacher releases the assessment's results. */
@@ -145,8 +142,6 @@ export type GradingCounts = Grading['GradingCounts'];
 export type BulkFinalized = Grading['BulkFinalized'];
 
 export type TopicMetric = Analytics['TopicMetric'];
-/* whether a student has any finalized evidence in the classroom yet. */
-export type PerformanceStatus = Analytics['StudentPerformance']['evidence_status'];
 export type Performance = Analytics['PerformanceResponse'];
 /* one page of a classroom's enrolled students, in roster order, each with their finalized topic evidence. */
 export type ClassPerformance = Analytics['ClassPerformanceResponse'];
@@ -156,8 +151,6 @@ export type GenerateRequest = Generation['GenerateRequest'];
 /* the question types the agent generates. */
 export type GeneratableType = Generation['DraftQuestion']['type'];
 export type Difficulty = GenerateRequest['difficulty'];
-/* a drafted question, with the quote from its sources that supports its key. */
-export type GeneratedQuestion = Generation['Generated'];
 /* a drafted question as the agent sends it, with null for what it leaves out; see draftQuestion. */
 export type DraftQuestion = Generation['DraftQuestion'];
 /* a passage as the agent sends it, with null for a document, chunk or page it doesn't name; see fromAgent. */

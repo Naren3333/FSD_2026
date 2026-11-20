@@ -44,8 +44,8 @@ async def lifespan(app: Any) -> AsyncIterator[None]:
     require_env(*OIDC_SETTINGS, "IDENTITY_URL", "KAFKA_BROKERS", "DATABASE_URL")
     # migrated a step at a time, its indexes built concurrently, so reads go on through a rolling upgrade.
     pool = await open_migrated_pool(os.environ["DATABASE_URL"], MIGRATIONS)
-    stop, connected = threading.Event(), threading.Event()
-    thread = threading.Thread(target=run, args=(pool, stop, connected), daemon=True)
+    stop = threading.Event()
+    thread = threading.Thread(target=run, args=(pool, stop), daemon=True)
     try:
         async with httpx.AsyncClient() as http:
             app.state.pool = pool

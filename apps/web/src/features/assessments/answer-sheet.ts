@@ -152,11 +152,8 @@ export class AnswerSheetComponent {
           error = `Your latest answers to ${assessment.title} could not be saved. ${failure.message}`;
         } else {
           this.answers.enable({ emitEvent: false });
-          if (changedError(failure)) {
-            this.stopAutosave();
-            this.changed.set(true);
-            this.saveNote.set(CHANGED);
-          } else this.saveNote.set(NOT_SAVED);
+          if (changedError(failure)) this.markChanged();
+          else this.saveNote.set(NOT_SAVED);
           this.state.error.set(NOT_LEFT);
           return false;
         }
@@ -177,8 +174,7 @@ export class AnswerSheetComponent {
 
   /* closes the teacher's preview; its answers were never saved. */
   closePreview(): void {
-    this.stopAutosave();
-    this.selected.set(null);
+    this.close();
   }
 
   /* whether a student has answers here that are not submitted; a teacher's preview never counts. */
@@ -274,6 +270,13 @@ export class AnswerSheetComponent {
     this.autosave = undefined;
   }
 
+  /* the teacher changed the questions: saving stops until the student opens the assessment again. */
+  private markChanged(): void {
+    this.stopAutosave();
+    this.changed.set(true);
+    this.saveNote.set(CHANGED);
+  }
+
   private countAnswered(): void {
     this.answered.set(Object.values(this.answers.getRawValue()).filter((a) => a.trim() !== '').length);
   }
@@ -306,9 +309,7 @@ export class AnswerSheetComponent {
           if (changedError(error)) {
             // as for a submission: the questions changed, so nothing more is saved until it is opened
             // again.
-            this.stopAutosave();
-            this.changed.set(true);
-            this.saveNote.set(CHANGED);
+            this.markChanged();
             return;
           }
           this.saveNote.set(NOT_SAVED);
