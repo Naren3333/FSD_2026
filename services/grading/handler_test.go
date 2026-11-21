@@ -54,7 +54,8 @@ func (m *memoryStore) listReleased(_ context.Context, _, _, student string, _ ..
 	if student != "student-1" {
 		return []Evaluation{}, nil
 	}
-	evidence := []Evidence{{Question: "q1", Awarded: 2, Possible: 3, Feedback: "Good start.", Criteria: []CriterionScore{{"c1", 2}}, Suggestion: &Suggestion{Status: suggestionReady, Feedback: "AI words"}}}
+	review := &SuggestionReview{Status: reviewDoubtful, Reasons: []string{doubtLevelsDiffer}, Criteria: []ReviewedCriterion{{"c1", 0, "Critic words."}}, Model: "critic-model"}
+	evidence := []Evidence{{Question: "q1", Awarded: 2, Possible: 3, Feedback: "Good start.", Criteria: []CriterionScore{{"c1", 2}}, Suggestion: &Suggestion{Status: suggestionReady, Feedback: "AI words", Review: review}}}
 	return []Evaluation{{ID: evaluationID, Student: student, Status: statusFinalized, Evidence: evidence}}, nil
 }
 
@@ -176,7 +177,7 @@ func TestOnlyTheTeacherSeesGradingCounts(t *testing.T) {
 	}
 	teacher := server{store: &memoryStore{}, access: platformtest.Access(platform.RelationTeacher), roster: platformtest.Roster{"student-1"}}
 	w := platformtest.Serve(teacher.routes, http.MethodGet, path, "", "teacher-1", "teacher")
-	if w.Code != http.StatusOK || w.Body.String() != `{"drafts":1,"finalized":0,"unreleased":0,"ready":0}`+"\n" {
+	if w.Code != http.StatusOK || w.Body.String() != `{"drafts":1,"finalized":0,"unreleased":0,"ready":0,"ready_doubtful":0}`+"\n" {
 		t.Fatalf("%d %q", w.Code, w.Body.String())
 	}
 }
@@ -191,6 +192,25 @@ func TestStudentsNeverSeeSuggestionsOrRubricMarks(t *testing.T) {
 		if strings.Contains(w.Body.String(), secret) {
 			t.Errorf("a student saw %q: %s", secret, w.Body.String())
 		}
+	}
+}
+
+// the marking critic's review (adr 0020) is the teacher's alone, on either of a student's result routes.
+func TestStudentsNeverSeeTheMarkingCritic(t *testing.T) {
+	s := server{store: &memoryStore{}, access: platformtest.Access(platform.RelationStudent), roster: platformtest.Roster{"student-1"}}
+	for _, path := range []string{"/v1/evaluations/mine?classroom_id=" + room, "/v1/evaluations/mine/page?classroom_id=" + room} {
+		w := platformtest.Serve(s.routes, http.MethodGet, path, "", "student-1", "student")
+		if w.Code != http.StatusOK || !strings.Contains(w.Body.String(), "Good start.") {
+			t.Fatalf("%s: %d %s", path, w.Code, w.Body.String())
+		}
+		for _, secret := range []string{"review", "doubtful", "LEVELS_DIFFER", "Critic words.", "critic-model"} {
+			if strings.Contains(w.Body.String(), secret) {
+				t.Errorf("%s: a student saw %q: %s", path, secret, w.Body.String())
+			}
+		}
+	}
+	if w := platformtest.Serve(s.routes, http.MethodGet, "/v1/evaluations/"+evaluationID, "", "student-1", "student"); w.Code != http.StatusForbidden {
+		t.Fatalf("a student read the teacher's view: %d %s", w.Code, w.Body.String())
 	}
 }
 

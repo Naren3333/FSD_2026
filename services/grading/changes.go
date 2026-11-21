@@ -82,8 +82,9 @@ func indexes() []platform.Index {
 const draftsOfStudent = "SELECT id,evidence FROM evaluations WHERE classroom_id=$1 AND student_id=$2 AND org_id=$3 AND status=$4 ORDER BY id FOR UPDATE"
 
 // requeueRemoved queues again, pending, the marking of the student's drafts in the classroom that was settled
-// while they were away (STUDENT_REMOVED): the marker checks their enrollment again before any ai call, so a
-// return older than their removal settles it the same way without cost. every draft is locked, as the
+// while they were away (STUDENT_REMOVED), and any second check of a ready suggestion stopped the same way. the
+// marker checks their enrollment again before any ai call, so a return older than their removal settles it the
+// same way without cost. every draft is locked, as the
 // marker's settlement locks one, so a settlement under way either commits first and is queued again here or
 // waits and sees this return (settle).
 func requeueRemoved(ctx context.Context, tx pgx.Tx, v platform.EnrollmentAdded) error {
@@ -102,8 +103,8 @@ func requeueRemoved(ctx context.Context, tx pgx.Tx, v platform.EnrollmentAdded) 
 	if err != nil {
 		return err
 	}
-	// each job's evaluation and question, and each requeued draft with its new evidence.
-	var jobEvaluations, jobQuestions, requeued, evidences []string
+	// each job's evaluation, question and stage, and each requeued draft with its new evidence.
+	var jobEvaluations, jobQuestions, jobStages, requeued, evidences []string
 	for _, d := range drafts {
 		var evidence []Evidence
 		if err = json.Unmarshal(d.evidence, &evidence); err != nil {
@@ -111,10 +112,20 @@ func requeueRemoved(ctx context.Context, tx pgx.Tx, v platform.EnrollmentAdded) 
 		}
 		changed := false
 		for i, e := range evidence {
-			if e.Suggestion == nil || e.Suggestion.Reason != reasonStudentRemoved {
+			s := e.Suggestion
+			switch {
+			case s == nil:
+				continue
+			case s.Reason == reasonStudentRemoved:
+				evidence[i].Suggestion = &Suggestion{Status: suggestionPending}
+				jobStages = append(jobStages, stageSuggest)
+			case s.Status == suggestionReady && s.Review != nil && s.Review.Reason == reasonStudentRemoved:
+				// a ready suggestion whose second check stopped (adr 0020) is checked again; it stays as it is.
+				s.Review = &SuggestionReview{Status: reviewPending}
+				jobStages = append(jobStages, stageReview)
+			default:
 				continue
 			}
-			evidence[i].Suggestion = &Suggestion{Status: suggestionPending}
 			jobEvaluations, jobQuestions, changed = append(jobEvaluations, d.id), append(jobQuestions, e.Question), true
 		}
 		if !changed {
@@ -130,7 +141,7 @@ func requeueRemoved(ctx context.Context, tx pgx.Tx, v platform.EnrollmentAdded) 
 		return nil
 	}
 	// one statement each, however many drafts the student has, so the drafts' locks are held briefly.
-	if _, err = tx.Exec(ctx, "INSERT INTO marking_jobs(evaluation_id,question_id) SELECT * FROM unnest($1::uuid[],$2::uuid[]) ON CONFLICT DO NOTHING", jobEvaluations, jobQuestions); err != nil {
+	if _, err = tx.Exec(ctx, "INSERT INTO marking_jobs(evaluation_id,question_id,stage) SELECT * FROM unnest($1::uuid[],$2::uuid[],$3::text[]) ON CONFLICT DO NOTHING", jobEvaluations, jobQuestions, jobStages); err != nil {
 		return err
 	}
 	_, err = tx.Exec(ctx, "UPDATE evaluations e SET evidence=v.evidence::jsonb FROM unnest($1::uuid[],$2::text[]) AS v(id,evidence) WHERE e.id=v.id", requeued, evidences)

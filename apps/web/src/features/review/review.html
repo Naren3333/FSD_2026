@@ -33,6 +33,7 @@
       [assessmentId]="assessmentId()"
       [unreleased]="unreleased()"
       [ready]="ready()"
+      [readyDoubtful]="readyDoubtful()"
       [releasePolicy]="releasePolicy()"
       [title]="assessmentTitle()"
       [blocked]="blocked"
@@ -89,6 +90,9 @@
                 </span>
                 @if (grade.status === 'draft' && toMark(grade); as count) {
                   <span class="badge badge-warning">{{ count }} to mark</span>
+                }
+                @if (needsCheck(grade)) {
+                  <span class="badge badge-warning">Check AI mark</span>
                 }
                 @if (grade.late) {
                   <span class="badge badge-danger">Late</span>
@@ -160,6 +164,9 @@
               </span>
               @if (grade.status === 'draft' && toMark(grade); as count) {
                 <span class="badge badge-warning">{{ count }} to mark</span>
+              }
+              @if (needsCheck(grade)) {
+                <span class="badge badge-warning">Check AI mark</span>
               }
               @if (grade.late) {
                 <span class="badge badge-danger">Late</span>
@@ -270,6 +277,26 @@
                                 · {{ suggestion.confidence }} confidence
                               }
                             </p>
+                            @if (suggestion.review; as review) {
+                              <p aria-live="polite">
+                                @if (review.status === 'doubtful') {
+                                  <span class="badge badge-warning">Check AI mark</span>
+                                }
+                                {{ reviewText(current, evidence) }}
+                              </p>
+                              @if (review.status === 'doubtful') {
+                                @for (d of reviewDifferences(suggestion); track d.criterion_id) {
+                                  <p>
+                                    <strong>Second check (AI-written):</strong>
+                                    {{ levelName(current, evidence, d.criterion_id, d.second) }} instead of
+                                    {{ d.suggested }} · {{ d.rationale }}
+                                  </p>
+                                }
+                                @for (flag of review.flags ?? []; track flag) {
+                                  <p class="error">Second check: {{ flagText(flag) }}</p>
+                                }
+                              }
+                            }
                             @if (suggestion.scheme_passages) {
                               <details class="scheme-used">
                                 <summary>
@@ -491,6 +518,9 @@
       · {{ names.title(grade) || 'Assessment' }} · {{ grade.evidence | marks }} marks before any unsaved
       changes
     </p>
+    @if (doubtfulNote(doubtful(grade, marks)); as note) {
+      <p class="warning">{{ note }}</p>
+    }
   }
   <p>
     Finalization records this student's scores in their performance record. To change a finalized grade,

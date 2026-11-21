@@ -45,17 +45,28 @@ type pgStore struct{ db *pgxpool.Pool }
 
 // counts is how many of a classroom's evaluations are drafts waiting for its teacher, how many are
 // finalized, how many finalized ones its students cannot see until the teacher releases them, and how many
-// drafts need no more marking, so finalizeAssessment would finalize them.
+// drafts need no more marking, so finalizeAssessment would finalize them, and how many of those have a
+// suggestion the marking critic doubted (adr 0020).
 type Counts struct {
-	Drafts     int `json:"drafts"`
-	Finalized  int `json:"finalized"`
-	Unreleased int `json:"unreleased"`
-	Ready      int `json:"ready"`
+	Drafts        int `json:"drafts"`
+	Finalized     int `json:"finalized"`
+	Unreleased    int `json:"unreleased"`
+	Ready         int `json:"ready"`
+	ReadyDoubtful int `json:"ready_doubtful"`
 }
+
+// readyDraft and doubtfulSuggestion are an evaluation with nothing left to mark, and one with a suggestion the
+// marking critic doubted.
+const (
+	readyDraft = `status='draft' AND NOT jsonb_path_exists(evidence,'$[*] ? (@.needs_marking == true)')`
+	// a doubted suggestion stops counting once the teacher's mark for its question gives another total.
+	doubtfulSuggestion = `jsonb_path_exists(evidence,'$[*] ? (@.suggestion.review.status == "doubtful" && (@.needs_marking == true || @.awarded == @.suggestion.awarded))')`
+)
 
 func (p pgStore) countEvaluations(ctx context.Context, org, classroom, assessment string, students []string) (Counts, error) {
 	var c Counts
-	err := p.db.QueryRow(ctx, "SELECT count(*) FILTER (WHERE status='draft'),count(*) FILTER (WHERE status='finalized'),count(*) FILTER (WHERE status='finalized' AND released_at IS NULL),count(*) FILTER (WHERE status='draft' AND NOT jsonb_path_exists(evidence,'$[*] ? (@.needs_marking == true)')) FROM evaluations WHERE classroom_id=$1 AND org_id=$2 AND student_id=ANY($3::text[]) AND ($4::uuid IS NULL OR assessment_id=$4::uuid)", classroom, org, students, optional(assessment)).Scan(&c.Drafts, &c.Finalized, &c.Unreleased, &c.Ready)
+	// readiness is worked out once per row, and doubt only for ready drafts.
+	err := p.db.QueryRow(ctx, "SELECT count(*) FILTER (WHERE status='draft'),count(*) FILTER (WHERE status='finalized'),count(*) FILTER (WHERE status='finalized' AND released_at IS NULL),count(*) FILTER (WHERE ready),count(*) FILTER (WHERE ready AND "+doubtfulSuggestion+") FROM (SELECT status,released_at,evidence,"+readyDraft+" AS ready FROM evaluations WHERE classroom_id=$1 AND org_id=$2 AND student_id=ANY($3::text[]) AND ($4::uuid IS NULL OR assessment_id=$4::uuid)) e", classroom, org, students, optional(assessment)).Scan(&c.Drafts, &c.Finalized, &c.Unreleased, &c.Ready, &c.ReadyDoubtful)
 	return c, err
 }
 
@@ -282,6 +293,12 @@ func collectWithEvidence(rows pgx.Rows) ([]withEvidence, error) {
 // finalizeLocked finalizes a draft locked in tx with its evidence as marked, with an audit entry, and
 // publishes it when released.
 func finalizeLocked(ctx context.Context, tx pgx.Tx, org, actor, reason string, v Evaluation, before []byte) (Evaluation, error) {
+	// finalizing ends the marking jobs below, so a second check still waiting will not run (adr 0020).
+	for _, e := range v.Evidence {
+		if s := e.Suggestion; s != nil && s.Review != nil && s.Review.Status == reviewPending {
+			s.Review = notReviewed(reasonFinalized)
+		}
+	}
 	after, err := json.Marshal(v.Evidence)
 	if err != nil {
 		return v, err

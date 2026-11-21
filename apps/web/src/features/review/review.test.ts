@@ -773,3 +773,173 @@ describe('finalizing every fully marked grade', () => {
     expect(page.component.state.error()).toBe('Save or close the grade you are marking first.');
   });
 });
+
+describe("the marking critic's second check", () => {
+  /* a draft whose question waits for the teacher, with a ready suggestion the second check found as `review` says. */
+  const checked = (
+    student: string,
+    review: NonNullable<Evaluation['evidence'][number]['suggestion']>['review'],
+  ) => {
+    const base = grade(student, 'draft');
+    return {
+      ...base,
+      evidence: [
+        {
+          ...base.evidence[0],
+          correct: false,
+          awarded: 0,
+          marked_by: undefined,
+          needs_marking: true,
+          suggestion: {
+            status: 'ready' as const,
+            awarded: 1,
+            confidence: 'high' as const,
+            criteria: [{ criterion_id: 'match', points: 1, evidence_quotes: ['0.5'], rationale: 'Right.' }],
+            review,
+          },
+        },
+      ],
+    };
+  };
+  const doubt = {
+    status: 'doubtful' as const,
+    awarded: 0,
+    reasons: ['LEVELS_DIFFER' as const],
+    criteria: [{ criterion_id: 'match', points: 0, rationale: 'Half is not shown.' }],
+  };
+
+  it('puts doubtful drafts first with Check AI mark, and says why in the grade', async () => {
+    const page = render(
+      Promise.resolve([checked('s1', { status: 'agreed', awarded: 1 }), checked('s2', doubt)]),
+    );
+    await page.settle();
+    const cards = [...page.root.querySelectorAll('article.grade h3')].map((h) => h.textContent?.trim());
+    expect(cards).toEqual(['Ben Tan', 'Ana Lim']);
+    expect(page.card('Ben Tan')?.textContent).toContain('Check AI mark');
+    expect(page.card('Ana Lim')?.textContent).not.toContain('Check AI mark');
+    page.component.show(page.component.grades.value()?.grades[1] as Evaluation);
+    page.fixture.detectChanges();
+    const panel = page.panel()?.textContent?.replace(/\s+/g, ' ') ?? '';
+    expect(panel).toContain('Second check disagrees: Mark 1 vs 0.');
+    expect(panel).toContain('Second check (AI-written):');
+    expect(panel).toContain('Half is not shown.');
+    // nothing changes until the teacher uses the suggestion.
+    expect(page.component.marks.dirty).toBe(false);
+    // next to mark goes on in queue order, wrapping to the agreed draft.
+    expect(page.component.nextDraft()?.id).toBe('e-s1');
+  });
+
+  it('warns in the finalize dialog, without blocking it', async () => {
+    const page = render(Promise.resolve([checked('s1', doubt)]));
+    await page.settle();
+    page.component.show(page.component.grades.value()?.grades[0] as Evaluation);
+    page.fixture.detectChanges();
+    page.component.marks.controls['q1'].controls.awarded.setValue(1);
+    page.component.askFinalize();
+    page.fixture.detectChanges();
+    const dialog = page.root.querySelector('dialog[open]');
+    expect(dialog?.textContent?.replace(/\s+/g, ' ')).toContain(
+      '1 question has a doubtful AI suggestion. Check it before finalizing.',
+    );
+    expect(dialog?.querySelector('.warning')).not.toBeNull();
+    expect(page.component.finalizing()).toBe(true);
+  });
+
+  it('drops the warning once the teacher marks the question otherwise', async () => {
+    const page = render(Promise.resolve([checked('s1', doubt)]));
+    await page.settle();
+    page.component.show(page.component.grades.value()?.grades[0] as Evaluation);
+    page.fixture.detectChanges();
+    page.component.marks.controls['q1'].controls.awarded.setValue(0);
+    page.component.askFinalize();
+    page.fixture.detectChanges();
+    expect(page.root.querySelector('dialog[open]')?.textContent).not.toContain('doubtful');
+  });
+
+  it('keeps the queue in place when a second check finishes after the page loaded', async () => {
+    const page = render(
+      Promise.resolve([
+        checked('s1', { status: 'pending', awarded: 0 }),
+        checked('s2', { status: 'agreed', awarded: 1 }),
+      ]),
+    );
+    await page.settle();
+    const names = () => [...page.root.querySelectorAll('article.grade h3')].map((h) => h.textContent?.trim());
+    expect(names()).toEqual(['Ana Lim', 'Ben Tan']);
+    const value = page.component.grades.value()!;
+    const ben = value.grades[1];
+    const doubted = {
+      ...ben,
+      evidence: ben.evidence.map((e) => ({ ...e, suggestion: { ...e.suggestion!, review: doubt } })),
+    };
+    page.component.grades.set({ ...value, grades: [value.grades[0], doubted] });
+    page.fixture.detectChanges();
+    expect(names()).toEqual(['Ana Lim', 'Ben Tan']);
+    expect(page.card('Ben Tan')?.textContent).toContain('Check AI mark');
+  });
+
+  it('says no warning for an agreed suggestion', async () => {
+    const page = render(Promise.resolve([checked('s1', { status: 'agreed', awarded: 1 })]));
+    await page.settle();
+    page.component.show(page.component.grades.value()?.grades[0] as Evaluation);
+    page.fixture.detectChanges();
+    expect(page.panel()?.textContent).toContain('Second check agrees.');
+    page.component.marks.controls['q1'].controls.awarded.setValue(1);
+    page.component.askFinalize();
+    page.fixture.detectChanges();
+    expect(page.root.querySelector('dialog[open]')?.textContent).not.toContain('doubtful');
+  });
+
+  it('counts doubtful drafts in the finalize-all dialog', async () => {
+    const page = render(Promise.resolve([checked('s1', doubt)]), {
+      counts: () => Promise.resolve({ drafts: 3, finalized: 0, unreleased: 0, ready: 2, ready_doubtful: 1 }),
+    });
+    (TestBed.inject(AssessmentApi) as unknown as { list: () => Promise<unknown> }).list = () =>
+      Promise.resolve([{ id: 'a1', title: 'Fractions quiz', status: 'published' }]);
+    page.component.assessmentId.set('a1');
+    page.component.load();
+    await page.settle();
+    page.button('Finalize all fully marked').click();
+    page.fixture.detectChanges();
+    expect(page.root.querySelector('dialog[open]')?.textContent?.replace(/\s+/g, ' ')).toContain(
+      '1 of them has a doubtful AI suggestion. Check it before finalizing.',
+    );
+  });
+
+  it('keeps reading the grade while the second check runs', async () => {
+    const fresh = checked('s1', { status: 'agreed', awarded: 1 });
+    const evaluation = vi.fn(() => Promise.resolve(fresh));
+    const page = render(Promise.resolve([checked('s1', { status: 'pending', awarded: 0 })]), { evaluation });
+    await page.settle();
+    vi.useFakeTimers();
+    page.component.show(page.component.grades.value()?.grades[0] as Evaluation);
+    page.fixture.detectChanges();
+    expect(page.panel()?.textContent).toContain('Second check running.');
+    await vi.advanceTimersByTimeAsync(5000);
+    page.fixture.detectChanges();
+    expect(evaluation).toHaveBeenCalledWith('e-s1');
+    expect(page.panel()?.textContent).toContain('Second check agrees.');
+  });
+
+  it('puts the chip on the queue row when the open grade turns doubtful', async () => {
+    const evaluation = vi.fn(() => Promise.resolve(checked('s1', doubt)));
+    const page = render(
+      Promise.resolve([
+        checked('s1', { status: 'pending', awarded: 0 }),
+        checked('s2', { status: 'agreed', awarded: 1 }),
+      ]),
+      { evaluation },
+    );
+    await page.settle();
+    vi.useFakeTimers();
+    page.component.show(page.component.grades.value()?.grades[0] as Evaluation);
+    page.fixture.detectChanges();
+    expect(page.card('Ana Lim')?.textContent).not.toContain('Check AI mark');
+    await vi.advanceTimersByTimeAsync(5000);
+    page.fixture.detectChanges();
+    expect(page.card('Ana Lim')?.textContent).toContain('Check AI mark');
+    // the row stays where the page put it.
+    const names = [...page.root.querySelectorAll('article.grade h3')].map((h) => h.textContent?.trim());
+    expect(names).toEqual(['Ana Lim', 'Ben Tan']);
+  });
+});

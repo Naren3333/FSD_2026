@@ -317,18 +317,29 @@ func TestFinalizeChecksItsRulesInTheStore(t *testing.T) {
 	}
 }
 
-// fakeSuggester answers every marking call the same way; during runs before it answers.
+// fakeSuggester answers every marking call the same way, or a review call with review when it is set; during
+// runs before it answers. it keeps each call's schema name and messages.
 type fakeSuggester struct {
-	output string
-	err    error
-	calls  int
-	who    platform.Billed
-	during func()
+	output   string
+	review   string
+	err      error
+	calls    int
+	who      platform.Billed
+	names    []string
+	messages [][]message
+	during   func()
 }
 
-func (f *fakeSuggester) generate(_ context.Context, _ []message, _ map[string]any, who platform.Billed) (string, string, error) {
+func (f *fakeSuggester) generate(_ context.Context, name string, messages []message, _ map[string]any, who platform.Billed) (string, string, error) {
 	f.calls++
 	f.who = who
+	f.names, f.messages = append(f.names, name), append(f.messages, messages)
+	if name == schemaReview && f.review != "" {
+		if f.during != nil {
+			f.during()
+		}
+		return f.review, "model-2", f.err
+	}
 	if f.during != nil {
 		f.during()
 	}
@@ -360,7 +371,7 @@ func TestAReadySuggestionNeverChangesTheGrade(t *testing.T) {
 	db := testDB(t)
 	submit(t, db, submissionA, "student-a", nil)
 	ai := &fakeSuggester{output: grounded3(t)}
-	markOnce(t, marker{db, ai})
+	markOnce(t, marker{db: db, ai: ai})
 	e := load(t, db, submissionA).evidence[0]
 	if e.Suggestion == nil || e.Suggestion.Status != suggestionReady || e.Suggestion.Awarded != 3 || e.Suggestion.Feedback != "Say more." {
 		t.Fatalf("suggestion not stored: %+v", e.Suggestion)
@@ -385,7 +396,7 @@ func TestASuggestionAfterFinalizeIsDropped(t *testing.T) {
 			t.Error(err)
 		}
 	}
-	m := marker{db, ai}
+	m := marker{db: db, ai: ai}
 	j, found, err := m.lease(t.Context())
 	if err != nil || !found {
 		t.Fatal(err)
@@ -434,7 +445,7 @@ func TestMarkerOutcomesAreStoredAsFailedSuggestions(t *testing.T) {
 				tc.before(db)
 			}
 			awarded := load(t, db, submissionA).evidence[0].Awarded
-			markOnce(t, marker{db, tc.ai})
+			markOnce(t, marker{db: db, ai: tc.ai})
 			e := load(t, db, submissionA).evidence[0]
 			s := e.Suggestion
 			if s == nil || s.Status != suggestionFailed || s.Reason != tc.reason || s.Awarded != 0 || len(s.Criteria) != 0 || tc.ai.calls != tc.calls {
@@ -456,7 +467,7 @@ func TestALostLeaseWritesNothing(t *testing.T) {
 			t.Error(err)
 		}
 	}
-	markOnce(t, marker{db, ai})
+	markOnce(t, marker{db: db, ai: ai})
 	if s := load(t, db, submissionA).evidence[0].Suggestion; s.Status != suggestionPending || s.Reason != "" {
 		t.Fatalf("a worker without the lease wrote %+v", s)
 	}
@@ -469,7 +480,7 @@ func TestASpendLimitWaitsWithoutUsingAnAttempt(t *testing.T) {
 	db := testDB(t)
 	submit(t, db, submissionA, "student-a", nil)
 	resets := time.Now().Add(time.Hour).UTC().Truncate(time.Second)
-	markOnce(t, marker{db, &fakeSuggester{err: &platform.AIError{Status: 429, Code: "AI_SPEND_LIMIT", ResetsAt: resets}}})
+	markOnce(t, marker{db: db, ai: &fakeSuggester{err: &platform.AIError{Status: 429, Code: "AI_SPEND_LIMIT", ResetsAt: resets}}})
 	var attempts int
 	var after time.Time
 	if err := db.QueryRow(t.Context(), "SELECT attempts,run_after FROM marking_jobs").Scan(&attempts, &after); err != nil {
@@ -486,7 +497,7 @@ func TestTheAssessmentsTeacherPaysForMarking(t *testing.T) {
 	db := testDB(t)
 	submit(t, db, submissionA, "student-a", map[string]any{"teacher_id": "teacher-9"})
 	f := newFakeAI(t, `{"output":null,"model_version":"m"}`)
-	markOnce(t, marker{db, f.client()})
+	markOnce(t, marker{db: db, ai: f.client()})
 	if f.body["operation"] != "generate" || f.body["billed_to"].(map[string]any)["user_id"] != "teacher-9" || f.body["billed_to"].(map[string]any)["role"] != "teacher" {
 		t.Fatalf("billed wrongly: %v", f.body)
 	}
@@ -599,7 +610,7 @@ func TestAMarkingJobPurgedMidwayWritesNothing(t *testing.T) {
 			t.Error(err)
 		}
 	}
-	markOnce(t, marker{db, ai})
+	markOnce(t, marker{db: db, ai: ai})
 	if ai.calls != 1 || jobs(t, db) != 0 || count(t, db, "SELECT count(*) FROM evaluations") != 0 {
 		t.Fatalf("calls %d, jobs %d, evaluations %d", ai.calls, jobs(t, db), count(t, db, "SELECT count(*) FROM evaluations"))
 	}
@@ -648,7 +659,7 @@ func TestARemovedStudentsWorkIsKeptButNotMarked(t *testing.T) {
 		t.Fatal(err)
 	}
 	ai := &fakeSuggester{output: grounded3(t)}
-	markOnce(t, marker{db, ai})
+	markOnce(t, marker{db: db, ai: ai})
 	if e := load(t, db, submissionA).evidence[0]; ai.calls != 0 || e.Suggestion == nil || e.Suggestion.Status != suggestionFailed || e.Suggestion.Reason != "STUDENT_REMOVED" {
 		t.Fatalf("calls %d, suggestion %+v", ai.calls, e.Suggestion)
 	}
@@ -663,7 +674,7 @@ func TestARemovedStudentsWorkIsKeptButNotMarked(t *testing.T) {
 		t.Fatalf("counts once enrolled again %+v, %v", c, err)
 	}
 	submit(t, db, submissionC, "student-a", map[string]any{"submitted_at": submitted.Add(2 * time.Hour)})
-	markOnce(t, marker{db, ai})
+	markOnce(t, marker{db: db, ai: ai})
 	if e := load(t, db, submissionC).evidence[0]; ai.calls != 1 || e.Suggestion.Status != suggestionReady {
 		t.Fatalf("work after enrolling again: calls %d, %+v", ai.calls, e.Suggestion)
 	}
@@ -712,7 +723,7 @@ func TestAStudentEnrolledAgainIsMarkedAgain(t *testing.T) {
 			t.Fatal(err)
 		}
 		ai := &fakeSuggester{output: grounded3(t)}
-		markOnce(t, marker{db, ai})
+		markOnce(t, marker{db: db, ai: ai})
 		if e := load(t, db, submissionA).evidence[0]; ai.calls != 1 || e.Suggestion == nil || e.Suggestion.Status != suggestionReady {
 			t.Fatalf("return first %v: calls %d, suggestion %+v", returnFirst, ai.calls, e.Suggestion)
 		}
@@ -729,7 +740,7 @@ func TestAStudentEnrolledAgainIsMarkedAgain(t *testing.T) {
 		}
 	}
 	ai := &fakeSuggester{output: grounded3(t)}
-	markOnce(t, marker{db, ai})
+	markOnce(t, marker{db: db, ai: ai})
 	if e := load(t, db, submissionA).evidence[0]; ai.calls != 0 || e.Suggestion == nil || e.Suggestion.Reason != "STUDENT_REMOVED" {
 		t.Fatalf("removed after returning: calls %d, suggestion %+v", ai.calls, e.Suggestion)
 	}
@@ -750,7 +761,7 @@ func TestAReturnQueuesAgainTheMarkingStoppedByARemoval(t *testing.T) {
 		t.Fatal(err)
 	}
 	ai := &fakeSuggester{output: grounded3(t)}
-	markOnce(t, marker{db, ai})
+	markOnce(t, marker{db: db, ai: ai})
 	if e := load(t, db, submissionA).evidence[0]; ai.calls != 0 || jobs(t, db) != 0 || e.Suggestion.Reason != reasonStudentRemoved {
 		t.Fatalf("removed: calls %d, jobs %d, %+v", ai.calls, jobs(t, db), e.Suggestion)
 	}
@@ -768,7 +779,7 @@ func TestAReturnQueuesAgainTheMarkingStoppedByARemoval(t *testing.T) {
 	if jobs(t, db) != 1 {
 		t.Fatalf("jobs %d", jobs(t, db))
 	}
-	markOnce(t, marker{db, ai})
+	markOnce(t, marker{db: db, ai: ai})
 	if e := load(t, db, submissionA).evidence[0]; ai.calls != 1 || e.Suggestion.Status != suggestionReady {
 		t.Fatalf("back in the classroom: calls %d, %+v", ai.calls, e.Suggestion)
 	}
@@ -804,7 +815,7 @@ func TestASettlementRacingAReturnRunsTheJobAgain(t *testing.T) {
 		t.Fatal(err)
 	}
 	ai := &fakeSuggester{output: grounded3(t)}
-	m := marker{db, ai}
+	m := marker{db: db, ai: ai}
 	j, found, err := m.lease(t.Context())
 	if err != nil || !found {
 		t.Fatalf("no job leased: %v", err)
@@ -812,7 +823,7 @@ func TestASettlementRacingAReturnRunsTheJobAgain(t *testing.T) {
 	if err = apply(t, db, restoreStudent, enrollment(t, submitted.Add(2*time.Hour))); err != nil {
 		t.Fatal(err)
 	}
-	if err = m.finish(t.Context(), j, &Suggestion{Status: suggestionFailed, Reason: reasonStudentRemoved}); err != nil {
+	if err = m.finish(t.Context(), j, replaced(&Suggestion{Status: suggestionFailed, Reason: reasonStudentRemoved})); err != nil {
 		t.Fatal(err)
 	}
 	if e := load(t, db, submissionA).evidence[0]; jobs(t, db) != 1 || e.Suggestion.Status != suggestionPending {
@@ -1100,7 +1111,7 @@ func TestAReassignedClassroomsNewTeacherPaysForItsMarking(t *testing.T) {
 		t.Fatalf("a late submission's payer = %v", p)
 	}
 	f := newFakeAI(t, `{"output":null,"model_version":"m"}`)
-	markOnce(t, marker{db, f.client()})
+	markOnce(t, marker{db: db, ai: f.client()})
 	if f.body["billed_to"].(map[string]any)["user_id"] != "teacher-new" {
 		t.Fatalf("billed %v", f.body["billed_to"])
 	}
@@ -1186,5 +1197,320 @@ func TestGradingFindsItsRowsThroughTheIndexesItBuilds(t *testing.T) {
 		if err != nil || !indexed || slices.ContainsFunc(plan, func(line string) bool { return strings.Contains(line, "Seq Scan") }) {
 			t.Fatalf("%s: plan %v, %v", c.sql, plan, err)
 		}
+	}
+}
+
+// withCritic is a marker that checks every ready suggestion a second time (adr 0020).
+func withCritic(db *pgxpool.Pool, ai suggester) marker {
+	return marker{db: db, ai: ai, markingCritic: true}
+}
+
+func stage(t *testing.T, db *pgxpool.Pool) string {
+	t.Helper()
+	var s string
+	if err := db.QueryRow(t.Context(), "SELECT stage FROM marking_jobs").Scan(&s); err != nil {
+		t.Fatal(err)
+	}
+	return s
+}
+
+func encoded(t *testing.T, v any) string {
+	t.Helper()
+	data, err := json.Marshal(v)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return string(data)
+}
+
+// a ready suggestion becomes a review job, whose second, blind marking is stored beside it as agreed or
+// doubtful; neither changes the suggestion, a mark or the audit.
+func TestTheCriticChecksAReadySuggestion(t *testing.T) {
+	disagree := reply(t, []map[string]any{criterion("c1", 0)}, "Critic feedback.")
+	for _, tc := range []struct {
+		name, review, status string
+		reasons              []string
+	}{
+		{"agreed", grounded3(t), reviewAgreed, nil},
+		{"doubtful", disagree, reviewDoubtful, []string{doubtLevelsDiffer}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			db := testDB(t)
+			submit(t, db, submissionA, "student-a", map[string]any{"teacher_id": "teacher-9"})
+			ai := &fakeSuggester{output: grounded3(t), review: tc.review}
+			m := withCritic(db, ai)
+			markOnce(t, m)
+			e := load(t, db, submissionA).evidence[0]
+			if e.Suggestion.Status != suggestionReady || e.Suggestion.Review == nil || e.Suggestion.Review.Status != reviewPending {
+				t.Fatalf("no review pending: %+v", e.Suggestion)
+			}
+			var attempts int
+			if err := db.QueryRow(t.Context(), "SELECT attempts FROM marking_jobs WHERE stage='review'").Scan(&attempts); err != nil || attempts != 0 {
+				t.Fatalf("no fresh review job: %d %v", attempts, err)
+			}
+			markOnce(t, m)
+			e = load(t, db, submissionA).evidence[0]
+			r := e.Suggestion.Review
+			if r == nil || r.Status != tc.status || !slices.Equal(r.Reasons, tc.reasons) || r.Model != "model-2" || len(r.Criteria) != 1 {
+				t.Fatalf("%+v", r)
+			}
+			if e.Suggestion.Awarded != 3 || e.Suggestion.Feedback != "Say more." || e.Awarded != 0 || !e.NeedsMarking || e.MarkedBy != "" {
+				t.Fatalf("the review changed the suggestion or the mark: %+v %+v", e, e.Suggestion)
+			}
+			if strings.Contains(encoded(t, e), "Critic feedback.") {
+				t.Fatal("the critic's feedback was kept")
+			}
+			if jobs(t, db) != 0 || audits(t, db, submissionA) != 0 || ai.calls != 2 {
+				t.Fatalf("jobs %d, audits %d, calls %d", jobs(t, db), audits(t, db, submissionA), ai.calls)
+			}
+			if !slices.Equal(ai.names, []string{schemaSuggestion, schemaReview}) || ai.who != (platform.Billed{UserID: "teacher-9", OrgID: "org", Role: "teacher"}) {
+				t.Fatalf("calls %v billed %+v", ai.names, ai.who)
+			}
+			// blind: the critic marks the same task under its own instructions, never shown the suggestion.
+			if ai.messages[1][0].Content != criticInstructions || ai.messages[1][1] != ai.messages[0][1] {
+				t.Fatal("the critic did not mark the same task under its own instructions")
+			}
+			for _, msg := range ai.messages[1] {
+				if strings.Contains(msg.Content, "Say more.") || strings.Contains(msg.Content, "model-1") {
+					t.Fatalf("the critic saw the suggestion: %s", msg.Content)
+				}
+			}
+		})
+	}
+}
+
+// a second marking that breaks the rules, or a call that fails, leaves the suggestion not reviewed: never agreed.
+func TestACriticFailureIsNotReviewed(t *testing.T) {
+	for _, tc := range []struct {
+		name, review, reason string
+		err                  error
+	}{
+		{"ungrounded", reply(t, []map[string]any{criterion("c1", 3, "a mutex")}, ""), "UNGROUNDED", nil},
+		{"invalid", "Agreed!", "INVALID_OUTPUT", nil},
+		{"rejected", "", "AI_OUTPUT_REJECTED", &platform.AIError{Status: 502, Code: "AI_OUTPUT_REJECTED"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			db := testDB(t)
+			submit(t, db, submissionA, "student-a", nil)
+			ai := &fakeSuggester{output: grounded3(t)}
+			m := withCritic(db, ai)
+			markOnce(t, m)
+			ai.review, ai.err = tc.review, tc.err
+			markOnce(t, m)
+			s := load(t, db, submissionA).evidence[0].Suggestion
+			if s.Status != suggestionReady || s.Awarded != 3 || s.Review == nil || s.Review.Status != reviewNotReviewed || s.Review.Reason != tc.reason || jobs(t, db) != 0 {
+				t.Fatalf("%+v %+v", s, s.Review)
+			}
+		})
+	}
+}
+
+// the teacher's spend limit holds the review without using an attempt, and leaves the suggestion as it is.
+func TestTheCriticWaitsForTheSpendLimit(t *testing.T) {
+	db := testDB(t)
+	submit(t, db, submissionA, "student-a", nil)
+	ai := &fakeSuggester{output: grounded3(t)}
+	m := withCritic(db, ai)
+	markOnce(t, m)
+	resets := time.Now().Add(time.Hour).UTC().Truncate(time.Second)
+	ai.err = &platform.AIError{Status: 429, Code: "AI_SPEND_LIMIT", ResetsAt: resets}
+	markOnce(t, m)
+	var attempts int
+	var after time.Time
+	if err := db.QueryRow(t.Context(), "SELECT attempts,run_after FROM marking_jobs WHERE stage='review'").Scan(&attempts, &after); err != nil {
+		t.Fatal(err)
+	}
+	s := load(t, db, submissionA).evidence[0].Suggestion
+	if attempts != 0 || !after.Equal(resets) || s.Status != suggestionReady || s.Awarded != 3 || s.Review.Status != reviewPending || s.Review.Reason != "AI_SPEND_LIMIT" {
+		t.Fatalf("attempts %d, run after %v, %+v %+v", attempts, after, s, s.Review)
+	}
+}
+
+// finalizing ends a review still waiting, so a reopened grade never shows a second check that will not run.
+func TestFinalizingEndsAWaitingReview(t *testing.T) {
+	db := testDB(t)
+	submit(t, db, submissionA, "student-a", nil)
+	ai := &fakeSuggester{output: grounded3(t), review: grounded3(t)}
+	markOnce(t, withCritic(db, ai))
+	if _, err := (pgStore{db}).finalizeEvaluation(t.Context(), "org", submissionA, "teacher-1", "Checked", map[string]Mark{questionID: {Criteria: map[string]int{"c1": 3}}}); err != nil {
+		t.Fatal(err)
+	}
+	r := load(t, db, submissionA).evidence[0].Suggestion.Review
+	if r == nil || r.Status != reviewNotReviewed || r.Reason != reasonFinalized || jobs(t, db) != 0 || ai.calls != 1 {
+		t.Fatalf("%+v, jobs %d, calls %d", r, jobs(t, db), ai.calls)
+	}
+}
+
+// a teacher who saved the suggestion's own marks still has them checked; one who marked otherwise does not.
+func TestATeacherWhoTookTheSuggestionStillHasItChecked(t *testing.T) {
+	for _, tc := range []struct {
+		name           string
+		points         int
+		status, reason string
+		calls          int
+	}{
+		{"took it", 3, reviewAgreed, "", 2},
+		{"marked otherwise", 0, reviewNotReviewed, "MARKED_BY_TEACHER", 1},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			db := testDB(t)
+			submit(t, db, submissionA, "student-a", nil)
+			ai := &fakeSuggester{output: grounded3(t), review: grounded3(t)}
+			m := withCritic(db, ai)
+			markOnce(t, m)
+			if _, err := (pgStore{db}).saveMarks(t.Context(), "org", submissionA, "teacher-1", map[string]Mark{questionID: {Criteria: map[string]int{"c1": tc.points}}}); err != nil {
+				t.Fatal(err)
+			}
+			markOnce(t, m)
+			e := load(t, db, submissionA).evidence[0]
+			r := e.Suggestion.Review
+			if r == nil || r.Status != tc.status || r.Reason != tc.reason || ai.calls != tc.calls || e.Awarded != tc.points || e.MarkedBy != markedTeacher {
+				t.Fatalf("%+v %+v, calls %d", e, r, ai.calls)
+			}
+		})
+	}
+}
+
+// a grade finalized while the critic marks ends the review, and the late review never reaches the final grade.
+func TestAReviewAfterFinalizeIsDropped(t *testing.T) {
+	db := testDB(t)
+	submit(t, db, submissionA, "student-a", nil)
+	ai := &fakeSuggester{output: grounded3(t), review: grounded3(t)}
+	m := withCritic(db, ai)
+	markOnce(t, m)
+	ai.during = func() {
+		if _, err := (pgStore{db}).finalizeEvaluation(context.Background(), "org", submissionA, "teacher-1", "Checked", map[string]Mark{questionID: {Criteria: map[string]int{"c1": 0}}}); err != nil {
+			t.Error(err)
+		}
+	}
+	markOnce(t, m)
+	after := load(t, db, submissionA)
+	if after.status != statusFinalized || after.evidence[0].Awarded != 0 || after.evidence[0].Suggestion.Review.Reason != reasonFinalized || jobs(t, db) != 0 || audits(t, db, submissionA) != 1 {
+		t.Fatalf("a late review reached a final grade: %+v", after.evidence[0].Suggestion.Review)
+	}
+}
+
+// a review of a suggestion replaced while the critic marked is discarded.
+func TestAReviewOfAReplacedSuggestionIsDiscarded(t *testing.T) {
+	db := testDB(t)
+	submit(t, db, submissionA, "student-a", nil)
+	ai := &fakeSuggester{output: grounded3(t), review: grounded3(t)}
+	m := withCritic(db, ai)
+	markOnce(t, m)
+	other := Suggestion{Status: suggestionReady, Criteria: []SuggestedCriterion{{Criterion: "c1", Points: 0, Quotes: []string{}, Rationale: "Other."}}, Model: "model-1"}
+	ai.during = func() {
+		if _, err := db.Exec(context.Background(), `UPDATE evaluations SET evidence=jsonb_set(evidence,'{0,suggestion}',$1::jsonb) WHERE id=$2`, encoded(t, other), submissionA); err != nil {
+			t.Error(err)
+		}
+	}
+	markOnce(t, m)
+	s := load(t, db, submissionA).evidence[0].Suggestion
+	if s.Awarded != 0 || s.Review != nil || jobs(t, db) != 0 {
+		t.Fatalf("a review reached another suggestion: %+v %+v", s, s.Review)
+	}
+}
+
+// with the critic off a ready suggestion ends its job and has no review; a review job queued before it was
+// turned off ends not reviewed, without an ai call.
+func TestTheCriticOffQueuesNoReview(t *testing.T) {
+	db := testDB(t)
+	submit(t, db, submissionA, "student-a", nil)
+	ai := &fakeSuggester{output: grounded3(t)}
+	markOnce(t, marker{db: db, ai: ai})
+	if s := load(t, db, submissionA).evidence[0].Suggestion; s.Status != suggestionReady || s.Review != nil || jobs(t, db) != 0 {
+		t.Fatalf("%+v, jobs %d", s, jobs(t, db))
+	}
+	db = testDB(t)
+	submit(t, db, submissionA, "student-a", nil)
+	ai = &fakeSuggester{output: grounded3(t)}
+	markOnce(t, withCritic(db, ai))
+	if stage(t, db) != stageReview {
+		t.Fatal("no review job")
+	}
+	markOnce(t, marker{db: db, ai: ai})
+	if s := load(t, db, submissionA).evidence[0].Suggestion; ai.calls != 1 || s.Review.Status != reviewNotReviewed || s.Review.Reason != "CRITIC_OFF" || jobs(t, db) != 0 {
+		t.Fatalf("calls %d, %+v", ai.calls, s.Review)
+	}
+}
+
+// a repeated assessment.submitted still gets one suggestion and one review.
+func TestADuplicateSubmissionIsReviewedOnce(t *testing.T) {
+	db := testDB(t)
+	submit(t, db, submissionA, "student-a", nil)
+	submit(t, db, submissionA, "student-a", nil)
+	ai := &fakeSuggester{output: grounded3(t), review: grounded3(t)}
+	m := withCritic(db, ai)
+	markOnce(t, m)
+	submit(t, db, submissionA, "student-a", nil) // redelivered while the review waits
+	markOnce(t, m)
+	submit(t, db, submissionA, "student-a", nil)
+	if _, found, err := m.lease(t.Context()); err != nil || found {
+		t.Fatalf("another job: %v %v", found, err)
+	}
+	s := load(t, db, submissionA).evidence[0].Suggestion
+	if ai.calls != 2 || !slices.Equal(ai.names, []string{schemaSuggestion, schemaReview}) || s.Review.Status != reviewAgreed {
+		t.Fatalf("calls %v, %+v", ai.names, s.Review)
+	}
+	if n := count(t, db, "SELECT count(*) FROM evaluations"); n != 1 {
+		t.Fatalf("%d evaluations", n)
+	}
+}
+
+// a review stopped while its student was out is checked again on their return, keeping the suggestion.
+func TestAReturnQueuesAgainAReviewStoppedByARemoval(t *testing.T) {
+	db := testDB(t)
+	submitted := time.Date(2026, 10, 1, 9, 0, 0, 0, time.UTC)
+	submit(t, db, submissionA, "student-a", map[string]any{"submitted_at": submitted})
+	ai := &fakeSuggester{output: grounded3(t), review: grounded3(t)}
+	m := withCritic(db, ai)
+	markOnce(t, m)
+	if err := apply(t, db, removeStudent, removal(t, submitted.Add(time.Hour))); err != nil {
+		t.Fatal(err)
+	}
+	markOnce(t, m)
+	if s := load(t, db, submissionA).evidence[0].Suggestion; ai.calls != 1 || s.Review.Reason != reasonStudentRemoved || jobs(t, db) != 0 {
+		t.Fatalf("calls %d, %+v", ai.calls, s.Review)
+	}
+	if err := apply(t, db, restoreStudent, enrollment(t, submitted.Add(2*time.Hour))); err != nil {
+		t.Fatal(err)
+	}
+	if stage(t, db) != stageReview {
+		t.Fatal("the review was not queued again")
+	}
+	markOnce(t, m)
+	if s := load(t, db, submissionA).evidence[0].Suggestion; ai.calls != 2 || s.Status != suggestionReady || s.Awarded != 3 || s.Review.Status != reviewAgreed {
+		t.Fatalf("calls %d, %+v %+v", ai.calls, s, s.Review)
+	}
+}
+
+// the counts say how many of the drafts a bulk finalize would finalize have a doubtful suggestion.
+func TestTheCountsNameReadyDraftsWithDoubts(t *testing.T) {
+	db := testDB(t)
+	ctx, s := t.Context(), pgStore{db}
+	submit(t, db, submissionA, "student-a", nil)
+	submit(t, db, submissionB, "student-b", nil)
+	ai := &fakeSuggester{output: grounded3(t), review: reply(t, []map[string]any{criterion("c1", 0)}, "")}
+	m := withCritic(db, ai)
+	for range 4 {
+		markOnce(t, m)
+	}
+	for _, id := range []string{submissionA, submissionB} {
+		if _, err := s.saveMarks(ctx, "org", id, "teacher-1", map[string]Mark{questionID: {Criteria: map[string]int{"c1": 3}}}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := db.Exec(ctx, `UPDATE evaluations SET evidence=jsonb_set(evidence,'{0,suggestion,review,status}','"agreed"') WHERE id=$1`, submissionB); err != nil {
+		t.Fatal(err)
+	}
+	c, err := s.countEvaluations(ctx, "org", submissionID, submissionID, everyone)
+	if err != nil || c.Ready != 2 || c.ReadyDoubtful != 1 {
+		t.Fatalf("%+v %v", c, err)
+	}
+	// once the teacher marks the doubted question otherwise, the doubt is settled.
+	if _, err = s.saveMarks(ctx, "org", submissionA, "teacher-1", map[string]Mark{questionID: {Criteria: map[string]int{"c1": 0}}}); err != nil {
+		t.Fatal(err)
+	}
+	if c, err = s.countEvaluations(ctx, "org", submissionID, submissionID, everyone); err != nil || c.Ready != 2 || c.ReadyDoubtful != 0 {
+		t.Fatalf("%+v %v", c, err)
 	}
 }

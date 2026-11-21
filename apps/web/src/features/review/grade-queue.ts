@@ -1,7 +1,16 @@
 import { computed, signal } from '@angular/core';
 import type { Evaluation } from '../../api/models';
 import { Section } from '../../shared/section';
-import { GRADE_FILTERS, PAGE_SIZE, draftAfter, matches, type GradeFilter, type Grades } from './grades';
+import {
+  GRADE_FILTERS,
+  PAGE_SIZE,
+  doubtfulFirst,
+  draftAfter,
+  inOrder,
+  matches,
+  type GradeFilter,
+  type Grades,
+} from './grades';
 
 /* selection and navigation over the current page, independent of marking actions. */
 export class GradeQueue {
@@ -25,15 +34,27 @@ export class GradeQueue {
     const count = (kept: GradeFilter) => grades.filter((g) => matches(g, kept)).length;
     return { all: grades.length, mark: count('mark'), draft: count('draft'), finalized: count('finalized') };
   });
+  /* the queue's order as the page loaded, so rows stay put while second checks finish and grades are finalized. */
+  private readonly order = signal<readonly string[]>([]);
+  /* the page's grades in queue order: drafts the second check doubted first, as of the page's load. */
+  readonly ordered = computed(() => {
+    const grades = this.grades.value()?.grades ?? [];
+    const order = this.order();
+    return order.length ? inOrder(grades, order) : doubtfulFirst(grades);
+  });
+  /* sets the queue's order from the page just loaded. */
+  fixOrder(): void {
+    this.order.set(doubtfulFirst(this.grades.value()?.grades ?? []).map((g) => g.id));
+  }
   /* the page's grades the filter keeps, in queue order. */
   readonly shown = computed(() => {
     const kept = this.gradeFilter();
-    return (this.grades.value()?.grades ?? []).filter((g) => matches(g, kept));
+    return this.ordered().filter((g) => matches(g, kept));
   });
   /* the next draft on the page after the open grade, whatever the filter shows. */
   readonly nextDraft = computed(() => {
     const open = this.open();
-    return open ? draftAfter(this.grades.value()?.grades ?? [], open.id) : null;
+    return open ? draftAfter(this.ordered(), open.id) : null;
   });
   /* no other draft on this page, but a next page to look on. */
   readonly nextOnNextPage = computed(() => {

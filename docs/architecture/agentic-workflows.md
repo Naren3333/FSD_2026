@@ -5,7 +5,7 @@ The agentic features we could build, in the order we plan to take them, and wher
 | # | Workflow | Status | Touches retrieval |
 |---|---|---|---|
 | 1 | Performance interpretation agent | Built (ADR 0014) | No |
-| 2 | Marking critic and escalation | Proposed | No |
+| 2 | Marking critic and escalation | Built (ADR 0020) | No |
 | 3 | Question generation critic loop | Built (ADR 0015) | Reads the passages generation already has |
 | 4 | Adaptive resit agent | Proposed, needs a question bank | Only if it generates new questions |
 | 5 | Teacher class-insights copilot | Proposed | Yes, if it searches materials |
@@ -16,9 +16,9 @@ How the workflows would feed each other once built (thick border: built, dashed:
 ```mermaid
 flowchart TB
   Submit[assessment.submitted.v4] --> Marker[Grading marker suggests marks]
-  Marker -.-> W2[Workflow 2: Marking critic flags low confidence]
+  Marker --> W2[Workflow 2: Marking critic flags doubtful marks]
   Marker --> Final[Teacher finalizes grades]
-  W2 -.-> Final
+  W2 --> Final
   Final -->|teacher asks| W1[Workflow 1: Performance interpretation]
   Final -.->|grading.finalized.v3| W6[Workflow 6: Interpretation on finalization]
   W6 -.-> W1
@@ -30,8 +30,8 @@ flowchart TB
   W5 -.->|tools| Data[Analytics, Grading, Curriculum]
   classDef built stroke-width:3px
   classDef proposed stroke-dasharray:4 3
-  class W1,W3 built;
-  class W2,W4,W5,W6 proposed;
+  class W1,W2,W3 built;
+  class W4,W5,W6 proposed;
 ```
 
 ## What makes these agentic
@@ -140,7 +140,28 @@ flowchart TD
 
 ## 2. Marking critic and escalation
 
-After `services/grading/marker.go` suggests a mark for a written answer, a second model pass checks it against the rubric and marking points and gives a confidence. Low-confidence suggestions, and similar answers in the same assessment that got different suggested marks, are flagged for the teacher first in Grading review. Services: Grading, ai-core, web review page. Effort: small to medium. A good demo because it can be measured against the marks teachers finalized.
+Built. After `services/grading/marker.go` makes a ready suggestion for a written answer, its job becomes a review job: a second model call marks the same answer blind, under its own instructions and without the first suggestion, and its reply passes the same checks. Code compares the two: different levels, low confidence on either side or a new flag make the suggestion doubtful, which the teacher sees as "Check AI mark", first in Grading review and in both finalize dialogs; anything that fails is not reviewed, never agreed. `MARKING_CRITIC=off` turns it off. Not built: flagging similar answers in one assessment that got different suggested marks, and measuring it against the marks teachers finalized. Services: Grading, ai-core, web review page. See ADR 0020.
+
+```mermaid
+flowchart TD
+  Job[marking_jobs row, stage suggest] --> Suggest[Marker call: marking.suggestion]
+  Suggest --> Check1{Checks: rubric levels, quotes in the answer}
+  Check1 -->|fails| Failed[Failed suggestion, no review]
+  Check1 -->|ready| Critic{MARKING_CRITIC on?}
+  Critic -->|no| Done[Ready suggestion, job deleted]
+  Critic -->|yes| Review[Same row, stage review, review pending]
+  Review --> Blind["Critic call: marking.review<br/>same task, own instructions,<br/>never the first suggestion"]
+  Blind -->|spend limit, busy, not configured| Wait[Waits without using an attempt]
+  Wait --> Blind
+  Blind --> Check2{Same checks}
+  Check2 -->|fails, or the call fails| NotReviewed[not_reviewed, with why]
+  Check2 -->|passes| Compare{"compareSuggestions:<br/>levels differ, low confidence,<br/>new flag?"}
+  Compare -->|yes| Doubtful[doubtful: Check AI mark, first in the queue]
+  Compare -->|no| Agreed[agreed]
+  Doubtful --> Teacher[Teacher marks and finalizes]
+  Agreed --> Teacher
+  NotReviewed --> Teacher
+```
 
 ## 3. Question generation critic loop
 

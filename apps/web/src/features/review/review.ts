@@ -28,12 +28,17 @@ import { marksText } from '../assessments/editor';
 import {
   applySuggestion,
   collapsible,
+  doubtful,
+  doubtfulNote,
   flagText,
   levelName,
   markingForm,
   markingSummary,
+  needsCheck,
   marksOf,
   outcome,
+  reviewDifferences,
+  reviewText,
   submittedAt,
   suggestionReason,
   toMark,
@@ -44,7 +49,7 @@ import { ReopenComponent, type Reopened } from './reopen';
 import { focusLater } from '../../shared/focus';
 import { GradeReader, PAGE_SIZE, draftAfter, type Grades } from './grades';
 import { GradeQueue } from './grade-queue';
-import { SuggestionPoll } from './suggestions';
+import { SuggestionPoll, withSuggestions } from './suggestions';
 
 @Component({
   selector: 'app-review',
@@ -123,6 +128,10 @@ export class ReviewComponent {
   readonly unreleased = computed(() => (this.assessmentId() ? (this.grades.value()?.unreleased ?? 0) : 0));
   /* the chosen assessment's drafts with nothing left to mark, across every page. */
   readonly ready = computed(() => (this.assessmentId() ? (this.grades.value()?.ready ?? 0) : 0));
+  /* of those, the drafts with a suggestion the second check doubted. */
+  readonly readyDoubtful = computed(() =>
+    this.assessmentId() ? (this.grades.value()?.readyDoubtful ?? 0) : 0,
+  );
   /* whether any of this page's dialogs is open, so the page's own status stays out of their way. */
   readonly dialogOpen = computed(
     () =>
@@ -143,11 +152,22 @@ export class ReviewComponent {
   readonly blocked = () => this.unsavedMarks();
   readonly flagText = flagText;
   readonly suggestionReason = suggestionReason;
+  readonly reviewDifferences = reviewDifferences;
+  readonly doubtful = doubtful;
+  readonly doubtfulNote = doubtfulNote;
+  readonly needsCheck = needsCheck;
   readonly toMark = toMark;
   readonly outcome = outcome;
   readonly submittedAt = submittedAt;
   readonly collapsible = collapsible;
-  private readonly suggestions = new SuggestionPoll(this.selected, this.classroomId);
+  private readonly suggestions = new SuggestionPoll(this.selected, this.classroomId, (fresh) => {
+    const current = this.grades.value();
+    if (current)
+      this.grades.set({
+        ...current,
+        grades: current.grades.map((g) => (g.id === fresh.id ? withSuggestions(g, fresh) : g)),
+      });
+  });
   /* the grade the address asks for, to open once the page has loaded ('' closes the open one), or null. */
   private requestedGrade: string | null = null;
   /* next to mark moved to the next page, so its first draft opens once it loads. */
@@ -235,7 +255,10 @@ export class ReviewComponent {
     if (!classroomId) return;
     void this.grades
       .load((current) => this.read(classroomId, assessmentId, current))
-      .then(() => this.openRequested());
+      .then(() => {
+        this.queue.fixOrder();
+        this.openRequested();
+      });
   }
 
   /* shows the grades of the assessment the filter names, or the newest of all, from their first page. */
@@ -360,7 +383,7 @@ export class ReviewComponent {
       this.firstDraft = false;
       this.requestedGrade = null;
       if (this.open()) return;
-      const first = this.grades.value()?.grades.find((g) => g.status === 'draft');
+      const first = this.queue.ordered().find((g) => g.status === 'draft');
       if (first) {
         this.openGrade(first);
         this.putAddress();
@@ -520,6 +543,11 @@ export class ReviewComponent {
     return levelName(this.names.question(grade, evidence), criterionId, points);
   }
 
+  /* what the second check of the question's ready suggestion found. */
+  reviewText(grade: Evaluation, evidence: Evidence): string {
+    return evidence.suggestion ? reviewText(evidence.suggestion, this.names.question(grade, evidence)) : '';
+  }
+
   saveMarks(): void {
     const grade = this.selected();
     if (!grade) return;
@@ -598,7 +626,7 @@ export class ReviewComponent {
   /* after finalizing, the next draft to mark opens with its heading, naming the student, focused; with none left, the queue's heading is. */
   private openNextAfter(id: string): void {
     if (this.open()) return;
-    const next = draftAfter(this.grades.value()?.grades ?? [], id);
+    const next = draftAfter(this.queue.ordered(), id);
     if (next) this.openGrade(next);
     else focusLater('grade-queue-heading');
     this.putAddress(true);

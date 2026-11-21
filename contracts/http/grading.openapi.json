@@ -310,13 +310,18 @@
           "ready": {
             "type": "integer",
             "minimum": 0
+          },
+          "ready_doubtful": {
+            "type": "integer",
+            "minimum": 0
           }
         },
         "required": [
           "drafts",
           "finalized",
           "unreleased",
-          "ready"
+          "ready",
+          "ready_doubtful"
         ],
         "additionalProperties": false
       },
@@ -572,6 +577,90 @@
             "type": "integer",
             "minimum": 1,
             "maximum": 5
+          },
+          "review": {
+            "type": "object",
+            "properties": {
+              "status": {
+                "enum": [
+                  "pending",
+                  "agreed",
+                  "doubtful",
+                  "not_reviewed"
+                ]
+              },
+              "reasons": {
+                "type": "array",
+                "items": {
+                  "enum": [
+                    "LEVELS_DIFFER",
+                    "LOW_CONFIDENCE",
+                    "CRITIC_FLAGGED"
+                  ]
+                },
+                "minItems": 0,
+                "maxItems": 3
+              },
+              "criteria": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "criterion_id": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "points": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 100
+                    },
+                    "rationale": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "criterion_id",
+                    "points",
+                    "rationale"
+                  ],
+                  "additionalProperties": false
+                },
+                "minItems": 0,
+                "maxItems": 10
+              },
+              "awarded": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 100
+              },
+              "flags": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                },
+                "minItems": 0,
+                "maxItems": 100
+              },
+              "confidence": {
+                "enum": [
+                  "high",
+                  "medium",
+                  "low"
+                ]
+              },
+              "model": {
+                "type": "string"
+              },
+              "reason": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "status",
+              "awarded"
+            ],
+            "additionalProperties": false
           }
         },
         "required": [

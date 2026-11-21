@@ -125,6 +125,8 @@ export interface BankFilter {
 
 /* an ai-suggested mark for a question the teacher marks. */
 export type Suggestion = Grading['Suggestion'];
+/* the marking critic's second check of a ready suggestion (adr 0020). */
+export type SuggestionReview = NonNullable<Suggestion['review']>;
 export type Evidence = Grading['EvaluationEvidence'];
 export type Evaluation = Grading['Evaluation'];
 /* a student's own released grade: marks and feedback, nothing the teacher still works on. */

@@ -516,6 +516,7 @@ services:
       AI_TOKEN_URL: http://keycloak:8080/realms/learning/protocol/openid-connect/token
       AI_CLIENT_ID: grading-marker
       AI_CLIENT_SECRET: ${GRADING_MARKER_CLIENT_SECRET:?Run scripts/setup.py or scripts/upgrade_local.py}
+      MARKING_CRITIC: ${MARKING_CRITIC:-on}
     depends_on:
       keycloak:
         condition: service_started

@@ -318,6 +318,29 @@ suggestion = obj(
         "reason": {"type": "string"},
         # how many of the question's marking-scheme passages the model was given (adr 0005).
         "scheme_passages": {"type": "integer", "minimum": 1, "maximum": 5},
+        # the marking critic's second check of a ready suggestion (adr 0020); absent when it is off.
+        "review": obj(
+            {
+                "status": {"enum": ["pending", "agreed", "doubtful", "not_reviewed"]},
+                "reasons": array({"enum": ["LEVELS_DIFFER", "LOW_CONFIDENCE", "CRITIC_FLAGGED"]}, maximum=3),
+                "criteria": array(
+                    obj(
+                        {
+                            "criterion_id": TEXT,
+                            "points": {"type": "integer", "minimum": 0, "maximum": 100},
+                            "rationale": {"type": "string"},
+                        }
+                    ),
+                    maximum=10,
+                ),
+                "awarded": {"type": "integer", "minimum": 0, "maximum": 100},
+                "flags": array({"type": "string"}),
+                "confidence": {"enum": ["high", "medium", "low"]},
+                "model": {"type": "string"},
+                "reason": {"type": "string"},
+            },
+            ["status", "awarded"],
+        ),
     },
     ["status", "awarded"],
 )
@@ -494,6 +517,8 @@ grading_counts = obj(
         "unreleased": {"type": "integer", "minimum": 0},
         # drafts with nothing left to mark: what a bulk finalize finalizes (adr 0016).
         "ready": {"type": "integer", "minimum": 0},
+        # of those, the drafts with a suggestion the marking critic doubted (adr 0020).
+        "ready_doubtful": {"type": "integer", "minimum": 0},
     }
 )
 release = obj({"assessment_id": UUID, "released": {"type": "integer", "minimum": 0}})

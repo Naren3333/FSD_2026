@@ -1,6 +1,6 @@
 import { FormControl, FormGroup, Validators } from '@angular/forms';
 import type { Evaluation, Evidence, Mark, Question, Suggestion } from '../../api/models';
-import { dateTime } from '../../shared/format';
+import { dateTime, plural } from '../../shared/format';
 
 /* the marking form for one evaluation and what it sends to grading. */
 
@@ -82,14 +82,18 @@ export function applySuggestion(marks: QuestionMarks, suggestion: Suggestion): v
   marks.markAsDirty();
 }
 
+/* why an ai call waits, in the teacher's words; for a suggestion and its second check alike. */
+const WAITING: Record<string, string> = {
+  AI_SPEND_LIMIT: 'Waiting for your daily AI allowance to reset.',
+  AI_BUSY: 'Waiting for your other AI requests to finish.',
+  AI_PROVIDER_NOT_CONFIGURED: 'AI is not set up on this server yet. It will be tried again every 10 minutes.',
+  AI_PROVIDER_FAILED: 'The AI provider failed; it will be tried again.',
+};
+
 /* why a suggestion is not ready, in the teacher's words. */
 export function suggestionReason(suggestion: Suggestion): string {
   const reasons: Record<string, string> = {
-    AI_SPEND_LIMIT: 'Waiting for your daily AI allowance to reset.',
-    AI_BUSY: 'Waiting for your other AI requests to finish.',
-    AI_PROVIDER_NOT_CONFIGURED:
-      'AI is not set up on this server yet. It will be tried again every 10 minutes.',
-    AI_PROVIDER_FAILED: 'The AI provider failed; it will be tried again.',
+    ...WAITING,
     AI_OUTPUT_REJECTED:
       "The AI's reply could not be used, so there is no suggestion. Mark this question yourself.",
     CONTRADICTED:
@@ -150,12 +154,8 @@ export function markingSummary(grade: Evaluation, form: MarkingForm): string {
   let left = 0;
   for (const e of grade.evidence) {
     possible += e.possible;
-    const value = form.controls[e.question_id]?.getRawValue();
-    const levels = Object.values(value?.criteria ?? {});
-    let points: number | null = value?.awarded ?? null;
-    if (levels.length)
-      points = levels.every((p) => p !== null) ? levels.reduce<number>((sum, p) => sum + Number(p), 0) : null;
-    if (points !== null) awarded += Number(points);
+    const points = formPoints(form, e);
+    if (points !== null) awarded += points;
     else if (e.needs_marking) left++;
     else awarded += e.awarded;
   }
@@ -165,9 +165,111 @@ export function markingSummary(grade: Evaluation, form: MarkingForm): string {
   return `${awarded} of ${possible} marks · ${rest}`;
 }
 
+/* the points the form gives a question so far, or null while it gives none. */
+function formPoints(form: MarkingForm, evidence: Evidence): number | null {
+  const value = form.controls[evidence.question_id]?.getRawValue();
+  const levels = Object.values(value?.criteria ?? {});
+  if (levels.length)
+    return levels.every((p) => p !== null) ? levels.reduce<number>((sum, p) => sum + Number(p), 0) : null;
+  return value?.awarded == null ? null : Number(value.awarded);
+}
+
 /* a suggested rubric level, named by its criterion and descriptor. */
 export function levelName(question: Question | undefined, criterionId: string, points: number): string {
-  const criterion = question?.rubric?.criteria.find((c) => c.id === criterionId);
-  const level = criterion?.levels.find((l) => l.points === points);
-  return `${criterion?.title ?? 'Criterion'}: ${points} (${level?.descriptor ?? 'level'})`;
+  const level = question?.rubric?.criteria
+    .find((c) => c.id === criterionId)
+    ?.levels.find((l) => l.points === points);
+  return `${criterionTitle(question, criterionId)}: ${points} (${level?.descriptor ?? 'level'})`;
+}
+
+/* a rubric criterion's title; a short answer's single criterion is its mark. */
+export function criterionTitle(question: Question | undefined, criterionId: string): string {
+  return (
+    question?.rubric?.criteria.find((c) => c.id === criterionId)?.title ??
+    (criterionId === 'match' ? 'Mark' : 'Criterion')
+  );
+}
+
+/* why a suggestion was not second-checked, in the teacher's words. */
+const NOT_REVIEWED: Record<string, string> = {
+  AI_OUTPUT_REJECTED: 'the second marking could not be used.',
+  EMPTY_OUTPUT: 'the second marking could not be used.',
+  INVALID_OUTPUT: 'the second marking could not be used.',
+  UNGROUNDED: 'the second marking quoted words that are not in the answer.',
+  CONTRADICTED: 'the second marking contradicted itself.',
+  AI_PROVIDER_FAILED: 'the AI provider failed.',
+  MARKED_BY_TEACHER: 'you marked this question differently first.',
+  STUDENT_REMOVED: 'the student was removed from the classroom.',
+  MARKING_INTERRUPTED: 'the second check was interrupted.',
+  AI_TIMEOUT: 'the second marking took too long.',
+  AI_UNAVAILABLE: 'AI was unavailable.',
+  BLANK_ANSWER: 'the answer is blank.',
+  NOT_MARKABLE: 'this question cannot be second-checked.',
+  CRITIC_OFF: 'the second check is turned off on this server.',
+  FINALIZED: 'the grade was finalized first.',
+  NO_TEACHER: 'no teacher is assigned to pay for it.',
+};
+
+/* a criterion of a doubtful suggestion where the second check chose another level, with its rationale. */
+export interface ReviewDifference {
+  criterion_id: string;
+  suggested: number;
+  second: number;
+  rationale: string;
+}
+
+/* the criteria the second check marked differently from the suggestion. */
+export function reviewDifferences(suggestion: Suggestion): ReviewDifference[] {
+  const suggested = new Map((suggestion.criteria ?? []).map((c) => [c.criterion_id, c.points]));
+  return (suggestion.review?.criteria ?? []).flatMap((c) => {
+    const points = suggested.get(c.criterion_id);
+    return points === undefined || points === c.points
+      ? []
+      : [{ criterion_id: c.criterion_id, suggested: points, second: c.points, rationale: c.rationale }];
+  });
+}
+
+/* what the second check of a ready suggestion found, in the teacher's words; '' without one. */
+export function reviewText(suggestion: Suggestion, question?: Question): string {
+  const review = suggestion.review;
+  if (!review) return '';
+  if (review.status === 'pending')
+    return review.reason
+      ? `Second check waiting. ${WAITING[review.reason] ?? `It will be tried again (${review.reason}).`}`
+      : 'Second check running.';
+  if (review.status === 'not_reviewed')
+    return `Not second-checked: ${NOT_REVIEWED[review.reason ?? ''] ?? 'it could not be made.'}`;
+  if (review.status === 'agreed') return 'Second check agrees.';
+  const differences = reviewDifferences(suggestion);
+  const doubts = differences.map(
+    (d) => `${criterionTitle(question, d.criterion_id)} ${d.suggested} vs ${d.second}`,
+  );
+  const reasons = review.reasons ?? [];
+  if (reasons.includes('LOW_CONFIDENCE')) doubts.push('one of the two markings was unsure');
+  if (reasons.includes('CRITIC_FLAGGED')) doubts.push('it raised a flag');
+  const heading = differences.length ? 'Second check disagrees' : 'Second check has doubts';
+  return `${heading}: ${doubts.join('; ') || 'check this mark'}.`;
+}
+
+/* how many of a grade's questions have a suggestion the second check doubted that the marks still follow: not
+   marked yet, or giving its total. form, when given, holds marks not saved yet. */
+export function doubtful(grade: Evaluation, form?: MarkingForm): number {
+  return grade.evidence.filter((e) => {
+    const s = e.suggestion;
+    if (s?.review?.status !== 'doubtful') return false;
+    const points = form ? formPoints(form, e) : null;
+    if (points !== null) return points === s.awarded;
+    return !!e.needs_marking || e.awarded === s.awarded;
+  }).length;
+}
+
+/* a draft with a suggestion the second check doubted, which the queue flags and lists first. */
+export function needsCheck(grade: Evaluation): boolean {
+  return grade.status === 'draft' && doubtful(grade) > 0;
+}
+
+/* the finalize dialogs' note on n doubtful suggestions, counted as `counted`; '' without any. */
+export function doubtfulNote(n: number, counted = plural(n, 'question')): string {
+  if (!n) return '';
+  return `${counted} ${n === 1 ? 'has' : 'have'} a doubtful AI suggestion. Check ${n === 1 ? 'it' : 'them'} before finalizing.`;
 }

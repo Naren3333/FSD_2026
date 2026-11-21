@@ -4,6 +4,7 @@ import { GradingApi } from '../../api/clients';
 import type { ReleasePolicy } from '../../api/models';
 import { ActionState } from '../../shared/action-state';
 import { ConfirmDialogComponent } from '../../shared/confirm-dialog';
+import { doubtfulNote } from './marking';
 
 /* what an action on the whole assessment did, and the classroom and assessment it was asked for. */
 export interface AssessmentActionDone {
@@ -29,6 +30,9 @@ export class AssessmentActionsComponent {
   @Input({ required: true }) unreleased = 0;
   /* drafts with nothing left to mark, across every page. */
   @Input({ required: true }) ready = 0;
+  /* of those, the drafts with a suggestion the second check doubted. */
+  @Input() readyDoubtful = 0;
+  readonly doubtfulNote = doubtfulNote;
   @Input({ required: true }) releasePolicy: ReleasePolicy | undefined;
   @Input({ required: true }) title: string | undefined;
   /* whether the page has marks not saved yet; it says so itself. */

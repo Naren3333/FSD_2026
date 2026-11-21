@@ -69,6 +69,7 @@ export interface components {
       finalized: number;
       unreleased: number;
       ready: number;
+      ready_doubtful: number;
     };
     Mark: {
       criteria?: {
@@ -126,6 +127,20 @@ export interface components {
       model?: string;
       reason?: string;
       scheme_passages?: number;
+      review?: {
+        status: 'pending' | 'agreed' | 'doubtful' | 'not_reviewed';
+        reasons?: ('LEVELS_DIFFER' | 'LOW_CONFIDENCE' | 'CRITIC_FLAGGED')[];
+        criteria?: {
+          criterion_id: string;
+          points: number;
+          rationale: string;
+        }[];
+        awarded: number;
+        flags?: string[];
+        confidence?: 'high' | 'medium' | 'low';
+        model?: string;
+        reason?: string;
+      };
     };
   };
   responses: never;

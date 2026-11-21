@@ -5,7 +5,7 @@ import { CurriculumNames } from '../../core/curriculum-names';
 import { assessmentsOf, studentNames } from '../../shared/names';
 import { readPage } from '../../shared/paged-section';
 import type { Section } from '../../shared/section';
-import { toMark } from './marking';
+import { needsCheck, toMark } from './marking';
 
 /* load evaluations, display names, totals and unreleased grade counts. */
 export interface Grades {
@@ -16,6 +16,8 @@ export interface Grades {
   unreleased: number;
   /* the chosen assessment's drafts with nothing left to mark, across every page: what finalizing all finalizes. */
   ready: number;
+  /* of those, the drafts with a suggestion the second check doubted (adr 0020). */
+  readyDoubtful: number;
   students: Map<string, string>;
   assessments: Map<string, Assessment>;
 }
@@ -39,6 +41,20 @@ export function matches(grade: Evaluation, kept: GradeFilter): boolean {
   if (kept === 'draft') return grade.status === 'draft';
   if (kept === 'finalized') return grade.status === 'finalized';
   return true;
+}
+
+/* the queue's order: drafts with a suggestion the second check doubted first, everything else as it came. */
+export function doubtfulFirst(list: readonly Evaluation[]): Evaluation[] {
+  const first: Evaluation[] = [];
+  const rest: Evaluation[] = [];
+  for (const g of list) (needsCheck(g) ? first : rest).push(g);
+  return [...first, ...rest];
+}
+
+/* the list in the order of the grade ids `order`, any not in it last. */
+export function inOrder(list: readonly Evaluation[], order: readonly string[]): Evaluation[] {
+  const rank = new Map(order.map((id, i) => [id, i]));
+  return [...list].sort((a, b) => (rank.get(a.id) ?? order.length) - (rank.get(b.id) ?? order.length));
 }
 
 /* the first draft after the grade `id` in the list, wrapping to earlier ones; the first draft when `id` is not in it. */
@@ -85,6 +101,7 @@ export class GradeReader {
       total: result.total,
       unreleased: counts?.unreleased ?? 0,
       ready: counts?.ready ?? 0,
+      readyDoubtful: counts?.ready_doubtful ?? 0,
       students,
       assessments,
     };

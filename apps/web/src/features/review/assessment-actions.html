@@ -57,4 +57,7 @@
       Students see them at once.
     }
   </p>
+  @if (doubtfulNote(readyDoubtful, readyDoubtful + ' of them'); as note) {
+    <p class="warning">{{ note }}</p>
+  }
 </app-confirm-dialog>

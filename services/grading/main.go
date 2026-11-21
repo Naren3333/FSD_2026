@@ -32,7 +32,8 @@ func main() {
 		dueDates := platform.Consumer{DB: a.DB, Group: "grading-due-dates-v1"}
 		users := platform.Consumer{DB: a.DB, Group: "grading-users-v1"}
 		teachers := platform.Consumer{DB: a.DB, Group: "grading-teachers-v1"}
-		marking := marker{a.DB, aiSuggester{platform.NewAICore()}}
+		// MARKING_CRITIC=off stops the second check of ready suggestions (adr 0020).
+		marking := marker{db: a.DB, ai: aiSuggester{platform.NewAICore()}, markingCritic: criticEnabled(platform.Env("MARKING_CRITIC", "on"))}
 		return []func(context.Context){
 			platform.Outbox{DB: a.DB}.Run, platform.IndexBuilder(a.DB, indexes()...),
 			func(ctx context.Context) { submissions.Consume(ctx, topicSubmitted, consume, &submissionsRunning) },

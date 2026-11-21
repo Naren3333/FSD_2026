@@ -46,7 +46,7 @@ Sizes come from the `--text-*` tokens (label 11px, xs 13px, sm 14px, base 16px, 
 - **Icons:** `<app-icon>` (`shared/icon.ts`), inline SVG paths from Lucide (ISC licence). No icon font or CDN.
 - **Page header:** `<app-page-header>` (`shared/page-header.ts`) with a title, a one-line subtitle and actions on the right. Icon-only actions stay on the title row; text buttons wrap under it.
 - **Refresh:** `<app-refresh-button>` (`shared/refresh-button.ts`), an outlined icon button named by its label (for example "Refresh assessments"). Its icon spins while busy.
-- **Chips** (`.badge`): plain teal, `.badge-good`, `.badge-warning`, `.badge-danger` and `.badge-plain`. `.ai-chip` carries the sparkles icon and reads "AI-written", "AI-written draft" or "AI draft for your review". A chip always has text.
+- **Chips** (`.badge`): plain teal, `.badge-good`, `.badge-warning`, `.badge-danger` and `.badge-plain`. `.ai-chip` carries the sparkles icon and reads "AI-written", "AI-written draft" or "AI draft for your review". Grading review's "Check AI mark" (a suggestion the second check doubted) is `.badge-warning`. A chip always has text.
 - **Filter toggles:** Grading review's status filters (All, To mark, Drafts, Finalized) are `.filter-chips` buttons with `aria-pressed`, 44px high. They are buttons, not chips.
 - **Cards:** `.panel`, with a `--line` border and `--radius`, and no shadow.
 - **Tables:** `.stack-table` turns each row into a card under 700px, with each cell labelled by its column name (`data-label`). `.table-scroll` scrolls sideways instead; the class topics table uses it.

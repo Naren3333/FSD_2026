@@ -71,6 +71,7 @@ def test_no_unguarded_secret_in_compose() -> None:
         *("ADAPTIVE_REWRITE", "ADAPTIVE_SEARCH", "CHAT_CONTEXT_TOKENS"),
         "AI_TOTAL_SPEND_LIMIT_USD",
         *("QUESTION_REVIEW", "QUESTION_REVIEW_RETRIES", "QUESTION_REVIEW_DEADLINE"),
+        "MARKING_CRITIC",
     }
 
 

@@ -742,7 +742,13 @@ def class_dashboard(u: Users, room_id: str, graded: Graded) -> None:
         {"title": a["title"], "submissions": a["submissions"]} for a in request(u.teacher, "GET", progress)
     ]
     counts = f"/grading/evaluations/counts{query}"
-    assert request(u.teacher, "GET", counts) == {"drafts": 0, "finalized": 1, "unreleased": 0, "ready": 0}
+    assert request(u.teacher, "GET", counts) == {
+        "drafts": 0,
+        "finalized": 1,
+        "unreleased": 0,
+        "ready": 0,
+        "ready_doubtful": 0,
+    }
     performance = f"/analytics/performance{query}&limit=50"
     page = request(u.teacher, "GET", performance)
     assert page["total"] >= 1 and page["offset"] == 0
@@ -916,6 +922,30 @@ def timestamp(seconds: float) -> str:
     return time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(seconds))
 
 
+def live_suggestions(u: Users, one: str) -> None:
+    """with real ai: every suggestion is ready and second-checked by the marking critic (adr 0020), and neither changes a mark."""
+    ready = eventually(
+        lambda: request(u.teacher, "GET", one),
+        lambda v: all(e["suggestion"]["status"] != "pending" for e in v["evidence"]),
+        "AI marking suggestions",
+    )
+    assert all(e["suggestion"]["status"] == "ready" for e in ready["evidence"]), ready["evidence"]
+    assert ready["evidence"][1]["suggestion"]["scheme_passages"] == 1
+
+    # a suggestion has no review when MARKING_CRITIC is off.
+    def review(e: dict[str, Any]) -> str | None:
+        return (e["suggestion"].get("review") or {}).get("status")
+
+    reviewed = eventually(
+        lambda: request(u.teacher, "GET", one),
+        lambda v: all(review(e) != "pending" for e in v["evidence"]),
+        "AI marking reviews",
+    )
+    for e in reviewed["evidence"]:
+        assert review(e) in (None, "agreed", "doubtful", "not_reviewed"), e
+        assert e["awarded"] == 0 and "marked_by" not in e, e
+
+
 def marking(u: Users, room_id: str, late: Late) -> None:
     """the teacher marks short answers and rubric questions (with ai suggestions queued, never applied), finalizes, and releases results by hand; analytics counts part marks."""
     short, free, answers = late.short, late.free, late.answers
@@ -942,14 +972,7 @@ def marking(u: Users, room_id: str, late: Late) -> None:
     )
     assert all(e["awarded"] == 0 and "marked_by" not in e for e in tried["evidence"])
     if LIVE_AI:
-        ready = eventually(
-            lambda: request(u.teacher, "GET", one),
-            lambda v: all(e["suggestion"]["status"] != "pending" for e in v["evidence"]),
-            "AI marking suggestions",
-        )
-        assert all(e["suggestion"]["status"] == "ready" for e in ready["evidence"]), ready["evidence"]
-        assert ready["evidence"][1]["suggestion"]["scheme_passages"] == 1
-        assert all(e["awarded"] == 0 and "marked_by" not in e for e in ready["evidence"])
+        live_suggestions(u, one)
     request(u.teacher, "GET", f"/grading/evaluations?classroom_id={room_id}&assessment_id=nope", 422)
 
     finalize = f"/grading/evaluations/{grade['id']}/finalize"
@@ -984,13 +1007,20 @@ def marking(u: Users, room_id: str, late: Late) -> None:
     )
     assert sql_value("grading", finalized_events) == "0", "grading.finalized.v3 was published before release"
     counts = f"/grading/evaluations/counts?classroom_id={room_id}"
-    assert request(u.teacher, "GET", counts) == {"drafts": 0, "finalized": 2, "unreleased": 1, "ready": 0}
+    assert request(u.teacher, "GET", counts) == {
+        "drafts": 0,
+        "finalized": 2,
+        "unreleased": 1,
+        "ready": 0,
+        "ready_doubtful": 0,
+    }
     # one assessment's counts are those its release acts on.
     assert request(u.teacher, "GET", f"{counts}&assessment_id={late.assessment_id}") == {
         "drafts": 0,
         "finalized": 1,
         "unreleased": 1,
         "ready": 0,
+        "ready_doubtful": 0,
     }
     release = "/grading/evaluations/release"
     request(u.student, "POST", release, 403, json={"assessment_id": late.assessment_id})
@@ -1449,7 +1479,7 @@ def databases() -> None:
         ("content", "1,2,3,4,5,6"),
         ("identity", "1,2,3,4,5,6,7,8,9"),
         ("assessment", "1,2,3,4,5,6"),
-        ("grading", "1,2,3,4,5,6,7,8,9,10"),
+        ("grading", "1,2,3,4,5,6,7,8,9,10,11"),
         ("analytics", "1,2,3,4,5,6,7,8,9,10,11,12,13"),
         ("curriculum", "1,2"),
         ("chatbot", "1,2,3,4,5,6"),
@@ -1733,7 +1763,13 @@ def reopen_and_bulk_finalize(u: Users, room_id: str, graded: Graded) -> None:
     mine = f"/grading/evaluations/mine/page?classroom_id={room_id}&limit=1"
     assert request(u.student, "GET", mine) == {"items": [], "total": 0}
     counts = f"/grading/evaluations/counts?classroom_id={room_id}&assessment_id={assessment}"
-    assert request(u.teacher, "GET", counts) == {"drafts": 1, "finalized": 0, "unreleased": 0, "ready": 1}
+    assert request(u.teacher, "GET", counts) == {
+        "drafts": 1,
+        "finalized": 0,
+        "unreleased": 0,
+        "ready": 1,
+        "ready_doubtful": 0,
+    }
     eventually(
         lambda: request(u.teacher, "GET", graded.performance_path)["topics"],
         lambda topics: topics == [],

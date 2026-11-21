@@ -1,6 +1,16 @@
 import { describe, expect, it } from 'vitest';
-import type { Evidence, Question } from '../../api/models';
-import { applySuggestion, markingForm, marksOf, suggestionReason } from './marking';
+import type { Evaluation, Evidence, Question, Suggestion } from '../../api/models';
+import { doubtfulFirst, inOrder } from './grades';
+import {
+  applySuggestion,
+  doubtful,
+  doubtfulNote,
+  markingForm,
+  marksOf,
+  reviewDifferences,
+  reviewText,
+  suggestionReason,
+} from './marking';
 
 const rubricQuestion: Question = {
   id: 'free',
@@ -124,5 +134,102 @@ describe('marking form', () => {
     expect(suggestionReason({ status: 'failed', awarded: 0, reason: 'STUDENT_REMOVED' })).toContain(
       'removed from the classroom',
     );
+  });
+});
+
+const suggested: Suggestion = {
+  status: 'ready',
+  awarded: 5,
+  confidence: 'high',
+  criteria: [
+    { criterion_id: 'c1', points: 4, evidence_quotes: ['light'], rationale: 'Right idea.' },
+    { criterion_id: 'c2', points: 1, evidence_quotes: ['clear'], rationale: 'Clear.' },
+  ],
+};
+const reviewed = (review: Suggestion['review']): Suggestion => ({ ...suggested, review });
+
+describe("the marking critic's second check", () => {
+  it('says what it found in words', () => {
+    expect(reviewText(suggested)).toBe('');
+    expect(reviewText(reviewed({ status: 'pending', awarded: 0 }))).toBe('Second check running.');
+    expect(reviewText(reviewed({ status: 'pending', awarded: 0, reason: 'AI_SPEND_LIMIT' }))).toBe(
+      'Second check waiting. Waiting for your daily AI allowance to reset.',
+    );
+    expect(reviewText(reviewed({ status: 'agreed', awarded: 5 }))).toBe('Second check agrees.');
+    expect(reviewText(reviewed({ status: 'not_reviewed', awarded: 0, reason: 'UNGROUNDED' }))).toBe(
+      'Not second-checked: the second marking quoted words that are not in the answer.',
+    );
+    expect(reviewText(reviewed({ status: 'not_reviewed', awarded: 0, reason: 'SOMETHING' }))).toBe(
+      'Not second-checked: it could not be made.',
+    );
+  });
+
+  it('names the criteria it marked differently, with both levels', () => {
+    const doubt = reviewed({
+      status: 'doubtful',
+      awarded: 1,
+      reasons: ['LEVELS_DIFFER', 'LOW_CONFIDENCE'],
+      criteria: [
+        { criterion_id: 'c1', points: 0, rationale: 'Not explained.' },
+        { criterion_id: 'c2', points: 1, rationale: 'Clear.' },
+      ],
+    });
+    expect(reviewDifferences(doubt)).toEqual([
+      { criterion_id: 'c1', suggested: 4, second: 0, rationale: 'Not explained.' },
+    ]);
+    expect(reviewText(doubt, rubricQuestion)).toBe(
+      'Second check disagrees: Accuracy 4 vs 0; one of the two markings was unsure.',
+    );
+    const flagged = reviewed({
+      status: 'doubtful',
+      awarded: 5,
+      reasons: ['CRITIC_FLAGGED'],
+      flags: ['off_topic'],
+    });
+    expect(reviewText(flagged, rubricQuestion)).toBe('Second check has doubts: it raised a flag.');
+  });
+
+  it('warns before finalizing a grade with doubtful suggestions, and sorts those drafts first', () => {
+    const grade = (id: string, status: Evaluation['status'], review?: Suggestion['review']): Evaluation => ({
+      id,
+      assessment_id: 'a1',
+      classroom_id: 'c1',
+      student_id: id,
+      status,
+      evidence: [{ ...evidence[2], suggestion: reviewed(review) }],
+      answers: {},
+      late: false,
+    });
+    const doubt = { status: 'doubtful' as const, awarded: 0, reasons: ['LEVELS_DIFFER' as const] };
+    const list = [
+      grade('g1', 'draft', { status: 'agreed', awarded: 5 }),
+      grade('g2', 'finalized', doubt),
+      grade('g3', 'draft', doubt),
+      grade('g4', 'draft'),
+      grade('g5', 'draft', doubt),
+    ];
+    expect(doubtful(list[2])).toBe(1);
+    expect(doubtfulNote(doubtful(list[0]))).toBe('');
+    expect(doubtfulNote(doubtful(list[2]))).toBe(
+      '1 question has a doubtful AI suggestion. Check it before finalizing.',
+    );
+    const two = { ...list[2], evidence: [list[2].evidence[0], { ...list[2].evidence[0], question_id: 'x' }] };
+    expect(doubtfulNote(doubtful(two))).toBe(
+      '2 questions have a doubtful AI suggestion. Check them before finalizing.',
+    );
+    // a doubt stops counting once the teacher's saved mark gives another total than the suggestion's.
+    const suggestedTotal = list[2].evidence[0].suggestion!.awarded;
+    const marked = (awarded: number): Evaluation => ({
+      ...list[2],
+      evidence: [{ ...list[2].evidence[0], needs_marking: false, marked_by: 'teacher', awarded }],
+    });
+    expect(doubtful(marked(suggestedTotal))).toBe(1);
+    expect(doubtful(marked(suggestedTotal + 1))).toBe(0);
+    // only drafts move, and otherwise the order is kept.
+    expect(doubtfulFirst(list).map((g) => g.id)).toEqual(['g3', 'g5', 'g1', 'g2', 'g4']);
+    // a grade finalized since keeps the place it had.
+    const order = doubtfulFirst(list).map((g) => g.id);
+    const after = list.map((g) => (g.id === 'g3' ? { ...g, status: 'finalized' as const } : g));
+    expect(inOrder(after, order).map((g) => g.id)).toEqual(['g3', 'g5', 'g1', 'g2', 'g4']);
   });
 });

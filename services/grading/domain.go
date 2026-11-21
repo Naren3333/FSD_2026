@@ -101,7 +101,46 @@ type Suggestion struct {
 	Reason string `json:"reason,omitempty"`
 	// SchemePassages is how many of the question's marking-scheme passages the model was given.
 	SchemePassages int `json:"scheme_passages,omitempty"`
+	// review is the marking critic's second check of a ready suggestion (adr 0020); absent when the critic is off.
+	Review *SuggestionReview `json:"review,omitempty"`
 }
+
+// SuggestionReview is a second, blind ai marking of the same answer, compared with the suggestion in code.
+type SuggestionReview struct {
+	Status string `json:"status"` // pending, agreed, doubtful or not_reviewed
+	// reasons say why it is doubtful: LEVELS_DIFFER, LOW_CONFIDENCE or CRITIC_FLAGGED.
+	Reasons  []string            `json:"reasons,omitempty"`
+	Criteria []ReviewedCriterion `json:"criteria,omitempty"`
+	Awarded  int                 `json:"awarded"`
+	// flags are the known flags the second marking raised that the suggestion did not.
+	Flags      []string `json:"flags,omitempty"`
+	Confidence string   `json:"confidence,omitempty"`
+	Model      string   `json:"model,omitempty"`
+	// reason says why it is still waiting or was not reviewed.
+	Reason string `json:"reason,omitempty"`
+}
+
+// ReviewedCriterion is the level the second marking chose for one criterion.
+type ReviewedCriterion struct {
+	Criterion string `json:"criterion_id"`
+	Points    int    `json:"points"`
+	Rationale string `json:"rationale"`
+}
+
+// review statuses and doubt reasons.
+const (
+	reviewPending     = "pending"
+	reviewAgreed      = "agreed"
+	reviewDoubtful    = "doubtful"
+	reviewNotReviewed = "not_reviewed"
+
+	doubtLevelsDiffer  = "LEVELS_DIFFER"
+	doubtLowConfidence = "LOW_CONFIDENCE"
+	doubtCriticFlagged = "CRITIC_FLAGGED"
+
+	// reasonFinalized is a review's reason when the grade was finalized before it could run.
+	reasonFinalized = "FINALIZED"
+)
 
 // SuggestedCriterion is the level suggested for one criterion, with the student's own words that justify
 // it.
