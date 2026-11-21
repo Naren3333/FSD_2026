@@ -166,3 +166,7 @@ export type Guidance = Generation['Guidance'];
 export type Interpretation = PerformanceAgentApi['schemas']['ResponseContract'];
 export type InterpretationEvidence = PerformanceAgentApi['schemas']['Evidence'];
 export type InterpretationStep = PerformanceAgentApi['schemas']['Step'];
+/* a teacher's question about a whole class and the agent's checked answer, for their review (adr 0021). */
+export type ClassInsightsRequest = PerformanceAgentApi['schemas']['ClassInsightsRequest'];
+export type ClassInsights = PerformanceAgentApi['schemas']['ClassInsightsResponse'];
+export type ClassEvidence = PerformanceAgentApi['schemas']['ClassEvidence'];

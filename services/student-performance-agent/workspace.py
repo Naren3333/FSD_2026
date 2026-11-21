@@ -10,6 +10,7 @@ from upstream import (
     ClassStudent,
     CriterionScore,
     Evaluation,
+    Evidence,
     TeacherQuestion,
     TopicMetrics,
     TopicName,
@@ -69,19 +70,93 @@ class Topic:
     topic_id: str
     name: str
 
+    @property
+    def label(self) -> str:
+        """the topic as a step names it to the teacher."""
+        return self.name or "a topic"
+
+
+def title_of(assessment: Assessment | None) -> str:
+    return clip(assessment["title"] if assessment else "Deleted assessment", 160)
+
+
+def questions_of(assessment: Assessment | None) -> dict[str, TeacherQuestion]:
+    """the assessment's questions by id; none once it is deleted."""
+    return {q["id"]: q for q in assessment["questions"]} if assessment else {}
+
+
+def new_question(
+    ref: str, v: Evaluation, e: Evidence, title: str, questions: Mapping[str, TeacherQuestion]
+) -> Question:
+    """one answer of a finalized evaluation, joined to the teacher's question."""
+    return Question(
+        ref,
+        e["question_id"],
+        v["id"],
+        v["assessment_id"],
+        title,
+        e["topic_id"],
+        e["awarded"],
+        e["possible"],
+        questions.get(e["question_id"]),
+        (v.get("answers") or {}).get(e["question_id"], ""),
+        e.get("feedback") or "",
+        e.get("criteria") or [],
+    )
+
+
+def new_result(ref: str, v: Evaluation, title: str, questions: list[Question]) -> Result:
+    return Result(
+        ref,
+        v["id"],
+        v["assessment_id"],
+        title,
+        (v.get("finalized_at") or "")[:10],
+        v.get("late", False),
+        bool(v.get("released_at")),
+        questions,
+    )
+
+
+def question_text(question: Mapping[str, Any]) -> tuple[str, str, str | None]:
+    """a question's type, prompt and expected answer as the model is shown them; none when it has no answer."""
+    expected = question.get("answer") or "; ".join(question.get("accepted_answers") or [])
+    expected = expected or (question.get("rubric") or {}).get("model_answer")
+    return (
+        question.get("type") or "unknown",
+        clip(question.get("prompt")) or "(question no longer available)",
+        clip(expected) if expected else None,
+    )
+
+
+def evidence_fields(q: Question) -> dict[str, Any]:
+    """the fields a response's evidence item takes from a cited question."""
+    return {
+        "question_id": q.question_id,
+        "evaluation_id": q.evaluation_id,
+        "assessment_id": q.assessment_id,
+        "assessment_title": q.assessment_title,
+        "topic_id": q.topic_id,
+        "prompt": str((q.question["prompt"] if q.question else "") or ""),
+        "awarded": q.awarded,
+        "possible": q.possible,
+    }
+
 
 @dataclass
 class Workspace:
     results: list[Result] = field(default_factory=list)
     topics: dict[str, Topic] = field(default_factory=dict)  # by topic id
     summary: list[TopicMetrics] = field(default_factory=list)  # analytics' topic metrics
+    by_ref: dict[str, Topic] = field(default_factory=dict)  # the same topics by "T" reference
 
     # ---- building it
 
     def topic(self, topic_id: str, name: str = "") -> Topic:
         name = clip(name, 160)
         if topic_id not in self.topics:
-            self.topics[topic_id] = Topic(f"T{len(self.topics) + 1}", topic_id, name)
+            topic = self.topics[topic_id] = Topic(f"T{len(self.topics) + 1}", topic_id, name)
+            self.by_ref[topic.ref] = topic
         elif name and not self.topics[topic_id].name:
             self.topics[topic_id].name = name
         return self.topics[topic_id]
@@ -91,41 +166,13 @@ class Workspace:
         count = 0
         for v in evaluations[:MAX_RESULTS]:
             assessment = assessments.get(v["assessment_id"])
-            title = clip(assessment["title"] if assessment else "Deleted assessment", 160)
-            by_id = {q["id"]: q for q in assessment["questions"]} if assessment else {}
-            answers = v.get("answers") or {}
+            title, by_id = title_of(assessment), questions_of(assessment)
             questions = []
             for e in v["evidence"]:
                 count += 1
                 self.topic(e["topic_id"])
-                questions.append(
-                    Question(
-                        f"E{count}",
-                        e["question_id"],
-                        v["id"],
-                        v["assessment_id"],
-                        title,
-                        e["topic_id"],
-                        e["awarded"],
-                        e["possible"],
-                        by_id.get(e["question_id"]),
-                        answers.get(e["question_id"], ""),
-                        e.get("feedback") or "",
-                        e.get("criteria") or [],
-                    )
-                )
-            self.results.append(
-                Result(
-                    f"R{len(self.results) + 1}",
-                    v["id"],
-                    v["assessment_id"],
-                    title,
-                    (v.get("finalized_at") or "")[:10],
-                    v.get("late", False),
-                    bool(v.get("released_at")),
-                    questions,
-                )
-            )
+                questions.append(new_question(f"E{count}", v, e, title, by_id))
+            self.results.append(new_result(f"R{len(self.results) + 1}", v, title, questions))
 
     def add_summary(self, topics: list[TopicMetrics]) -> None:
         """validated analytics rows used by the overview and tools."""
@@ -146,7 +193,7 @@ class Workspace:
         return next((r for r in self.results if r.ref == ref), None)
 
     def topic_by_ref(self, ref: object) -> Topic | None:
-        return next((t for t in self.topics.values() if t.ref == ref), None)
+        return self.by_ref.get(ref) if isinstance(ref, str) else None
 
     def topic_name(self, topic_id: str) -> str:
         topic = self.topics.get(topic_id)
@@ -213,28 +260,26 @@ class Workspace:
         shown = chosen[:MAX_READ]
         return {
             "assessment": result.title,
-            "questions": [self._answer(q) for q in shown],
+            "questions": [self.answer(q) for q in shown],
             "not_shown": len(chosen) - len(shown),
         }
 
-    def _answer(self, q: Question) -> dict[str, Any]:
+    def answer(self, q: Question) -> dict[str, Any]:
         question: Mapping[str, Any] = q.question or {}
+        kind, prompt, expected = question_text(question)
         row: dict[str, Any] = {
             "evidence": q.ref,
             "topic": self.topics[q.topic_id].ref,
-            "type": question.get("type") or "unknown",
-            "prompt": clip(question.get("prompt")) or "(question no longer available)",
+            "type": kind,
+            "prompt": prompt,
             "student_answer": clip(q.answer) or "(blank)",
             "marks": f"{q.awarded}/{q.possible}",
         }
         if question.get("options"):
             row["options"] = [clip(o, 120) for o in question["options"]]
-        expected = question.get("answer") or "; ".join(question.get("accepted_answers") or [])
+        if expected is not None:
+            row["expected"] = expected
         rubric = question.get("rubric") or {}
-        if expected:
-            row["expected"] = clip(expected)
-        elif rubric.get("model_answer"):
-            row["expected"] = clip(rubric["model_answer"])
         if rubric.get("criteria") and q.criteria:
             earned = {c.get("criterion_id"): c.get("points") for c in q.criteria}
             row["rubric"] = [

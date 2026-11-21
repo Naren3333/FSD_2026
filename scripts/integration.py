@@ -786,6 +786,47 @@ def performance_interpretation(u: Users, room_id: str) -> None:
     validate_response("POST", path, answered.status_code, answered.json())
 
 
+def class_insights(u: Users, room_id: str) -> None:
+    """the class-insights copilot answers the classroom's teacher only (adr 0021): no model call for a class with nothing released, a checked answer with live ai, and otherwise an answer or a plain refusal without provider keys."""
+    path = "/performance-agent/class_insights"
+    body = {"classroom_id": room_id, "question": "Who is struggling, and with which topics?"}
+    assert httpx.post(BASE + path, json=body).status_code == 401
+    request(u.student, "POST", path, 403, json=body)
+    request(u.other, "POST", path, 403, json=body)
+    request(u.teacher, "POST", path, 422, json={"classroom_id": room_id})
+    request(u.teacher, "POST", path, 422, json={**body, "previous_questions": ["a", "b", "c", "d"]})
+    empty = school_classroom(u, f"Integration insights {uuid4().hex[:8]}")
+    refused = request(u.teacher, "POST", path, 422, json={**body, "classroom_id": empty["id"]})
+    assert refused["error"]["code"] == "NO_EVIDENCE", refused
+    answered = u.teacher.post(path, json=body, timeout=310)
+    code = answered.json()["error"]["code"] if answered.status_code == 422 else ""
+    # one student with a short test may give the model nothing to report. with live ai only that is accepted,
+    # never a draft the checks threw out, which would hide a broken copilot.
+    found_nothing = code == "NOTHING_TO_ANSWER"
+    if LIVE_AI and not found_nothing:
+        assert answered.status_code == 200, answered.text
+        data = answered.json()
+        cited = {e["evidence_id"] for e in data["evidence"]}
+        named = {s["student_id"] for s in data["students"]}
+        sections = ("struggling", "observations", "possible_misconceptions", "reteach")
+        assert data["requires_teacher_review"] is True and any(data[k] for k in sections), data
+        statements = data["observations"] + data["possible_misconceptions"] + data["reteach"]
+        assert all(set(s["evidence_ids"]) <= cited for s in statements), data
+        assert all(set(g["student_ids"]) <= named for g in data["struggling"]), data
+        # the only enrolled student is the only one it may name, by the roster's name.
+        assert named <= {u.student_id} and all(s["display_name"] for s in data["students"]), data
+    elif not LIVE_AI:
+        assert (
+            code in ("NOTHING_TO_ANSWER", "INSIGHTS_REJECTED")
+            or answered.status_code == 200
+            or (
+                answered.status_code == 503
+                and answered.json()["error"]["code"] == "AI_PROVIDER_NOT_CONFIGURED"
+            )
+        ), answered.text
+    validate_response("POST", path, answered.status_code, answered.json())
+
+
 @dataclass
 class Late:
     assessment_id: str
@@ -1604,7 +1645,7 @@ def main() -> None:
         "draft and scheduled assessments, saved answers, late submissions, short-answer and rubric marking, "
         "AI marking suggestions, manual release (no analytics before it), part marks in analytics, "
         "student privacy, database isolation, numbered migrations, pgvector, AI service accounts, teacher-only "
-        "performance interpretation, per-session rate limiting."
+        "performance interpretation and class insights, per-session rate limiting."
     )
 
 
@@ -1620,6 +1661,7 @@ def run() -> None:
     step("Class dashboard", lambda: class_dashboard(users, room_id, graded))
     step("Reopening and bulk finalizing", lambda: reopen_and_bulk_finalize(users, room_id, graded))
     step("Performance interpretation", lambda: performance_interpretation(users, room_id))
+    step("Class insights", lambda: class_insights(users, room_id))
     late = step("Assessment lifecycle", lambda: lifecycle(users, room_id))
     step("Marking and release", lambda: marking(users, room_id, late))
     step("Question bank and resits", lambda: bank_and_resits(users, room_id))

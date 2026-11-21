@@ -4,11 +4,59 @@ export type paths = Record<string, never>;
 export type webhooks = Record<string, never>;
 export interface components {
   schemas: {
+    CitedStudent: {
+      student_id: string;
+      display_name: string;
+    };
     ClassComparisonScope: {
       population: number;
       compared: number;
       partial: boolean;
       selection?: 'roster_order';
+    };
+    ClassEvidence: {
+      question_id: string;
+      evaluation_id: string;
+      assessment_id: string;
+      assessment_title: string;
+      topic_id: string;
+      prompt: string;
+      awarded: number;
+      possible: number;
+      evidence_id: string;
+      student_id: string;
+    };
+    ClassInsightsRequest: {
+      classroom_id: string;
+      question: string;
+      previous_questions?: string[];
+    };
+    ClassInsightsResponse: {
+      classroom_id: string;
+      question: string;
+      struggling: components['schemas']['StrugglingGroup'][];
+      observations: components['schemas']['ClassObservation'][];
+      possible_misconceptions: components['schemas']['ClassMisconception'][];
+      reteach: components['schemas']['Reteach'][];
+      students: components['schemas']['CitedStudent'][];
+      evidence: components['schemas']['ClassEvidence'][];
+      steps: components['schemas']['Step'][];
+      model_turns: number;
+      dropped: {
+        [key: string]: number;
+      };
+      scope: components['schemas']['ClassComparisonScope'];
+      requires_teacher_review?: true;
+    };
+    ClassMisconception: {
+      text: string;
+      evidence_ids: string[];
+    };
+    ClassObservation: {
+      text: string;
+      topic_ids: string[];
+      student_ids: string[];
+      evidence_ids: string[];
     };
     ErrorBody: {
       code: string;
@@ -52,11 +100,21 @@ export interface components {
       class_comparison_scope?: components['schemas']['ClassComparisonScope'] | null;
       requires_teacher_review?: true;
     };
+    Reteach: {
+      topic_id: string;
+      text: string;
+      evidence_ids: string[];
+    };
     Step: {
       tool: string;
       reason: string;
       target: string;
       outcome: 'ok' | 'refused' | 'failed';
+    };
+    StrugglingGroup: {
+      topic_id: string;
+      student_ids: string[];
+      text: string;
     };
   };
   responses: never;

@@ -8,7 +8,7 @@ The agentic features we could build, in the order we plan to take them, and wher
 | 2 | Marking critic and escalation | Built (ADR 0020) | No |
 | 3 | Question generation critic loop | Built (ADR 0015) | Reads the passages generation already has |
 | 4 | Adaptive resit agent | Proposed, needs a question bank | Only if it generates new questions |
-| 5 | Teacher class-insights copilot | Proposed | Yes, if it searches materials |
+| 5 | Teacher class-insights copilot | Built (ADR 0021) | No: it does not search materials |
 | 6 | Interpretation on finalization | Proposed, after 1 | No |
 
 How the workflows would feed each other once built (thick border: built, dashed: proposed):
@@ -26,19 +26,19 @@ flowchart TB
   W4 -.->|bank short of questions| W3[Workflow 3: Question generation critic loop]
   W3 --> Editor[Teacher adds drafts to an assessment]
   W4 -.->|teacher approves| Editor
-  W5[Workflow 5: Class-insights copilot] -.->|tool| W1
-  W5 -.->|tools| Data[Analytics, Grading, Curriculum]
+  W5[Workflow 5: Class-insights copilot] -->|teacher follows a student link| W1
+  W5 -->|tools| Data[Analytics, Grading, Assessment, Curriculum, Identity]
   classDef built stroke-width:3px
   classDef proposed stroke-dasharray:4 3
-  class W1,W2,W3 built;
-  class W4,W5,W6 proposed;
+  class W1,W2,W3,W5 built;
+  class W4,W6 proposed;
 ```
 
 ## What makes these agentic
 
 Every earlier AI feature is a fixed pipeline: code chooses the inputs and makes one structured model call. In these workflows the model chooses what to look at next (tools), a later step checks or revises an earlier one (critics), or one agent's output starts another's work (hand-offs). Each one keeps the project's rules: every model call goes through ai-core and is billed to a person, tools read with the user's own token, nothing reaches a student or changes a grade without the teacher, and every claim is checked against the evidence it cites.
 
-ADR 0014 built the pattern the others reuse, inside `student-performance-agent`: a turn loop over ai-core's structured `generate` (no tool-calling API was needed), short references the model cites instead of ids, a turn limit and a deadline that force a report, a step trace for the teacher, and checks that drop anything the gathered evidence does not support. If a second agent needs it, move the loop into `learning_transport` then, not before.
+ADR 0014 built the pattern the others reuse, inside `student-performance-agent`: a turn loop over ai-core's structured `generate` (no tool-calling API was needed), short references the model cites instead of ids, a turn limit and a deadline that force a report, a step trace for the teacher, and checks that drop anything the gathered evidence does not support. Workflow 5 is its second user, in the same service, so the loop moved into the service's own `loop.py` and not into `learning_transport` (ADR 0021).
 
 A fixed pipeline next to the two agentic shapes built so far:
 
@@ -50,7 +50,7 @@ flowchart LR
     C3 -->|rejected, with reason| C1
     C3 -->|passed or flagged| C4[Drafts for the teacher]
   end
-  subgraph Tools["Tool loop: workflow 1"]
+  subgraph Tools["Tool loop: workflows 1 and 5"]
     direction LR
     T1[Opening evidence] --> T2{Model turn}
     T2 -->|tool calls| T3[Read-only tools] --> T2
@@ -206,7 +206,29 @@ Takes the topics the interpretation agent recommends, picks questions on them fr
 
 ## 5. Teacher class-insights copilot
 
-A chat for teachers ("who is struggling with recursion, and what should I reteach?") that answers with tools over Analytics, Grading, Curriculum and the interpretation agent, citing students and questions. Searching teaching material would go through Content's search, so agree that part with the retrieval work first. Effort: medium to large.
+Built. A teacher asks one question about a class ("who is struggling with recursion, and what should I reteach?") and gets one checked answer: who is struggling with which topic, observations, possible misconceptions and what to reteach, each with the answers it rests on. It is a second route in student-performance-agent, `POST /v1/class_insights`, on the interpretation agent's loop (`loop.py`) with its own workspace, tools, prompts and checks. It is stateless: a follow-up resends up to three earlier questions as context, and the evidence is read again every time. The model sees students as `S1` references only; their names are added after the checks, and each cited student links to Learning performance for an interpretation. It does not search Content. Services: student-performance-agent, Analytics, Grading, Assessment, Curriculum, Identity, ai-core. See ADR 0021.
+
+```mermaid
+flowchart TD
+  Ask([Teacher asks a question]) --> Auth[Identity: classroom's teacher?]
+  Auth --> Open["Side by side: Analytics class metrics (first 200),<br/>Identity roster names (kept in the agent),<br/>then Curriculum topic names"]
+  Open -->|no released evidence| Empty[422 NO_EVIDENCE, no model call]
+  Open --> Loop["Shared turn loop: up to 5 turns,<br/>refs S1, T1, Q1, R1, E1 only"]
+  subgraph Tools["Read-only tools, side by side"]
+    TD[topic_detail T#]
+    TQ["topic_questions T#<br/>one shared class read from Grading"]
+    SR["student_results S#"]
+    RA["read_answers Q# or R#"]
+    PR["prerequisites T#"]
+  end
+  Loop <--> Tools
+  Loop --> Check["Checks: struggling students need enough evidence and a weak result,<br/>statements cite shown topics or answers,<br/>misconceptions cite read answers that lost marks,<br/>percentages match shares shown for what an item cites"]
+  Check -->|nothing survives| Rejected[422 INSIGHTS_REJECTED]
+  Check -->|nothing reported| Nothing[422 NOTHING_TO_ANSWER]
+  Check -->|some survive| Names[Names added for cited students] --> Draft([Draft for the teacher, nothing saved])
+```
+
+`scripts/eval/run_class_insights.py` checks it on two scripted classes, repeatably (`docs/development/operations.md`, Agent evals). Not built: saved threads, material search, and running the interpretation agent from inside it.
 
 ## 6. Interpretation on finalization
 

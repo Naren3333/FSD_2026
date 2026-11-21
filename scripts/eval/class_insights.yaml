@@ -1,0 +1,70 @@
+# the class insights eval (adr 0021): a scripted class of known shape, and the questions a teacher asks about it.
+# load_class_insights.py seeds it in its own classroom, with the performance eval's topics and assessments
+# (performance.yaml) under this prefix; run_class_insights.py checks the answers. every answer not listed is
+# right, the joins answers of performance.yaml's class_wide are wrong for everyone who does not override them,
+# and a free response not listed gets full marks.
+
+classroom: Class insights eval
+prefix: "Eval insights · "
+
+students:
+  ci-steady-a:
+    sits: [basics, recursion, joins]
+  ci-steady-b:  # strong everywhere, joins included
+    sits: [basics, recursion, joins]
+    answers:
+      j2: "All rows of the left table"
+      j4: "12"
+      j5: "Use a LEFT JOIN to keep every customer even without orders; an INNER JOIN drops them."
+  ci-steady-c:
+    sits: [basics, recursion, joins]
+  ci-weak-all:  # weak on every topic
+    sits: [basics, recursion, joins]
+    answers:
+      f1: "0"
+      f2: "func"
+      f3: "parameter"
+      f4: "Everywhere in the module"
+      f5: "A parameter and an argument are the same thing."
+      f6: "print"
+      l1: "2"
+      l2: "continue"
+      l3: "5"
+      l4: "A nested loop"
+      r1: "A loop"
+      r2: "It returns None"
+      r3: "0"
+      r4: "def total(xs): return xs[0] + total(xs)"
+      r5: "It prints 3."
+      r6: "There are none"
+    marks:
+      f5: {criteria: [0, 0], feedback: "They are not the same: the parameter is the name, the argument the value."}
+      r4: {criteria: [0, 0], feedback: "No base case, and the list never gets shorter."}
+      r5: {criteria: [0], feedback: "It never stops: there is no base case."}
+  ci-few-results:  # one functions question only, answered wrongly: too little evidence to call a struggle
+    sits: [recursion]
+    answers:
+      f6: "print"
+
+# who a good answer names as struggling with each topic, and who it must never name as struggling.
+expect:
+  struggling:
+    SQL joins: [ci-steady-a, ci-steady-c, ci-weak-all]
+    Functions: [ci-weak-all]
+    Loops: [ci-weak-all]
+    Recursion: [ci-weak-all]
+  never_struggling: [ci-steady-b, ci-few-results]
+
+cases:
+  struggling:
+    question: "Who is struggling, and with which topics?"
+    tools: [topic_questions]
+  reteach:
+    question: "What should I reteach first?"
+    tools: [topic_questions]
+    reteach: [SQL joins]
+  follow-up:
+    question: "Which joins questions lost the class the most marks, and why?"
+    previous_questions: ["Who is struggling, and with which topics?"]
+    tools: [topic_questions, read_answers]
+    reteach: [SQL joins]

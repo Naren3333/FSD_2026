@@ -50,10 +50,11 @@ flowchart LR
   SP -->|generate as student-performance-agent| AI
   SP -->|read with the teacher's token| Analytics
   SP -->|read with the teacher's token| Grading
+  SP -->|roster names, kept from the model| Identity
   subgraph AI applications
     AI[AI core: ingest, embed, generate, rerank]
     QG[Question generation]
-    SP[Performance interpretation]
+    SP[Performance interpretation and class insights]
     QC[Question chatbot]
   end
 ```
@@ -123,4 +124,4 @@ Grading asks ai-core for marking suggestions when an assessment turns them on (A
 
 Question generation (ADR 0006) drafts questions and marking guidance for a classroom's teacher. It reads the topic from Curriculum and passages from Content's search with the teacher's own token, makes one structured ai-core call billed to the teacher, and returns only drafts whose cited passages and quoted evidence check out. It stores nothing: the teacher adds drafts to the editor, and Assessment validates them like any question. Generated questions keep their `sources` and `origin` for the teacher; the submission event leaves them out.
 
-Performance interpretation (ADR 0014) is the first agent that chooses its own steps. For a classroom's teacher it reads one enrolled student's topic summary (Analytics), finalized results (Grading), the assessments' questions (Assessment) and topic names (Curriculum) with the teacher's own token, then runs at most five structured ai-core turns billed to the teacher. Each turn either calls read-only tools (read the answers behind a result, read a topic's prerequisites, compare with the class) or reports; the last turn must report. The report is checked against what the tools returned and comes back with its cited questions and the agent's steps. It stores nothing and never changes a grade, and it does not search Content. The workflows planned after it are listed in `agentic-workflows.md`. No agent accesses business databases or uses test doubles in runtime code.
+Performance interpretation (ADR 0014) is the first agent that chooses its own steps. For a classroom's teacher it reads one enrolled student's topic summary (Analytics), finalized results (Grading), the assessments' questions (Assessment) and topic names (Curriculum) with the teacher's own token, then runs at most five structured ai-core turns billed to the teacher. Each turn either calls read-only tools (read the answers behind a result, read a topic's prerequisites, compare with the class) or reports; the last turn must report. The report is checked against what the tools returned and comes back with its cited questions and the agent's steps. It stores nothing and never changes a grade, and it does not search Content. Class insights (ADR 0021) is a second route in the same service, on the same turn loop (`loop.py`): a classroom's teacher asks one question about the class, and the agent opens with the class's released topic metrics (Analytics), the roster's names (Identity) and the topic names (Curriculum), then reads topic details, the class's finalized answers per question (Grading and Assessment), one student's results or prerequisites as tools. The model sees students as references only; their names are added after the checks, for the cited students. The workflows planned after these are listed in `agentic-workflows.md`. No agent accesses business databases or uses test doubles in runtime code.

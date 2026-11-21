@@ -13,6 +13,11 @@ def select_cases(cases: list[dict], ids: list[str] | None) -> list[dict]:
     return [c for c in cases if c["id"] in ids]
 
 
+def ratio(part: float, whole: int) -> float | None:
+    """part over whole to three places; none when there is nothing to divide by."""
+    return round(part / whole, 3) if whole else None
+
+
 def checkpoint(path: Path, report: dict) -> None:
     """replace the last complete json checkpoint; never truncate it in place."""
     path.parent.mkdir(parents=True, exist_ok=True)

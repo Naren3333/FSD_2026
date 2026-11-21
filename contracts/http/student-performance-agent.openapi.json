@@ -145,6 +145,115 @@
                 }
               }
             }
+          },
+          "504": {
+            "description": "Gateway Timeout",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/class_insights": {
+      "post": {
+        "summary": "Class Insights",
+        "description": "a draft answer to the teacher's question about their class, for them to review; students are named only after the checks, and nothing is saved.",
+        "operationId": "class_insights_v1_class_insights_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ClassInsightsRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ClassInsightsResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Unprocessable Content",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Too Many Requests",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "Bad Gateway",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Service Unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "504": {
+            "description": "Gateway Timeout",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
           }
         }
       }
@@ -152,6 +261,26 @@
   },
   "components": {
     "schemas": {
+      "CitedStudent": {
+        "properties": {
+          "student_id": {
+            "type": "string",
+            "title": "Student Id"
+          },
+          "display_name": {
+            "type": "string",
+            "title": "Display Name"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "student_id",
+          "display_name"
+        ],
+        "title": "CitedStudent",
+        "description": "a student the report names, for the teacher only: the model saw references, never names."
+      },
       "ClassComparisonScope": {
         "properties": {
           "population": {
@@ -183,6 +312,270 @@
           "partial"
         ],
         "title": "ClassComparisonScope"
+      },
+      "ClassEvidence": {
+        "properties": {
+          "question_id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Question Id"
+          },
+          "evaluation_id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Evaluation Id"
+          },
+          "assessment_id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Assessment Id"
+          },
+          "assessment_title": {
+            "type": "string",
+            "title": "Assessment Title"
+          },
+          "topic_id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Topic Id"
+          },
+          "prompt": {
+            "type": "string",
+            "title": "Prompt"
+          },
+          "awarded": {
+            "type": "integer",
+            "minimum": 0.0,
+            "title": "Awarded"
+          },
+          "possible": {
+            "type": "integer",
+            "minimum": 1.0,
+            "title": "Possible"
+          },
+          "evidence_id": {
+            "type": "string",
+            "title": "Evidence Id"
+          },
+          "student_id": {
+            "type": "string",
+            "title": "Student Id"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "question_id",
+          "evaluation_id",
+          "assessment_id",
+          "assessment_title",
+          "topic_id",
+          "prompt",
+          "awarded",
+          "possible",
+          "evidence_id",
+          "student_id"
+        ],
+        "title": "ClassEvidence",
+        "description": "one student's finalized question result a statement cites; `evidence_id` is local to this response."
+      },
+      "ClassInsightsRequest": {
+        "properties": {
+          "classroom_id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Classroom Id"
+          },
+          "question": {
+            "type": "string",
+            "maxLength": 500,
+            "minLength": 1,
+            "title": "Question"
+          },
+          "previous_questions": {
+            "items": {
+              "type": "string",
+              "maxLength": 500,
+              "minLength": 1
+            },
+            "type": "array",
+            "maxItems": 3,
+            "title": "Previous Questions"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "classroom_id",
+          "question"
+        ],
+        "title": "ClassInsightsRequest",
+        "description": "a teacher's question about a classroom they teach; earlier questions are context, never evidence."
+      },
+      "ClassInsightsResponse": {
+        "properties": {
+          "classroom_id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Classroom Id"
+          },
+          "question": {
+            "type": "string",
+            "title": "Question"
+          },
+          "struggling": {
+            "items": {
+              "$ref": "#/components/schemas/StrugglingGroup"
+            },
+            "type": "array",
+            "title": "Struggling"
+          },
+          "observations": {
+            "items": {
+              "$ref": "#/components/schemas/ClassObservation"
+            },
+            "type": "array",
+            "title": "Observations"
+          },
+          "possible_misconceptions": {
+            "items": {
+              "$ref": "#/components/schemas/ClassMisconception"
+            },
+            "type": "array",
+            "title": "Possible Misconceptions"
+          },
+          "reteach": {
+            "items": {
+              "$ref": "#/components/schemas/Reteach"
+            },
+            "type": "array",
+            "title": "Reteach"
+          },
+          "students": {
+            "items": {
+              "$ref": "#/components/schemas/CitedStudent"
+            },
+            "type": "array",
+            "title": "Students"
+          },
+          "evidence": {
+            "items": {
+              "$ref": "#/components/schemas/ClassEvidence"
+            },
+            "type": "array",
+            "title": "Evidence"
+          },
+          "steps": {
+            "items": {
+              "$ref": "#/components/schemas/Step"
+            },
+            "type": "array",
+            "title": "Steps"
+          },
+          "model_turns": {
+            "type": "integer",
+            "minimum": 1.0,
+            "title": "Model Turns"
+          },
+          "dropped": {
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "type": "object",
+            "title": "Dropped"
+          },
+          "scope": {
+            "$ref": "#/components/schemas/ClassComparisonScope"
+          },
+          "requires_teacher_review": {
+            "type": "boolean",
+            "const": true,
+            "title": "Requires Teacher Review",
+            "default": true
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "classroom_id",
+          "question",
+          "struggling",
+          "observations",
+          "possible_misconceptions",
+          "reteach",
+          "students",
+          "evidence",
+          "steps",
+          "model_turns",
+          "dropped",
+          "scope"
+        ],
+        "title": "ClassInsightsResponse",
+        "description": "a draft answer for the classroom's teacher; nothing is saved and no grade changes."
+      },
+      "ClassMisconception": {
+        "properties": {
+          "text": {
+            "type": "string",
+            "title": "Text"
+          },
+          "evidence_ids": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "minItems": 1,
+            "title": "Evidence Ids"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "text",
+          "evidence_ids"
+        ],
+        "title": "ClassMisconception",
+        "description": "a possible wrong idea that answers the agent read show."
+      },
+      "ClassObservation": {
+        "properties": {
+          "text": {
+            "type": "string",
+            "title": "Text"
+          },
+          "topic_ids": {
+            "items": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "type": "array",
+            "title": "Topic Ids"
+          },
+          "student_ids": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Student Ids"
+          },
+          "evidence_ids": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Evidence Ids"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "text",
+          "topic_ids",
+          "student_ids",
+          "evidence_ids"
+        ],
+        "title": "ClassObservation",
+        "description": "a statement about the class, with the topics, students and question results it rests on."
       },
       "ErrorBody": {
         "properties": {
@@ -431,6 +824,35 @@
         "title": "ResponseContract",
         "description": "a draft interpretation for the classroom's teacher; it never changes a grade."
       },
+      "Reteach": {
+        "properties": {
+          "topic_id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Topic Id"
+          },
+          "text": {
+            "type": "string",
+            "title": "Text"
+          },
+          "evidence_ids": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Evidence Ids"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "topic_id",
+          "text",
+          "evidence_ids"
+        ],
+        "title": "Reteach",
+        "description": "a topic to teach again, and the question results that show why."
+      },
       "Step": {
         "properties": {
           "tool": {
@@ -465,6 +887,36 @@
         ],
         "title": "Step",
         "description": "one tool call the agent chose, in order, and what came of it."
+      },
+      "StrugglingGroup": {
+        "properties": {
+          "topic_id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Topic Id"
+          },
+          "student_ids": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "minItems": 1,
+            "title": "Student Ids"
+          },
+          "text": {
+            "type": "string",
+            "title": "Text"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "topic_id",
+          "student_ids",
+          "text"
+        ],
+        "title": "StrugglingGroup",
+        "description": "students whose released evidence on a topic shows they need practice."
       }
     }
   }

@@ -1,6 +1,7 @@
 """the model's report, checked against what the agent actually gathered: anything citing evidence it never saw, or a misconception without a wrong answer the model read, is dropped and counted, never repaired."""
 
 import json
+import re
 from collections import Counter
 from dataclasses import dataclass, field
 from typing import Any
@@ -12,6 +13,9 @@ MAX_MISCONCEPTIONS = 3
 MAX_INTERVENTIONS = 4
 MAX_TOPICS = 3
 MAX_TEXT = 500
+# what looks like a reference ("S14", "T2", "Q5", "R1", "E3") in model-written text. only one the workspace
+# gave out counts, since the teacher sees names, never references; a title like "T1 quiz" is ordinary text.
+REFERENCE = re.compile(r"\b[STQRE]\d+\b")
 
 
 class UnreadableOutputError(Exception):
@@ -70,7 +74,7 @@ def report(data: dict[str, Any], workspace: Workspace, shown: set[str]) -> Check
         dropped["TOO_MANY"] += len(misconceptions) - MAX_MISCONCEPTIONS
     interventions = []
     for text in raw_interventions:
-        cleaned = _text(text)
+        cleaned = clean(text)
         if cleaned and cleaned not in interventions:
             interventions.append(cleaned)
         else:
@@ -93,8 +97,24 @@ def report(data: dict[str, Any], workspace: Workspace, shown: set[str]) -> Check
     )
 
 
-def _text(value: object) -> str:
+def clean(value: object) -> str:
+    """a reported text with its whitespace collapsed and cut to max_text; empty when it is not a string."""
     return " ".join(value.split())[:MAX_TEXT] if isinstance(value, str) else ""
+
+
+def strings(value: object) -> list[str]:
+    """the distinct strings of a reported list, in order; empty when it is not a list."""
+    return list(dict.fromkeys(r for r in value if isinstance(r, str))) if isinstance(value, list) else []
+
+
+def misconception_drop(evidence: list[Question], shown: set[str]) -> str | None:
+    """why a misconception citing these answers is dropped, or none when it may stand."""
+    if any(q.ref not in shown for q in evidence):
+        # it must rest on answers the model can still see, not on marks alone or a trimmed read.
+        return "ANSWER_NOT_READ"
+    if not all(q.lost_marks for q in evidence):
+        return "FULL_MARKS_CITED"
+    return None
 
 
 def _findings(
@@ -107,20 +127,16 @@ def _findings(
 ) -> list[Finding]:
     kept: list[Finding] = []
     for item in raw:
-        text = _text(item.get("text")) if isinstance(item, dict) else ""
-        refs = item.get("evidence") if isinstance(item, dict) else None
-        refs = list(dict.fromkeys(r for r in refs if isinstance(r, str))) if isinstance(refs, list) else []
+        text = clean(item.get("text")) if isinstance(item, dict) else ""
+        refs = strings(item.get("evidence")) if isinstance(item, dict) else []
         if not text:
             dropped["EMPTY_OR_REPEATED"] += 1
         elif not refs:
             dropped["NO_EVIDENCE"] += 1
         elif any(r not in questions for r in refs):
             dropped["UNKNOWN_EVIDENCE"] += 1
-        elif misconception and any(r not in shown for r in refs):
-            # a misconception must rest on answers the model can still see, not on marks alone or a trimmed read.
-            dropped["ANSWER_NOT_READ"] += 1
-        elif misconception and not all(questions[r].lost_marks for r in refs):
-            dropped["FULL_MARKS_CITED"] += 1
+        elif misconception and (why := misconception_drop([questions[r] for r in refs], shown)):
+            dropped[why] += 1
         elif any(f.text == text for f in kept):
             dropped["EMPTY_OR_REPEATED"] += 1
         else:

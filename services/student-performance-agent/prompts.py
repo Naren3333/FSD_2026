@@ -60,12 +60,14 @@ CALL = strict_object(
 )
 
 
+def one(allowed: list[str]) -> dict[str, Any]:
+    """one reference, held to `allowed` by the schema when it is short enough to list."""
+    return {"type": "string", "enum": allowed} if 0 < len(allowed) <= MAX_ENUM else STR
+
+
 def refs(allowed: list[str]) -> dict[str, Any]:
     """a list of references, held to `allowed` by the schema when it is short enough to list."""
-    return {
-        "type": "array",
-        "items": {"type": "string", "enum": allowed} if 0 < len(allowed) <= MAX_ENUM else STR,
-    }
+    return {"type": "array", "items": one(allowed)}
 
 
 def report_schema(evidence: list[str], topics: list[str]) -> dict[str, Any]:
@@ -82,13 +84,17 @@ def report_schema(evidence: list[str], topics: list[str]) -> dict[str, Any]:
 
 def schema(final: bool, evidence: list[str], topics: list[str]) -> dict[str, Any]:
     """a turn's reply: tool calls or a report, or on the last turn the report alone. a report may cite only the question references `evidence` and recommend only the topic references `topics`."""
-    report = report_schema(evidence, topics)
+    return turn_schema(final, report_schema(evidence, topics), CALL)
+
+
+def turn_schema(final: bool, report: dict[str, Any], call: dict[str, Any]) -> dict[str, Any]:
+    """the report alone on the last turn; otherwise tool calls or a report, as the loop reads them."""
     if final:
         return report
     return strict_object(
         {
             "action": {"type": "string", "enum": ["call_tools", "report"]},
-            "tool_calls": {"type": "array", "items": CALL},
+            "tool_calls": {"type": "array", "items": call},
             "report": {"anyOf": [report, {"type": "null"}]},
         }
     )
@@ -156,13 +162,13 @@ def suggested(opening: dict[str, Any], history: list[dict[str, Any]]) -> list[di
 
 
 def shown(messages: list[dict[str, str]]) -> set[str]:
-    """the evidence refs whose answers are in the task as sent; a read_answers result trimmed from it no longer counts."""
+    """the evidence refs whose answers are in the task as sent, from a result's questions or a question's answers; a read_answers result trimmed from it no longer counts."""
     history = json.loads(messages[-1]["content"])["tool_history"]
     return {
-        q["evidence"]
+        row["evidence"]
         for h in history
         if h["call"]["tool"] == "read_answers" and isinstance(h["output"], dict)
-        for q in h["output"].get("questions") or []
+        for row in (h["output"].get("questions") or []) + (h["output"].get("answers") or [])
     }
 
 

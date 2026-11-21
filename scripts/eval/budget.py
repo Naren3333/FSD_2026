@@ -9,7 +9,7 @@ from local_stack import compose, psql_json
 
 DEFAULT_CAP = 0.50  # usd per run
 # what one case of each kind is assumed to cost before any has been measured.
-FLOORS = {"performance": 0.05, "generation": 0.05, "probe": 0.02}
+FLOORS = {"performance": 0.05, "insights": 0.05, "generation": 0.05, "probe": 0.02}
 DEFAULT_LIMIT = 10.0  # ai-core's teacher allowance in docker-compose.yml
 
 

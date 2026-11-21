@@ -3,6 +3,7 @@ import { PerformanceAgentApi } from '../../api/clients';
 import type { Interpretation, InterpretationEvidence, InterpretationStep } from '../../api/models';
 import { AiUsage } from '../../core/ai-usage';
 import { CurriculumNames } from '../../core/curriculum-names';
+import { plural } from '../../shared/format';
 import { Section } from '../../shared/section';
 import { IconComponent } from '../../shared/icon';
 import { SectionStateComponent } from '../../shared/section-state';
@@ -10,10 +11,14 @@ import { SectionStateComponent } from '../../shared/section-state';
 /* the longest question prompt an evidence line shows. */
 const PROMPT_CHARS = 120;
 
+/* the performance agent's tools, for both interpretation and class insights. */
 const TOOLS: Record<string, string> = {
   read_answers: 'Read answers',
   prerequisites: 'Checked prerequisites',
   class_comparison: 'Compared with the class',
+  topic_detail: 'Read the topic’s results',
+  topic_questions: 'Read the topic’s questions',
+  student_results: 'Read a student’s results',
 };
 
 const OUTCOMES: Record<InterpretationStep['outcome'], string> = {
@@ -35,10 +40,10 @@ export function evidenceText(e: InterpretationEvidence): string {
 }
 
 /* "2 statements were left out because they did not rest on this student's results.", or '' when none were. */
-export function droppedText(dropped: Record<string, number>): string {
+export function droppedText(dropped: Record<string, number>, whose = "this student's"): string {
   const total = Object.values(dropped).reduce((sum, n) => sum + n, 0);
   if (!total) return '';
-  return `${total} ${total === 1 ? 'statement was' : 'statements were'} left out because they did not rest on this student's results.`;
+  return `${total} ${total === 1 ? 'statement was' : 'statements were'} left out because they did not rest on ${whose} results.`;
 }
 
 /* asks the performance agent to interpret one student's finalized results, for their teacher to review (adr 0014). */
@@ -61,6 +66,7 @@ export class InterpretationComponent implements OnChanges {
   readonly dropped = computed(() => droppedText(this.result.value()?.dropped ?? {}));
   readonly stepText = stepText;
   readonly evidenceText = evidenceText;
+  readonly plural = plural;
 
   ngOnChanges(): void {
     // another student's evidence is on show: an earlier interpretation no longer applies.

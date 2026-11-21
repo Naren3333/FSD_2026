@@ -21,6 +21,7 @@ import { PageHeaderComponent } from '../../shared/page-header';
 import { RefreshButtonComponent } from '../../shared/refresh-button';
 import { IconComponent } from '../../shared/icon';
 import { dateTime, plural } from '../../shared/format';
+import { ClassInsightsComponent } from './class-insights';
 
 @Component({
   selector: 'app-dashboard',
@@ -34,6 +35,7 @@ import { dateTime, plural } from '../../shared/format';
     SectionStateComponent,
     PagerComponent,
     IconComponent,
+    ClassInsightsComponent,
   ],
   templateUrl: './dashboard.html',
 })

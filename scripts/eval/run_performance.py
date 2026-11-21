@@ -12,7 +12,7 @@ from budget import DEFAULT_CAP, Budget, CapReachedError, correlation
 from common import RUNS, Session, load_state
 from load_performance import fixture
 from local_stack import check
-from reporting import checkpoint, select_cases
+from reporting import checkpoint, ratio, select_cases
 
 PATH = "/performance-agent/performance_interpretation"
 TIMEOUT = 310  # kong's five minutes and a little
@@ -225,10 +225,6 @@ def summarize(cases: list[dict]) -> dict:
         "latency_ms_max": lat[-1] if lat else None,
         "dropped": dropped,
     }
-
-
-def ratio(part: float, whole: int) -> float | None:
-    return round(part / whole, 3) if whole else None
 
 
 def main() -> None:

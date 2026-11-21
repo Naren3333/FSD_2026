@@ -1,0 +1,188 @@
+<section class="panel dashboard-panel interpretation class-insights" aria-labelledby="class-insights-heading">
+  <div class="interpretation-head">
+    <h3 id="class-insights-heading">Ask about this class</h3>
+    <span class="badge ai-chip"><app-icon name="sparkles" [size]="14" />AI draft for your review</span>
+  </div>
+  <p>
+    An AI agent reads this class's released results and its finalized answers, some of which may not be
+    released to students yet, then drafts an answer that cites the questions it rests on. It names students
+    only from your roster and can't look a student up by name. Each question uses your daily AI allowance.
+  </p>
+  @if (history().length) {
+    <div class="caption earlier-questions">
+      <p>Following up on:</p>
+      <ul>
+        @for (earlier of history(); track $index) {
+          <li>{{ earlier }}</li>
+        }
+      </ul>
+    </div>
+  }
+  <form id="class-insights-form" novalidate [formGroup]="form" (ngSubmit)="ask()">
+    <div class="button-row presets" role="group" aria-label="Suggested questions">
+      @for (preset of presets; track preset) {
+        <button type="button" class="quiet" [disabled]="result.loading()" (click)="usePreset(preset)">
+          {{ preset }}
+        </button>
+      }
+    </div>
+    <app-field
+      controlId="class-insights-question"
+      [label]="history().length ? 'Your follow-up question' : 'Your question'"
+      [hint]="
+        'Up to ' +
+        max +
+        ' characters. Press Ctrl+Enter to ask. ' +
+        form.controls.question.value.length +
+        '/' +
+        max
+      "
+      error="Enter a question of 1 to 500 characters."
+      [invalid]="tried() && form.controls.question.invalid"
+    >
+      <textarea
+        appFieldControl
+        id="class-insights-question"
+        formControlName="question"
+        rows="3"
+        [attr.maxlength]="max"
+        [readonly]="result.loading()"
+        (keydown)="shortcut($event)"
+      ></textarea>
+    </app-field>
+    <div class="button-row">
+      <button id="class-insights-ask" [disabled]="result.loading() || !classroomId()">
+        {{ history().length ? 'Ask a follow-up' : 'Ask' }}
+      </button>
+      @if (history().length || answer() || empty()) {
+        <button type="button" class="secondary" [disabled]="result.loading()" (click)="newQuestion()">
+          New question
+        </button>
+      }
+    </div>
+  </form>
+  <app-section-state [section]="result" loading="Reading the class's results and drafting an answer…" />
+  <p class="visually-hidden" role="status" aria-live="polite">{{ announcement() }}</p>
+  @if (result.ready() && empty()) {
+    <p class="empty">{{ empty() }}</p>
+  }
+  @if (answer(); as answer) {
+    <div class="interpretation-result">
+      <p id="class-insights-answer" class="asked" tabindex="-1">
+        <strong>You asked:</strong> {{ answer.question }}
+      </p>
+      @if (answer.scope.partial) {
+        <p class="caption">
+          Covers the first {{ answer.scope.compared }} of {{ answer.scope.population }} students in roster
+          order. It may not represent the whole class.
+        </p>
+      }
+      @if (answer.struggling.length) {
+        <h4>Struggling</h4>
+        <ul class="findings">
+          @for (group of answer.struggling; track $index) {
+            <li>
+              <p>
+                <strong>{{ topic(group.topic_id) }}</strong>
+              </p>
+              <p>{{ group.text }}</p>
+              <ul class="student-links" aria-label="Students">
+                @for (id of group.student_ids; track id) {
+                  <li>
+                    <a routerLink="/performance" [queryParams]="{ student: id }">{{ student(id) }}</a>
+                  </li>
+                }
+              </ul>
+            </li>
+          }
+        </ul>
+      }
+      @if (answer.observations.length) {
+        <h4>Observations</h4>
+        <ul class="findings">
+          @for (item of answer.observations; track $index) {
+            <li>
+              <p>{{ item.text }}</p>
+              @if (item.topic_ids.length) {
+                <p class="caption">Topics: {{ topics(item.topic_ids) }}</p>
+              }
+              @if (item.student_ids.length) {
+                <ul class="student-links" aria-label="Students">
+                  @for (id of item.student_ids; track id) {
+                    <li>
+                      <a routerLink="/performance" [queryParams]="{ student: id }">{{ student(id) }}</a>
+                    </li>
+                  }
+                </ul>
+              }
+              @if (item.evidence_ids.length) {
+                <ul class="cited caption" aria-label="Evidence">
+                  @for (e of cited(item.evidence_ids); track e.evidence_id) {
+                    <li>{{ evidenceText(e) }}</li>
+                  }
+                </ul>
+              }
+            </li>
+          }
+        </ul>
+      }
+      @if (answer.possible_misconceptions.length) {
+        <h4>Possible misconceptions</h4>
+        <ul class="findings">
+          @for (item of answer.possible_misconceptions; track $index) {
+            <li>
+              <p>{{ item.text }}</p>
+              @if (item.evidence_ids.length) {
+                <ul class="cited caption" aria-label="Evidence">
+                  @for (e of cited(item.evidence_ids); track e.evidence_id) {
+                    <li>{{ evidenceText(e) }}</li>
+                  }
+                </ul>
+              }
+            </li>
+          }
+        </ul>
+      }
+      @if (answer.reteach.length) {
+        <h4>What to reteach</h4>
+        <ol class="findings">
+          @for (item of answer.reteach; track $index) {
+            <li>
+              <p>
+                <strong>{{ topic(item.topic_id) }}</strong>
+              </p>
+              <p>{{ item.text }}</p>
+              @if (item.evidence_ids.length) {
+                <ul class="cited caption" aria-label="Evidence">
+                  @for (e of cited(item.evidence_ids); track e.evidence_id) {
+                    <li>{{ evidenceText(e) }}</li>
+                  }
+                </ul>
+              }
+            </li>
+          }
+        </ol>
+      }
+      @if (dropped()) {
+        <p class="caption">{{ dropped() }}</p>
+      }
+      <details>
+        <summary>
+          How the agent worked ({{ plural(answer.steps.length, 'step') }},
+          {{ plural(answer.model_turns, 'model turn') }})
+        </summary>
+        @if (answer.steps.length) {
+          <ol>
+            @for (step of answer.steps; track $index) {
+              <li>{{ stepText(step) }}</li>
+            }
+          </ol>
+        } @else {
+          <p class="caption">
+            It answered from the class's results summary without looking anything else up.
+          </p>
+        }
+      </details>
+    </div>
+  }
+</section>

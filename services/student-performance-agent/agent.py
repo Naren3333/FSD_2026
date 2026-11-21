@@ -1,96 +1,49 @@
 """performance interpretation (adr 0014): a bounded tool-using loop. the agent opens with the student's topic summary and finalized results, then each model turn either picks read-only tools or reports; the last turn must report. the report is checked against what the tools returned."""
 
-import asyncio
 import logging
-import time
-from collections import Counter
-from typing import Any, Literal
+from typing import Any
 
-from fastapi import HTTPException, Request
+from fastapi import Request
 from learning_transport import RELATION_TEACHER, Claims, UpstreamError, failure, require_relation
-from learning_transport.agents import MIN_CALL, OUT_OF_TIME, ai_core_refusal, gather_all, unusable_reply
+from learning_transport.agents import gather_all
 
 import checks
 import prompts
-from clients import GENERATE_TIMEOUT, ClassSample, Services, billed
+from clients import Services
 from config import Settings
-from contracts import ClassComparisonScope, Evidence, Observation, RequestContract, ResponseContract, Step
-from workspace import MAX_RESULTS, Topic, Workspace
+from contracts import ClassComparisonScope, Evidence, Observation, RequestContract, ResponseContract
+from loop import Loop, Outcome, ToolError, Wording
+from workspace import MAX_RESULTS, Topic, Workspace, evidence_fields
 
 log = logging.getLogger("student-performance-agent.agent")
 
-Outcome = Literal["ok", "refused", "failed"]
-TURN_TOKENS = 1500
-REPORT_TOKENS = 3000
-# time kept back for the report: a tool turn and its tools end this long before the budget runs out. it covers
-# the report call's own timeout, so a late tool turn never leaves the report too little time.
-REPORT_RESERVE = GENERATE_TIMEOUT + MIN_CALL
-# a tool turn that fails with one of these goes straight to the report, which can still use what was gathered.
-RECOVERABLE = {OUT_OF_TIME, "AI_TIMEOUT", "AI_OUTPUT_REJECTED", "AI_PROVIDER_FAILED"}
 NOT_TEACHER = ("FORBIDDEN", "Only the classroom's teacher can interpret a student's results.")
+WORDING = Wording(
+    slow="Interpreting these results took too long. Try again, or try again later.",
+    no_access="You no longer have access to this student's results.",
+    unavailable="Interpreting results is not available right now. Try again later.",
+)
 
 
-def refused(e: UpstreamError) -> HTTPException:
-    """a failed upstream call as an error the page can act on, with a safe message."""
-    if (known := ai_core_refusal(e)) is not None:
-        return known
-    if e.code == OUT_OF_TIME:
-        return failure(
-            503, OUT_OF_TIME, "Interpreting these results took too long. Try again, or try again later."
-        )
-    if e.service != "ai-core" and e.status in (401, 403):
-        return failure(403, "FORBIDDEN", "You no longer have access to this student's results.")
-    if e.service != "ai-core" or e.status in (0, 503):
-        return failure(
-            503, "AI_UNAVAILABLE", "Interpreting results is not available right now. Try again later."
-        )
-    return failure(502, "AI_PROVIDER_FAILED", "The model could not answer. Try again.")
+class Agent(Loop[ResponseContract]):
+    log = log
+    event = "interpretation"
+    wording = WORDING
+    names = ("performance.turn", "performance.report")
+    workspace: Workspace
 
-
-class ToolError(Exception):
-    """a tool call the agent refused or could not complete, and what the model is told."""
-
-    def __init__(self, target: str, outcome: Outcome, message: str) -> None:
-        super().__init__(message)
-        self.target, self.outcome, self.message = target, outcome, message
-
-
-class Agent:
     def __init__(self, services: Services, settings: Settings, request: Request, claims: Claims) -> None:
-        self.services, self.settings, self.request, self.claims = services, settings, request, claims
-        self.authorization = request.headers["authorization"]
-        self.correlation: str = request.state.correlation_id
+        super().__init__(services, settings, request, claims)
         self.workspace = Workspace()
-        self.student = ""  # set by interpret
-        self.steps: list[Step] = []
-        self.history: list[dict[str, Any]] = []
-        self.done: set[tuple[str, str | None, str | None]] = set()  # calls that answered, not to repeat
-        self.shown: set[str] = set()  # evidence refs whose answers the latest turn's task still held
-        self.unreadable = 0
-        self.failed_turns = 0
-        self.started = time.monotonic()
-        self.until = self.started + settings.budget  # no call runs past this
-        self.class_read: asyncio.Future[ClassSample] | None = None
+        self.classroom = self.student = ""  # set by interpret
         self.comparison_scope: ClassComparisonScope | None = None
 
     async def interpret(self, body: RequestContract) -> ResponseContract:
-        try:
-            async with asyncio.timeout(max(0.0, self.until - time.monotonic())):
-                return await self._interpret(body)
-        except TimeoutError:
-            raise refused(UpstreamError("ai-core", 0, OUT_OF_TIME)) from None
-        finally:
-            # a class read a timed-out tool left running does not outlive the request.
-            if self.class_read is not None:
-                if self.class_read.done():
-                    if not self.class_read.cancelled():
-                        self.class_read.exception()  # retrieved, so a failure is not logged as unhandled
-                else:
-                    self.class_read.cancel()
+        return await self.bounded(self._interpret(body))
 
     async def _interpret(self, body: RequestContract) -> ResponseContract:
         classroom, student = str(body.classroom_id), body.student_id
-        self.student = student
+        self.classroom, self.student = classroom, student
         # the caller must teach the classroom and the student must be enrolled in it.
         await require_relation(
             self.services.identity,
@@ -104,44 +57,22 @@ class Agent:
             await self._open(classroom, student)
         except UpstreamError as e:
             log.warning("interpretation_open_failed", extra={"error": str(e)})
-            raise refused(e) from None
+            raise self.refused(e) from None
         if not self.workspace.results:
             raise failure(
                 422,
                 "NO_EVIDENCE",
                 "This student has no finalized results in this classroom yet, so there is nothing to interpret.",
             )
-        turns = self.settings.max_turns
-        for turn in range(1, turns + 1):
-            now = time.monotonic()
-            final = (
-                turn == turns
-                or now - self.started > self.settings.deadline
-                or self.until - REPORT_RESERVE - now < MIN_CALL
-            )
-            reply = await self._turn(turn, turns, final)
-            if reply is None:
-                # an unreadable or failed tool turn: asking again the same way would likely fail the same way.
-                turns = turn + 1
-                continue
-            if final:
-                return self._finish(reply, turn, classroom, student)
-            if reply.get("action") == "report" and isinstance(reply.get("report"), dict):
-                return self._finish(reply["report"], turn, classroom, student)
-            calls = reply.get("tool_calls") if isinstance(reply.get("tool_calls"), list) else []
-            if not calls:
-                # nothing to look up and no report: the next turn must report.
-                turns = turn + 1
-                continue
-            await self._run_tools(classroom, calls[: prompts.MAX_CALLS], self.until - REPORT_RESERVE)
-        raise unusable_reply()
+        return await self.loop()
 
     async def _open(self, classroom: str, student: str) -> None:
         """the student's released topic summary and finalized results, and the names of their topics."""
-        summary, evaluations = await gather_all(
+        summary, sample = await gather_all(
             self.services.performance(self.authorization, classroom, student, self.correlation),
             self.services.results(self.authorization, classroom, student, self.correlation, MAX_RESULTS),
         )
+        evaluations = sample.evaluations
         # only the newest results reach the workspace, so only their assessments are read.
         self.workspace.add_summary(summary["topics"])
         # every topic is in the summary or the evidence, so names are read alongside the assessments.
@@ -158,104 +89,24 @@ class Agent:
         self.workspace.name_topics(names)
         self.workspace.fit()
 
-    async def _turn(self, turn: int, turns: int, final: bool) -> dict[str, Any] | None:
-        """one model turn's reply, or none when a tool turn was unreadable or failed recoverably (the next turn reports)."""
-        messages = prompts.messages(self.workspace.opening(), self.history, turn, turns, final)
-        self.shown = prompts.shown(messages)
-        try:
-            output = await self.services.generate(
-                messages,
-                REPORT_TOKENS if final else TURN_TOKENS,
-                prompts.schema(
-                    final, list(self.workspace.questions()), [t.ref for t in self.workspace.topics.values()]
-                ),
-                "performance.report" if final else "performance.turn",
-                self.correlation,
-                billed(self.claims),
-                # a tool turn leaves the report its reserve; the report may use what is left.
-                self.until - (0 if final else REPORT_RESERVE),
-            )
-        except UpstreamError as e:
-            log.warning("interpretation_failed", extra={"error": str(e), "turn": turn})
-            if not final and e.code in RECOVERABLE:
-                self.failed_turns += 1
-                return None
-            raise refused(e) from None
-        try:
-            return checks.parse(output)
-        except checks.UnreadableOutputError:
-            self.unreadable += 1
-            if final:
-                raise unusable_reply() from None
-            return None
+    def messages(self, turn: int, turns: int, final: bool) -> list[dict[str, str]]:
+        return prompts.messages(self.workspace.opening(), self.history, turn, turns, final)
 
-    async def _run_tools(self, classroom: str, calls: list[Any], until: float) -> None:
-        """the turn's calls side by side, each cut off at `until`; recorded in the order the model asked."""
-        planned = []
-        asked = set(self.done)  # a call made twice in one turn runs once
-        for call in calls:
-            if not isinstance(call, dict):
-                continue
-            tool, reason = str(call.get("tool") or ""), " ".join(str(call.get("reason") or "").split())[:200]
-            result_ref, topic_ref = _ref(call.get("result")), _ref(call.get("topic"))
-            key = (tool, result_ref, topic_ref)
-            planned.append((key, reason, key in asked))
-            asked.add(key)
-        outcomes = await asyncio.gather(
-            *(self._timed(classroom, *key, repeat, until) for key, _, repeat in planned)
+    def schema(self, final: bool) -> dict[str, Any]:
+        return prompts.schema(
+            final, list(self.workspace.questions()), [t.ref for t in self.workspace.topics.values()]
         )
-        for ((tool, result_ref, topic_ref), reason, _), (target, outcome, output) in zip(
-            planned, outcomes, strict=True
-        ):
-            # only an answered call is refused as a repeat; a failed or timed-out one may be tried again.
-            if outcome == "ok":
-                self.done.add((tool, result_ref, topic_ref))
-            made = {"tool": tool, "result": result_ref, "topic": topic_ref}
-            self.history.append({"call": made, "output": output})
-            self.steps.append(
-                Step(tool=tool, reason=reason or "No reason given.", target=target, outcome=outcome)
-            )
 
-    async def _timed(
-        self,
-        classroom: str,
-        tool: str,
-        result_ref: str | None,
-        topic_ref: str | None,
-        repeat: bool,
-        until: float,
-    ) -> tuple[str, Outcome, Any]:
-        """one tool call, failed when it is still running at `until`."""
-        try:
-            return await asyncio.wait_for(
-                self._tool(classroom, tool, result_ref, topic_ref, repeat),
-                max(until - time.monotonic(), 0.01),
-            )
-        except TimeoutError:
-            log.info("tool_failed", extra={"tool": tool, "reason": "out_of_time"})
-            return "out of time", "failed", {"error": "There was no time left to read this."}
-
-    async def _tool(
-        self, classroom: str, tool: str, result_ref: str | None, topic_ref: str | None, repeat: bool
-    ) -> tuple[str, Outcome, Any]:
-        """what the tool looked at in words, its outcome, and what the model is shown."""
-        try:
-            topic = self.workspace.topic_by_ref(topic_ref) if topic_ref else None
-            if topic_ref and topic is None:
-                raise ToolError("unknown topic", "refused", f"There is no topic {topic_ref}.")
-            if repeat:
-                raise ToolError("repeat", "refused", "You already made this call; its result is above.")
-            if tool == "read_answers":
-                return self._read_answers(result_ref, topic)
-            if tool == "prerequisites":
-                return await self._prerequisites(topic)
-            if tool == "class_comparison":
-                return await self._class_comparison(classroom, topic)
-            raise ToolError("unknown tool", "refused", f"There is no tool {tool}.")
-        except ToolError as e:
-            if e.outcome == "failed":
-                log.info("tool_failed", extra={"tool": tool})
-            return e.target, e.outcome, {"error": e.message}
+    async def tool(self, tool: str, result_ref: str | None, topic: Topic | None) -> tuple[str, Outcome, Any]:
+        if tool == "read_answers":
+            return self._read_answers(result_ref, topic)
+        if tool == "prerequisites":
+            if topic is None:
+                raise ToolError("no topic", "refused", "Give the topic whose prerequisites you want.")
+            return await self.prerequisites(topic)
+        if tool == "class_comparison":
+            return await self._class_comparison(topic)
+        raise ToolError("unknown tool", "refused", f"There is no tool {tool}.")
 
     def _read_answers(self, result_ref: str | None, topic: Topic | None) -> tuple[str, Outcome, Any]:
         result = self.workspace.result(result_ref)
@@ -264,35 +115,23 @@ class Agent:
         target = result.title + (f", {topic.name}" if topic and topic.name else "")
         return target, "ok", self.workspace.read_answers(result, topic)
 
-    async def _prerequisites(self, topic: Topic | None) -> tuple[str, Outcome, Any]:
-        if topic is None:
-            raise ToolError("no topic", "refused", "Give the topic whose prerequisites you want.")
-        target = topic.name or "a topic"
-        try:
-            found = await self.services.prerequisites(self.authorization, topic.topic_id, self.correlation)
-        except UpstreamError:
-            raise ToolError(target, "failed", "The curriculum could not be read just now.") from None
-        return target, "ok", self.workspace.prerequisites(topic, found)
-
-    async def _class_comparison(self, classroom: str, topic: Topic | None) -> tuple[str, Outcome, Any]:
+    async def _class_comparison(self, topic: Topic | None) -> tuple[str, Outcome, Any]:
         target = topic.name if topic and topic.name else "whole class"
-        if self.class_read is None:
-            self.class_read = asyncio.ensure_future(
-                self.services.class_performance(self.authorization, classroom, self.correlation)
-            )
         unread = ToolError(target, "failed", "The class's results could not be read just now.")
         try:
-            # shielded: one call running out of time does not cancel the read the others share.
-            sample = await asyncio.shield(self.class_read)
+            sample = await self.shared(
+                "class_performance",
+                lambda: self.services.class_performance(self.authorization, self.classroom, self.correlation),
+            )
         except UpstreamError:
-            self.class_read = None  # a later call reads the class again
             raise unread from None
         try:
             output = self.workspace.class_comparison(sample.students, topic, self.student)
+            classmates = max(0, sample.total - 1)
             self.comparison_scope = ClassComparisonScope(
-                population=max(0, sample.total - 1),
+                population=classmates,
                 compared=output["students_compared"],
-                partial=output["students_compared"] < max(0, sample.total - 1),
+                partial=output["students_compared"] < classmates,
             )
             output["scope"] = self.comparison_scope.model_dump()
             if self.comparison_scope.partial:
@@ -301,11 +140,16 @@ class Agent:
         except (KeyError, TypeError, ValueError, AttributeError):
             raise unread from None
 
-    def _finish(self, report: dict[str, Any], turn: int, classroom: str, student: str) -> ResponseContract:
+    def words(self, ref: str) -> str | None:
+        if result := self.workspace.result(ref):
+            return result.title
+        if q := self.workspace.questions().get(ref):
+            return f"an answer in {q.assessment_title}"
+        return super().words(ref)
+
+    def finish(self, report: dict[str, Any], turn: int) -> ResponseContract:
         try:
             checked = checks.report(report, self.workspace, self.shown)
-        except checks.UnreadableOutputError:
-            raise unusable_reply() from None
         except checks.RejectedError as e:
             log.info("interpretation_rejected", extra={"turns": turn, "dropped": dict(e.dropped)})
             raise failure(
@@ -313,46 +157,25 @@ class Agent:
                 "INTERPRETATION_REJECTED",
                 "The drafted interpretation did not rest on this student's evidence, so it was not shown. Try again.",
             ) from None
-        dropped: Counter[str] = checked.dropped
-        if self.unreadable:
-            dropped["UNREADABLE_TURN"] += self.unreadable
-        if self.failed_turns:
-            dropped["FAILED_TURN"] += self.failed_turns
+        dropped = self.turn_drops(checked.dropped)
         cited = {q.ref: q for f in checked.observations + checked.misconceptions for q in f.evidence}
         log.info(
             "interpreted",
             extra={"turns": turn, "tools": len(self.steps), "dropped": dict(dropped), "cited": len(cited)},
         )
         return ResponseContract(
-            classroom_id=classroom,  # type: ignore[arg-type]
-            student_id=student,
+            classroom_id=self.classroom,  # type: ignore[arg-type]
+            student_id=self.student,
             observations=[_observation(f) for f in checked.observations],
             possible_misconceptions=[_observation(f) for f in checked.misconceptions],
             suggested_interventions=checked.interventions,
             recommended_topic_ids=checked.topic_ids,  # type: ignore[arg-type]
-            evidence=[
-                Evidence(
-                    question_id=q.question_id,  # type: ignore[arg-type]
-                    evaluation_id=q.evaluation_id,  # type: ignore[arg-type]
-                    assessment_id=q.assessment_id,  # type: ignore[arg-type]
-                    assessment_title=q.assessment_title,
-                    topic_id=q.topic_id,  # type: ignore[arg-type]
-                    prompt=str((q.question["prompt"] if q.question else "") or ""),
-                    awarded=q.awarded,
-                    possible=q.possible,
-                )
-                for q in cited.values()
-            ],
-            steps=self.steps,
+            evidence=[Evidence(**evidence_fields(q)) for q in cited.values()],
+            steps=self.shown_steps(),
             model_turns=turn,
             dropped=dict(dropped),
             class_comparison_scope=self.comparison_scope,
         )
-
-
-def _ref(value: object) -> str | None:
-    """a reference the model gave, or none when it is not a non-empty string."""
-    return value if isinstance(value, str) and value else None
 
 
 def _observation(f: checks.Finding) -> Observation:

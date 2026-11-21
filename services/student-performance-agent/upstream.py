@@ -42,6 +42,31 @@ class ClassPage(TypedDict):
     total: Count
 
 
+class MetricStudent(TypedDict):
+    """a student of the class with analytics' full topic metrics, as the class insights read them."""
+
+    student_id: str
+    topics: list[TopicMetrics]
+
+
+class MetricPage(TypedDict):
+    students: list[MetricStudent]
+    total: Count
+
+
+class RosterStudent(TypedDict):
+    """a roster entry from identity; the names stay in the agent and never reach the model (adr 0021)."""
+
+    id: Annotated[str, Field(min_length=1)]
+    username: str
+    display_name: str
+
+
+class RosterPage(TypedDict):
+    students: list[RosterStudent]
+    total: Count
+
+
 class CriterionScore(TypedDict):
     criterion_id: str
     points: Count
@@ -69,6 +94,17 @@ class Evaluation(TypedDict):
 
 class EvaluationPage(TypedDict):
     evaluations: list[Evaluation]
+    total: Count
+
+
+class ClassEvaluation(Evaluation):
+    """an evaluation in a class-wide list, which says whose it is."""
+
+    student_id: str
+
+
+class ClassEvaluationPage(TypedDict):
+    evaluations: list[ClassEvaluation]
     total: Count
 
 
@@ -110,7 +146,10 @@ class TopicName(TypedDict):
 
 performance = TypeAdapter(Performance)
 class_page = TypeAdapter(ClassPage)
+metric_page = TypeAdapter(MetricPage)
+roster_page = TypeAdapter(RosterPage)
 evaluation_page = TypeAdapter(EvaluationPage)
+class_evaluation_page = TypeAdapter(ClassEvaluationPage)
 assessments = TypeAdapter(list[Assessment])
 assessment = TypeAdapter(Assessment)
 topic_names = TypeAdapter(list[TopicName])

@@ -26,14 +26,26 @@ from conftest import (
     tools,
 )
 from fastapi.testclient import TestClient
-from learning_transport import agents
+from learning_transport import UpstreamError, agents
 
 import agent
+import loop
 import main
 import workspace
 
 PATH = "/v1/performance_interpretation"
 BODY = {"classroom_id": ROOM, "student_id": STUDENT}
+
+
+def test_the_teacher_reads_step_reasons_in_words_not_references(api, fakes: Fakes):
+    asked = call("read_answers", "R1", "T1")
+    asked["reason"] = "R1 has E1 on T1, unlike R9."
+    fakes.replies = [reply(tools(asked)), reply(done())]
+    resp = api.post(PATH, json=BODY, headers=as_user())
+    assert resp.status_code == 200, resp.text
+    assert [s["reason"] for s in resp.json()["steps"]] == [
+        "Loops quiz has an answer in Loops quiz on Loops, unlike R9."
+    ]
 
 
 def test_the_agent_investigates_then_reports_on_the_evidence(api, fakes: Fakes):
@@ -338,10 +350,10 @@ def test_every_call_is_cut_off_inside_the_budget(api, fakes: Fakes):
     timeout = fakes.requests[[p for p, _, _ in fakes.requests].index("/v1/inference")][2].extensions[
         "timeout"
     ]
-    assert timeout["read"] <= 100.0 - agent.REPORT_RESERVE
+    assert timeout["read"] <= 100.0 - loop.REPORT_RESERVE
     # ai-core is told to give up first, so it never finishes and bills a reply nobody waits for.
     assert fakes.calls("/v1/inference")[0]["timeout"] <= timeout["read"] - agents.REPLY_MARGIN
-    main.app.state.settings = dataclasses.replace(SETTINGS, budget=agent.REPORT_RESERVE)
+    main.app.state.settings = dataclasses.replace(SETTINGS, budget=loop.REPORT_RESERVE)
     fakes.replies = [reply(report(possible_misconceptions=[]))]
     resp = api.post(PATH, json=BODY, headers=as_user())
     assert resp.status_code == 200 and fakes.calls("/v1/inference")[-1]["schema_name"] == "performance.report"
@@ -447,7 +459,7 @@ def test_a_malformed_evaluation_is_an_upstream_failure(api, fakes: Fakes):
 
 def test_running_out_of_time_for_the_report_says_so(api, fakes: Fakes):
     """a report the budget leaves no time for is not an outage: the teacher is told it took too long."""
-    main.app.state.settings = dataclasses.replace(SETTINGS, budget=agent.MIN_CALL - 1)
+    main.app.state.settings = dataclasses.replace(SETTINGS, budget=loop.MIN_CALL - 1)
     resp = api.post(PATH, json=BODY, headers=as_user())
     assert resp.status_code == 503 and resp.json()["error"]["code"] == "OUT_OF_TIME"
     assert fakes.calls("/v1/inference") == []
@@ -516,3 +528,40 @@ def test_invalid_rubric_is_rejected_before_inference(api, fakes: Fakes):
     response = api.post(PATH, json=BODY, headers=as_user())
     assert response.status_code == 503
     assert not fakes.calls("/v1/inference")
+
+
+def test_a_shared_read_is_made_once_read_again_after_a_failure_and_cancelled_at_the_end():
+    import asyncio
+    from types import SimpleNamespace
+
+    reads: list[int] = []
+
+    async def read() -> None:
+        reads.append(1)
+        if len(reads) == 1:
+            raise UpstreamError("analytics", 503)
+        await asyncio.Event().wait()
+
+    async def scenario() -> None:
+        request = SimpleNamespace(
+            headers={"authorization": "Bearer t1"}, state=SimpleNamespace(correlation_id="c")
+        )
+        turns = loop.Loop(None, SETTINGS, request, None)  # type: ignore[arg-type]
+
+        async def work() -> asyncio.Future[object]:
+            with pytest.raises(UpstreamError):
+                await turns.shared("class", read)
+            # two calls running out of time share the second read without cancelling it.
+            for _ in range(2):
+                with pytest.raises(TimeoutError):
+                    await asyncio.wait_for(turns.shared("class", read), 0.01)
+            pending = turns.reads["class"]
+            assert not pending.done()
+            return pending
+
+        pending = await turns.bounded(work())
+        await asyncio.sleep(0)
+        assert pending.cancelled()
+
+    asyncio.run(scenario())
+    assert len(reads) == 2

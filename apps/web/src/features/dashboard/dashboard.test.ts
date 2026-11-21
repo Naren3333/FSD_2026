@@ -5,12 +5,15 @@ import { BrowserTestingModule, platformBrowserTesting } from '@angular/platform-
 import { provideRouter } from '@angular/router';
 import { readFileSync } from 'node:fs';
 import { beforeAll, describe, expect, it, vi } from 'vitest';
-import { AnalyticsApi, AssessmentApi, GradingApi, IdentityApi } from '../../api/clients';
+import { AnalyticsApi, AssessmentApi, GradingApi, IdentityApi, PerformanceAgentApi } from '../../api/clients';
 import type { AssessmentProgress, ClassPerformance, GradingCounts, Student } from '../../api/models';
+import { AiUsage } from '../../core/ai-usage';
 import { ClassroomContext } from '../../core/classroom-context';
 import { CurriculumNames } from '../../core/curriculum-names';
+import { FieldComponent } from '../../shared/field';
 import { PagerComponent } from '../../shared/pager';
 import { SectionStateComponent } from '../../shared/section-state';
+import { ClassInsightsComponent } from './class-insights';
 import { DashboardComponent } from './dashboard';
 import { PageHeaderComponent } from '../../shared/page-header';
 
@@ -102,6 +105,8 @@ async function render(parts: Parts = {}, classroomId = 'c1', rooms: Rooms = {}) 
         provide: AnalyticsApi,
         useValue: { classPerformance },
       },
+      { provide: PerformanceAgentApi, useValue: { classInsights: () => new Promise(() => undefined) } },
+      { provide: AiUsage, useValue: { refresh: () => undefined } },
       {
         provide: CurriculumNames,
         useValue: {
@@ -130,6 +135,8 @@ async function render(parts: Parts = {}, classroomId = 'c1', rooms: Rooms = {}) 
     set: { template: template('../../shared/section-state.html') },
   });
   TestBed.overrideComponent(PagerComponent, { set: { template: template('../../shared/pager.html') } });
+  TestBed.overrideComponent(ClassInsightsComponent, { set: { template: template('./class-insights.html') } });
+  TestBed.overrideComponent(FieldComponent, { set: { template: template('../../shared/field.html') } });
   const fixture = TestBed.createComponent(DashboardComponent);
   fixture.detectChanges();
   const root = fixture.nativeElement as HTMLElement;
@@ -161,6 +168,14 @@ describe('class dashboard states', () => {
     const page = await render({}, '');
     expect(page.text()).toContain('No classroom selected.');
     expect(page.text()).not.toContain('Needs grading');
+  });
+
+  it('offers the class-insights panel under the class topics once a classroom is chosen', async () => {
+    const none = await render({}, '');
+    expect(none.text()).not.toContain('Ask about this class');
+    const page = await render();
+    const headings = [...page.root.querySelectorAll('h3')].map((h) => h.textContent?.trim());
+    expect(headings.indexOf('Ask about this class')).toBeGreaterThan(headings.indexOf('Class topics'));
   });
 
   it('says the classrooms are loading, not that none is selected, until they are known', async () => {

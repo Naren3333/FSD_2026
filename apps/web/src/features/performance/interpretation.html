@@ -76,8 +76,8 @@
       }
       <details>
         <summary>
-          How the agent worked ({{ draft.steps.length }} {{ draft.steps.length === 1 ? 'step' : 'steps' }},
-          {{ draft.model_turns }} model {{ draft.model_turns === 1 ? 'turn' : 'turns' }})
+          How the agent worked ({{ plural(draft.steps.length, 'step') }},
+          {{ plural(draft.model_turns, 'model turn') }})
         </summary>
         @if (draft.steps.length) {
           <ol>

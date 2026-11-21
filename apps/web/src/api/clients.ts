@@ -19,6 +19,8 @@ import type {
   BankQuestionInput,
   BankQuestionPage,
   ChatMessage,
+  ClassInsights,
+  ClassInsightsRequest,
   ClassPerformance,
   Classroom,
   DocumentRecord,
@@ -598,7 +600,7 @@ export class QuestionGenerationApi {
 /* the agent may take several model turns; kong allows it five minutes. */
 const INTERPRETATION_TIMEOUT = 5 * 60 * 1000 + 10 * 1000;
 
-/* a draft interpretation of one student's finalized results, for the classroom's teacher (adr 0014). */
+/* the performance agent's drafts for the classroom's teacher: one student's interpretation (adr 0014) and class insights (adr 0021). */
 @Injectable({ providedIn: 'root' })
 export class PerformanceAgentApi {
   private readonly gateway = inject(Gateway);
@@ -607,6 +609,15 @@ export class PerformanceAgentApi {
     return this.gateway.request('performance-agent', '/performance_interpretation', {
       method: 'POST',
       body: { classroom_id: classroomId, student_id: studentId },
+      timeout: INTERPRETATION_TIMEOUT,
+    });
+  }
+
+  /* a checked answer to the teacher's question about their class (adr 0021); the same loop and time limit. */
+  classInsights(request: ClassInsightsRequest): Promise<ClassInsights> {
+    return this.gateway.request('performance-agent', '/class_insights', {
+      method: 'POST',
+      body: request,
       timeout: INTERPRETATION_TIMEOUT,
     });
   }

@@ -9,7 +9,7 @@ from typing import Any
 
 import yaml
 from common import Session, load_state, save_state
-from local_stack import admin_client, check, ensure_person
+from local_stack import admin_client, check, delete_topics, ensure_person
 
 FIXTURE = Path(__file__).with_name("performance.yaml")
 WAIT = 90  # seconds for an event to reach grading or analytics
@@ -49,10 +49,9 @@ def ensure_people(spec: dict, state: dict) -> None:
     save_state(state)
 
 
-def ensure_topics(teacher: Session, spec: dict, state: dict) -> dict[str, str]:
-    """topic name in the fixture → its curriculum id, creating any that are missing, with their prerequisites."""
-    perf = state["performance"]
-    ids: dict[str, str] = perf.setdefault("topics", {})
+def ensure_topics(teacher: Session, spec: dict, state: dict, part: dict) -> dict[str, str]:
+    """topic name in the fixture → its curriculum id, creating any that are missing, with their prerequisites. `part` is the eval's part of the state."""
+    ids: dict[str, str] = part.setdefault("topics", {})
     for name in spec["topics"]:
         if name in ids and teacher.request("GET", f"/curriculum/topics/{ids[name]}").status_code == 200:
             continue
@@ -69,18 +68,17 @@ def ensure_topics(teacher: Session, spec: dict, state: dict) -> dict[str, str]:
     return ids
 
 
-def ensure_classroom(teacher: Session, admin: Session, spec: dict, state: dict) -> str:
-    """the teacher's performance classroom, which the school's admin creates for them (adr 0019)."""
-    perf = state["performance"]
+def ensure_classroom(teacher: Session, admin: Session, spec: dict, state: dict, part: dict) -> str:
+    """the teacher's eval classroom, which the school's admin creates for them (adr 0019)."""
     mine = {c["id"] for c in check(teacher.request("GET", "/identity/classrooms")).json()}
-    if perf.get("classroom") not in mine:
+    if part.get("classroom") not in mine:
         teacher_id = check(teacher.request("POST", "/identity/me", json={})).json()["id"]
         body = {"name": spec["classroom"], "teacher_id": teacher_id}
-        perf["classroom"] = check(admin.request("POST", "/identity/admin/classrooms", json=body)).json()["id"]
-        perf.pop("assessments", None)
-        perf.pop("students", None)
+        part["classroom"] = check(admin.request("POST", "/identity/admin/classrooms", json=body)).json()["id"]
+        part.pop("assessments", None)
+        part.pop("students", None)
         save_state(state)
-    return str(perf["classroom"])
+    return str(part["classroom"])
 
 
 def question_input(q: dict, topic_id: str) -> dict:
@@ -103,9 +101,11 @@ def question_input(q: dict, topic_id: str) -> dict:
     return body
 
 
-def ensure_assessments(teacher: Session, spec: dict, state: dict, room: str, topics: dict[str, str]) -> None:
+def ensure_assessments(
+    teacher: Session, spec: dict, state: dict, part: dict, room: str, topics: dict[str, str]
+) -> None:
     """each fixture assessment published once; question keys → ids and criteria ids kept in state."""
-    made = state["performance"].setdefault("assessments", {})
+    made = part.setdefault("assessments", {})
     for key, a in spec["assessments"].items():
         if (
             key in made
@@ -185,12 +185,13 @@ def marks_for(spec: dict, key: str, assessment: str, made: dict, evidence: list[
     return out
 
 
-def sit_and_mark(teacher: Session, spec: dict, state: dict, room: str, ids: dict[str, str]) -> None:
-    perf = state["performance"]
+def sit_and_mark(
+    teacher: Session, spec: dict, state: dict, part: dict, room: str, ids: dict[str, str]
+) -> None:
     for key, student in spec["students"].items():
         session = Session(username(key), state)
         for assessment in student["sits"]:
-            made = perf["assessments"][assessment]
+            made = part["assessments"][assessment]
             path = f"/assessment/assessments/{made['id']}"
             if session.request("GET", f"{path}/submission").status_code == 404:
                 answers = {made["questions"][k]: v for k, v in answers_for(spec, key, assessment).items()}
@@ -204,8 +205,8 @@ def sit_and_mark(teacher: Session, spec: dict, state: dict, room: str, ids: dict
         for v in page["evaluations"]:
             if v["status"] == "finalized":
                 continue
-            assessment = next(k for k, m in perf["assessments"].items() if m["id"] == v["assessment_id"])
-            marks = marks_for(spec, key, assessment, perf["assessments"][assessment], v["evidence"])
+            assessment = next(k for k, m in part["assessments"].items() if m["id"] == v["assessment_id"])
+            marks = marks_for(spec, key, assessment, part["assessments"][assessment], v["evidence"])
             check(
                 teacher.request(
                     "POST",
@@ -216,31 +217,42 @@ def sit_and_mark(teacher: Session, spec: dict, state: dict, room: str, ids: dict
         print(f"  {key}: {len(student['sits'])} assessments finalized")
 
 
-def main() -> None:
-    argparse.ArgumentParser(
-        description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
-    ).parse_args()
-    spec, state = fixture(), load_state()
-    teacher = Session("teacher", state)
-    ensure_people(spec, state)
-    profiles = {
-        key: check(Session(username(key), state).request("POST", "/identity/me", json={})).json()
+def delete_classroom(spec: dict, state: dict, section: str, keep: tuple[str, ...] = ()) -> None:
+    """the section's classroom through identity, so each service purges its own data, and the eval's topics; `keep` names the state the section keeps."""
+    part = state.get(section, {})
+    if room := part.get("classroom"):
+        res = Session("teacher", state).request("DELETE", f"/identity/classrooms/{room}")
+        if res.status_code != 404:  # already deleted is fine
+            check(res)
+        print(f"deleted: {spec['classroom']}")
+    if part.get("topics"):
+        prefix = spec["prefix"].replace("'", "''")
+        print(f"deleted {delete_topics(f"name LIKE '{prefix}%'")} eval topics")
+    state[section] = {k: part.get(k, {}) for k in keep}
+    save_state(state)
+
+
+def seed(spec: dict, state: dict, section: str) -> tuple[str, dict[str, str]]:
+    """the spec's students enrolled in the eval's classroom, the topics and assessments made, every sitting marked and finalized, and analytics caught up; the classroom and student ids are kept under `section` of the state."""
+    part = state.setdefault(section, {})
+    teacher, admin = Session("teacher", state), Session("admin", state)
+    ensure_people(spec, state)  # passwords stay with the performance eval's, where sign-in reads them
+    ids = {
+        key: check(Session(username(key), state).request("POST", "/identity/me", json={})).json()["id"]
         for key in spec["students"]
     }
-    ids = {key: p["id"] for key, p in profiles.items()}
-    admin = Session("admin", state)
-    room = ensure_classroom(teacher, admin, spec, state)
+    room = ensure_classroom(teacher, admin, spec, state, part)
     for student_id in ids.values():
         check(
             admin.request(
                 "POST", f"/identity/admin/classrooms/{room}/enrollments", json={"student_id": student_id}
             )
         )
-    state["performance"]["students"] = ids
+    part["students"] = ids
     save_state(state)
-    topics = ensure_topics(teacher, spec, state)
-    ensure_assessments(teacher, spec, state, room, topics)
-    sit_and_mark(teacher, spec, state, room, ids)
+    topics = ensure_topics(teacher, spec, state, part)
+    ensure_assessments(teacher, spec, state, part, room, topics)
+    sit_and_mark(teacher, spec, state, part, room, ids)
     # analytics counts what finalization released; wait until it has every student who sat something.
     for key, student in spec["students"].items():
         sat = {q["topic"] for a in student["sits"] for q in spec["assessments"][a]["questions"].values()}
@@ -252,6 +264,14 @@ def main() -> None:
                 lambda t, n=len(sat): len(t) == n,
                 f"{key} in analytics",
             )
+    return room, ids
+
+
+def main() -> None:
+    argparse.ArgumentParser(
+        description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
+    ).parse_args()
+    room, ids = seed(fixture(), load_state(), "performance")
     print(f"Performance eval classroom {room} ready with {len(ids)} students.")
 
 
