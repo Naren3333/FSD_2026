@@ -191,7 +191,7 @@ def test_generation_cases_name_corpus_documents_and_valid_types():
     titles = {
         m["title"]
         for m in run_generation.yaml.safe_load(
-            Path(run_generation.ROOT / "scripts/eval/corpus.yaml").read_text(encoding="utf-8")
+            run_generation.CASES.with_name("corpus.yaml").read_text(encoding="utf-8")
         ).values()
     }
     _, cases = run_generation.load_cases()

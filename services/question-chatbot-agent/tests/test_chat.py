@@ -88,7 +88,7 @@ def test_answer_streams_cites_and_saves(api: TestClient, fakes: Fakes, store: Me
     answer = saved(store, tid)
     assert events[-1][1] == {"message_id": answer["id"], "outcome": "answered", "checking": True}
     assert (answer["outcome"], answer["prompt_version"], answer["model"], answer["usage_tokens"]) == (
-        "answered", "student_tutor.v4", "gpt-test", 42)  # fmt: skip
+        "answered", "student_tutor.v5", "gpt-test", 42)  # fmt: skip
     assert answer["rewritten_query"] == "How do plants get energy from light?"
     assert answer["retrieved_chunk_ids"] == [C1, C2, C3]
 
@@ -735,7 +735,7 @@ def test_a_message_about_several_topics_searches_each_and_shares_the_prompt(
         rewrite(
             "how does design relate to testing", sub_queries=["design principles", "unit testing with mocks"]
         ),
-        chat_stream(["Design [S1] makes tests easy [S3]."]),
+        chat_stream(["Design [S1] makes tests easy [S6]."]),
     ]
     tid = thread(api)
     events = post(api, tid, "how does design make testing easier?")
@@ -755,12 +755,16 @@ def test_a_message_about_several_topics_searches_each_and_shares_the_prompt(
     prompt = fakes.calls("/v1/inference")[1]["messages"]
     documents = prompt[2]["content"]
     assert "Software Testing passage 1" in documents and "explain the connection" in prompt[0]["content"]
-    # the topics are listed, and each passage a topic's search found names it; the whole message's don't.
-    assert (
-        "<topics><topic>design principles</topic><topic>unit testing with mocks</topic></topics>" in documents
-    )
-    assert 'pages="1" topic="unit testing with mocks">\nSoftware Testing passage 1' in documents
-    assert 'pages="1" topic="design principles">\nSoftware Design passage 1' in documents
+    # each topic's passages sit in its own block, in topic order: the design search's four, the testing search's
+    # five, then the one only the whole message's search found.
+    design_block = documents.index('<topic name="design principles">')
+    testing_block = documents.index('<topic name="unit testing with mocks">')
+    assert design_block < documents.index('id="S4"') < testing_block < documents.index('id="S5"')
+    assert documents.rindex("</topic>") < documents.index('id="S10"')
+    assert '<document id="S5" title="Software Testing" pages="1">\nSoftware Testing passage 1' in documents
+    assert '<document id="S1" title="Software Design" pages="1">\nSoftware Design passage 1' in documents
+    assert answer["passage_topics"][answer["retrieved_chunk_ids"][2]] == {
+        "primary": "unit testing with mocks", "topics": ["unit testing with mocks"]}  # fmt: skip
 
 
 def test_a_topic_whose_best_passage_is_under_the_floor_gives_none(
@@ -1020,7 +1024,10 @@ def test_duplicate_primary_passage_keeps_all_topic_labels(api: TestClient, fakes
     ]
     events = post(api, thread(api), "How do chlorophyll and stomata work together?")
     docs = fakes.calls("/v1/inference")[1]["messages"][2]["content"]
-    assert 'topic="chlorophyll; stomata"' in docs
+    # one passage for both: it is grouped under the first topic, and names the other, which has no block.
+    assert '<topic name="chlorophyll">' in docs and 'also="stomata"' in docs
+    assert '<topic name="stomata">' not in docs
+    # a topic with no passage of its own is covered by one its search found.
     assert "Citation coverage is incomplete" not in tokens(events)
 
 
@@ -1293,3 +1300,142 @@ def test_refusals_and_small_talk_are_not_checked(api: TestClient, fakes: Fakes, 
     assert "does not cite" not in tokens(post(api, tid, "hi"))
     assert saved(store, tid)["answer_check"] is None
     assert fakes.calls(CHECK) == []
+
+
+# ---- primary topics (adr 0025 amendment)
+
+
+def test_a_passage_is_primary_for_the_topic_search_it_ranked_best_in() -> None:
+    from chat import attribute
+
+    a, b, c = (result(cid, "x", 1, title="Notes", section_path="") for cid in (C1, C2, C3))
+    # c ranks first for "stomata" but third for "chlorophyll".
+    legs = [[a, b, c], [c, b]]
+    out = attribute([a, b, c], ["chlorophyll", "stomata"], legs, 0.5)
+    assert out[C3] == {"primary": "stomata", "topics": ["chlorophyll", "stomata"]}
+    assert out[C1] == {"primary": "chlorophyll", "topics": ["chlorophyll"]}
+    # b ranks second in both: the tie goes to the earlier topic.
+    assert out[C2]["primary"] == "chlorophyll"
+
+
+def test_a_rank_tie_goes_to_the_topic_its_title_or_section_names() -> None:
+    from chat import attribute
+
+    shared = result(C1, "x", 1, title="Biology", section_path="Stomata and gas exchange")
+    other = result(C2, "x", 2, title="Biology", section_path="Chlorophyll")
+    out = attribute([shared, other], ["chlorophyll", "stomata"], [[shared, other], [shared]], 0.5)
+    assert out[C1]["primary"] == "stomata" and out[C2]["primary"] == "chlorophyll"
+
+
+def test_a_topic_left_without_a_passage_of_its_own_takes_a_shared_one() -> None:
+    from chat import attribute
+
+    first, second = result(C1, "x", 1, section_path=""), result(C2, "x", 2, section_path="")
+    # both rank best for chlorophyll, so stomata would have none: its best-ranked shared passage moves to it.
+    out = attribute([first, second], ["chlorophyll", "stomata"], [[first, second], [second, first]], 0.5)
+    assert {out[C1]["primary"], out[C2]["primary"]} == {"chlorophyll", "stomata"}
+    assert out[C2]["primary"] == "stomata"
+    # a single passage for both stays with the first, and names the other.
+    out = attribute([first], ["chlorophyll", "stomata"], [[first], [first]], 0.5)
+    assert out[C1] == {"primary": "chlorophyll", "topics": ["chlorophyll", "stomata"]}
+
+
+def test_passages_under_the_topic_floor_or_not_kept_get_no_topic() -> None:
+    from chat import attribute
+
+    weak, dropped = result(C1, "x", 1, score=0.4), result(C2, "x", 2)
+    assert attribute([weak], ["a", "b"], [[weak, dropped], []], 0.5) == {}
+
+
+def test_coverage_counts_a_topics_own_passages_when_it_has_any() -> None:
+    from support import uncovered
+
+    topics = {C1: {"primary": "a", "topics": ["a", "b"]}, C2: {"primary": "b", "topics": ["b"]}}
+    # c1 was found for b too, but b has a passage of its own, so citing c1 alone leaves b uncovered.
+    assert uncovered(["a", "b"], topics, [C1]) == ["b"]
+    assert uncovered(["a", "b"], topics, [C1, C2]) == []
+    # with no passage of its own, any passage its search found covers it.
+    assert uncovered(["a", "b"], {C1: {"primary": "a", "topics": ["a", "b"]}}, [C1]) == []
+    assert uncovered(["a", "b"], topics, []) == ["a", "b"]
+
+
+def test_a_shared_passage_does_not_cover_a_topic_with_passages_of_its_own(
+    api: TestClient, fakes: Fakes, store: MemoryStore, caplog: pytest.LogCaptureFixture
+) -> None:
+    design, testing = str(uuid4()), str(uuid4())
+    shared = result(C1, "Design for testability.", 1, document_id=design, title="Software Design")
+    own = result(C2, "Unit tests with mocks.", 2, document_id=testing, title="Software Testing", score=0.8)
+    fakes.by_query = {"both": [shared], "design": [shared], "testing": [shared, own]}
+    fakes.replies += [rewrite("both", sub_queries=["design", "testing"]), chat_stream(["Design [S1]."])]
+    tid = thread(api)
+    with caplog.at_level("INFO", logger="question-chatbot-agent.chat"):
+        reply = tokens(post(api, tid, "how does design help testing?"))
+    assert "Citation coverage is incomplete for: testing." in reply
+    answer = saved(store, tid)
+    assert answer["passage_topics"] == {
+        C1: {"primary": "design", "topics": ["design", "testing"]},
+        C2: {"primary": "testing", "topics": ["testing"]},
+    }
+    [turn] = [r for r in caplog.records if r.getMessage() == "chat_turn"]
+    assert (turn.primary_topics, turn.uncovered_topics) == (2, 1)  # type: ignore[attr-defined]
+
+
+def test_fitting_keeps_each_topics_own_passage_first(
+    api: TestClient, fakes: Fakes, store: MemoryStore
+) -> None:
+    from chat import PASSAGE_OVERHEAD, token_bound
+
+    question = "How do chlorophyll and stomata work together?"
+    body = "Leaf biology. " * 100
+    shared, mine, extra = (result(cid, body, n) for n, cid in enumerate([C1, C2, C3], 1))
+    cost = token_bound(body) + token_bound(shared["title"]) + PASSAGE_OVERHEAD
+    main.app.state.settings = replace(SETTINGS, context_tokens=1000 + token_bound(question) + 2 * cost)
+    # the shared passage is found by both, but ranks best for chlorophyll; stomata's own passage is c2.
+    fakes.by_query = {"both": [extra], "chlorophyll": [shared], "stomata": [mine, shared]}
+    # stomata comes first: by any topic label it would take the shared passage and leave chlorophyll none.
+    fakes.replies += [
+        rewrite("both", sub_queries=["stomata", "chlorophyll"]),
+        chat_stream(["Leaf [S1][S2]."]),
+    ]
+    tid = thread(api)
+    post(api, tid, question)
+    answer = saved(store, tid)
+    assert set(answer["retrieved_chunk_ids"]) == {C1, C2}  # room for two: one of each topic's own
+    assert set(answer["passage_topics"]) == {C1, C2}  # only the passages in the prompt
+
+
+def test_saved_topics_hold_ids_and_cleaned_labels_only() -> None:
+    from chat import saved_topics
+
+    out = saved_topics({C1: {"primary": "a [doc:x] <b>", "topics": ["a [doc:x] <b>", "c" * 300]}})
+    assert out == {C1: {"primary": "a doc:x b", "topics": ["a doc:x b", "c" * 200]}}
+    assert saved_topics({}) is None
+
+
+def test_a_multitopic_refusal_under_the_floor_saves_no_passage_topics(
+    api: TestClient, fakes: Fakes, store: MemoryStore, caplog: pytest.LogCaptureFixture
+) -> None:
+    # above the topic floor, so the topic searches keep them, but under the relevance floor: refused, no prompt.
+    weak = [
+        result(C1, "Chlorophyll absorbs light.", 3, score=0.55),
+        result(C2, "Stomata let CO2 in.", 5, score=0.55),
+    ]
+    fakes.by_query = {"both": weak, "chlorophyll": weak[:1], "stomata": weak[1:]}
+    fakes.replies.append(rewrite("both", sub_queries=["chlorophyll", "stomata"]))
+    tid = thread(api)
+    with caplog.at_level("INFO", logger="question-chatbot-agent.chat"):
+        post(api, tid, "How do chlorophyll and stomata work together?")
+    answer = saved(store, tid)
+    assert answer["outcome"] == "no_results" and answer["passage_topics"] is None
+    [turn] = [r for r in caplog.records if r.getMessage() == "chat_turn"]
+    assert turn.primary_topics == 0  # type: ignore[attr-defined]
+
+
+def test_a_single_topic_answer_saves_no_passage_topics(
+    api: TestClient, fakes: Fakes, store: MemoryStore
+) -> None:
+    fakes.results = RESULTS
+    fakes.replies += [rewrite("light"), chat_stream(["Light [S1]."])]
+    tid = thread(api)
+    post(api, tid, "how do plants get energy?")
+    assert saved(store, tid)["passage_topics"] is None

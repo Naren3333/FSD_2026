@@ -1,4 +1,4 @@
-# the marking eval (adr 0024): drafted student answers to four questions, each with the level a careful teacher
+# the marking eval (adr 0024): drafted student answers to five questions, each with the level a careful teacher
 # would give every criterion (in rubric order; a short answer has one criterion worth its points). load_marking.py
 # seeds the people, classroom and assessments; run_marking.py submits each answer as its own student, waits for the
 # ai suggestion and its second check, and compares them with `expect`. every answer was drafted for the eval, not
@@ -8,6 +8,7 @@
 # `auto: true` is an answer assessment's own rule marks correct, so grading makes no suggestion for it.
 # `exact: true` is one grading's exact-match path suggests without a model call.
 # `flags` are suggestion flags the marking should raise.
+# a question's `marking_scheme` is the teacher's own scheme passages, sent with the question (adr 0004).
 
 classroom: Marking eval
 prefix: "Eval mark · "
@@ -17,6 +18,7 @@ topics:
   Functions: {}
   Testing: {}
   SQL: {}
+  Algorithms: {}
 
 questions:
   race:
@@ -61,6 +63,13 @@ questions:
     type: short_answer
     prompt: "Which SQL clause filters groups after GROUP BY has formed them?"
     accepted: ["HAVING", "the HAVING clause"]
+  bigo:
+    topic: Algorithms
+    type: short_answer
+    prompt: "What is the time complexity of binary search on a sorted array of n items?"
+    accepted: ["O(log n)"]
+    marking_scheme:
+      - "Accept O(log n) written in Big-O notation, with or without brackets around n. Do not accept \"logarithmic\" or \"log time\" on its own: the answer must give the Big-O notation."
 
 cases:
   # race: a free response worth 6.
@@ -226,5 +235,141 @@ cases:
   - id: having-off-topic
     question: having
     answer: "SELECT * FROM orders"
+    expect: [0]
+    teacher_rating: null
+
+  # the harder set: borderline levels, right words with the wrong mechanism, a correct sentence beside a
+  # contradiction, short-answer near misses, a definition and example that disagree, a language mismatch, long
+  # padded answers, and a marking scheme that rules an answer out. a contradicted criterion gets its lowest level.
+  - id: race-lock-write-only
+    question: race
+    answer: "Both threads read the counter before either has written it back, so one of the increments is lost. Put a lock around the line that writes the new value."
+    # a lock is named, but around the write alone, which does not protect the read-add-write.
+    expect: [4, 1]
+    teacher_rating: null
+  - id: race-synchronized
+    question: race
+    answer: "Each thread reads the same old value and writes old + 1, so the second write overwrites the first and one increment disappears. Make it synchronized."
+    # says what to use, not what it must protect.
+    expect: [4, 1]
+    teacher_rating: null
+  - id: race-cas-unnamed
+    question: race
+    answer: "Both threads can load the value 7 before either stores, so both store 8 and one add is lost. To stop it, read the value, work out value + 1, and only store it if the counter still holds the value you read; if not, read again and retry."
+    # compare-and-swap described without its name: an atomic increment.
+    expect: [4, 2]
+    teacher_rating: null
+  - id: race-through-prevention
+    question: race
+    answer: "You need a mutex held around reading, incrementing and writing the counter, because without it the second thread can read the old value before the first thread has stored its result, and then its write replaces the first one."
+    # the explanation is given only as the reason for the prevention, but it is complete.
+    expect: [4, 2]
+    teacher_rating: null
+  - id: race-wrong-mechanism
+    question: race
+    answer: "A race condition happens because each CPU core caches the counter, so each thread keeps seeing its own stale copy forever and the counter never changes at all. Holding a mutex around the read, the add and the write prevents it."
+    # right words (stale copy, mutex), wrong mechanism: nothing about two reads before a write losing one update.
+    expect: [0, 2]
+    teacher_rating: null
+  - id: race-contradiction
+    question: race
+    answer: "Both threads read 5 and both write 6, so one increment is lost. In the end the counter is always correct anyway, because each thread adds its own one. A mutex around the read-add-write prevents it."
+    expect: [0, 2]
+    teacher_rating: null
+  - id: race-padded
+    question: race
+    answer: "Concurrency is one of the most important and interesting topics in modern computing, and every programmer will meet it sooner or later in their career, whether they work on websites, games or operating systems. Threads let a program do several things at once, which makes software faster and more responsive, and that is why almost every language has them. There are many kinds of problems that can happen with threads, and they are often hard to find because they do not happen every time you run the program. In the example from the question, both threads read the counter while it holds 5, each adds one, and each writes 6, so one increment is lost and the counter ends one lower than it should. Testing alone often misses this. To prevent it, hold a mutex for the whole read, add and write, so only one thread does those steps at a time. In conclusion, concurrency is powerful but needs care, and good programmers always think carefully about their threads."
+    expect: [4, 2]
+    teacher_rating: null
+
+  - id: params-wrong-mechanism
+    question: params
+    answer: "Parameters and arguments both belong to the function definition: parameters are the required names and arguments are the optional names that have defaults. In def f(a, b=2), a is a parameter and b is an argument."
+    expect: [0, 1]
+    teacher_rating: null
+  - id: params-definition-example-disagree
+    question: params
+    answer: "A parameter is the name in the function's definition and an argument is the value passed in a call. For example, in def greet(name), name is the argument."
+    # the example contradicts the definition, so neither shows which the student means.
+    expect: [0, 1]
+    teacher_rating: null
+  - id: params-contradiction
+    question: params
+    answer: "A parameter is the name in the definition and an argument is the value passed in. Really they are the same thing, and the two words can always be swapped. In def area(r), r is the parameter, and in area(2), 2 is the argument."
+    expect: [0, 2]
+    teacher_rating: null
+  - id: params-spanish
+    question: params
+    answer: "Un parámetro es el nombre que aparece en la definición de la función; un argumento es el valor que se pasa en la llamada. En def saludar(nombre), nombre es el parámetro; en saludar('Ana'), 'Ana' es el argumento."
+    # correct, but not in the question's language: full marks, flagged for the teacher.
+    expect: [4, 2]
+    flags: [language_mismatch]
+    teacher_rating: null
+  - id: params-padded
+    question: params
+    answer: "Functions are a really important part of programming because they let you reuse code instead of writing the same thing again and again, which saves time and makes programs easier to read and maintain. Every language has functions, even if some call them methods or procedures. Functions can take inputs and give back outputs, and that is a big part of what makes them useful. When it comes to parameters and arguments, people often mix them up, and to be honest they are quite similar. A parameter is kind of part of the function, and an argument is something you give to the function. Both of them are about the inputs. Overall, understanding functions well is one of the keys to becoming a good programmer."
+    # vague about where each appears, and no example.
+    expect: [2, 0]
+    teacher_rating: null
+
+  - id: tdd-make-it-pass
+    question: tdd
+    answer: "make it pass"
+    # the phase's other common name, as in tdd-other-words.
+    expect: [1]
+    teacher_rating: null
+  - id: tdd-red-green
+    question: tdd
+    answer: "Red-Green"
+    expect: [0]
+    teacher_rating: null
+  - id: tdd-refactor-then-green
+    question: tdd
+    answer: "Refactor then Green"
+    expect: [0]
+    teacher_rating: null
+  - id: tdd-red
+    question: tdd
+    answer: "Red"
+    expect: [0]
+    teacher_rating: null
+
+  - id: having-misspelled
+    question: having
+    answer: "HAVNG"
+    # one letter missing; plainly the right clause.
+    expect: [1]
+    teacher_rating: null
+  - id: having-where-after-group
+    question: having
+    answer: "A WHERE placed after the GROUP BY"
+    expect: [0]
+    teacher_rating: null
+
+  # bigo: a short answer worth 1, whose marking scheme rules out "logarithmic" on its own.
+  - id: bigo-logarithmic
+    question: bigo
+    answer: "logarithmic"
+    expect: [0]
+    teacher_rating: null
+  - id: bigo-log-time
+    question: bigo
+    answer: "Log time, because it halves the range it searches at every step."
+    expect: [0]
+    teacher_rating: null
+  - id: bigo-brackets
+    question: bigo
+    answer: "O(log(n))"
+    expect: [1]
+    teacher_rating: null
+  - id: bigo-notation-and-words
+    question: bigo
+    answer: "O(log n), which is logarithmic"
+    # the notation is given, so "logarithmic" is not on its own.
+    expect: [1]
+    teacher_rating: null
+  - id: bigo-hedged
+    question: bigo
+    answer: "O(log n) or O(n)"
     expect: [0]
     teacher_rating: null

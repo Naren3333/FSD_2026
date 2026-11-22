@@ -1,8 +1,14 @@
-"""the answer support check's text handling (adr 0025): an answer's cited statements, the check's verdicts and the notices shown after the answer."""
+"""the answer support check (adr 0025): cited statements, the check call, its verdicts and the notices after the answer."""
 
 import json
 import re
-from typing import Any
+import time
+from typing import TYPE_CHECKING, Any
+
+import prompts
+
+if TYPE_CHECKING:
+    from clients import Services
 
 MAX_STATEMENTS = 24  # cited statements checked per answer; later ones are left unchecked
 STATEMENT_CHARS = 300  # of a statement's text sent and saved
@@ -10,6 +16,9 @@ CLAIM_CHARS = 80  # of a claim's text named in the notice
 NOTICE_CLAIMS = 3
 VERDICTS = ("supported", "partial", "unsupported")
 UNCITED_NOTICE = "\n\nThis answer does not cite the materials."
+# the check runs after `done`: its visible reply budget and how long it may take.
+CHECK_MAX_TOKENS = 1500
+CHECK_SECONDS = 20.0
 
 _MARKER = re.compile(r"\[doc:([0-9a-fA-F-]+)\]")
 # a sentence ends at . ! or ? and the citations right after it, or at a line break.
@@ -78,6 +87,52 @@ def verdicts(output: str) -> dict[str, str]:
     return {str(v["id"]): str(v["verdict"]) for v in json.loads(output)["verdicts"]}
 
 
+async def check(
+    services: "Services",
+    passages: dict[str, str],
+    checked: list[tuple[str, list[str]]],
+    correlation: str,
+    billed_to: dict[str, Any],
+) -> list[str]:
+    """the verdict on each (text, passage tags) statement against the tagged passages, in order; raises when the check fails."""
+    ids = [str(n) for n in range(1, len(checked) + 1)]
+    output = await services.generate(
+        prompts.answer_check_messages(
+            passages, [(i, text, tags) for i, (text, tags) in zip(ids, checked, strict=True)]
+        ),
+        CHECK_MAX_TOKENS,
+        prompts.ANSWER_CHECK_SCHEMA,
+        prompts.ANSWER_CHECK,
+        correlation,
+        billed_to,
+        time.monotonic() + CHECK_SECONDS,
+        profile="check",  # an independent second opinion (adr 0023)
+        check=lambda out: faults(out, ids),
+        reask=1,
+    )
+    found = verdicts(output)
+    return [found[i] for i in ids]
+
+
+def label(topic: str) -> str:
+    """a topic as shown or saved: rewrite output is untrusted, so no markup and at most 200 characters."""
+    return re.sub(r"[\[\]<>`*_]", "", " ".join(topic.split()))[:200]
+
+
+def uncovered(
+    sub_queries: list[str], passage_topics: dict[str, dict[str, Any]], cited: list[str]
+) -> list[str]:
+    """the topics no cited passage covers: the topic's own (primary) passages, else any found for it."""
+    given = set(cited)
+    missing = []
+    for t in sub_queries:
+        own = [cid for cid, v in passage_topics.items() if v["primary"] == t]
+        found = own or [cid for cid, v in passage_topics.items() if t in v["topics"]]
+        if not given.intersection(found):
+            missing.append(t)
+    return missing
+
+
 def unsupported_notice(claims: list[str]) -> str:
     """a note naming the statements the cited passages do not support."""
     named = []
@@ -92,11 +147,11 @@ def unsupported_notice(claims: list[str]) -> str:
     return "\n\nThe cited passages may not support: " + "; ".join(named) + rest + "."
 
 
-def record(checked: list[tuple[str, list[str]]], found: dict[str, str], version: str) -> dict[str, Any]:
+def record(checked: list[tuple[str, list[str]]], found: list[str], version: str) -> dict[str, Any]:
     """the saved answer_check of a checked answer: each statement's verdict and cited chunks, and the counts."""
     rows = [
-        {"statement": text, "chunk_ids": cited, "verdict": found[str(n)]}
-        for n, (text, cited) in enumerate(checked, 1)
+        {"statement": text, "chunk_ids": cited, "verdict": verdict}
+        for (text, cited), verdict in zip(checked, found, strict=True)
     ]
     counts = {v: sum(r["verdict"] == v for r in rows) for v in VERDICTS}
     return {"status": "checked", "prompt_version": version, "counts": counts, "statements": rows}

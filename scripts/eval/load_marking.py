@@ -42,6 +42,9 @@ def assign(spec: dict) -> dict[str, str]:
 
 def question_input(q: dict, topic_id: str) -> dict:
     body: dict[str, Any] = {"prompt": q["prompt"], "type": q["type"], "topic_id": topic_id}
+    if q.get("marking_scheme"):
+        # the teacher's own scheme passages, pasted rather than cited from a document.
+        body["marking_scheme"] = [{"text": t} for t in q["marking_scheme"]]
     if q["type"] == "short_answer":
         return body | {"accepted_answers": q["accepted"], "case_sensitive": bool(q.get("case_sensitive"))}
     rubric = {

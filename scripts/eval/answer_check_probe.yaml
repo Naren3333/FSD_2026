@@ -1,0 +1,64 @@
+# the answer-check probe (adr 0025): planted answer statements with a known fault, and good controls, sent straight
+# to the deployed support check (answer_check.v1) with the passages they cite. the passages are written for this
+# probe. each batch is one check call, as one answer's cited statements are.
+#
+# expect: the right verdict. `partial` statements change a number or a name, so `unsupported` is also a catch;
+# `unsupported` ones contradict the passage or state a true claim it does not hold; `supported` ones are controls
+# (paraphrase, condensing, a socratic hint built on the passage).
+# kind: number, name, contradiction, outside (true but not in the passages), paraphrase, condensing, hint.
+
+batches:
+  testing:
+    passages:
+      S1: >-
+        Test-driven development repeats a short cycle. First the developer writes a test that fails (red), then
+        writes just enough code to make it pass (green), and then improves the structure of the code without
+        changing its behaviour (refactor).
+      S2: >-
+        A mock object stands in for a real dependency during a unit test. It records the calls made to it, so the
+        test can check that the code under test called the dependency as expected. Mocks keep unit tests fast
+        because they avoid slow resources such as databases and networks.
+    statements:
+      - {id: tdd-paraphrase, kind: paraphrase, expect: supported, cites: [S1], text: "In TDD you start with a test that fails, write only enough code to pass it, and then tidy the design without changing what the code does."}
+      - {id: tdd-condensed, kind: condensing, expect: supported, cites: [S1], text: "The TDD cycle is red, green, refactor."}
+      - {id: mock-hint, kind: hint, expect: supported, cites: [S2], text: "Think about what a mock records: how could your test use that to see whether the database was called?"}
+      - {id: tdd-four-steps, kind: number, expect: partial, cites: [S1], text: "The TDD cycle has four steps: red, green, refactor and release."}
+      - {id: tdd-code-first, kind: contradiction, expect: unsupported, cites: [S1], text: "In TDD the developer writes the code first and adds a failing test afterwards."}
+      - {id: mock-slower, kind: contradiction, expect: unsupported, cites: [S2], text: "Mocks make unit tests slower because they add an extra layer between the code and the database."}
+      - {id: mock-frameworks, kind: outside, expect: unsupported, cites: [S2], text: "Mocking libraries such as Mockito can create mock objects automatically."}
+
+  http:
+    passages:
+      S1: >-
+        HTTP status codes are grouped by their first digit. Codes from 200 to 299 mean the request succeeded, codes
+        from 400 to 499 mean the client made an error, and codes from 500 to 599 mean the server failed. 404 Not
+        Found means the requested resource does not exist.
+      S2: >-
+        REST APIs name resources with plural nouns, such as /students, and use HTTP methods for the actions: GET
+        reads a resource, POST creates one, PUT replaces one and DELETE removes one.
+    statements:
+      - {id: codes-paraphrase, kind: paraphrase, expect: supported, cites: [S1], text: "A code in the 400s says the client made the mistake, while one in the 500s means the server failed."}
+      - {id: rest-condensed, kind: condensing, expect: supported, cites: [S2], text: "In REST, the plural noun names the resource and the HTTP method names the action."}
+      - {id: codes-hint, kind: hint, expect: supported, cites: [S1], text: "Which digit of the status code would you look at first to tell whether the client or the server caused the problem?"}
+      - {id: codes-success-range, kind: number, expect: partial, cites: [S1], text: "Codes from 200 to 399 mean the request succeeded."}
+      - {id: rest-patch, kind: name, expect: partial, cites: [S2], text: "PATCH replaces a resource and DELETE removes one."}
+      - {id: rest-verbs, kind: contradiction, expect: unsupported, cites: [S2], text: "REST APIs should name resources with verbs, such as /getStudents."}
+      - {id: codes-teapot, kind: outside, expect: unsupported, cites: [S1], text: "Status code 418 was defined as a joke in an April Fools' RFC."}
+
+  git:
+    passages:
+      S1: >-
+        Git tracks a file in three states: modified, staged and committed. git add moves a change to the staging
+        area, and git commit records the staged changes in the repository's history.
+      S2: >-
+        A merge conflict happens when two branches change the same lines of a file. Git marks the conflicting part
+        with <<<<<<<, ======= and >>>>>>> lines, and the developer must edit the file, remove the markers and commit
+        the result.
+    statements:
+      - {id: states-paraphrase, kind: paraphrase, expect: supported, cites: [S1], text: "After you change a file, git add stages the change and git commit saves it into the history."}
+      - {id: states-condensed, kind: condensing, expect: supported, cites: [S1], text: "A file in Git is modified, staged or committed."}
+      - {id: conflict-hint, kind: hint, expect: supported, cites: [S2], text: "Look at the lines between the markers: which version of each change do you want to keep before you commit?"}
+      - {id: push-stages, kind: name, expect: partial, cites: [S1], text: "git push moves a change to the staging area."}
+      - {id: four-states, kind: number, expect: partial, cites: [S1], text: "Git tracks a file in four states: untracked, modified, staged and committed."}
+      - {id: conflict-automatic, kind: contradiction, expect: unsupported, cites: [S2], text: "Git resolves merge conflicts automatically, so the developer never needs to edit the file."}
+      - {id: conflict-pull-often, kind: outside, expect: unsupported, cites: [S2], text: "Pulling from the main branch often helps avoid many merge conflicts."}

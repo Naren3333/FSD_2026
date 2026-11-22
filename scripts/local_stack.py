@@ -103,6 +103,16 @@ def compose(
     )
 
 
+def run_inside(service: str, script: str, job: Any, timeout: float, what: str) -> Any:
+    """runs a python `script` in the service's container with `job` as json on stdin; its last output line, read as json."""
+    done = compose(
+        "exec", "-T", service, "python", "-c", script, input=json.dumps(job), check=False, timeout=timeout
+    )
+    if done.returncode:
+        raise RuntimeError(f"{what} failed: {done.stderr.strip()[-600:]}")
+    return json.loads(done.stdout.strip().splitlines()[-1])
+
+
 def require_test_stack(*, dev: bool) -> None:
     """stops a script that creates and deletes data unless it is aimed at the running test stack, or `dev` (the script's --dev flag) says to use the development stack's data anyway."""
     if dev:

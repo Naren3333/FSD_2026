@@ -269,6 +269,8 @@ export class AdminClassroomsComponent {
   /* re-reads the roster, the enrolled ids and the classrooms' counts after a student joined or left. */
   private async rereadRoster(classroomId: string): Promise<void> {
     const same = () => this.managing()?.id === classroomId;
+    // another classroom opened meanwhile: its own reads are current, so only the counts are re-read.
+    if (!same()) return this.rereadClassrooms();
     await Promise.all([
       this.roster.reload(() => this.readRoster(classroomId, same)),
       this.enrolledIds.reload(() => this.readEnrolled(classroomId)),

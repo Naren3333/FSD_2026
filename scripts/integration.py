@@ -1562,7 +1562,7 @@ def databases() -> None:
         ("grading", "1,2,3,4,5,6,7,8,9,10,11"),
         ("analytics", "1,2,3,4,5,6,7,8,9,10,11,12,13"),
         ("curriculum", "1,2"),
-        ("chatbot", "1,2,3,4,5,6,7"),
+        ("chatbot", "1,2,3,4,5,6,7,8"),
         ("aicore", "1,2,3,4,5,6,7"),
     ]:
         migrations = sql_value(service, versions)

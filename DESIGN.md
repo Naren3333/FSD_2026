@@ -6,7 +6,7 @@ locale: en-SG
 # Learning Ledger design context
 
 ## North Star
-A teacher's working notebook: calm, precise, and centered on the evidence behind learning. Teachers organize lessons and review actual submissions; students see their own work. This is a product workspace, not a marketing landing page. The supplied brief in docs/requirements.md is authoritative.
+A teacher's working notebook: calm, precise, and centered on the evidence behind learning. Teachers organize lessons and review actual submissions; students see their own work. This is a product workspace, not a marketing landing page. Behaviour is set by UX-CONTRACT.md and docs/decisions.md.
 
 ## Visual direction
 Direction A, "Refined Ledger": a navy sidebar, teal brand, serif page titles and calm cards on a light canvas. The classroom → materials → assessment → evidence rail appears only on the signed-out welcome card (`apps/web/src/app.html:176`).

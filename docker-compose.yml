@@ -543,7 +543,7 @@ services:
       DB_POOL_MIN: ${DB_POOL_MIN:-1}
       IDENTITY_URL: http://identity:8080
       KAFKA_BROKERS: kafka:9092
-      # a new group re-reads every retained event, for rebuilding into a new database (operations.md).
+      # a new group re-reads every retained event, for rebuilding into a new database (within the 7-day retention, decision 0010).
       KAFKA_GROUP: ${ANALYTICS_KAFKA_GROUP:-analytics-v1}
     depends_on:
       keycloak:

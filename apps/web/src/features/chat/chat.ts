@@ -344,13 +344,20 @@ export class ChatComponent {
     ids: string[],
     noticed: () => boolean,
   ): Promise<void> {
-    await stream.catch(() => undefined);
+    const closed = await stream.then(
+      () => true,
+      () => false,
+    );
     this.checking.update((all) => all.filter((id) => !ids.includes(id)));
     this.usage.refresh();
-    // a later question's announcement is not overwritten.
+    // a later question's announcement is not overwritten; a dropped stream never learned the outcome.
     if (!this.streaming() && this.announcement() === 'Answer complete. Checking the sources…')
       this.announcement.set(
-        noticed() ? 'Sources checked: see the note under the answer.' : 'Sources checked.',
+        !closed
+          ? 'Answer complete.'
+          : noticed()
+            ? 'Sources checked: see the note under the answer.'
+            : 'Sources checked.',
       );
     // a question asked meanwhile re-reads the conversation itself when it ends.
     if (!this.streaming() && !this.state.busy()) await this.sync(thread);

@@ -262,6 +262,9 @@ func (p pgStore) deleteClassroom(ctx context.Context, classroom, org string) err
 // separate, deliberate step (deleteClassroom), since it deletes every student's work in them.
 var errOwnsClassrooms = errors.New("the teacher still has classrooms")
 
+// an admin account, by its stored role: a token that lost the admin role still cannot delete it (adr 0019).
+var errAdminAccount = errors.New("an admin account cannot delete itself")
+
 // clear the caller's profile and enrollments and announce deletion atomically.
 func (p pgStore) deleteAccount(ctx context.Context, org, subject string) error {
 	tx, err := p.db.Begin(ctx)
@@ -274,6 +277,9 @@ func (p pgStore) deleteAccount(ctx context.Context, org, subject string) error {
 	var role string
 	if err = tx.QueryRow(ctx, "SELECT role FROM users WHERE id=$1 AND org_id=$2 AND deleted_at IS NULL FOR UPDATE", subject, org).Scan(&role); err != nil {
 		return err
+	}
+	if role == platform.RoleAdmin {
+		return errAdminAccount
 	}
 	var owned bool
 	if err = tx.QueryRow(ctx, "SELECT EXISTS(SELECT 1 FROM classrooms WHERE teacher_id=$1 AND deleted_at IS NULL)", subject).Scan(&owned); err != nil {

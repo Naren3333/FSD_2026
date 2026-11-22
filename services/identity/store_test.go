@@ -305,6 +305,12 @@ func TestADeletedAccountIsClearedAnnouncedAndNeverReturns(t *testing.T) {
 	if err := s.deleteAccount(ctx, "org-a", teacher); !errors.Is(err, errOwnsClassrooms) {
 		t.Fatalf("a teacher with a classroom: %v", err)
 	}
+	admin := uuid.NewString()
+	register(t, s, "org-a", admin, "admin", "head")
+	// refused by the stored role, whatever the token now says (adr 0019).
+	if err := s.deleteAccount(ctx, "org-a", admin); !errors.Is(err, errAdminAccount) {
+		t.Fatalf("an admin account: %v", err)
+	}
 	if err := s.deleteAccount(ctx, "org-a", student); err != nil {
 		t.Fatal(err)
 	}

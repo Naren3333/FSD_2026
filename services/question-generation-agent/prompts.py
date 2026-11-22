@@ -14,8 +14,9 @@ MAX_MESSAGE = 60000  # ai-core's longest message, in characters
 PASSAGES_BUDGET = 50000
 MIN_PASSAGE_CAP = 200  # the shortest a passage is cut to in a review
 # the instructions' version, logged with each request: bump it when they change (v2: key checks, adr 0026;
-# v3: wrong-option rules for the writer, and the weak options the reviewer names).
-PROMPT_VERSION = 3
+# v3: wrong-option rules for the writer, and the weak options the reviewer names; v4: practice may ask for
+# extra multiple choice, adr 0022).
+PROMPT_VERSION = 4
 
 
 @dataclass(frozen=True)
@@ -110,7 +111,7 @@ def adapted(instructions: str, header: str, changed: dict[str, str]) -> str:
 
 # a student's practice (adr 0022): the same rules, written for a student revising alone with no teacher review.
 PRACTICE_GENERATION_CHANGES = {
-    "- Write exactly": "- Write exactly the number of questions of each type given in counts, and no other types, at the requested difficulty, about the requested topic and focus when they are given, otherwise about the main ideas of the passages.",
+    "- Write exactly": "- Write exactly the number of questions of each type given in counts, and no other types, at the requested difficulty, about the requested topic and focus when they are given, otherwise about the main ideas of the passages. counts may ask for a few more multiple_choice questions than the student gets, so the best can be kept: write every one, each on a different fact.",
     "- explanation:": "- explanation: one or two sentences to the student on why the answer is right, saying what the materials state. Do not just repeat the answer.",
     "- free_response:": "",
     "- points:": "- points: always 1.",

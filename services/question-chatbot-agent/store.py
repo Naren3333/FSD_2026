@@ -23,6 +23,10 @@ TURN_STALE = "3 minutes"
 RELEASE_TURN = "DELETE FROM active_turns WHERE thread_id=%s AND started_at=%s"
 
 
+def _jsonb(value: Any) -> Jsonb | None:
+    return None if value is None else Jsonb(value, dumps=json.dumps)
+
+
 class Store(Protocol):
     async def create_thread(self, org: str, user: str, role: str, classroom_id: str) -> dict[str, Any] | None:
         """the new thread, or none when the classroom was deleted and purged."""
@@ -167,8 +171,9 @@ class PostgresStore(AsyncPooled):
                 ]
             cur = await conn.execute(
                 "INSERT INTO messages (thread_id, role, content, outcome, rewritten_query, sub_queries, is_on_topic,"
-                " retrieved_chunk_ids, citations, prompt_version, model, usage_tokens, latency_ms, answer_check)"
-                " VALUES (%s, 'assistant', %s, %s, %s, %s, %s, %s::uuid[], %s, %s, %s, %s, %s, %s) RETURNING id",
+                " retrieved_chunk_ids, citations, prompt_version, model, usage_tokens, latency_ms, answer_check,"
+                " passage_topics)"
+                " VALUES (%s, 'assistant', %s, %s, %s, %s, %s, %s::uuid[], %s, %s, %s, %s, %s, %s, %s) RETURNING id",
                 (
                     thread_id,
                     answer["content"],
@@ -177,14 +182,13 @@ class PostgresStore(AsyncPooled):
                     answer.get("sub_queries"),
                     answer.get("is_on_topic"),
                     answer.get("retrieved_chunk_ids"),
-                    None if citations is None else Jsonb(citations, dumps=json.dumps),
+                    _jsonb(citations),
                     answer.get("prompt_version"),
                     answer.get("model"),
                     answer.get("usage_tokens"),
                     answer.get("latency_ms"),
-                    None
-                    if answer.get("answer_check") is None
-                    else Jsonb(answer["answer_check"], dumps=json.dumps),
+                    _jsonb(answer.get("answer_check")),
+                    _jsonb(answer.get("passage_topics")),
                 ),
             )
             row = await cur.fetchone()

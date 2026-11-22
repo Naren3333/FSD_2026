@@ -2,7 +2,6 @@
 
 import argparse
 import json
-import subprocess
 import sys
 import time
 from collections import Counter
@@ -12,8 +11,8 @@ from typing import Any
 
 import yaml
 from budget import DEFAULT_CAP, Budget, CapReachedError, correlation, ledger_calls
-from common import ROOT, RUNS, STUDENT2, Session, load_state, save_state, service_modules
-from local_stack import check, psql_json
+from common import RUNS, STUDENT2, Session, load_state, save_state, service_modules
+from local_stack import check, psql_json, run_inside
 from reporting import checkpoint, select_cases
 
 # the agent's own checks, to hold its output to them; its prompts for the reviewer's reasons.
@@ -303,28 +302,8 @@ def review_batch(spec: dict, batch: dict, billed: dict, sent: str, effort: str |
         "correlation": sent,
         "review_effort": effort,
     }
-    done = subprocess.run(
-        [
-            "docker",
-            "compose",
-            "exec",
-            "-T",
-            "question-generation-agent",
-            "python",
-            "-c",
-            INSIDE.read_text(encoding="utf-8"),
-        ],
-        check=False,
-        cwd=ROOT,
-        input=json.dumps(job),
-        text=True,
-        encoding="utf-8",
-        capture_output=True,
-        timeout=TIMEOUT,
-    )
-    if done.returncode:
-        raise RuntimeError(f"probe batch {batch['id']} failed: {done.stderr.strip()[-600:]}")
-    return json.loads(done.stdout.strip().splitlines()[-1])
+    script = INSIDE.read_text(encoding="utf-8")
+    return run_inside("question-generation-agent", script, job, TIMEOUT, f"probe batch {batch['id']}")
 
 
 def judge(batch: dict, verdicts: list[dict], attempt: int) -> list[dict]:

@@ -1,4 +1,4 @@
-"""run the marking eval (adr 0024): each case's student submits its answer through kong, grading's marker suggests marks and its critic checks them, billed to the teacher, within a cost cap; the suggestion is compared with the levels marking_cases.yaml expects. --rescore reads the suggestions of an earlier run again instead, making no submission or model call. teacher_rating is left for a person to fill in."""
+"""run the marking eval (adr 0024): grading's marker and critic on real submissions; --rescore re-reads a run."""
 
 import argparse
 import json
@@ -196,6 +196,7 @@ def summarize(cases: list[dict]) -> dict:
         "critic_true_doubt_rate": ratio(sum(c["review"] == "doubtful" for c in wrong), len(wrong)),
         "critic_false_doubt_rate": ratio(sum(c["review"] == "doubtful" for c in right), len(right)),
         "critic_case_agreement": ratio(sum(bool(c["critic_agrees"]) for c in reviewed), len(reviewed)),
+        "critic_wrong_cases": sum(c["critic_agrees"] is False for c in reviewed),
         "not_reviewed": sum(c["review"] == "not_reviewed" for c in marked),
         "expected_flags_raised": ratio(sum(not c["missing_flags"] for c in flagged), len(flagged)),
         "cost_usd": round(sum(c["cost_usd"] for c in cases), 6),

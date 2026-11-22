@@ -220,7 +220,7 @@ export class PracticeComponent {
       return;
     }
     const shown = this.attempts();
-    const first = more ? shown.length : 0;
+    let first = 0;
     let added = 0;
     await this.state.run(async () => {
       const found = await this.api
@@ -242,7 +242,9 @@ export class PracticeComponent {
         });
       if (!found || classroomId !== this.classroomId()) return;
       const fresh = found.questions.map((question) => ({ question, answer: '', correct: null }));
-      this.attempts.set(more ? [...shown, ...fresh] : fresh);
+      // appended to the set as it is now, so answers checked while this ran are kept.
+      first = more ? this.attempts().length : 0;
+      this.attempts.update((current) => (more ? [...current, ...fresh] : fresh));
       // `dropped` counts every refused draft, rewritten ones too; only what the set is short says what was left out.
       this.short.set({ missing: Math.max(found.requested - found.returned, 0), requested: found.requested });
       added = fresh.length;

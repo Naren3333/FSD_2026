@@ -180,6 +180,10 @@ func (s server) deleteAccount(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	err := s.store.deleteAccount(r.Context(), c.Org, c.Subject)
+	if errors.Is(err, errAdminAccount) {
+		platform.Error(w, http.StatusForbidden, "ADMIN_ACCOUNT", "A school admin account cannot delete itself; another admin of the school manages it in Keycloak.")
+		return
+	}
 	if errors.Is(err, errOwnsClassrooms) {
 		platform.Error(w, http.StatusConflict, "OWNS_CLASSROOMS", "Ask your school admin to give your classrooms to another teacher or delete them first.")
 		return

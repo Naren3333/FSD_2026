@@ -1,6 +1,7 @@
 """question generation and marking guidance (adr 0006), with a reviewer pass that sends rejected drafts back for a bounded number of rewrites (adr 0015), and a student's own practice on the same loop (adr 0022); the reviewer runs on the check profile and also reviews guidance (adr 0026)."""
 
 import logging
+import math
 import time
 from collections import Counter
 from collections.abc import Callable
@@ -63,6 +64,10 @@ GUIDANCE_REVIEW_TOKENS = 1000
 MAX_CALLS = 2 * (MAX_REVIEW_RETRIES + 1)
 WEAK_DISTRACTORS = "WEAK_DISTRACTORS"
 UNREADABLE_REPLY = "UNREADABLE_REPLY"
+# practice's spare multiple choice per write (adr 0022): up to ASK_MAX drafts, FIRST_EXTRA_MAX extra first, then LATER_EXTRA.
+ASK_MAX = 8
+FIRST_EXTRA_MAX = 2
+LATER_EXTRA = 1
 NOT_TEACHER = ("FORBIDDEN", "Only the classroom's teacher can generate questions or marking guidance.")
 NOT_STUDENT = ("FORBIDDEN", "Only a student enrolled in this classroom can generate practice questions.")
 GUIDANCE_REJECTED = "The drafted guidance did not pass the checks. Try again."
@@ -228,6 +233,16 @@ class Job:
     with_review: bool
 
 
+def asked(needed: dict[str, int], first: bool) -> dict[str, int]:
+    """a practice write's counts: those still `needed`, plus a few spare multiple choice."""
+    choices = needed.get("multiple_choice", 0)
+    if not choices:
+        return dict(needed)
+    extra = min(FIRST_EXTRA_MAX, math.ceil(choices / 2)) if first else LATER_EXTRA
+    extra = min(extra, max(ASK_MAX - sum(needed.values()), 0))
+    return {**needed, "multiple_choice": choices + extra}
+
+
 @dataclass
 class Run:
     """what a reviewed generation has so far."""
@@ -262,13 +277,17 @@ class Run:
         have = Counter(g.question.type for g in self.held)
         return {t: body.counts[t] - have[t] for t in body.question_types if body.counts[t] > have[t]}
 
-    def next_request(self, body: GenerateRequest, shortfall: dict[str, int]) -> GenerateRequest:
-        """the next round's request: the shortfall, with the drafts held as existing; the other weak and rejected drafts go back only as previous_attempts, so a corrected rewrite is not a duplicate."""
+    def next_request(self, body: GenerateRequest, shortfall: dict[str, int], first: bool) -> GenerateRequest:
+        """the next round's request: the shortfall plus practice's spares, with the held drafts as existing."""
         held = [g.question.prompt for g in self.held]
         # may pass max_existing: the checks compare against all of them, and the prompts keep the newest that fit.
-        return body.model_copy(
-            update={"counts": shortfall, "existing_prompts": [*body.existing_prompts, *held]}
-        )
+        counts = dict(shortfall) if self.audience.serves_unpassed else asked(shortfall, first)
+        return body.model_copy(update={"counts": counts, "existing_prompts": [*body.existing_prompts, *held]})
+
+    def spare(self, body: GenerateRequest) -> int:
+        """passed drafts beyond their type's count: never served, and not dropped."""
+        have = Counter(g.question.type for g in self.accepted)
+        return sum(max(have[t] - body.counts.get(t, 0), 0) for t in have)
 
     def checked(
         self, rejected: list[checks.Rejected], dropped: Counter[str], sent_back: Counter[str]
@@ -348,7 +367,7 @@ class Run:
         return final
 
     def passed_only(self, body: GenerateRequest) -> list[Generated]:
-        """a student's practice: the passed drafts, at most the count of each type; flagged and unreviewed ones are counted as dropped, since no teacher reviews them (adr 0022)."""
+        """a student's practice: the first passed drafts of each type; flagged and unreviewed ones count as dropped, spares do not."""
         self.dropped.update(reason for _, reason in self.weak)
         if self.unreviewed:
             self.dropped[review.NOT_REVIEWED] += len(self.unreviewed)
@@ -496,7 +515,7 @@ class Pipeline:
                     break  # a re-ask used this round's calls
                 run.rounds[-1].retried = True
             round_started = now
-            request = run.next_request(body, shortfall)
+            request = run.next_request(body, shortfall, n == 0)
             output = await self._generate(job, n, request, run)
             if output is None or not await self._check_and_review(job, n, output, request, run):
                 break
@@ -583,6 +602,7 @@ class Pipeline:
                 "rounds": len(run.rounds),
                 "calls": run.calls,
                 "dropped": dict(run.dropped),
+                "spare": run.spare(body),
                 "prompt_version": prompts.PROMPT_VERSION,
             },
         )
@@ -636,7 +656,8 @@ class Pipeline:
             if not self.settings.review:
                 return guidance
             verdict = await self._guidance_review(body, guidance, passages, deadline, calls)
-            if verdict is None or verdict.passed:
+            # a reply with no usable verdict is a review that did not run, not a failure (adr 0015, 0026).
+            if verdict is None or verdict.passed or verdict.reason == review.NOT_REVIEWED:
                 return guidance
             if reasked:
                 raise self._guidance_rejected(verdict.reason, calls)  # the re-ask is used up
@@ -647,7 +668,7 @@ class Pipeline:
             verdict = await self._guidance_review(
                 body, guidance, passages, deadline, calls, after_rewrite=True
             )
-            if verdict is not None and not verdict.passed:
+            if verdict is not None and not verdict.passed and verdict.reason != review.NOT_REVIEWED:
                 raise self._guidance_rejected(verdict.reason, calls)
             return guidance
         except UpstreamError as e:

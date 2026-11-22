@@ -20,7 +20,7 @@ def short(answer: str) -> str:
 
 def test_every_case_expects_a_level_of_each_criterion():
     ids = [c["id"] for c in SPEC["cases"]]
-    assert len(ids) == len(set(ids)) and 25 <= len(ids) <= 40
+    assert len(ids) == len(set(ids)) and 45 <= len(ids) <= 60
     for c in SPEC["cases"]:
         q = SPEC["questions"][c["question"]]
         levels = (
@@ -66,6 +66,25 @@ def test_question_inputs_follow_the_assessment_contract():
     assert race["rubric"]["model_answer"] and "accepted_answers" not in race
     tdd = load_marking.question_input(SPEC["questions"]["tdd"], "t2")
     assert tdd["accepted_answers"] == ["Green", "green phase"] and tdd["case_sensitive"] is False
+    assert "marking_scheme" not in tdd
+    bigo = load_marking.question_input(SPEC["questions"]["bigo"], "t3")
+    assert [set(e) for e in bigo["marking_scheme"]] == [{"text"}]
+    assert "Do not accept" in bigo["marking_scheme"][0]["text"]
+
+
+def test_the_scheme_question_has_cases_it_rules_out_and_accepts():
+    # each excerpt fits assessment's limits: 1-5 passages of 1-2000 characters.
+    for q in SPEC["questions"].values():
+        scheme = q.get("marking_scheme") or []
+        assert len(scheme) <= 5 and all(0 < len(t) <= 2000 for t in scheme)
+    expected = {c["id"]: c["expect"] for c in SPEC["cases"] if c["question"] == "bigo"}
+    assert expected["bigo-logarithmic"] == [0] and expected["bigo-notation-and-words"] == [1]
+
+
+def test_the_harder_set_needs_one_student_per_case_of_the_busiest_question():
+    # race has the most cases, 17, and each student sits its assessment once.
+    assert load_marking.students_needed(SPEC) == 17
+    assert {c["question"] for c in SPEC["cases"]} == set(SPEC["questions"])
 
 
 IDS = ["c1", "c2"]
@@ -191,6 +210,7 @@ def test_the_summary_measures_agreement_and_the_critic():
     assert s["critic_doubtful_rate"] == round(2 / 6, 3)
     assert s["critic_true_doubt_rate"] == 0.5 and s["critic_false_doubt_rate"] == 0.25
     assert s["critic_case_agreement"] == round(4 / 6, 3)
+    assert s["critic_wrong_cases"] == 2
     assert s["expected_flags_raised"] == 0.5
     assert s["cost_usd"] == 0.07
 

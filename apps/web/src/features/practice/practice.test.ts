@@ -337,6 +337,24 @@ describe('practice', () => {
     expect(document.activeElement?.id).toBe('practice-2-prompt');
   });
 
+  it('keeps an answer checked while more questions were being written', async () => {
+    const page = render();
+    await page.settle();
+    page.tick('Testing slides');
+    await page.generate();
+    let deliver: (value: ReturnType<typeof set>) => void = () => undefined;
+    page.practice.mockReturnValueOnce(new Promise((resolve) => (deliver = resolve)));
+    page.button('More questions')!.click();
+    await page.settle();
+    page.answer(0, 'A unit test');
+    await page.check(0);
+    deliver(set({ ...choice, prompt: 'Which test runs fastest?' }));
+    await page.settle();
+    expect(page.text()).toContain('Which test runs fastest?');
+    expect(page.text()).toContain('1 of 1 correct');
+    expect(document.activeElement?.id).toBe('practice-2-prompt');
+  });
+
   it.each([
     ['INSUFFICIENT_SOURCE', 422, 'The chosen documents say too little about this.'],
     ['GENERATION_REJECTED', 422, 'None of the practice questions passed the checks.'],

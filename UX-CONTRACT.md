@@ -1,6 +1,6 @@
 # Learning Ledger interaction contract
 
-Business authority: docs/requirements.md sections 6, 8, 15–18 and docs/decisions/0001-foundation.md. A school's admin creates its accounts and classrooms and enrolls students (ADR 0019); teachers work in the classrooms assigned to them. Students submit once; grades are immutable after teacher finalization. All authorization remains server-enforced.
+Business authority: docs/decisions.md (decision 0001 and the later decisions it names) and docs/architecture.md. A school's admin creates its accounts and classrooms and enrolls students (ADR 0019); teachers work in the classrooms assigned to them. Students submit once; grades are immutable after teacher finalization. All authorization remains server-enforced.
 
 | Capability | Canonical owner | Source of truth | Allowed variants | Verification |
 |---|---|---|---|---|

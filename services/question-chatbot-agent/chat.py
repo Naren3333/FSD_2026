@@ -50,9 +50,6 @@ PASSAGE_OVERHEAD = 200  # characters each passage adds to the prompt besides its
 MAX_SUB_QUERIES = 3
 MERGED_TOP_K = 12  # passages a split message is answered from (one search gives SEARCH_TOP_K)
 PER_DOCUMENT = 5  # of those, at most this many from one document
-# the support check (adr 0025), run after `done`: its visible reply budget and how long it may take.
-CHECK_MAX_TOKENS = 1500
-CHECK_SECONDS = 20.0
 
 
 class SSEResponse(StreamingResponse):
@@ -136,7 +133,9 @@ class Turn:
         self.outcome = "answered"
         self.rewritten_query: str | None = None  # none when the rewrite failed
         self.sub_queries: list[str] = []  # the topics of a message about several, each searched on its own
-        self.topic_of: dict[str, list[str]] = {}  # a duplicate passage can support several topic searches.
+        # chunk id → {primary, topics}: every topic search that found the passage, and the one it ranked best in.
+        self.passage_topics: dict[str, dict[str, Any]] = {}
+        self.uncovered: list[str] = []  # the topics no cited passage of their own covers
         self.is_on_topic: bool | None = None
         self.small_talk = False
         self.searched = False
@@ -248,12 +247,13 @@ class Turn:
             or self.top_score is None
             or self.top_score < self.settings.relevance_floor
         ):
+            self.passage_topics = {}  # no prompt, so no passage was given a topic in one
             return None
         fitting = self._fitting()
         if not fitting:
             return None
         messages, self.version, tag_map = prompts.build_messages(
-            role, fitting, self.history, self.content, self.topic_of
+            role, fitting, self.history, self.content, self.passage_topics, self.sub_queries
         )
         return messages, tag_map
 
@@ -279,14 +279,13 @@ class Turn:
         if self.small_talk or self.rewriter is None:
             return None
         # structural coverage only: a citation's presence does not establish semantic entailment.
-        cited_topics = {t for cid in self.rewriter.cited for t in self.topic_of.get(cid, [])}
-        missing = [t for t in self.sub_queries if t not in cited_topics]
-        if not missing:
+        self.uncovered = support.uncovered(self.sub_queries, self.passage_topics, self.rewriter.cited)
+        if not self.uncovered:
             return None
-        log.warning("chat_topic_citations_incomplete", extra={"topics": missing})
-        # rewrite output is untrusted.
-        labels = [re.sub(r"[\[\]<>`*_]", "", " ".join(t.split()))[:200] for t in missing]
-        return "\n\nCitation coverage is incomplete for: " + "; ".join(labels) + "."
+        log.warning("chat_topic_citations_incomplete", extra={"topics": self.uncovered})
+        return (
+            "\n\nCitation coverage is incomplete for: " + "; ".join(map(support.label, self.uncovered)) + "."
+        )
 
     def _uncited_notice(self, answer: str) -> str | None:
         """notes an uncited answer that states something, with no model call; for a cited one, sets up the support check."""
@@ -346,26 +345,15 @@ class Turn:
         assert self.rewriter is not None
         tag_of = {cid: tag for tag, cid in self.rewriter.tag_map.items()}
         content = {str(r["chunk_id"]): str(r.get("content") or "") for r in self.results}
-        ids = [str(n) for n in range(1, len(checked) + 1)]
         cited = dict.fromkeys(c for _, refs in checked for c in refs)
-        messages = prompts.answer_check_messages(
-            {tag_of[c]: content[c] for c in cited},
-            [(i, text, [tag_of[c] for c in refs]) for i, (text, refs) in zip(ids, checked, strict=True)],
-        )
         try:
-            output = await self.services.generate(
-                messages,
-                CHECK_MAX_TOKENS,
-                prompts.ANSWER_CHECK_SCHEMA,
-                prompts.ANSWER_CHECK,
+            found = await support.check(
+                self.services,
+                {tag_of[c]: content[c] for c in cited},
+                [(text, [tag_of[c] for c in refs]) for text, refs in checked],
                 self.correlation,
                 self.billed_to,  # the same user's allowance as the answer (adr 0003)
-                time.monotonic() + CHECK_SECONDS,
-                profile="check",  # an independent second opinion (adr 0023)
-                check=lambda out: support.faults(out, ids),
-                reask=1,
             )
-            found = support.verdicts(output)
         except Exception as e:  # never fails the turn: the answer stands without a notice
             log.warning(
                 "answer_check_failed",
@@ -417,19 +405,9 @@ class Turn:
             self.results = [r for r in searches[0] if float(r["score"]) >= self.settings.topic_floor]
             return
         self.results = merge(searches, self.settings.relevance_floor, self.settings.topic_floor)
-        self._attribute_topics(searches[1:])
-
-    def _attribute_topics(self, legs: list[list[dict[str, Any]]]) -> None:
-        """names each kept passage's topics: every qualifying topic leg, including passages taken first by the primary search."""
-        retained = {str(r["chunk_id"]) for r in self.results}
-        self.topic_of = {}
-        for topic_label, passages in zip(self.sub_queries, legs, strict=True):
-            for passage in passages:
-                cid = str(passage["chunk_id"])
-                if cid in retained and float(passage["score"]) >= self.settings.topic_floor:
-                    labels = self.topic_of.setdefault(cid, [])
-                    if topic_label not in labels:
-                        labels.append(topic_label)
+        self.passage_topics = attribute(
+            self.results, self.sub_queries, searches[1:], self.settings.topic_floor
+        )
 
     def _fitting(self) -> list[dict[str, Any]]:
         """the results, best first, that fit in one prompt message."""
@@ -452,16 +430,21 @@ class Turn:
             - token_bound(self.content)
             - 1000,
         )
-        # give each requested topic a chance before spending the remaining budget on extra passages.
+        # give each requested topic a chance before spending the remaining budget on extra passages: its best
+        # passage of its own (primary), or else its best one shared with another topic.
         priority: list[dict[str, Any]] = []
         represented: set[str] = set()
-        for label in self.sub_queries:
-            for r in self.results:
-                cid = str(r["chunk_id"])
-                if label in self.topic_of.get(cid, []) and cid not in represented:
-                    priority.append(r)
-                    represented.add(cid)
-                    break
+
+        def topics_of(r: dict[str, Any]) -> dict[str, Any]:
+            return self.passage_topics.get(str(r["chunk_id"]), {})
+
+        for t in self.sub_queries:
+            free = [r for r in self.results if str(r["chunk_id"]) not in represented]
+            mine = [r for r in free if topics_of(r).get("primary") == t]
+            mine = mine or [r for r in free if t in topics_of(r).get("topics", [])]
+            if mine:
+                priority.append(mine[0])
+                represented.add(str(mine[0]["chunk_id"]))
         candidates = priority + [r for r in self.results if str(r["chunk_id"]) not in represented]
         for r in candidates:
             content = r.get("content") or ""
@@ -480,6 +463,7 @@ class Turn:
             kept.append(r)
         kept_ids = {str(r["chunk_id"]) for r in kept}
         self.results = [r for r in self.results if str(r["chunk_id"]) in kept_ids]
+        self.passage_topics = {cid: v for cid, v in self.passage_topics.items() if cid in kept_ids}
         return self.results
 
     async def _rewrite(self) -> None:
@@ -555,6 +539,9 @@ class Turn:
                 "retrieved": len(self.results),
                 "top_score": self.top_score,
                 "cited": len(self.rewriter.cited if self.rewriter else []),
+                # topics with a passage of their own in the prompt, and those none of theirs was cited for.
+                "primary_topics": len({v["primary"] for v in self.passage_topics.values()}),
+                "uncovered_topics": len(self.uncovered),
                 "answer_check": self.answer_check and self.answer_check["status"],
                 "unsupported": (self.answer_check or {}).get("counts", {}).get("unsupported"),
                 "usage_tokens": self.usage_tokens,
@@ -581,6 +568,7 @@ class Turn:
             "usage_tokens": self.usage_tokens,
             "latency_ms": round((time.perf_counter() - self.started) * 1000),
             "answer_check": self.answer_check,
+            "passage_topics": saved_topics(self.passage_topics) if decided else None,
         }
         return answer, await self.store.save_answer(str(self.thread["id"]), answer, self.claim)
 
@@ -627,6 +615,53 @@ _STOPWORDS = frozenset({"the", "a", "an", "of", "in", "to", "and", "for"})
 
 def _words(text: str) -> set[str]:
     return set(re.findall(r"[a-z0-9]+", text.lower()))
+
+
+def _named(topic: str, result: dict[str, Any]) -> int:
+    """how many of the topic's words the passage's title and section name."""
+    heading = _words(str(result.get("title") or "") + " " + str(result.get("section_path") or ""))
+    return len((_words(topic) - _STOPWORDS) & heading)
+
+
+def attribute(
+    results: list[dict[str, Any]], sub_queries: list[str], legs: list[list[dict[str, Any]]], floor: float
+) -> dict[str, dict[str, Any]]:
+    """chunk id → {primary, topics} for the kept passages a topic search found at `floor` or above.
+
+    the primary topic is the search the passage ranked best in, ties going to the topic more of whose words its
+    title or section names, then to the earlier topic. a topic left with no primary passage takes its best-ranked
+    passage from a topic that has another, so a passage shared by two topics can't leave one with none."""
+    kept = {str(r["chunk_id"]): r for r in results}
+    rank: dict[str, dict[str, int]] = {}
+    for t, passages in zip(sub_queries, legs, strict=True):
+        for n, passage in enumerate(passages):
+            cid = str(passage["chunk_id"])
+            if cid in kept and float(passage["score"]) >= floor:
+                rank.setdefault(cid, {}).setdefault(t, n)
+
+    def key(cid: str, t: str) -> tuple[int, int, int]:
+        return rank[cid][t], -_named(t, kept[cid]), sub_queries.index(t)
+
+    out: dict[str, dict[str, Any]] = {
+        cid: {"primary": min(found, key=lambda t: key(cid, t)), "topics": list(found)}
+        for cid, found in rank.items()
+    }
+    for t in sub_queries:
+        owners = [v["primary"] for v in out.values()]
+        if t in owners:
+            continue
+        spare = [cid for cid, v in out.items() if t in v["topics"] and owners.count(v["primary"]) > 1]
+        if spare:
+            out[min(spare, key=lambda cid: key(cid, t))]["primary"] = t
+    return out
+
+
+def saved_topics(passage_topics: dict[str, dict[str, Any]]) -> dict[str, dict[str, Any]] | None:
+    """the passage topics as saved with the answer: chunk ids and topic labels only, never passage text."""
+    return {
+        cid: {"primary": support.label(v["primary"]), "topics": [support.label(t) for t in v["topics"]]}
+        for cid, v in passage_topics.items()
+    } or None
 
 
 def _covered(primary: list[dict[str, Any]], query: str, floor: float) -> list[dict[str, Any]]:

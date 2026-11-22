@@ -213,6 +213,35 @@ describe('a classroom’s students', () => {
     expect(page.root.textContent).toContain('Bo Koh enrolled in 3A.');
   });
 
+  it('keeps another classroom’s roster when an enroll finishes after it was opened', async () => {
+    const other: SchoolClassroom = { ...room, id: 'c2', name: '3B', students: 0 };
+    let enrolled: () => void = () => undefined;
+    const page = render([lee], [room, other], {
+      enroll: vi.fn(
+        () => new Promise((resolve) => (enrolled = () => resolve({ student_id: 's2', classroom_id: 'c1' }))),
+      ),
+      rosterPage: vi.fn((id: string) =>
+        Promise.resolve(
+          id === 'c1'
+            ? { students: [{ id: 's1', username: 'ana', display_name: 'Ana Lim' }], total: 1 }
+            : { students: [], total: 0 },
+        ),
+      ),
+      rosterIds: vi.fn((id: string) => Promise.resolve(id === 'c1' ? ['s1'] : [])),
+    });
+    await page.settle();
+    page.button('Manage students of 3A').click();
+    await page.settle();
+    page.button('Enroll Bo Koh in 3A').click();
+    page.button('Manage students of 3B').click();
+    await page.settle();
+    enrolled();
+    await page.settle();
+    await page.settle();
+    expect(page.panel('admin-roster-title')).toContain('Students in 3B');
+    expect(page.panel('admin-roster-title')).not.toContain('Ana Lim');
+  });
+
   it('asks before removing a student', async () => {
     const page = render([lee], [room]);
     await page.settle();

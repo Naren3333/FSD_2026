@@ -108,6 +108,13 @@ def test_the_task_asks_for_a_count_of_each_type():
     assert "count" not in task and "question_types" not in task
 
 
+def test_the_practice_writer_is_told_counts_may_hold_spare_choices():
+    rules = prompts.PRACTICE_GENERATION_INSTRUCTIONS.splitlines()
+    rule = next(line for line in rules if line.startswith("- Write exactly"))
+    assert "a few more multiple_choice" in rule and "write every one" in rule
+    assert "a few more" not in prompts.GENERATION_INSTRUCTIONS
+
+
 def test_generation_without_attempts_is_unchanged():
     body = request(existing_prompts=["Old one?"])
     plain = prompts.generation_messages("T", body, PASSAGES)

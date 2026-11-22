@@ -5,7 +5,7 @@ from learning_transport.agents import AGENT_ENV, EFFORTS, AgentSettings, read_se
 
 # below this top rerank score the chosen documents say too little about the request, and the agent answers
 # INSUFFICIENT_SOURCE without a model call. calibrated on the eval corpus (2026-10-19, rerank-3); the scores and
-# trade-offs are in docs/development/operations.md, so recheck them there before changing it.
+# trade-offs are in docs/decisions.md (decision 0006), so recheck them there before changing it.
 RELEVANCE_FLOOR = 0.5
 MAX_REVIEW_RETRIES = 2
 REVIEW_OFF = ("off", "false", "0", "no")

@@ -8,10 +8,25 @@ import httpx
 import pytest
 from conftest import CHUNK_1, DOC, ROOM, SETTINGS, TOPIC, Fakes, as_user, reply
 from test_checks import choice, short
-from test_review_loop import KEY_HOLDS, STEMS, UNREADABLE, WEAK, gen, rev, task
+from test_review_loop import (
+    GEN,
+    KEY_HOLDS,
+    REV,
+    STEMS,
+    UNREADABLE,
+    WEAK,
+    WRONG_KEY,
+    ask,
+    gen,
+    rev,
+    sent,
+    task,
+)
 
 import main
+import pipeline
 import prompts
+from contracts import MAX_COUNT
 
 PRACTICE = "/v1/practice"
 BODY: dict[str, Any] = {
@@ -79,7 +94,8 @@ def test_a_student_gets_reviewed_questions_with_their_keys(api, fakes: Fakes):
     write, check = calls(fakes, "practice.generated", "practice.reviewed")
     assert write["messages"][0]["content"] == prompts.PRACTICE_GENERATION_INSTRUCTIONS
     assert check["messages"][0]["content"] == prompts.PRACTICE_REVIEW_INSTRUCTIONS
-    assert task(write)["counts"] == {"multiple_choice": 1, "short_answer": 1}
+    # one spare multiple choice is asked for; short answers are asked for as requested.
+    assert task(write)["counts"] == {"multiple_choice": 2, "short_answer": 1}
 
 
 @pytest.mark.parametrize("user", ["t1", "s2", "a1"])
@@ -359,3 +375,121 @@ def test_an_unreadable_practice_write_is_asked_again_on_the_students_allowance(a
     resp = practise(api, counts={"multiple_choice": 1})
     assert resp.status_code == 200 and resp.json()["model_calls"] == 3
     calls(fakes, "practice.generated", "practice.generated", "practice.reviewed")
+
+
+# ---- spare multiple choice (adr 0022)
+
+
+def test_extra_multiple_choice_is_asked_for_and_the_first_passes_served(api, fakes: Fakes):
+    """three wanted, five asked for: every one passes, the first three in review order are served, and the two spare passes are not counted as dropped."""
+    fakes.replies = [gen(*(choice(prompt=STEMS[i]) for i in range(5))), rev(*["pass"] * 5)]
+    resp = practise(api, counts={"multiple_choice": 3})
+    assert resp.status_code == 200, resp.text
+    data = resp.json()
+    assert [q["prompt"] for q in data["questions"]] == STEMS[:3]
+    assert data["requested"] == 3 and data["returned"] == 3 and data["dropped"] == {}
+    write, check = calls(fakes, "practice.generated", "practice.reviewed")
+    assert task(write)["counts"] == {"multiple_choice": 5} and len(task(check)["questions"]) == 5
+
+
+def test_a_spare_pass_fills_a_weak_drafts_place_without_another_round(api, fakes: Fakes):
+    fakes.replies = [
+        gen(choice(prompt=STEMS[0]), choice(prompt=STEMS[1]), choice(prompt=STEMS[2])),
+        rev("pass", WEAK, "pass"),
+    ]
+    resp = practise(api, counts={"multiple_choice": 2})
+    assert resp.status_code == 200, resp.text
+    data = resp.json()
+    assert [q["prompt"] for q in data["questions"]] == [STEMS[0], STEMS[2]]
+    assert data["dropped"] == {"WEAK_DISTRACTORS": 1} and data["model_calls"] == 2
+
+
+def test_a_later_round_asks_for_the_shortfall_and_one_more(api, fakes: Fakes):
+    fakes.replies = [
+        gen(choice(prompt=STEMS[0]), choice(prompt=STEMS[1]), short()),
+        rev(WEAK, WEAK, "pass"),
+        gen(choice(prompt=STEMS[2]), choice(prompt=STEMS[3])),
+        rev("pass", "pass"),
+    ]
+    resp = practise(api)
+    assert resp.status_code == 200, resp.text
+    data = resp.json()
+    assert [q["prompt"] for q in data["questions"]] == [STEMS[2], short()["prompt"]]
+    first, _, retry, _ = calls(
+        fakes, "practice.generated", "practice.reviewed", "practice.generated", "practice.reviewed"
+    )
+    assert task(first)["counts"] == {"multiple_choice": 2, "short_answer": 1}
+    # the short answer is full, so only multiple choice is asked for again; the spare pass is not dropped.
+    assert task(retry)["counts"] == {"multiple_choice": 2} and data["dropped"] == {"WEAK_DISTRACTORS": 2}
+
+
+def test_spare_passes_are_existing_questions_for_the_next_round(api, fakes: Fakes):
+    """a short answer still wanted: the spare multiple choice that passed is not written again."""
+    again = "Name a test that checks one class alone."
+    fakes.replies = [
+        gen(choice(prompt=STEMS[0]), choice(prompt=STEMS[1]), short()),
+        rev("pass", "pass", WRONG_KEY),
+        gen(short(prompt=again)),
+        rev("pass"),
+    ]
+    resp = practise(api)
+    assert resp.status_code == 200, resp.text
+    assert [q["prompt"] for q in resp.json()["questions"]] == [STEMS[0], again]
+    schemas = ("practice.generated", "practice.reviewed") * 2
+    retry = calls(fakes, *schemas)[2]
+    assert task(retry)["counts"] == {"short_answer": 1}
+    assert {STEMS[0], STEMS[1]} <= set(task(retry)["existing_questions"])
+
+
+def test_a_teachers_request_asks_for_exactly_its_counts(api, fakes: Fakes):
+    """no spare drafts for a teacher: the reply's fourth multiple choice is not read."""
+    fakes.replies = [gen(*(choice(prompt=STEMS[i]) for i in range(4))), rev("pass", "pass", "pass")]
+    resp = ask(api, count=3)
+    assert resp.status_code == 200, resp.text
+    write, check = sent(fakes, GEN, REV)
+    assert task(write)["counts"] == {"multiple_choice": 3} and len(task(check)["questions"]) == 3
+    assert write["messages"][0]["content"] == prompts.GENERATION_INSTRUCTIONS
+
+
+@pytest.mark.parametrize(
+    ("needed", "first", "want"),
+    [
+        ({"multiple_choice": 1}, True, {"multiple_choice": 2}),
+        ({"multiple_choice": 3}, True, {"multiple_choice": 5}),
+        ({"multiple_choice": 4, "short_answer": 2}, True, {"multiple_choice": 6, "short_answer": 2}),
+        ({"multiple_choice": 5, "short_answer": 2}, True, {"multiple_choice": 6, "short_answer": 2}),
+        ({"multiple_choice": 8}, True, {"multiple_choice": 8}),
+        ({"multiple_choice": 10}, True, {"multiple_choice": 10}),
+        ({"multiple_choice": 3}, False, {"multiple_choice": 4}),
+        ({"multiple_choice": 2, "short_answer": 6}, False, {"multiple_choice": 2, "short_answer": 6}),
+        ({"short_answer": 3}, True, {"short_answer": 3}),
+    ],
+)
+def test_the_extra_drafts_asked_for(needed: dict[str, int], first: bool, want: dict[str, int]):
+    assert pipeline.asked(needed, first) == want
+
+
+def test_a_write_is_never_asked_for_more_drafts_than_a_request_may_hold():
+    """every practice request stays within ASK_MAX (or what was requested) and MAX_COUNT, short answers as requested."""
+    for choices in range(MAX_COUNT + 1):
+        for shorts in range(MAX_COUNT + 1 - choices):
+            needed = {k: v for k, v in (("multiple_choice", choices), ("short_answer", shorts)) if v}
+            for first in (True, False):
+                got = pipeline.asked(needed, first)
+                assert sum(got.values()) <= max(pipeline.ASK_MAX, choices + shorts) <= MAX_COUNT
+                assert got.get("short_answer", 0) == shorts and got.get("multiple_choice", 0) >= choices
+
+
+def test_spare_drafts_keep_to_the_call_budget(api, fakes: Fakes):
+    """every round fails: three writes and three reviews, as before."""
+    fakes.replies = [
+        gen(choice(prompt=STEMS[0]), choice(prompt=STEMS[1])),
+        rev(WRONG_KEY, WRONG_KEY),
+        gen(choice(prompt=STEMS[2]), choice(prompt=STEMS[3])),
+        rev(WRONG_KEY, WRONG_KEY),
+        gen(choice(prompt=STEMS[4]), choice(prompt=STEMS[5])),
+        rev(WRONG_KEY, WRONG_KEY),
+    ]
+    resp = practise(api, counts={"multiple_choice": 1})
+    assert resp.status_code == 422 and resp.json()["error"]["code"] == "GENERATION_REJECTED"
+    assert len(fakes.calls("/v1/inference")) == pipeline.MAX_CALLS

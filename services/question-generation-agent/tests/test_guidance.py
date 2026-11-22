@@ -157,3 +157,11 @@ def test_guidance_calls_are_cut_off_at_the_deadline(api, fakes: Fakes):
     timeouts = [r.extensions["timeout"]["read"] for p, _, r in fakes.requests if p == "/v1/inference"]
     assert timeouts[0] == clients.GENERATE_TIMEOUT
     assert len(timeouts) == 4 and all(t <= 100 for t in timeouts[1:])
+
+
+def test_a_review_that_gives_no_verdict_returns_the_guidance_without_a_rewrite(api, fakes: Fakes):
+    # "fail" with reason NONE names no fault: the review did not run, so nothing is paid to rewrite it.
+    fakes.replies = [reply(written()), verdict(False, "NONE")]
+    resp = draft(api)
+    assert resp.status_code == 200, resp.text
+    sent(fakes, WRITE, CHECK)

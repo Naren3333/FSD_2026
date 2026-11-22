@@ -193,6 +193,18 @@ describe('the source check after an answer', () => {
     expect(quiet.page.announcement()).toBe('Sources checked.');
   });
 
+  it('does not say the sources were checked when the stream drops during the check', async () => {
+    const { page, send } = await setup((onEvent) => {
+      onEvent({ event: 'token', data: { text: 'Roots take up water.' } });
+      onEvent({ event: 'done', data: { message_id: 'm2', outcome: 'answered', checking: true } });
+      // the connection drops after `done`, while the check runs.
+      return new Promise((_, reject) => setTimeout(() => reject(new Error('network'))));
+    });
+    await send('What do roots do?');
+    await vi.waitFor(() => expect(page.checking()).toEqual([]));
+    expect(page.announcement()).toBe('Answer complete.');
+  });
+
   it('does not re-read over a question asked while the check runs', async () => {
     let closeFirst = () => undefined as void;
     let calls = 0;

@@ -35,7 +35,7 @@ from token_count import encoding as tokenizer
 ERRORS: dict[int | str, dict[str, Any]] = {
     code: {"model": ErrorResponse} for code in (401, 403, 404, 422, 503)
 }
-# seconds the shutdown waits for answers still being saved and support checks still running (chat.CHECK_SECONDS).
+# seconds the shutdown waits for answers still being saved and support checks still running (support.CHECK_SECONDS).
 SAVE_GRACE = 25.0
 CONSUMER_STOP_GRACE = 35  # seconds shutdown waits for the classroom-deletion consumer
 

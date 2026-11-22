@@ -64,7 +64,7 @@ def add_missing_secrets(env_path: Path) -> dict[str, str]:
         if stale:
             print(
                 "Note: " + ", ".join(stale) + " only take effect on fresh volumes; existing ones keep their "
-                "passwords (see operations.md)."
+                "passwords until the volumes are recreated."
             )
     return env
 

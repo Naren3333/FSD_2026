@@ -67,7 +67,7 @@ async def test_turns_keep_history_title_and_answers(store: PostgresStore) -> Non
         "sub_queries": ["light reactions", "Calvin cycle"],
         "is_on_topic": True, "retrieved_chunk_ids": [chunk], "citations": [citation],
         "prompt_version": "teacher.v1", "model": "gpt-test", "usage_tokens": 42, "latency_ms": 900,
-        "answer_check": CHECKED,
+        "answer_check": CHECKED, "passage_topics": {chunk: {"primary": "light reactions", "topics": ["light reactions"]}},
     }, UNCLAIMED)  # fmt: skip
     history = await store.start_turn(tid, "and then?", 6)
     assert [h["role"] for h in history] == ["user", "assistant"]
@@ -79,10 +79,13 @@ async def test_turns_keep_history_title_and_answers(store: PostgresStore) -> Non
     ]
     assert str(messages[1]["id"]) == answer_id and messages[1]["citations"] == [citation]
     async with store.pool.connection() as conn:
-        cur = await conn.execute("SELECT sub_queries, answer_check FROM messages WHERE id=%s", (answer_id,))
+        cur = await conn.execute(
+            "SELECT sub_queries, answer_check, passage_topics FROM messages WHERE id=%s", (answer_id,)
+        )
         assert await cur.fetchone() == {
             "sub_queries": ["light reactions", "Calvin cycle"],
             "answer_check": CHECKED,
+            "passage_topics": {chunk: {"primary": "light reactions", "topics": ["light reactions"]}},
         }
     thread = await store.thread("org", user, tid)
     assert thread is not None and thread["title"] == ("What is photosynthesis? " * 10)[:80]
