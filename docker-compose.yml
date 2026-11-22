@@ -571,6 +571,10 @@ services:
       VOYAGE_API_KEY: ${VOYAGE_API_KEY:-}
       EMBEDDING_MODEL: text-embedding-3-small
       CHAT_MODEL: gpt-6-luna
+      # model profiles (adr 0023): structured replies think a little; the check profile is a critic's second opinion.
+      STRUCTURED_REASONING_EFFORT: low
+      CHECK_MODEL: gpt-6-luna
+      CHECK_REASONING_EFFORT: medium
       TABLE_VISION_MODEL: gpt-5.4-mini
       FIGURE_MODEL: gpt-6-luna
       RERANKER_MODEL: rerank-3
@@ -624,6 +628,7 @@ services:
       QUESTION_REVIEW: ${QUESTION_REVIEW:-on}
       QUESTION_REVIEW_RETRIES: ${QUESTION_REVIEW_RETRIES:-2}
       QUESTION_REVIEW_DEADLINE: ${QUESTION_REVIEW_DEADLINE:-240}
+      QUESTION_REVIEW_EFFORT: ${QUESTION_REVIEW_EFFORT:-}
     depends_on:
       keycloak:
         condition: service_started

@@ -54,7 +54,8 @@ def test_prices() -> None:
     assert spend.cost("gpt-5.4-mini", 1_000_000, 0, cached_in=1_000_000) == pytest.approx(0.075)
     assert spend.cost("text-embedding-3-small", 1_000_000) == pytest.approx(0.02)
     # an unknown model is never free: it is charged the most expensive known rates.
-    assert spend.cost("gpt-next", 1_000_000, 1_000_000) == pytest.approx(0.75 + 4.50)
+    assert spend.cost("gpt-next", 1_000_000, 1_000_000) == pytest.approx(2.00 + 10.00)
+    assert spend.cost("gpt-6.2-sol", 1_000_000, 1_000_000, cached_in=1_000_000) == pytest.approx(10.10)
 
 
 def test_price_overrides(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -137,21 +138,24 @@ def test_a_timed_out_reply_is_charged_its_prompt_and_whole_output(
     test_settings: settings.Settings,
     stream: bool,
 ) -> None:
-    """openai may still run, and bill, a reply nobody waited for: it is charged as if it used all of max_tokens."""
-    openai_fake.replies.append(hang)
+    """openai may still run, and bill, a reply nobody waited for: each attempt is charged as if it used all of the max_completion_tokens it was sent with. a timeout is retried once while the deadline allows."""
+    openai_fake.replies += [hang, hang]
     resp = api.post("/v1/inference", json={**GENERATE, "max_tokens": 6000, "stream": stream})
     # a structured reply that timed out says so; a stream that never opened is a provider failure.
     expected = (502, "AI_PROVIDER_FAILED") if stream else (504, "AI_TIMEOUT")
     assert (resp.status_code, resp.json()["error"]["code"]) == expected
-    settle(ledger, 1)
-    billed, charge = ledger.charges[0]
-    assert billed.user_id == "student-1" and charge.estimated
-    assert (charge.operation, charge.tokens_in, charge.tokens_out) == (
-        "stream" if stream else "generate",
-        billing.prompt_tokens(PROMPT),
-        6000,
-    )
-    assert charge.cost_usd == pytest.approx(spend.cost(test_settings.chat_model, charge.tokens_in, 6000))
+    assert len(openai_fake.requests) == 2
+    settle(ledger, 2)
+    # a stream does not reason; a structured reply on the default profile was sent 1.5 times, capped at 8000.
+    sent = 6000 if stream else 8000
+    for billed, charge in ledger.charges:
+        assert billed.user_id == "student-1" and charge.estimated and charge.outcome == "timeout"
+        assert (charge.operation, charge.tokens_in, charge.tokens_out) == (
+            "stream" if stream else "generate",
+            billing.prompt_tokens(PROMPT),
+            sent,
+        )
+        assert charge.cost_usd == pytest.approx(spend.cost(test_settings.chat_model, charge.tokens_in, sent))
 
 
 def test_a_stream_that_times_out_midway_is_charged_its_whole_output(
@@ -601,3 +605,135 @@ def test_an_unpriced_reranker_is_charged_the_highest_rates(
     assert charge.model == test_settings.reranker_model and charge.cost_usd > 0
     assert charge.cost_usd == pytest.approx(40 * highest / 1_000_000)
     assert "unpriced_model" in [r.getMessage() for r in caplog.records]
+
+
+# ---- model profiles, outcomes and latency (adr 0023)
+
+
+@pytest.mark.parametrize(
+    "profile, model", [("default", "gpt-test"), ("check", "gpt-check"), ("fast", "gpt-test")]
+)
+def test_the_ledger_records_the_model_each_profile_used(
+    api: TestClient, openai_fake: FakeOpenAI, ledger: MemoryLedger, profile: str, model: str
+) -> None:
+    openai_fake.reply(json=chat_response("Hello!"))
+    resp = api.post("/v1/inference", json={**GENERATE, "model_profile": profile})
+    assert resp.status_code == 200 and resp.json()["model_version"] == model
+    settle(ledger, 1)
+    charge = ledger.charges[0][1]
+    assert (charge.model, charge.outcome) == (model, "ok")
+    assert charge.latency_ms is not None and charge.latency_ms >= 0
+    assert charge.cost_usd == pytest.approx(spend.cost(model, 120, 7))
+
+
+def test_a_rejected_reply_is_recorded_as_rejected(
+    api: TestClient, openai_fake: FakeOpenAI, ledger: MemoryLedger
+) -> None:
+    openai_fake.reply(json=chat_response('{"q', finish_reason="length"))
+    body = {**GENERATE, "model_profile": "check", "response_schema": {"type": "object"}}
+    resp = api.post("/v1/inference", json=body)
+    assert (resp.status_code, resp.json()["error"]["code"]) == (502, "AI_OUTPUT_REJECTED")
+    settle(ledger, 1)
+    charge = ledger.charges[0][1]
+    assert (charge.model, charge.outcome) == ("gpt-check", "rejected")
+
+
+def test_a_reply_after_a_timed_out_attempt_charges_both(
+    api: TestClient, openai_fake: FakeOpenAI, ledger: MemoryLedger
+) -> None:
+    """openai may still bill the attempt that timed out, so it is charged as a timeout beside the reply."""
+    openai_fake.replies += [hang, httpx2.Response(200, json=chat_response("Hello!"))]
+    assert api.post("/v1/inference", json={**GENERATE, "max_tokens": 100}).status_code == 200
+    settle(ledger, 2)
+    outcomes = [(c.outcome, c.tokens_out, c.estimated) for _, c in ledger.charges]
+    assert outcomes == [("timeout", 150, True), ("ok", 7, False)]
+
+
+def test_a_stream_records_its_outcome(api: TestClient, openai_fake: FakeOpenAI, ledger: MemoryLedger) -> None:
+    openai_fake.replies.append(chat_stream(["one", "two"], fail_after=1))
+    assert "event: error" in api.post("/v1/inference", json={**GENERATE, "stream": True}).text
+    openai_fake.replies.append(chat_stream(["Hel", "lo"]))
+    assert api.post("/v1/inference", json={**GENERATE, "stream": True}).status_code == 200
+    settle(ledger, 2)
+    assert [(c.model, c.outcome) for _, c in ledger.charges] == [("gpt-test", "failed"), ("gpt-test", "ok")]
+
+
+def test_a_streamed_reply_takes_no_other_profile(api: TestClient) -> None:
+    resp = api.post("/v1/inference", json={**GENERATE, "stream": True, "model_profile": "check"})
+    assert resp.status_code == 422
+
+
+def test_a_calls_own_effort_is_sent_and_the_ledger_records_its_profiles_model(
+    api: TestClient, openai_fake: FakeOpenAI, ledger: MemoryLedger
+) -> None:
+    openai_fake.reply(json=chat_response("Hello!"))
+    body = {**GENERATE, "max_tokens": 100, "model_profile": "check", "reasoning_effort": "none"}
+    resp = api.post("/v1/inference", json=body)
+    assert resp.status_code == 200 and resp.json()["model_version"] == "gpt-check"
+    [req] = openai_fake.requests
+    assert (req["model"], req["reasoning_effort"], req["max_completion_tokens"]) == ("gpt-check", "none", 100)
+    settle(ledger, 1)
+    assert ledger.charges[0][1].model == "gpt-check"
+
+
+@pytest.mark.parametrize("effort", ["low", "medium", "high"])
+def test_a_streamed_reply_takes_no_reasoning_effort_but_none(api: TestClient, effort: str) -> None:
+    resp = api.post("/v1/inference", json={**GENERATE, "stream": True, "reasoning_effort": effort})
+    assert resp.status_code == 422
+
+
+def test_a_streamed_reply_may_ask_for_no_reasoning(api: TestClient, openai_fake: FakeOpenAI) -> None:
+    openai_fake.replies.append(chat_stream(["Hel", "lo"]))
+    resp = api.post("/v1/inference", json={**GENERATE, "stream": True, "reasoning_effort": "none"})
+    assert resp.status_code == 200
+    [req] = openai_fake.requests
+    assert req["reasoning_effort"] == "none"
+
+
+def test_usage_rows_carry_outcome_and_latency() -> None:
+    charge = spend.Charge("generate", "gpt-check", 1, 2, 0.5, outcome="ok", latency_ms=42)
+    row = spend.usage_row(spend.Billed(user_id="u", org_id="o", role="student"), charge, "corr")
+    columns = spend.INSERT_USAGE.split("(")[1].split(")")[0].split(",")
+    assert dict(zip(columns, row, strict=True))["outcome"] == "ok"
+    assert dict(zip(columns, row, strict=True))["latency_ms"] == 42
+
+
+def test_a_rerank_is_retried_once_within_its_budget(
+    api: TestClient, reranker_fake: FakeReranker, ledger: MemoryLedger
+) -> None:
+    replies = [
+        httpx2.Response(503, json={}),
+        httpx2.Response(200, json={"data": [{"index": 0, "relevance_score": 0.9},
+                                            {"index": 1, "relevance_score": 0.1}],
+                                   "usage": {"total_tokens": 9}}),
+    ]  # fmt: skip
+    reranker_fake.handler = lambda request: replies.pop(0)
+    resp = api.post("/v1/rerank", json=RERANK)
+    assert resp.status_code == 200 and resp.json()["scores"] == [0.9, 0.1]
+    assert len(reranker_fake.requests) == 2
+    settle(ledger, 1)
+    assert ledger.charges[0][1].outcome == "ok"
+
+
+def test_a_rerank_retry_never_starts_past_its_budget(
+    api: TestClient, reranker_fake: FakeReranker, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import rerank
+
+    clock = [0.0]
+    monkeypatch.setattr(rerank, "_now", lambda: clock[0])
+
+    def slow_failure(request: httpx2.Request) -> httpx2.Response:
+        clock[0] += rerank.RERANK_BUDGET - rerank.MIN_RETRY / 2
+        return httpx2.Response(503, json={})
+
+    reranker_fake.handler = slow_failure
+    resp = api.post("/v1/rerank", json=RERANK)
+    assert (resp.status_code, resp.json()["error"]["code"]) == (502, "AI_PROVIDER_FAILED")
+    assert len(reranker_fake.requests) == 1
+
+
+def test_a_rerank_client_error_is_not_retried(api: TestClient, reranker_fake: FakeReranker) -> None:
+    reranker_fake.handler = lambda request: httpx2.Response(400, json={})
+    assert api.post("/v1/rerank", json=RERANK).status_code == 502
+    assert len(reranker_fake.requests) == 1

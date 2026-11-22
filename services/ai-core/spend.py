@@ -17,11 +17,15 @@ log = logging.getLogger("ai-core.spend")
 
 MIGRATIONS = Path(__file__).parent / "migrations"
 Role = Literal["student", "teacher"]
+# how a recorded call ended (adr 0023): answered, answered but refused as unusable, unanswered in time, or
+# broken off by the provider.
+Outcome = Literal["ok", "rejected", "timeout", "failed"]
 
 # usd per million tokens: input, cached input, output.
 DEFAULT_PRICES: dict[str, tuple[float, float, float]] = {
     "gpt-6-luna": (0.10, 0.01, 0.50),
     "gpt-5.4-mini": (0.75, 0.075, 4.50),
+    "gpt-6.2-sol": (2.00, 0.10, 10.00),
     "text-embedding-3-small": (0.02, 0.02, 0.0),
     "rerank-3": (0.05, 0.05, 0.0),
 }
@@ -51,6 +55,8 @@ class Charge:
     estimated: bool = (
         False  # token counts guessed from text length (a stream cut off before its usage arrived)
     )
+    outcome: Outcome | None = None  # none for ingest and rows written before migration 007
+    latency_ms: int | None = None  # from the provider call's start to its charge
 
 
 def prices() -> dict[str, tuple[float, float, float]]:
@@ -227,8 +233,8 @@ class PostgresLedger(AsyncPooled):
 
 
 INSERT_USAGE = (
-    "INSERT INTO usage(org_id,user_id,role,operation,model,tokens_in,tokens_out,cost_usd,estimated,correlation_id)"
-    " VALUES(%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)"
+    "INSERT INTO usage(org_id,user_id,role,operation,model,tokens_in,tokens_out,cost_usd,estimated,correlation_id,"
+    "outcome,latency_ms) VALUES(%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)"
 )
 ADJUST_RESERVATION = "UPDATE budget_reservations SET amount=greatest(0,amount-%s) WHERE id=%s"
 
@@ -246,6 +252,8 @@ def usage_row(billed: Billed, charge: Charge, correlation: str) -> tuple[Any, ..
         charge.cost_usd,
         charge.estimated,
         correlation,
+        charge.outcome,
+        charge.latency_ms,
     )
 
 

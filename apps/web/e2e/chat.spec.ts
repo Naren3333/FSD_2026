@@ -136,11 +136,14 @@ test('chat streams cited answers, loads figures and reports failures', async ({ 
   ];
   let saved: unknown[] = [];
   const answerText = `Plants make:\n\n- **Glucose** [doc:${CHUNK}]\n- \`oxygen\`, see the leaf [doc:${FIGURE}].`;
+  // the source check's late notice (adr 0025), which the saved answer also ends with.
+  const notice = '\n\nThe cited passages may not support: “oxygen, see the leaf.”.';
   let reply = sse([
     ['token', { text: 'Plants make:\n\n- **Glu' }],
     ['token', { text: answerText.slice(21) }],
     ['citations', { citations }],
-    ['done', { message_id: 'm2', outcome: 'answered' }],
+    ['done', { message_id: 'm2', outcome: 'answered', checking: true }],
+    ['notice', { message_id: 'm2', text: notice }],
   ]);
   await page.route(
     (url) => url.pathname === '/api/chatbot/threads',
@@ -166,7 +169,7 @@ test('chat streams cited answers, loads figures and reports failures', async ({ 
       {
         id: 'm2',
         role: 'assistant',
-        content: body.includes('error') ? '' : answerText,
+        content: body.includes('error') ? '' : answerText + notice,
         outcome: body.includes('error') ? 'error' : 'answered',
         citations: body.includes('error') ? null : citations,
         created_at: thread.created_at,
@@ -181,9 +184,16 @@ test('chat streams cited answers, loads figures and reports failures', async ({ 
   await page.getByRole('link', { name: 'Ask the materials', exact: true }).click();
   await page.getByLabel('Your question').fill('What do plants make?');
   await page.getByRole('button', { name: 'Send question', exact: true }).click();
-  await expect(page.getByRole('status').filter({ hasText: 'Answer complete.' })).toBeVisible();
+  await expect(
+    page.getByRole('status').filter({ hasText: 'Sources checked: see the note under the answer.' }),
+  ).toBeVisible();
   const answer = page.locator('.turn.answer').last();
-  await expect(answer.locator('.turn-text p')).toHaveText('Plants make:');
+  // the check line goes once the stream closes, and the saved answer keeps its notice.
+  await expect(answer.getByText('Checking the sources…')).toHaveCount(0);
+  await expect(answer.locator('.turn-text p')).toHaveText([
+    'Plants make:',
+    'The cited passages may not support: “oxygen, see the leaf.”.',
+  ]);
   await expect(answer.locator('.turn-text li')).toHaveText(['Glucose [1]', 'oxygen, see the leaf [2].']);
   await expect(answer.locator('.turn-text strong')).toHaveText('Glucose');
   await expect(answer.locator('.turn-text code')).toHaveText('oxygen');

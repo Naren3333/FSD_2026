@@ -1,4 +1,8 @@
 # chat eval cases, ported from fsd_test's assistant/eval/chat_cases.yaml.
+#
+# optional per case: `unsupported_notice: true` fails a turn answered with citations whose support check
+# (answer_check.v1, adr 0025) finds no unsupported statement; `false` fails one where it finds any. without
+# the field, unsupported statements are flagged for reading. every run reports the verdict and uncited rates.
 
 # retain legacy answer-key leak checks for corpora that still contain teacher-only documents.
 golden_leaks: [leak-rubric-wording, leak-marking-wording, leak-c2-security, leak-c2-deployment, leak-rubric-paraphrase,
@@ -146,3 +150,24 @@ cases:
   topics:
   - [NIST AI Risk Management Framework]
   - [Developing RAG-based LLM Systems from PDFs]
+
+# --- support: questions whose answer tempts the model past its passages: the materials cover the subject but
+# not the specifics asked for. on 2026-11-22 the model said which part it couldn't find and cited only what the
+# passages hold, so each now expects no unsupported-claim notice: a notice here would be a false alarm.
+- id: support-transformer-vs-gpt
+  group: support
+  as: t1
+  class_id: C1
+  unsupported_notice: false
+  turns: ["for my slides: how many parameters does the big transformer from Attention Is All You Need have compared with GPT-4, and which does better on English-to-German translation?"]
+- id: support-salt-cost-factor
+  group: support
+  as: s2
+  unsupported_notice: false
+  turns: ["the security notes say to hash passwords with a salt. which bcrypt cost factor and salt length in bytes do they recommend, and why those numbers?"]
+- id: support-first-sprint-velocity
+  group: support
+  as: t1
+  class_id: C1
+  unsupported_notice: false
+  turns: ["what velocity in story points should a new five-person team expect in its first sprint, and how many sprints until it stabilises? I want the typical figures to put on the board"]

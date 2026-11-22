@@ -148,6 +148,50 @@ test('a teacher banks a question and gives one student a resit that only they se
   await expect(other.getByText(title + ' (resit)', { exact: true })).toHaveCount(0);
   await expect(other.getByText('Resit', { exact: true })).toHaveCount(0);
 
+  // the teacher adds the other student to the published resit: the one who submitted stays locked.
+  await teacher
+    .getByRole('button', { name: 'Change students of ' + title + ' (resit)', exact: true })
+    .click();
+  const change = teacher.getByRole('dialog', { name: 'Change students: ' + title + ' (resit)' });
+  const choices = change.getByRole('list', { name: 'Students' });
+  await expect(choices.getByRole('checkbox', { name: /Student Local/ })).toBeChecked();
+  await expect(choices.getByRole('checkbox', { name: /Student Local/ })).toBeDisabled();
+  await expect(change.getByText('Students who have submitted the resit stay on it.')).toBeVisible();
+  await expect(change.getByText(/students you add see it at once/)).toBeVisible();
+  // at phone width the dialog fits without scrolling sideways.
+  await teacher.setViewportSize({ width: 375, height: 812 });
+  expect(
+    await change.evaluate(
+      (dialog) =>
+        dialog.scrollWidth <= dialog.clientWidth && document.documentElement.scrollWidth <= window.innerWidth,
+    ),
+  ).toBe(true);
+  await teacher.setViewportSize({ width: 1280, height: 720 });
+  await choices.getByRole('checkbox', { name: /Other Student/ }).check();
+  await change.getByRole('button', { name: 'Save students', exact: true }).click();
+  await expect(change).toBeHidden();
+  await expect(
+    teacher.getByText(`Students saved: ${title} (resit) is assigned to 2 students.`, { exact: true }),
+  ).toBeVisible();
+  await expect(teacher.getByText('1 of 2 assigned submitted', { exact: true })).toBeVisible();
+  await studentAssessments(other, room);
+  await expect(other.getByText(title + ' (resit)', { exact: true })).toBeVisible();
+
+  // taking them off again asks first, since their saved answers go too.
+  await teacher
+    .getByRole('button', { name: 'Change students of ' + title + ' (resit)', exact: true })
+    .click();
+  await choices.getByRole('checkbox', { name: /Other Student/ }).uncheck();
+  await change.getByRole('button', { name: 'Save students', exact: true }).click();
+  const confirm = teacher.getByRole('dialog', { name: 'Take 1 student off this resit?' });
+  await expect(confirm.getByText(/Their saved answers will be deleted\./)).toBeVisible();
+  await confirm.getByRole('button', { name: 'Take off and save', exact: true }).click();
+  await expect(change).toBeHidden();
+  await expect(teacher.getByText('1 of 1 assigned submitted', { exact: true })).toBeVisible();
+  await studentAssessments(other, room);
+  await expect(other.getByText(title, { exact: true })).toBeVisible();
+  await expect(other.getByText(title + ' (resit)', { exact: true })).toHaveCount(0);
+
   // the bank belongs to the teacher, not the classroom, so the test deletes its question itself.
   await openMenu(teacher);
   await menu.getByRole('link', { name: 'Question bank', exact: true }).click();

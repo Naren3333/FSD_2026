@@ -1,0 +1,81 @@
+@if (full) {
+  <p class="caption">{{ max }} students are chosen, the most a resit can have.</p>
+}
+@if (locked.size && lockedReason) {
+  <p class="caption" [id]="pickerId + '-locked'">{{ lockedReason }}</p>
+}
+@if (chosen.size) {
+  <p class="caption">Chosen students, including other pages:</p>
+  <ul class="tag-row" aria-label="Chosen students">
+    @for (id of chosenList(); track id) {
+      <li>
+        <button
+          type="button"
+          class="secondary"
+          [disabled]="disabled || isLocked(id)"
+          [attr.aria-describedby]="isLocked(id) && lockedReason ? pickerId + '-locked' : null"
+          (click)="remove(id)"
+        >
+          @if (isLocked(id)) {
+            {{ label(id) }} ({{ lockedLabel.toLowerCase() }})
+          } @else {
+            Remove
+            @if (unnamed(id)) {
+              <span class="identifier">{{ id }}</span>
+            } @else {
+              {{ label(id) }}
+            }
+          }
+        </button>
+      </li>
+    }
+  </ul>
+}
+<app-section-state [section]="section" loading="Loading the classroom's students…" />
+@if (section.error()) {
+  <button type="button" class="secondary" (click)="load()">Try again</button>
+}
+@if (section.ready() && section.value(); as people) {
+  <ul class="resit-choices" aria-label="Students">
+    @for (student of people; track student.id) {
+      <li>
+        <label class="check">
+          <input
+            #studentBox
+            type="checkbox"
+            [checked]="isChosen(student.id)"
+            [disabled]="disabled || isLocked(student.id) || (full && !isChosen(student.id))"
+            [attr.aria-describedby]="isLocked(student.id) && lockedReason ? pickerId + '-locked' : null"
+            (change)="toggle(student, studentBox.checked)"
+          />
+          <span class="resit-choice">
+            <span>{{ rowName(student) }}</span>
+            <span class="tag-row">
+              @if (isLocked(student.id)) {
+                <span class="badge badge-plain">{{ lockedLabel }}</span>
+              }
+              @if (suggested.has(student.id)) {
+                <span class="badge badge-warning">{{ suggestedLabel }}</span>
+              }
+              @if (notes.get(student.id); as note) {
+                <span class="caption">{{ note }}</span>
+              }
+            </span>
+          </span>
+        </label>
+      </li>
+    } @empty {
+      <li class="empty">No students are enrolled in this classroom yet. Your school admin enrolls them.</li>
+    }
+  </ul>
+}
+<app-pager
+  label="Student pages"
+  [page]="section.page()"
+  (pageChange)="section.page.set($event)"
+  [pageSize]="section.pageSize"
+  [total]="section.total()"
+  noun="students"
+  [disabled]="section.loading() || disabled"
+  (go)="load()"
+/>

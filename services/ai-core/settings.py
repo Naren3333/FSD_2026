@@ -29,7 +29,7 @@ class Settings:
     openai_api_key: str | None
     embedding_model: str
     chat_model: str
-    chat_reasoning_effort: str
+    chat_reasoning_effort: str  # streamed chat and the "fast" profile
     voyage_api_key: str | None
     voyage_base_url: str
     reranker_model: str
@@ -56,6 +56,11 @@ class Settings:
     chunk_tokens: int = 600
     chunk_overlap: int = 90
     slide_chunks: bool = True
+    # the model profiles (adr 0023): structured and plain replies on "default" think a little; "check" is the
+    # second opinion a critic or reviewer gives, on its own model and effort.
+    structured_reasoning_effort: str = "low"
+    check_model: str = "gpt-6-luna"
+    check_reasoning_effort: str = "medium"
     # optional operational ceiling across every user and all usage retained in this ledger; never a daily
     # reset.
     total_spend_limit_usd: float | None = None
@@ -71,6 +76,14 @@ class Settings:
             raise ValueError("AI_USER_CONCURRENCY must be 1–100")
         if not 1 <= self.ingest_max_pages <= 500 or not 1 <= self.ingest_max_chunks <= 5000:
             raise ValueError("Ingest limits must be 1–500 pages and 1–5000 chunks")
+
+    def profile(self, name: str) -> tuple[str, str]:
+        """the model and reasoning effort a non-streamed reply on profile `name` runs with."""
+        if name == "check":
+            return self.check_model, self.check_reasoning_effort
+        if name == "fast":
+            return self.chat_model, self.chat_reasoning_effort
+        return self.chat_model, self.structured_reasoning_effort
 
 
 def _prices(raw: str) -> dict[str, tuple[float, float, float]]:
@@ -109,5 +122,8 @@ def get_settings() -> Settings:
         chunk_tokens=int(env("CHUNK_TOKENS") or 600),
         chunk_overlap=int(env("CHUNK_OVERLAP") or 90),
         slide_chunks=_flag("SLIDE_CHUNKS", True),
+        structured_reasoning_effort=env("STRUCTURED_REASONING_EFFORT") or "low",
+        check_model=env("CHECK_MODEL") or "gpt-6-luna",
+        check_reasoning_effort=env("CHECK_REASONING_EFFORT") or "medium",
         total_spend_limit_usd=float(total) if (total := env("AI_TOTAL_SPEND_LIMIT_USD")) else None,
     )

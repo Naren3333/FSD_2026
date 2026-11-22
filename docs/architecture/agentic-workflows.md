@@ -6,7 +6,7 @@ The agentic features we could build, in the order we plan to take them, and wher
 |---|---|---|---|
 | 1 | Performance interpretation agent | Built (ADR 0014) | No |
 | 2 | Marking critic and escalation | Built (ADR 0020) | No |
-| 3 | Question generation critic loop | Built (ADR 0015) | Reads the passages generation already has |
+| 3 | Question generation critic loop | Built (ADRs 0015, 0026) | Reads the passages generation already has |
 | 4 | Adaptive resit agent | Proposed, needs a question bank | Only if it generates new questions |
 | 5 | Teacher class-insights copilot | Built (ADR 0021) | No: it does not search materials |
 | 6 | Interpretation on finalization | Proposed, after 1 | No |
@@ -165,7 +165,7 @@ flowchart TD
 
 ## 3. Question generation critic loop
 
-Built. A reviewer model pass checks each generated question against its cited passages only: answerable, key matches what the reviewer worked out, one right answer, plausible wrong options, not a repeat. Rejected drafts go back to the generator with the reason, up to two retries inside one deadline; weak wrong options are flagged for the teacher instead of dropped, and a reviewer failure returns drafts marked not reviewed. Teachers can skip the review per request. Student practice (ADR 0022) runs the same loop with the review always on and keeps only passed drafts. Services: question-generation-agent, ai-core, web generator panel and Practice page. See ADR 0015.
+Built. A reviewer model pass checks each generated question against its cited passages only: answerable, key matches what the reviewer worked out, one right answer, plausible wrong options, not a repeat. Rejected drafts go back to the generator with the reason, up to two retries inside one deadline; weak wrong options are flagged for the teacher instead of dropped, and a reviewer failure returns drafts marked not reviewed. Teachers can skip the review per request. Student practice (ADR 0022) runs the same loop with the review always on and keeps only passed drafts. Since ADR 0026 the reviewer runs on ai-core's `check` profile, also judges whether the cited evidence supports the key and whether another option is right, marking guidance gets one review and rewrite, and a malformed write gets one re-ask within the six-call budget. Services: question-generation-agent, ai-core, web generator panel and Practice page. See ADRs 0015 and 0026.
 
 One request, from passages to drafts (defaults: two retries, a 240-second deadline, so at most three writes and three reviews):
 
@@ -198,7 +198,7 @@ flowchart TD
   Last --> Out(["Drafts by type, passed first, with each round's<br/>counts and the call count; nothing added until the teacher does"])
 ```
 
-`scripts/eval/run_generation.py` compares requests with the review on and off, and its `--probe` sends planted faulty drafts straight to the reviewer to measure what it catches. Next steps for it: use the probe's misses to tune the reviewer, and decide from the on/off comparison whether the review earns its extra calls.
+`scripts/eval/run_generation.py` compares requests with the review on and off, and its `--probe` sends planted faulty drafts straight to the reviewer to measure what it catches. The probe's two misses are now caught (13 of 13, 2026-11-22). On 2026-11-22 the review sent back 19 drafts across six requests that would otherwise have reached teachers, at 32 calls against 6 and p50 41 s against 8.8 s. Weak wrong options are now flagged for teachers rather than rewritten, which brought the median to 16.8 s with 14 calls. Next step: shorter practice sets, which still drop weak-option drafts after six calls.
 
 ## 4. Adaptive resit agent
 

@@ -1,5 +1,6 @@
 """openai_client: embeddings, chat (plain, streamed, json schema) and the retry rules, against a mock openai."""
 
+import json
 from collections.abc import Callable
 
 import httpx2
@@ -217,7 +218,8 @@ async def test_plain_reply(openai_fake: FakeOpenAI) -> None:
     reply = await openai_client.generate(HELLO, 40)
     assert reply == openai_client.Completion("Hello there", Usage(120, 7), "stop")
     [req] = openai_fake.requests
-    assert "response_format" not in req and req["max_completion_tokens"] == 40
+    assert "response_format" not in req and req["max_completion_tokens"] == 60
+    assert req["reasoning_effort"] == "low"
 
 
 async def test_schema_reply_is_returned_as_json_text(openai_fake: FakeOpenAI) -> None:
@@ -227,7 +229,7 @@ async def test_schema_reply_is_returned_as_json_text(openai_fake: FakeOpenAI) ->
     schema = req["response_format"]["json_schema"]
     assert req["response_format"]["type"] == "json_schema"
     assert schema["name"] == "query_rewrite_v1" and schema["strict"] is True and schema["schema"] == SCHEMA
-    assert req["max_completion_tokens"] == 100 and req["reasoning_effort"] == "none"
+    assert req["max_completion_tokens"] == 150 and req["reasoning_effort"] == "low"
 
 
 @pytest.mark.parametrize(
@@ -291,7 +293,7 @@ async def test_a_long_reply_gets_its_whole_budget(
 ) -> None:
     Clock(openai_fake, monkeypatch)
     openai_fake.reply(json=chat_response(REWRITE))
-    await openai_client.generate(HELLO, 6000, SCHEMA, name="questions.generated")
+    await openai_client.generate(HELLO, 4000, SCHEMA, name="questions.generated")  # sent as 6000
     assert openai_fake.timeouts == [pytest.approx(120)]
 
 
@@ -302,7 +304,7 @@ async def test_the_callers_timeout_shortens_the_budget(
     Clock(openai_fake, monkeypatch)
     openai_fake.reply(json=chat_response(REWRITE))
     openai_fake.reply(json=chat_response(REWRITE))
-    await openai_client.generate(HELLO, 6000, SCHEMA, name="questions.generated", timeout=40)
+    await openai_client.generate(HELLO, 4000, SCHEMA, name="questions.generated", timeout=40)
     await openai_client.generate(HELLO, 300, SCHEMA, name="query.rewrite", timeout=100)  # longer: no change
     assert openai_fake.timeouts == [pytest.approx(40), pytest.approx(openai_client.TIMEOUT)]
 
@@ -312,7 +314,7 @@ async def test_a_retry_gets_what_is_left_of_the_budget(
 ) -> None:
     clock = Clock(openai_fake, monkeypatch)
     openai_fake.replies += [clock.slow(50, 500), httpx2.Response(200, json=chat_response(REWRITE))]
-    await openai_client.generate(HELLO, 6000, SCHEMA, name="questions.generated")
+    await openai_client.generate(HELLO, 4000, SCHEMA, name="questions.generated")
     first, second = openai_fake.timeouts
     assert first == pytest.approx(120) and second == pytest.approx(70 - openai_fake.sleeps[0])
 
@@ -323,7 +325,7 @@ async def test_no_retry_starts_without_enough_budget_left(
     clock = Clock(openai_fake, monkeypatch)
     openai_fake.replies.append(clock.slow(115, 500))
     with pytest.raises(openai.InternalServerError):
-        await openai_client.generate(HELLO, 6000, SCHEMA, name="questions.generated")
+        await openai_client.generate(HELLO, 4000, SCHEMA, name="questions.generated")
     assert len(openai_fake.requests) == 1 and openai_fake.sleeps == []
 
 
@@ -336,3 +338,145 @@ async def test_a_stream_is_not_reopened_once_a_whole_attempt_no_longer_fits(
         await collect()
     # 20 s gone leaves 25 s of STREAM_OPEN_BUDGET: less than one more 30 s attempt.
     assert len(openai_fake.requests) == 1 and openai_fake.sleeps == []
+
+
+# ---- model profiles (adr 0023)
+
+
+@pytest.mark.parametrize(
+    "profile, model, effort, sent",
+    [
+        ("default", "gpt-test", "low", 150),  # the writer: a little reasoning
+        ("check", "gpt-check", "medium", 250),  # a critic's second opinion
+        ("fast", "gpt-test", "none", 100),  # a short rewrite: no reasoning
+    ],
+)
+async def test_each_profile_sends_its_model_effort_and_reasoning_allowance(
+    openai_fake: FakeOpenAI, profile: str, model: str, effort: str, sent: int
+) -> None:
+    openai_fake.reply(json=chat_response(REWRITE))
+    await openai_client.generate(HELLO, 100, SCHEMA, name="x", profile=profile)
+    [req] = openai_fake.requests
+    assert (req["model"], req["reasoning_effort"], req["max_completion_tokens"]) == (model, effort, sent)
+
+
+@pytest.mark.parametrize(
+    "profile, effort, model, sent",
+    [
+        ("check", "none", "gpt-check", 100),  # the profile's model, without its medium reasoning
+        ("check", "low", "gpt-check", 150),
+        ("default", "medium", "gpt-test", 250),
+    ],
+)
+async def test_a_calls_own_effort_overrides_its_profiles(
+    openai_fake: FakeOpenAI, profile: str, effort: str, model: str, sent: int
+) -> None:
+    openai_fake.reply(json=chat_response(REWRITE))
+    await openai_client.generate(HELLO, 100, SCHEMA, name="x", profile=profile, effort=effort)
+    [req] = openai_fake.requests
+    assert (req["model"], req["reasoning_effort"], req["max_completion_tokens"]) == (model, effort, sent)
+
+
+def test_the_reasoning_allowance_is_capped_and_never_below_the_reply() -> None:
+    tokens = openai_client.completion_tokens
+    assert (tokens(1500, "none"), tokens(1500, "low"), tokens(1500, "medium")) == (1500, 2250, 3750)
+    assert tokens(5000, "medium") == openai_client.MAX_COMPLETION  # the contract's largest reply
+    assert tokens(8000, "medium") == 8000
+    assert tokens(100, "unheard-of") == 400  # an unknown effort gets the largest multiple
+
+
+async def test_the_reservation_covers_the_tokens_actually_sent(
+    openai_fake: FakeOpenAI, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """max_completion_tokens counts reasoning, so the worst case reserved is the allowance sent, not max_tokens."""
+    import budget
+    import spend
+
+    reserved: list[float] = []
+
+    class Capture:
+        async def reserve(self, reservation: str, billed: object, amount: float, concurrency: int) -> None:
+            reserved.append(amount)
+
+        async def adjust(self, reservation: str, unused: float) -> None:
+            pass
+
+    active = budget.Budget(Capture(), spend.Billed(user_id="u", org_id="o", role="teacher"))  # type: ignore[arg-type]
+    token = budget.current.set(active)
+    try:
+        openai_fake.reply(json=chat_response(REWRITE))
+        await openai_client.generate(HELLO, 1000, SCHEMA, name="x", profile="check")
+    finally:
+        budget.current.reset(token)
+    prompt = len(json.dumps(HELLO).encode()) + 64
+    assert reserved == [pytest.approx(spend.cost("gpt-check", prompt, 2500))]
+
+
+# ---- a timed-out attempt is retried once, within the deadline
+
+
+def hang(request: httpx2.Request) -> httpx2.Response:
+    raise httpx2.ReadTimeout("timed out (test)", request=request)
+
+
+async def test_a_timeout_is_retried_once_when_the_deadline_allows(
+    openai_fake: FakeOpenAI, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    Clock(openai_fake, monkeypatch)
+    openai_fake.replies += [hang, httpx2.Response(200, json=chat_response(REWRITE))]
+    attempts = openai_client.Attempts()
+    assert (await openai_client.generate(HELLO, 100, SCHEMA, name="x", attempts=attempts)).text == REWRITE
+    assert (attempts.count, attempts.timeouts) == (2, 1)
+
+
+async def test_a_second_timeout_is_not_retried(
+    openai_fake: FakeOpenAI, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    Clock(openai_fake, monkeypatch)
+    openai_fake.replies += [hang, hang, httpx2.Response(200, json=chat_response(REWRITE))]
+    attempts = openai_client.Attempts()
+    with pytest.raises(openai.APITimeoutError):
+        await openai_client.generate(HELLO, 100, SCHEMA, name="x", attempts=attempts)
+    assert len(openai_fake.requests) == 2 and attempts.timeouts == 2
+
+
+async def test_a_timeout_that_used_the_budget_is_not_retried(
+    openai_fake: FakeOpenAI, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    clock = Clock(openai_fake, monkeypatch)
+
+    def slow_hang(request: httpx2.Request) -> httpx2.Response:
+        clock.now += 25  # of a 30 s budget: too little is left for another attempt
+        return hang(request)
+
+    openai_fake.replies.append(slow_hang)
+    with pytest.raises(openai.APITimeoutError):
+        await openai_client.generate(HELLO, 100, SCHEMA, name="x")
+    assert len(openai_fake.requests) == 1 and openai_fake.sleeps == []
+
+
+async def test_the_reservation_follows_a_calls_own_effort(
+    openai_fake: FakeOpenAI, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """the check profile at low reasons less, so less is reserved than at its own medium."""
+    import budget
+    import spend
+
+    reserved: list[float] = []
+
+    class Capture:
+        async def reserve(self, reservation: str, billed: object, amount: float, concurrency: int) -> None:
+            reserved.append(amount)
+
+        async def adjust(self, reservation: str, unused: float) -> None:
+            pass
+
+    active = budget.Budget(Capture(), spend.Billed(user_id="u", org_id="o", role="teacher"))  # type: ignore[arg-type]
+    token = budget.current.set(active)
+    try:
+        openai_fake.reply(json=chat_response(REWRITE))
+        await openai_client.generate(HELLO, 1000, SCHEMA, name="x", profile="check", effort="low")
+    finally:
+        budget.current.reset(token)
+    prompt = len(json.dumps(HELLO).encode()) + 64
+    assert reserved == [pytest.approx(spend.cost("gpt-check", prompt, 1500))]

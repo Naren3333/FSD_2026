@@ -8,6 +8,8 @@ import pytest
 from conftest import BOUNDARIES, CHUNK_1, CHUNK_2, DOC, ROOM, TOPIC, UNIT_TESTS, Fakes, as_user, hit, reply
 from test_checks import choice, short, written
 
+import prompts
+
 GENERATE = "/v1/questions"
 GUIDANCE = "/v1/marking-guidance"
 BODY: dict[str, Any] = {
@@ -187,10 +189,31 @@ def test_nothing_is_made_up_when_every_question_fails(api, fakes: Fakes):
     assert error["code"] == "GENERATION_REJECTED" and "EVIDENCE_NOT_FOUND" not in error["message"]
 
 
-def test_an_unreadable_reply(api, fakes: Fakes):
-    fakes.replies = [httpx.Response(200, json={"output": "{not json"})]
+def test_an_unreadable_reply_asked_again_and_still_unreadable(api, fakes: Fakes):
+    fakes.replies = [httpx.Response(200, json={"output": "{not json"})] * 2
     resp = api.post(GENERATE, json=BODY, headers=as_user())
     assert resp.status_code == 502 and resp.json()["error"]["code"] == "AI_OUTPUT_REJECTED"
+    first, again = fakes.calls("/v1/inference")
+    # the re-ask carries the faulty reply and what was wrong with it, billed to the same teacher.
+    assert again["messages"][:2] == first["messages"] and again["messages"][2]["content"] == "{not json"
+    assert "not a json object" in again["messages"][3]["content"]
+    assert again["billed_to"] == first["billed_to"] and again["model_profile"] == "default"
+
+
+def test_an_unreadable_reply_is_asked_again_once(api, fakes: Fakes):
+    fakes.replies = [httpx.Response(200, json={"output": '{"other": []}'}), reply({"questions": [choice()]})]
+    resp = api.post(GENERATE, json={**BODY, "counts": {"multiple_choice": 1}}, headers=as_user())
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["returned"] == 1 and resp.json()["model_calls"] == 2
+    assert "no questions list" in fakes.calls("/v1/inference")[1]["messages"][-1]["content"]
+
+
+def test_a_reply_ai_core_rejects_is_asked_again_once(api, fakes: Fakes):
+    rejected = httpx.Response(502, json={"error": {"code": "AI_OUTPUT_REJECTED", "message": "x"}})
+    fakes.replies = [rejected, reply({"questions": [choice()]})]
+    resp = api.post(GENERATE, json={**BODY, "counts": {"multiple_choice": 1}}, headers=as_user())
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["model_calls"] == 2 and len(fakes.calls("/v1/inference")) == 2
 
 
 @pytest.mark.parametrize(
@@ -204,7 +227,8 @@ def test_an_unreadable_reply(api, fakes: Fakes):
     ],
 )  # fmt: skip
 def test_ai_core_failures(api, fakes: Fakes, status, error, expected_status, expected_code):
-    fakes.replies = [httpx.Response(status, json={"error": error})]
+    # a rejected reply is asked again once, and the second is rejected too.
+    fakes.replies = [httpx.Response(status, json={"error": error})] * 2
     resp = api.post(GENERATE, json=BODY, headers=as_user())
     assert resp.status_code == expected_status and resp.json()["error"]["code"] == expected_code
     if expected_code == "AI_SPEND_LIMIT":
@@ -260,9 +284,12 @@ def test_guidance_for_a_question_the_teacher_wrote(api, fakes: Fakes):
 
 
 def test_guidance_that_fails_the_checks_is_refused(api, fakes: Fakes):
-    fakes.replies = [reply(short(evidence="nothing like the slides at all, honestly"))]
+    fakes.replies = [reply(short(evidence="nothing like the slides at all, honestly"))] * 2
     resp = api.post(GUIDANCE, json={**GUIDANCE_BODY, "type": "short_answer"}, headers=as_user())
     assert resp.status_code == 422
+    # asked again once, told what failed, before it is refused.
+    first, again = fakes.calls("/v1/inference")
+    assert prompts.PROBLEMS["EVIDENCE_NOT_FOUND"] in again["messages"][-1]["content"]
     assert (
         resp.json()["error"]["code"] == "GUIDANCE_REJECTED"
         and "EVIDENCE_NOT_FOUND" not in resp.json()["error"]["message"]

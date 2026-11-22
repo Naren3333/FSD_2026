@@ -35,7 +35,8 @@ from token_count import encoding as tokenizer
 ERRORS: dict[int | str, dict[str, Any]] = {
     code: {"model": ErrorResponse} for code in (401, 403, 404, 422, 503)
 }
-SAVE_GRACE = 10.0  # seconds the shutdown waits for interrupted answers still being saved
+# seconds the shutdown waits for answers still being saved and support checks still running (chat.CHECK_SECONDS).
+SAVE_GRACE = 25.0
 CONSUMER_STOP_GRACE = 35  # seconds shutdown waits for the classroom-deletion consumer
 
 
@@ -56,9 +57,9 @@ async def lifespan(app: Any) -> AsyncIterator[None]:
         app.state.pending = set()
         consumer.start()
         yield
+        stop.set()  # the consumer stops while the saves finish, so both fit in the container's stop grace
         if app.state.pending:
             await asyncio.wait(app.state.pending, timeout=SAVE_GRACE)
-        stop.set()
         await asyncio.to_thread(consumer.join, CONSUMER_STOP_GRACE)
     purge_pool.close()
     await store.close()
@@ -161,7 +162,7 @@ async def list_messages(
 
 @app.post(
     "/v1/threads/{thread_id}/messages",
-    responses={**ERRORS, 409: {"model": ErrorResponse}, 200: {"description": "The answer as server-sent events: token, citations, done or error",
+    responses={**ERRORS, 409: {"model": ErrorResponse}, 200: {"description": "The answer as server-sent events: token, citations, done (checking: whether a notice may follow), then notice, or error",
                                "content": {"text/event-stream": {}}}},
 )  # fmt: skip
 async def post_message(

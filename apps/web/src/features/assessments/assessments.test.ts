@@ -15,6 +15,7 @@ import { UnsavedChanges } from '../../core/unsaved-changes';
 import { AnswerSheetComponent } from './answer-sheet';
 import { AssessmentsComponent } from './assessments';
 import { AssessmentEditorComponent } from './editor-view';
+import { ResitStudentsComponent } from './resit-students';
 import { fillForm, optionLines } from './editor';
 
 describe('optionLines', () => {
@@ -1248,5 +1249,38 @@ describe('the resit builder view', () => {
     await settle();
     expect(page.editing()?.id).toBe('r1');
     expect(page.state.message()).toBe('Resit draft created for 1 student. Review it, then publish it.');
+  });
+});
+
+describe('a resit for one student, and changing its students', () => {
+  it('reads the student the address names with the resit, and only with it', async () => {
+    vi.useFakeTimers();
+    const { page, go, settle } = setup('teacher');
+    await settle();
+    go({ resit: 'a1', student: 's7' });
+    await settle();
+    expect(page.resitAddress()).toBe('a1');
+    expect(page.resitStudent()).toBe('s7');
+    go({ edit: 'a1', student: 's7' });
+    await settle();
+    expect(page.resitStudent()).toBe('');
+  });
+
+  it('opens the students dialog and follows its save in the editor and the list', async () => {
+    vi.useFakeTimers();
+    const resit = assessment({ id: 'r1', status: 'published', resit_of: 'a1', assignees: ['s1'] });
+    const { page, api, settle } = setup('teacher', resit);
+    await settle();
+    const open = vi.fn();
+    page.resitStudents = { open } as unknown as ResitStudentsComponent;
+    page.changeStudents('r1', 'students-r1');
+    expect(open).toHaveBeenCalledWith('r1', 'students-r1');
+    page.editing.set(resit);
+    const reads = api.list.mock.calls.length;
+    page.studentsSaved({ ...resit, assignees: ['s1', 's2'] });
+    await settle();
+    expect(page.editing()?.assignees).toEqual(['s1', 's2']);
+    expect(page.state.message()).toBe(`Students saved: ${resit.title} is assigned to 2 students.`);
+    expect(api.list.mock.calls.length).toBe(reads + 1);
   });
 });

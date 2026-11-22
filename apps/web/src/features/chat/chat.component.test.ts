@@ -118,6 +118,116 @@ describe('sending a question', () => {
   });
 });
 
+describe('the source check after an answer', () => {
+  const at = '2026-10-24T00:00:00Z';
+  const notice = '\n\nThe cited passages may not support: “Roots make sugar.”.';
+
+  it('frees the question box at done, shows the check until the notice, then keeps the saved answer', async () => {
+    const saved: ChatMessage[] = [];
+    let close = () => undefined as void;
+    let emit: (e: StreamEvent) => void = () => undefined;
+    const { page, usage } = await setup(
+      (onEvent) =>
+        new Promise<void>((resolve) => {
+          emit = onEvent;
+          onEvent({ event: 'token', data: { text: 'Roots make sugar.' } });
+          onEvent({ event: 'done', data: { message_id: 'm2', outcome: 'answered', checking: true } });
+          close = resolve;
+        }),
+      saved,
+    );
+    page.form.controls.question.setValue('What do roots do?');
+    page.send();
+    // the turn is over at done: another question can be asked while the sources are checked.
+    await vi.waitFor(() => expect(page.state.busy()).toBe(false));
+    expect(page.streaming()).toBe(false);
+    const answer = page.messages.value()![1];
+    expect(page.isChecking(answer)).toBe(true);
+    expect(page.announcement()).toBe('Answer complete. Checking the sources…');
+    usage.refresh.mockClear();
+
+    emit({ event: 'notice', data: { message_id: 'm2', text: notice } });
+    expect(page.messages.value()![1].content).toBe('Roots make sugar.' + notice);
+    saved.push(
+      {
+        id: 'm1',
+        role: 'user',
+        content: 'What do roots do?',
+        outcome: null,
+        citations: null,
+        created_at: at,
+      },
+      {
+        id: 'm2',
+        role: 'assistant',
+        content: 'Roots make sugar.' + notice,
+        outcome: 'answered',
+        citations: [],
+        created_at: at,
+      },
+    );
+    close();
+    await vi.waitFor(() => expect(page.messages.value()?.[1].id).toBe('m2'));
+    expect(page.messages.value()![1].content).toBe('Roots make sugar.' + notice);
+    expect(page.checking()).toEqual([]);
+    expect(page.announcement()).toBe('Sources checked: see the note under the answer.');
+    expect(usage.refresh).toHaveBeenCalled(); // the check spends allowance too
+  });
+
+  it('shows no check line when none runs, and removes it when the stream ends without a notice', async () => {
+    const { page, send } = await setup((onEvent) => {
+      onEvent({ event: 'token', data: { text: 'Hello.' } });
+      onEvent({ event: 'done', data: { message_id: 'm2', outcome: 'answered', checking: false } });
+      return Promise.resolve();
+    });
+    await send('hi');
+    expect(page.checking()).toEqual([]);
+    expect(page.announcement()).toBe('Answer complete.');
+
+    const quiet = await setup((onEvent) => {
+      onEvent({ event: 'done', data: { message_id: 'm3', outcome: 'answered', checking: true } });
+      return Promise.resolve();
+    });
+    await quiet.send('What do roots do?');
+    await vi.waitFor(() => expect(quiet.page.checking()).toEqual([]));
+    expect(quiet.page.announcement()).toBe('Sources checked.');
+  });
+
+  it('does not re-read over a question asked while the check runs', async () => {
+    let closeFirst = () => undefined as void;
+    let calls = 0;
+    const { page } = await setup(
+      (onEvent) =>
+        new Promise<void>((resolve) => {
+          calls += 1;
+          onEvent({ event: 'token', data: { text: `Answer ${calls}.` } });
+          if (calls === 1) {
+            onEvent({ event: 'done', data: { message_id: 'm2', outcome: 'answered', checking: true } });
+            closeFirst = resolve;
+          } else {
+            onEvent({ event: 'done', data: { message_id: 'm4', outcome: 'answered', checking: false } });
+          }
+        }),
+    );
+    page.form.controls.question.setValue('first');
+    page.send();
+    await vi.waitFor(() => expect(page.state.busy()).toBe(false));
+    page.form.controls.question.setValue('second');
+    page.send();
+    await vi.waitFor(() => expect(page.streaming()).toBe(true));
+    closeFirst();
+    await new Promise((resolve) => setTimeout(resolve));
+    // the second answer is still streaming, so the first check's end leaves the list as it is.
+    expect(page.messages.value()?.map((m) => m.content)).toEqual([
+      'first',
+      'Answer 1.',
+      'second',
+      'Answer 2.',
+    ]);
+    expect(page.checking()).toEqual([]);
+  });
+});
+
 describe('a chat answer that fails', () => {
   it('says when a used-up daily AI allowance resets, and refreshes the meter', async () => {
     const resets = '2026-10-18T00:00:00+08:00';

@@ -4,6 +4,7 @@ import json
 from typing import Any
 from uuid import uuid4
 
+import pytest
 from conftest import BOUNDARIES, CHUNK_1, CHUNK_2, DOC, UNIT_TESTS
 from test_checks import PASSAGES, choice, request
 
@@ -151,7 +152,16 @@ def test_every_reason_the_loop_feeds_back_has_words():
 def test_review_schema_requires_every_property():
     schema = prompts.review_schema()
     item = schema["properties"]["reviews"]["items"]
-    assert item["required"] == ["question", "own_answer", "verdict", "reason", "note"]
+    assert item["required"] == [
+        "question",
+        "own_answer",
+        "evidence_supports_key",
+        "other_option_also_correct",
+        "verdict",
+        "reason",
+        "note",
+        "weak_options",
+    ]
     assert item["additionalProperties"] is False
 
 
@@ -171,3 +181,34 @@ def test_the_reviewer_may_fail_a_draft_for_needing_the_materials():
 def test_the_generator_is_told_to_stand_alone_and_keep_options_alike():
     for phrase in ("never seen the materials", "similar in length", "defining words", "different fact"):
         assert phrase in prompts.GENERATION_INSTRUCTIONS
+
+
+@pytest.mark.parametrize(
+    "instructions", [prompts.GENERATION_INSTRUCTIONS, prompts.PRACTICE_GENERATION_INSTRUCTIONS]
+)
+def test_the_writer_is_given_wrong_option_rules_up_front(instructions: str):
+    rules = instructions.splitlines()
+    wrong = next(i for i, line in enumerate(rules) if line.startswith("- Wrong options"))
+    assert wrong <= 3  # before the rules on evidence and counts
+    for words in (
+        "misconception",
+        "same length, grammar",
+        '"all of the above"',
+        '"none of the above"',
+        "jokes",
+        "off the topic",
+        "restate the key",
+    ):
+        assert words in rules[wrong]
+
+
+def test_a_rejected_draft_carries_the_weak_options_it_was_told():
+    attempt = checks.Rejected(
+        "What does a unit test check?", "multiple_choice", "WEAK_DISTRACTORS", "", ("A banana",)
+    )
+    other = checks.Rejected("Name one.", "short_answer", "WRONG_KEY")
+    messages = prompts.generation_messages("Testing", request(), PASSAGES, [attempt, other])
+    task = json.loads(messages[1]["content"])
+    assert task["previous_attempts"][0]["weak_options"] == ["A banana"]
+    assert "weak_options" not in task["previous_attempts"][1]
+    assert "weak_options" in messages[0]["content"]

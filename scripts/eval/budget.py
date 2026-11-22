@@ -9,7 +9,7 @@ from local_stack import compose, psql_json
 
 DEFAULT_CAP = 0.50  # usd per run
 # what one case of each kind is assumed to cost before any has been measured.
-FLOORS = {"performance": 0.05, "insights": 0.05, "generation": 0.05, "probe": 0.02}
+FLOORS = {"performance": 0.05, "insights": 0.05, "generation": 0.05, "probe": 0.02, "marking": 0.02}
 DEFAULT_LIMIT = 10.0  # ai-core's teacher allowance in docker-compose.yml
 
 
@@ -89,7 +89,10 @@ class Budget:
             )
 
     def after(self, kind: str, correlation_id: str) -> float:
-        cost = ledger_cost(correlation_id)
+        return self.after_cost(kind, ledger_cost(correlation_id))
+
+    def after_cost(self, kind: str, cost: float) -> float:
+        """records a cost measured some other way, such as from the payer's ledger."""
         self.spent += cost
         self.largest[kind] = max(self.largest.get(kind, 0.0), cost)
         return cost

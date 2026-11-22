@@ -1,7 +1,9 @@
 """reserve allowance before paid calls and record provider usage afterward."""
 
 import asyncio
+import dataclasses
 import logging
+import time
 from collections import defaultdict
 from collections.abc import Coroutine, Sequence
 from dataclasses import dataclass
@@ -112,16 +114,16 @@ class Billing:
         messages: Sequence[dict[str, Any]],
         max_tokens: int,
         reservation: budget.Budget | None = None,
+        *,
+        started: float | None = None,
     ) -> None:
-        """record timeout_charge for a call the provider did not answer in time."""
+        """record timeout_charge for a call the provider did not answer in time; `started` (time.monotonic()) times it."""
 
         async def count_then_charge() -> None:
-            await self.charge(
-                billed,
-                correlation,
-                await timeout_charge(operation, model, messages, max_tokens),
-                reservation=reservation,
-            )
+            charge = await timeout_charge(operation, model, messages, max_tokens)
+            if started is not None:
+                charge = timed(charge, "timeout", started)
+            await self.charge(billed, correlation, charge, reservation=reservation)
 
         await self._unless_cancelled(count_then_charge())
         active = reservation or budget.current.get()
@@ -189,7 +191,15 @@ async def timeout_charge(
 ) -> spend.Charge:
     """a call the provider did not answer in time."""
     tokens_in = await asyncio.to_thread(prompt_tokens, messages)
-    return priced(operation, model, tokens_in, max_tokens, estimated=True)
+    return dataclasses.replace(
+        priced(operation, model, tokens_in, max_tokens, estimated=True), outcome="timeout"
+    )
+
+
+def timed(charge: spend.Charge, outcome: spend.Outcome, started: float) -> spend.Charge:
+    """the charge with how the call ended and the milliseconds since `started` (time.monotonic())."""
+    latency = round((time.monotonic() - started) * 1000)
+    return dataclasses.replace(charge, outcome=outcome, latency_ms=latency)
 
 
 @dataclass
@@ -220,7 +230,7 @@ def ingest_charges(record: costs.IngestCost) -> list[spend.Charge]:
 class StreamBill:
     """charges a streamed reply once, however it ends: with openai's counts when the usage chunk arrived, or an estimate from the text when the stream broke or the caller hung up first."""
 
-    def __init__(
+    def __init__(  # noqa: PLR0913 - the call's accounting context and when it started
         self,
         billing: Billing,
         billed: spend.Billed,
@@ -228,9 +238,12 @@ class StreamBill:
         model: str,
         messages: Sequence[dict[str, Any]],
         max_tokens: int,
+        started: float | None = None,
     ) -> None:
         self.billing, self.billed, self.correlation = billing, billed, correlation
         self.model, self.messages, self.max_tokens = model, messages, max_tokens
+        self.started = time.monotonic() if started is None else started
+        self.outcome: spend.Outcome = "ok"  # "failed" once the provider breaks off mid-stream
         self.prompt = "".join(str(m.get("content", "")) for m in self.messages)
         self.text: list[str] = []
         self.done = False
@@ -241,6 +254,7 @@ class StreamBill:
             return
         self.done = True
         charge = reply_charge("stream", self.model, self.prompt, "".join(self.text), usage)
+        charge = timed(charge, self.outcome, self.started)
         await self.billing.charge(self.billed, self.correlation, charge, reservation=self.reservation)
 
     async def timed_out(self) -> None:
@@ -255,4 +269,5 @@ class StreamBill:
             self.messages,
             self.max_tokens,
             self.reservation,
+            started=self.started,
         )

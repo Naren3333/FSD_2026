@@ -79,6 +79,8 @@ export class AssessmentEditorComponent {
   @Output() readonly save = new EventEmitter<boolean>();
   /* stop editing, or clear a new assessment's form. */
   @Output() readonly cancel = new EventEmitter<void>();
+  /* change the resit's students, by its id. */
+  @Output() readonly changeStudents = new EventEmitter<string>();
 
   readonly topics = this.curriculum.topics;
   readonly maxQuestions = MAX_QUESTIONS;

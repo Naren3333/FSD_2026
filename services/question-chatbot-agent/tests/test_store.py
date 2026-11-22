@@ -50,6 +50,11 @@ async def test_threads_belong_to_their_user_and_organization(store: PostgresStor
     assert await store.list_threads("org", user, str(uuid4())) == []
 
 
+CHECKED = {"status": "checked", "prompt_version": "answer_check.v1",
+           "counts": {"supported": 1, "partial": 0, "unsupported": 0},
+           "statements": [{"statement": "Light.", "chunk_ids": [], "verdict": "supported"}]}  # fmt: skip
+
+
 async def test_turns_keep_history_title_and_answers(store: PostgresStore) -> None:
     user = str(uuid4())
     tid = str((await store.create_thread("org", user, "teacher", ROOM))["id"])
@@ -62,6 +67,7 @@ async def test_turns_keep_history_title_and_answers(store: PostgresStore) -> Non
         "sub_queries": ["light reactions", "Calvin cycle"],
         "is_on_topic": True, "retrieved_chunk_ids": [chunk], "citations": [citation],
         "prompt_version": "teacher.v1", "model": "gpt-test", "usage_tokens": 42, "latency_ms": 900,
+        "answer_check": CHECKED,
     }, UNCLAIMED)  # fmt: skip
     history = await store.start_turn(tid, "and then?", 6)
     assert [h["role"] for h in history] == ["user", "assistant"]
@@ -73,10 +79,37 @@ async def test_turns_keep_history_title_and_answers(store: PostgresStore) -> Non
     ]
     assert str(messages[1]["id"]) == answer_id and messages[1]["citations"] == [citation]
     async with store.pool.connection() as conn:
-        cur = await conn.execute("SELECT sub_queries FROM messages WHERE id=%s", (answer_id,))
-        assert await cur.fetchone() == {"sub_queries": ["light reactions", "Calvin cycle"]}
+        cur = await conn.execute("SELECT sub_queries, answer_check FROM messages WHERE id=%s", (answer_id,))
+        assert await cur.fetchone() == {
+            "sub_queries": ["light reactions", "Calvin cycle"],
+            "answer_check": CHECKED,
+        }
     thread = await store.thread("org", user, tid)
     assert thread is not None and thread["title"] == ("What is photosynthesis? " * 10)[:80]
+
+
+async def test_a_support_check_is_saved_on_its_answer_after_it(store: PostgresStore) -> None:
+    tid = str((await store.create_thread("org", str(uuid4()), "student", ROOM))["id"])
+    await store.start_turn(tid, "q", 6)
+    answer_id = await store.save_answer(tid, {"content": "Light.", "outcome": "answered"}, UNCLAIMED)
+    assert answer_id is not None
+    notice = "\n\nThe cited passages may not support: “Light.”."
+    assert await store.save_check(answer_id, CHECKED, notice) is True
+    [_, answer] = await store.messages(tid, 200)
+    assert answer["content"] == "Light." + notice  # what a reload shows
+    async with store.pool.connection() as conn:
+        cur = await conn.execute("SELECT answer_check FROM messages WHERE id=%s", (answer_id,))
+        assert await cur.fetchone() == {"answer_check": CHECKED}
+    # a failed check records its status and leaves the content as saved.
+    failed = {"status": "failed", "prompt_version": "answer_check.v1"}
+    assert await store.save_check(answer_id, failed, None) is True
+    assert (await store.messages(tid, 200))[1]["content"] == "Light." + notice
+    # the user's own message is never changed, and a deleted thread's answer is gone.
+    [question] = [m for m in await store.messages(tid, 200) if m["role"] == "user"]
+    assert await store.save_check(str(question["id"]), CHECKED, notice) is False
+    async with store.pool.connection() as conn:
+        await conn.execute("DELETE FROM threads WHERE id=%s", (tid,))
+    assert await store.save_check(answer_id, CHECKED, notice) is False
 
 
 async def test_an_error_answer_without_retrieval_is_saved(store: PostgresStore) -> None:

@@ -24,7 +24,12 @@ class RequestContract(Contract):
     response_schema: dict[str, Any] | None = None
     schema_name: str | None = Field(default=None, pattern=r"^[A-Za-z0-9_.-]{1,64}$")
     stream: bool = False
-    model_profile: Literal["default"] = "default"
+    # default: the chat model at low reasoning; check: a critic's second opinion (CHECK_MODEL at
+    # CHECK_REASONING_EFFORT); fast: the chat model without reasoning, for short rewrites (adr 0023).
+    model_profile: Literal["default", "check", "fast"] = "default"
+    # the reasoning effort this one call runs at instead of its profile's; the token allowance and the
+    # reservation follow it (adr 0023). a stream takes none only.
+    reasoning_effort: Literal["none", "low", "medium"] | None = None
     # the seconds the caller waits for a non-streamed reply; ai-core gives up first instead of finishing a reply
     # nobody reads.
     timeout: float | None = Field(default=None, ge=1, le=300)
@@ -46,6 +51,10 @@ class RequestContract(Contract):
             raise ValueError("a structured reply cannot be streamed")
         elif self.stream and self.timeout is not None:
             raise ValueError("a streamed reply takes no timeout")
+        elif self.stream and self.model_profile != "default":
+            raise ValueError("a streamed reply uses the default profile")
+        elif self.stream and self.reasoning_effort not in (None, "none"):
+            raise ValueError("a streamed reply takes no reasoning effort but none")
         if self.response_schema is not None and len(json.dumps(self.response_schema)) > MAX_SCHEMA_CHARS:
             raise ValueError(f"response_schema is over {MAX_SCHEMA_CHARS} characters as JSON")
         return self

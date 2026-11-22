@@ -186,7 +186,7 @@ def assess(run: dict, chunks: dict[str, str]) -> None:
                     failures.append(f"draft {n} cites chunk {s.get('chunk_id')} outside the chosen documents")
             if q["type"] == "multiple_choice" and q["answer"] not in q["options"]:
                 failures.append(f"draft {n}: key {q['answer']!r} is not an option")
-            if checks.NEEDS_MATERIALS_PATTERN.search(checks.normalize(q["prompt"])):
+            if checks.needs_materials(checks.normalize(q["prompt"])):
                 failures.append(f"draft {n} leans on the materials: {q['prompt'][:80]!r}")
             for other in drafts[: n - 1]:
                 if checks.similar(q["prompt"], other["question"]["prompt"]):
@@ -293,14 +293,15 @@ def probe_batches() -> tuple[dict, list[dict]]:
     return spec, [{"id": k, **b} for k, b in spec["batches"].items()]
 
 
-def review_batch(spec: dict, batch: dict, billed: dict, sent: str) -> list[dict]:
-    """the deployed reviewer's verdicts on one batch, from inside the agent's container."""
+def review_batch(spec: dict, batch: dict, billed: dict, sent: str, effort: str | None = None) -> list[dict]:
+    """the deployed reviewer's verdicts on one batch, from inside the agent's container, at `effort` instead of the agent's QUESTION_REVIEW_EFFORT when given."""
     job = {
         "topic": spec["topic"],
         "difficulty": spec["difficulty"],
         "batch": batch,
         "billed_to": billed,
         "correlation": sent,
+        "review_effort": effort,
     }
     done = subprocess.run(
         [
@@ -342,6 +343,8 @@ def judge(batch: dict, verdicts: list[dict], attempt: int) -> list[dict]:
                 "note": v["note"],
                 "right": v["reason"] != "NOT_REVIEWED" and (v["passed"] == (d["expect"] == "pass")),
                 "exact": v["reason"] in fair,
+                # the agent's own checks drop it before any review (adr 0026), so a reviewer miss costs nothing.
+                "checked": checks.needs_materials(checks.normalize(d.get("prompt", ""))),
             }
         )
     return rows
@@ -365,6 +368,7 @@ def probe_summary(rows: list[dict]) -> dict:
         "false_reject_rate": round(sum(not r["passed"] for r in good) / len(good), 3) if good else None,
         "by_reason": by_reason,
         "missed": sorted({r["id"] for r in bad if r["passed"]}),
+        "missed_after_checks": sorted({r["id"] for r in bad if r["passed"] and not r.get("checked")}),
         "wrongly_failed": sorted({f"{r['id']} ({r['got']})" for r in good if not r["passed"]}),
     }
 
@@ -386,6 +390,11 @@ def main() -> None:
     part.add_argument("--probe", action="store_true", help="also run the reviewer probe")
     part.add_argument("--probe-only", action="store_true", help="run only the reviewer probe")
     ap.add_argument("--repeat", type=int, default=1, help="reviewer probe passes (default 1)")
+    ap.add_argument(
+        "--review-effort",
+        choices=["none", "low", "medium"],
+        help="the probe's reviewer effort (default: the agent's QUESTION_REVIEW_EFFORT)",
+    )
     args = ap.parse_args()
 
     state = load_state()
@@ -423,6 +432,7 @@ def main() -> None:
             "probe": probe_summary(verdicts) | {"cost_usd": round(probe_cost, 6)} if verdicts else None,
             "runs": done,
             "probe_verdicts": verdicts,
+            "probe_review_effort": args.review_effort,
             **extra,
         }
 
@@ -447,7 +457,7 @@ def main() -> None:
             for batch in batches:
                 budget.before("probe")
                 sent = correlation()
-                got = review_batch(spec, batch, billed, sent)
+                got = review_batch(spec, batch, billed, sent, args.review_effort)
                 cost = budget.after("probe", sent)
                 probe_cost += cost
                 verdicts += judge(batch, got, attempt)

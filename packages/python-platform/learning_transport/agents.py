@@ -3,7 +3,7 @@
 import asyncio
 import os
 import time
-from collections.abc import Awaitable
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from datetime import datetime
 from typing import Any
@@ -62,6 +62,30 @@ OUT_OF_TIME = "OUT_OF_TIME"
 MIN_CALL = 5.0
 # ai-core gives up this long before the agent does, leaving time for its allowance checks and accounting.
 REPLY_MARGIN = 5.0
+# ai-core's model profiles (adr 0023): the writer's default, a critic's second opinion, a short rewrite.
+PROFILES = ("default", "check", "fast")
+# the reasoning efforts a call may ask ai-core for instead of its profile's (adr 0023).
+EFFORTS = ("none", "low", "medium")
+# what a re-ask tells the model when ai-core refused its reply outright (refused, cut off or not the schema).
+REJECTED = "the reply was refused, cut off or did not match the required json schema"
+
+
+class CheckFailedError(UpstreamError):
+    """a reply that the caller's check still found faults in after every re-ask: `errors` from the last check, `output` the last reply. its code is AI_OUTPUT_REJECTED, so handlers of that code treat it as an unusable reply."""
+
+    def __init__(self, errors: list[str], output: str) -> None:
+        super().__init__("ai-core", 502, "AI_OUTPUT_REJECTED")
+        self.errors, self.output = errors, output
+
+
+def reask_messages(
+    messages: list[dict[str, str]], output: str | None, errors: list[str]
+) -> list[dict[str, str]]:
+    """the follow-up turn: the original messages, the faulty reply when there is one, and what was wrong with it."""
+    previous = [{"role": "assistant", "content": output}] if output else []
+    faults = "; ".join(errors)
+    ask = f"your previous reply failed these checks: {faults}. return a corrected reply."
+    return [*messages, *previous, {"role": "user", "content": ask}]
 
 
 def ai_core_refusal(e: UpstreamError) -> HTTPException | None:
@@ -156,7 +180,7 @@ class AgentClients:
 
     # ---- ai-core, as the agent
 
-    async def generate(  # noqa: PLR0913 - one call's schema, payer and optional cut-off
+    async def generate(  # noqa: PLR0913 - one call's schema, payer, cut-off, profile, effort and checks
         self,
         messages: list[dict[str, str]],
         max_tokens: int,
@@ -165,8 +189,57 @@ class AgentClients:
         correlation: str,
         payer: dict[str, str],
         deadline: float | None = None,
+        *,
+        profile: str = "default",
+        reasoning_effort: str | None = None,
+        check: Callable[[str], list[str]] | None = None,
+        reask: int = 0,
     ) -> str:
-        """one structured reply: the model's output as text, matching `schema`, billed to `payer` (billed_to()). with a `deadline` (time.monotonic()) the call is cut off then, and one it stopped or kept from starting raises OUT_OF_TIME."""
+        """one structured reply: the model's output as text, matching `schema`, billed to `payer` (billed_to()), on ai-core's model `profile`, at `reasoning_effort` instead of the profile's when given (re-asks too). with a `deadline` (time.monotonic()) the call is cut off then, and one it stopped or kept from starting raises OUT_OF_TIME.
+
+        `check` returns the faults it finds in an output (none: usable). with `reask`, a reply ai-core rejected (AI_OUTPUT_REJECTED) or that fails `check` is asked again, up to `reask` times, with the faults appended (reask_messages), billed to the same payer and within the same deadline. still faulty: AI_OUTPUT_REJECTED from ai-core as before, or CheckFailedError with the last faults and output. a re-ask with too little time left is not started: the last failure is raised instead."""
+        if profile not in PROFILES:
+            raise ValueError(f"unknown model profile {profile!r}")
+        if reasoning_effort is not None and reasoning_effort not in EFFORTS:
+            raise ValueError(f"unknown reasoning effort {reasoning_effort!r}")
+        asked = messages
+        for left in range(reask, -1, -1):
+            try:
+                output = await self._generate_once(
+                    asked, max_tokens, schema, name, correlation, payer, deadline, profile,
+                    reasoning_effort=reasoning_effort,
+                )  # fmt: skip
+            except UpstreamError as e:
+                if e.code != "AI_OUTPUT_REJECTED" or not left or not self._time_left(deadline):
+                    raise
+                asked = reask_messages(messages, None, [REJECTED])
+                continue
+            errors = check(output) if check is not None else []
+            if not errors:
+                return output
+            if not left or not self._time_left(deadline):
+                raise CheckFailedError(errors, output)
+            asked = reask_messages(messages, output, errors)
+        raise AssertionError("unreachable")  # the last pass always returns or raises
+
+    @staticmethod
+    def _time_left(deadline: float | None) -> bool:
+        """whether another call may start before `deadline`."""
+        return deadline is None or deadline - time.monotonic() >= MIN_CALL
+
+    async def _generate_once(  # noqa: PLR0913 - generate's own arguments
+        self,
+        messages: list[dict[str, str]],
+        max_tokens: int,
+        schema: dict[str, Any],
+        name: str,
+        correlation: str,
+        payer: dict[str, str],
+        deadline: float | None,
+        profile: str,
+        *,
+        reasoning_effort: str | None = None,
+    ) -> str:
         limit = self.generate_timeout
         if deadline is not None:
             left = deadline - time.monotonic()
@@ -179,6 +252,8 @@ class AgentClients:
             "max_tokens": max_tokens,
             "response_schema": schema,
             "schema_name": name,
+            "model_profile": profile,
+            **({"reasoning_effort": reasoning_effort} if reasoning_effort is not None else {}),
             "billed_to": payer,
             # ai-core stops first, so a reply is never finished and billed after the agent has stopped waiting.
             "timeout": max(limit - REPLY_MARGIN, 1.0),

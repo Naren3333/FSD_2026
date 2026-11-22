@@ -6,9 +6,9 @@ from typing import Any
 
 import httpx
 import pytest
-from conftest import CHUNK_1, DOC, ROOM, SETTINGS, TOPIC, Fakes, as_user
+from conftest import CHUNK_1, DOC, ROOM, SETTINGS, TOPIC, Fakes, as_user, reply
 from test_checks import choice, short
-from test_review_loop import STEMS, WEAK, gen, rev, task
+from test_review_loop import KEY_HOLDS, STEMS, UNREADABLE, WEAK, gen, rev, task
 
 import main
 import prompts
@@ -215,6 +215,27 @@ def test_flagged_and_unreviewed_drafts_never_reach_the_student(api, fakes: Fakes
     assert data["returned"] == 1 and data["dropped"] == {"WEAK_DISTRACTORS": 1, "NOT_REVIEWED": 1}
 
 
+def test_a_weak_draft_with_a_verified_key_is_still_rewritten_for_a_student(api, fakes: Fakes):
+    """unlike a teacher's request, practice spends a round to replace it, told which options were weak (adr 0022)."""
+    named = {"weak_options": ["The whole system end to end"]}
+    fakes.replies = [
+        gen(choice(prompt=STEMS[0])),
+        rev((*WEAK, named)),
+        gen(choice(prompt=STEMS[1])),
+        rev("pass"),
+    ]
+    resp = practise(api, counts={"multiple_choice": 1})
+    assert resp.status_code == 200, resp.text
+    data = resp.json()
+    assert [q["prompt"] for q in data["questions"]] == [STEMS[1]]
+    assert data["dropped"] == {"WEAK_DISTRACTORS": 1} and data["model_calls"] == 4
+    _, _, rewrite, _ = calls(
+        fakes, "practice.generated", "practice.reviewed", "practice.generated", "practice.reviewed"
+    )
+    (attempt,) = task(rewrite)["previous_attempts"]
+    assert attempt["prompt"] == STEMS[0] and attempt["weak_options"] == named["weak_options"]
+
+
 def test_an_unreviewed_draft_does_not_fill_its_place(api, fakes: Fakes):
     """a retry is paid to replace a draft the reviewer did not judge, which a teacher's request would keep; the unjudged draft is not held against its rewrite."""
     fakes.replies = [gen(choice(prompt=STEMS[0])), rev(), gen(choice(prompt=STEMS[1])), rev("pass")]
@@ -310,3 +331,31 @@ def test_every_practice_change_rewrites_a_teacher_rule():
     # past the opening line, which says no teacher checks them, nothing is written for a teacher.
     for practice in (prompts.PRACTICE_GENERATION_INSTRUCTIONS, prompts.PRACTICE_REVIEW_INSTRUCTIONS):
         assert "teacher" not in practice.split("\n", 1)[1]
+
+
+# ---- independent review and re-asks (adr 0026)
+
+
+def test_practice_is_reviewed_on_the_check_profile(api, fakes: Fakes):
+    fakes.replies = [gen(choice(), short()), rev("pass", "pass")]
+    assert practise(api).status_code == 200
+    write, check = calls(fakes, "practice.generated", "practice.reviewed")
+    assert write["model_profile"] == "default" and check["model_profile"] == "check"
+
+
+def test_a_practice_key_the_passages_do_not_support_never_reaches_the_student(api, fakes: Fakes):
+    configure(review_retries=0)
+    unsupported = {"question": 1, **KEY_HOLDS, "evidence_supports_key": False}
+    fakes.replies = [
+        gen(choice()),
+        reply({"reviews": [{**unsupported, "verdict": "pass", "reason": "NONE", "note": ""}]}),
+    ]
+    resp = practise(api, counts={"multiple_choice": 1})
+    assert resp.status_code == 422 and resp.json()["error"]["code"] == "GENERATION_REJECTED"
+
+
+def test_an_unreadable_practice_write_is_asked_again_on_the_students_allowance(api, fakes: Fakes):
+    fakes.replies = [UNREADABLE, gen(choice()), rev("pass")]
+    resp = practise(api, counts={"multiple_choice": 1})
+    assert resp.status_code == 200 and resp.json()["model_calls"] == 3
+    calls(fakes, "practice.generated", "practice.generated", "practice.reviewed")

@@ -1,4 +1,5 @@
 import { Component, Input, OnChanges, computed, inject } from '@angular/core';
+import { RouterLink } from '@angular/router';
 import { PerformanceAgentApi } from '../../api/clients';
 import type { Interpretation, InterpretationEvidence, InterpretationStep } from '../../api/models';
 import { AiUsage } from '../../core/ai-usage';
@@ -46,11 +47,26 @@ export function droppedText(dropped: Record<string, number>, whose = "this stude
   return `${total} ${total === 1 ? 'statement was' : 'statements were'} left out because they did not rest on ${whose} results.`;
 }
 
+/* each assessment the statements cite, once, in the order first cited. */
+export function citedAssessments(
+  draft: Pick<Interpretation, 'observations' | 'possible_misconceptions' | 'evidence'>,
+): { id: string; title: string }[] {
+  const byQuestion = new Map(draft.evidence.map((e) => [e.question_id, e] as const));
+  const found = new Map<string, string>();
+  for (const item of [...draft.observations, ...draft.possible_misconceptions]) {
+    for (const id of item.evidence_ids) {
+      const e = byQuestion.get(id);
+      if (e && !found.has(e.assessment_id)) found.set(e.assessment_id, e.assessment_title);
+    }
+  }
+  return [...found].map(([id, title]) => ({ id, title }));
+}
+
 /* asks the performance agent to interpret one student's finalized results, for their teacher to review (adr 0014). */
 @Component({
   selector: 'app-interpretation',
   standalone: true,
-  imports: [SectionStateComponent, IconComponent],
+  imports: [RouterLink, SectionStateComponent, IconComponent],
   templateUrl: './interpretation.html',
 })
 export class InterpretationComponent implements OnChanges {
@@ -63,6 +79,11 @@ export class InterpretationComponent implements OnChanges {
   readonly evidence = computed(
     () => new Map((this.result.value()?.evidence ?? []).map((e) => [e.question_id, e] as const)),
   );
+  /* the assessments a resit could be made of for this student. */
+  readonly resits = computed(() => {
+    const draft = this.result.value();
+    return draft ? citedAssessments(draft) : [];
+  });
   readonly dropped = computed(() => droppedText(this.result.value()?.dropped ?? {}));
   readonly stepText = stepText;
   readonly evidenceText = evidenceText;

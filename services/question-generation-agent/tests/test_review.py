@@ -6,12 +6,15 @@ from typing import Any
 import pytest
 
 import checks
+import prompts
 import review
 from review import Verdict
 
+KEY_HOLDS = {"own_answer": "x", "evidence_supports_key": True, "other_option_also_correct": False}
+
 
 def one(number: Any = 1, verdict: Any = "pass", reason: Any = "NONE", note: Any = "", **more: Any) -> dict:
-    return {"question": number, "own_answer": "x", "verdict": verdict, "reason": reason, "note": note, **more}
+    return {"question": number, **KEY_HOLDS, "verdict": verdict, "reason": reason, "note": note, **more}
 
 
 def read(*reviews: dict, count: int) -> list[Verdict]:
@@ -63,3 +66,56 @@ def test_non_object_reviews_are_skipped():
 def test_needs_materials_is_read_as_a_failure_with_that_reason():
     got = read(one(1, "fail", "NEEDS_MATERIALS", "Refers to the slides."), count=1)
     assert got == [Verdict(False, "NEEDS_MATERIALS", "Refers to the slides.")]
+
+
+# ---- the reviewer's key checks (adr 0026)
+
+
+def test_a_pass_whose_passages_do_not_support_the_key_fails_as_not_answerable():
+    (got,) = read(one(1, evidence_supports_key=False), count=1)
+    assert got == Verdict(False, "NOT_ANSWERABLE", review.KEY_UNSUPPORTED_NOTE, prompts.KEY_UNSUPPORTED)
+
+
+def test_a_pass_with_a_second_right_option_fails_as_ambiguous():
+    # the probe's transaction-guarantee draft: isolation is also guaranteed, so two options are right.
+    (got,) = read(one(1, other_option_also_correct=True), count=1)
+    assert got == Verdict(False, "AMBIGUOUS", review.SECOND_RIGHT_NOTE, prompts.SECOND_RIGHT_OPTION)
+
+
+def test_the_option_check_applies_only_to_multiple_choice():
+    output = json.dumps(
+        {"reviews": [one(1, other_option_also_correct=True), one(2, other_option_also_correct=True)]}
+    )
+    assert review.verdicts(output, 2, [False, True]) == [
+        Verdict(True, "NONE", ""),
+        Verdict(False, "AMBIGUOUS", review.SECOND_RIGHT_NOTE, prompts.SECOND_RIGHT_OPTION),
+    ]
+
+
+@pytest.mark.parametrize("change", [{"evidence_supports_key": None}, {"other_option_also_correct": "no"}])
+def test_a_key_check_left_out_or_not_a_boolean_fails_closed(change: dict[str, Any]):
+    item = one(1)
+    item.update(change)
+    assert not read(item, count=1)[0].passed
+
+
+def test_a_fail_keeps_the_reviewers_reason_with_the_key_checks_problem():
+    (got,) = read(one(1, "fail", "WRONG_KEY", "Rollback undoes.", evidence_supports_key=False), count=1)
+    assert got == Verdict(False, "WRONG_KEY", "Rollback undoes.", prompts.KEY_UNSUPPORTED)
+
+
+def test_guidance_verdicts_need_only_the_evidence_check():
+    passed = {
+        "own_answer": "x",
+        "evidence_supports_key": True,
+        "verdict": "pass",
+        "reason": "NONE",
+        "note": "",
+    }
+    assert review.guidance_verdict(json.dumps(passed)) == Verdict(True, "NONE", "")
+    unsupported = {**passed, "evidence_supports_key": False}
+    assert review.guidance_verdict(json.dumps(unsupported)).reason == "NOT_ANSWERABLE"
+    wrong = {**passed, "verdict": "fail", "reason": "WEAK_DISTRACTORS"}  # not a guidance reason
+    assert review.guidance_verdict(json.dumps(wrong)).reason == "NOT_REVIEWED"
+    with pytest.raises(checks.UnreadableOutputError):
+        review.guidance_verdict("nope")

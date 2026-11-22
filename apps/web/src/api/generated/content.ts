@@ -81,6 +81,7 @@ export interface components {
     SearchResponse: {
       results: components['schemas']['SearchHit'][];
       rerank_fallback: boolean;
+      embedding_fallback: boolean;
     };
   };
   responses: never;

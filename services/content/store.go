@@ -171,8 +171,11 @@ func (p pgStore) vectorLeg(ctx context.Context, f filter, vector []float32, mode
 	return scanHits(rows)
 }
 
+// keywordleg matches any of the query's words, stop words dropped: plainto_tsquery joins its quoted lexemes
+// with &, which become | so a long question still finds passages that share only some of its words.
+// ts_rank_cd ranks the passages with more of them, closer together, first.
 func (p pgStore) keywordLeg(ctx context.Context, f filter, query string) ([]hit, error) {
-	rows, err := p.db.Query(ctx, fmt.Sprintf("WITH r AS MATERIALIZED (SELECT %s, ts_rank_cd(tsv, q) AS rank FROM document_chunks, websearch_to_tsquery('english', $5) AS q WHERE tsv @@ q AND %s ORDER BY rank DESC, id LIMIT %d) SELECT %s FROM r JOIN documents d ON d.id=r.document_id ORDER BY r.rank DESC, r.id", legColumns, filterSQL, legLimit, resultColumns), f.args(query)...)
+	rows, err := p.db.Query(ctx, fmt.Sprintf("WITH r AS MATERIALIZED (SELECT %s, ts_rank_cd(tsv, k.q) AS rank FROM document_chunks, (SELECT replace(plainto_tsquery('english', $5)::text, ' & ', ' | ')::tsquery AS q) AS k WHERE tsv @@ k.q AND %s ORDER BY rank DESC, id LIMIT %d) SELECT %s FROM r JOIN documents d ON d.id=r.document_id ORDER BY r.rank DESC, r.id", legColumns, filterSQL, legLimit, resultColumns), f.args(query)...)
 	if err != nil {
 		return nil, err
 	}

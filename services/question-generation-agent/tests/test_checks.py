@@ -391,3 +391,51 @@ def test_a_key_much_longer_than_the_other_options_is_noticed():
     )
     assert not checks.long_key(_mc(long, "An end to end test"))
     assert not checks.long_key(_mc("A unit test", "A load test", "A smoke test"))
+
+
+# ---- pointing at what only the materials show (adr 0026)
+
+# the reviewer probe's planted draft (scripts/eval/review_probe.yaml, groups-shown) that the reviewer passed.
+GROUPS_SHOWN = "Using the three groups shown, which group does 404 belong to?"
+
+
+@pytest.mark.parametrize(
+    "prompt",
+    [
+        GROUPS_SHOWN,
+        "What do the steps listed above have in common?",
+        "In the code shown below, what is printed?",
+        "Which stage comes first of the four stages pictured?",
+        "What is the cost of the structure described below?",
+    ],
+)
+def test_a_prompt_pointing_at_what_the_materials_show_is_dropped(prompt: str):
+    kept, dropped, rejected, _ = checks.questions(
+        json.dumps({"questions": [choice(prompt=prompt)]}), request(), PASSAGES
+    )
+    assert kept == [] and dropped == {"NEEDS_MATERIALS": 1}
+    assert rejected == [checks.Rejected(prompt, "multiple_choice", "NEEDS_MATERIALS")]
+
+
+@pytest.mark.parametrize(
+    "prompt",
+    [
+        "Which of the companies listed on the exchange is the largest?",
+        "Why are the values below the minimum rejected?",
+        "Which of the options listed is a prime number?",
+        "How many of the answers shown above are right?",
+        "Which drug was shown to lower blood pressure?",
+        "Which of the following is true of a unit test?",
+        # the probe's two-right-options draft is a reviewer fault, not a wording one: the check leaves it.
+        "What does running changes in a transaction guarantee?",
+    ],
+)
+def test_ordinary_uses_of_shown_listed_and_below_pass(prompt: str):
+    assert not checks.needs_materials(checks.normalize(prompt))
+
+
+def test_a_reply_without_its_list_is_a_fault_to_ask_again():
+    assert checks.reply_faults('{"questions": []}', "questions") == []
+    assert checks.reply_faults("{not json", "questions") == [checks.UNREADABLE]
+    assert checks.reply_faults("[]", "questions") == [checks.UNREADABLE]
+    assert checks.reply_faults('{"questions": "x"}', "questions") == ["the reply had no questions list"]

@@ -491,3 +491,22 @@ async def test_a_dst_change_day_resets_at_the_next_local_midnight(
     assert usage.spent_usd == 0.5
     assert usage.resets_at == datetime.fromisoformat(resets_at)
     assert usage.resets_at.astimezone(LONDON).hour == 0 and usage.resets_at.tzinfo == LONDON
+
+
+async def test_a_recorded_call_keeps_its_outcome_and_latency(pinned: Pinned) -> None:
+    """migration 007 adds both columns; a charge without them, as ingest writes, leaves them null."""
+    user = str(uuid4())
+    timed = spend.Charge("generate", "gpt-check", 10, 5, 0.001, outcome="rejected", latency_ms=1234)
+    await pinned.ledger.record(billed(user), timed, "timed")
+    await pinned.ledger.record(billed(user), spend.Charge("ingest", "m", 1, 0, 0.001), "untimed")
+    async with pinned.ledger.pool.connection() as conn:
+        cur = await conn.execute(
+            "SELECT correlation_id,model,outcome,latency_ms FROM usage WHERE user_id=%s ORDER BY id", (user,)
+        )
+        rows = await cur.fetchall()
+    assert [tuple(r.values()) for r in rows] == [
+        ("timed", "gpt-check", "rejected", 1234),
+        ("untimed", "m", None, None),
+    ]
+    with pytest.raises(psycopg.errors.CheckViolation):
+        await pinned.ledger.record(billed(user), spend.Charge("embed", "m", 1, 0, 0.0, outcome="lost"), "x")  # type: ignore[arg-type]

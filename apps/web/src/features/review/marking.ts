@@ -199,6 +199,7 @@ const NOT_REVIEWED: Record<string, string> = {
   CONTRADICTED: 'the second marking contradicted itself.',
   AI_PROVIDER_FAILED: 'the AI provider failed.',
   MARKED_BY_TEACHER: 'you marked this question differently first.',
+  EXACT_MATCH: 'the answer matches an accepted answer exactly.',
   STUDENT_REMOVED: 'the student was removed from the classroom.',
   MARKING_INTERRUPTED: 'the second check was interrupted.',
   AI_TIMEOUT: 'the second marking took too long.',

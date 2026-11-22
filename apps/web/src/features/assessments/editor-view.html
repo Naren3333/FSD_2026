@@ -53,6 +53,15 @@
       <span class="badge">Resit</span>
       Assigned to {{ assignedCount() }} {{ assignedCount() === 1 ? 'student' : 'students' }}: only they can
       see it.
+      <button
+        type="button"
+        class="quiet"
+        id="resit-change-students"
+        [disabled]="state.busy()"
+        (click)="changeStudents.emit(editing?.id ?? '')"
+      >
+        Change students
+      </button>
     </p>
   }
 

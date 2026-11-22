@@ -18,6 +18,7 @@ from learning_transport.agents import AI_CORE_CODES
 from starlette.types import Receive, Scope, Send
 
 import prompts
+import support
 from citations import CitationRewriter
 from clients import Done, Services
 from config import Settings
@@ -49,6 +50,9 @@ PASSAGE_OVERHEAD = 200  # characters each passage adds to the prompt besides its
 MAX_SUB_QUERIES = 3
 MERGED_TOP_K = 12  # passages a split message is answered from (one search gives SEARCH_TOP_K)
 PER_DOCUMENT = 5  # of those, at most this many from one document
+# the support check (adr 0025), run after `done`: its visible reply budget and how long it may take.
+CHECK_MAX_TOKENS = 1500
+CHECK_SECONDS = 20.0
 
 
 class SSEResponse(StreamingResponse):
@@ -137,6 +141,10 @@ class Turn:
         self.small_talk = False
         self.searched = False
         self.top_score: float | None = None
+        self.answer_check: dict[str, Any] | None = None  # the support check's record (adr 0025)
+        # the cited statements the support check runs on after `done`; empty when no check runs.
+        self.to_check: list[tuple[str, list[str]]] = []
+        self.latency_ms: int | None = None  # when the answer was saved
         self.begun = False  # whether events() has started; finish() saves the turn when it never did
 
     def finish(self) -> None:
@@ -172,8 +180,15 @@ class Turn:
         if error is None:
             saved = await self._saved(self.outcome)
             if isinstance(saved, str):
+                # started before `done` is sent and detached, so a client that leaves from here on still
+                # gets the check saved; the lifespan waits for it.
+                check = detached(self.pending, self._verify(saved)) if self.to_check else None
                 yield sse_event("citations", {"citations": self._citations()})
-                yield sse_event("done", {"message_id": saved, "outcome": self.outcome})
+                yield sse_event(
+                    "done", {"message_id": saved, "outcome": self.outcome, "checking": bool(check)}
+                )
+                if check is not None and (notice := await asyncio.shield(check)):
+                    yield sse_event("notice", {"message_id": saved, "text": notice})
                 return
             error = saved
         elif await self._saved("error") == THREAD_GONE:
@@ -212,10 +227,15 @@ class Turn:
             async for out in pieces:
                 self.parts.append(out)
                 yield sse_event("token", {"text": out})
+        answer = "".join(self.parts)
+        self._took("answer_ms", step)
         if notice := self._coverage_notice():
             self.parts.append(notice)
             yield sse_event("token", {"text": notice})
-        self._took("answer_ms", step)
+        # an uncited answer is noted at once; a cited one is checked after `done` (_verify).
+        if notice := self._uncited_notice(answer):
+            self.parts.append(notice)
+            yield sse_event("token", {"text": notice})
 
     def _prompt(self, role: str) -> tuple[list[dict[str, str]], dict[str, str]] | None:
         """the answer call's messages and citation tags, or none when the materials cannot answer it."""
@@ -267,6 +287,95 @@ class Turn:
         # rewrite output is untrusted.
         labels = [re.sub(r"[\[\]<>`*_]", "", " ".join(t.split()))[:200] for t in missing]
         return "\n\nCitation coverage is incomplete for: " + "; ".join(labels) + "."
+
+    def _uncited_notice(self, answer: str) -> str | None:
+        """notes an uncited answer that states something, with no model call; for a cited one, sets up the support check."""
+        if self.small_talk or self.rewriter is None:
+            return None
+        if self.rewriter.cited:
+            self.to_check = self._checkable(answer)
+            return None
+        if not support.factual(answer):
+            return None
+        self.answer_check = {"status": "uncited"}
+        log.warning("chat_answer_uncited", extra={"thread_id": str(self.thread["id"])})
+        return support.UNCITED_NOTICE
+
+    def _checkable(self, answer: str) -> list[tuple[str, list[str]]]:
+        """the answer's cited statements, each with the cited chunks that were in the prompt."""
+        assert self.rewriter is not None
+        given = {str(r["chunk_id"]) for r in self.results}
+        known = [
+            (text, [c for c in refs if c in self.rewriter.tag_map.values() and c in given])
+            for text, refs in support.statements(answer)
+        ]
+        return [(text, refs) for text, refs in known if refs]
+
+    async def _verify(self, message_id: str) -> str | None:
+        """after `done`: checks the saved answer's cited statements, saves the record and any notice on it, and returns the notice. a failed check saves its status and shows nothing."""
+        step = time.perf_counter()
+        thread_id = str(self.thread["id"])
+        try:
+            self.answer_check = await self._check(self.to_check)
+            self._took("check_ms", step)
+            unsupported = [
+                r["statement"]
+                for r in self.answer_check.get("statements", [])
+                if r["verdict"] == "unsupported"
+            ]
+            notice = support.unsupported_notice(unsupported) if unsupported else None
+            if unsupported:
+                log.warning(
+                    "chat_answer_unsupported", extra={"thread_id": thread_id, "statements": len(unsupported)}
+                )
+            if not await self.store.save_check(message_id, self.answer_check, notice):
+                # the thread was deleted meanwhile (THREAD_GONE): nothing more is saved or shown.
+                log.info("chat_thread_gone", extra={"thread_id": thread_id, "outcome": self.outcome})
+                return None
+        except Exception:
+            log.exception("answer_check_save_failed", extra={"thread_id": thread_id})
+            return None
+        finally:
+            self._log_turn(self.outcome)
+        if notice:
+            self.parts.append(notice)
+        return notice
+
+    async def _check(self, checked: list[tuple[str, list[str]]]) -> dict[str, Any]:
+        """the support check's record (answer_check.v1) for the answer's cited statements."""
+        assert self.rewriter is not None
+        tag_of = {cid: tag for tag, cid in self.rewriter.tag_map.items()}
+        content = {str(r["chunk_id"]): str(r.get("content") or "") for r in self.results}
+        ids = [str(n) for n in range(1, len(checked) + 1)]
+        cited = dict.fromkeys(c for _, refs in checked for c in refs)
+        messages = prompts.answer_check_messages(
+            {tag_of[c]: content[c] for c in cited},
+            [(i, text, [tag_of[c] for c in refs]) for i, (text, refs) in zip(ids, checked, strict=True)],
+        )
+        try:
+            output = await self.services.generate(
+                messages,
+                CHECK_MAX_TOKENS,
+                prompts.ANSWER_CHECK_SCHEMA,
+                prompts.ANSWER_CHECK,
+                self.correlation,
+                self.billed_to,  # the same user's allowance as the answer (adr 0003)
+                time.monotonic() + CHECK_SECONDS,
+                profile="check",  # an independent second opinion (adr 0023)
+                check=lambda out: support.faults(out, ids),
+                reask=1,
+            )
+            found = support.verdicts(output)
+        except Exception as e:  # never fails the turn: the answer stands without a notice
+            log.warning(
+                "answer_check_failed",
+                extra={
+                    "thread_id": str(self.thread["id"]),
+                    "error": getattr(e, "code", None) or type(e).__name__,
+                },
+            )
+            return {"status": "failed", "prompt_version": prompts.ANSWER_CHECK}
+        return support.record(checked, found, prompts.ANSWER_CHECK)
 
     def _took(self, name: str, since: float) -> float:
         """records the ms since `since` as `name` and returns now, the next step's start."""
@@ -374,7 +483,7 @@ class Turn:
         return self.results
 
     async def _rewrite(self) -> None:
-        """a standalone search query, the two flags and the topics (query_rewrite.v2)."""
+        """a standalone search query, the two flags and the topics (query_rewrite.v4)."""
         if self.settings.adaptive_rewrite and not needs_rewrite(self.content, self.history):
             self.rewritten_query = self.content
             self.is_on_topic = True  # retrieval, never this heuristic, decides whether there is evidence.
@@ -387,6 +496,7 @@ class Turn:
                 prompts.QUERY_REWRITE,
                 self.correlation,
                 self.billed_to,
+                profile="fast",  # a short rewrite: no reasoning (adr 0023)
             )
             out = json.loads(output)
             query, on_topic, small_talk = (
@@ -428,6 +538,13 @@ class Turn:
         if message_id is None:
             log.info("chat_thread_gone", extra={"thread_id": str(self.thread["id"]), "outcome": outcome})
             return None
+        self.latency_ms = answer["latency_ms"]
+        if not self.to_check or outcome != self.outcome:
+            self._log_turn(outcome)  # else once the support check ends, with its record and check_ms
+        return message_id
+
+    def _log_turn(self, outcome: str) -> None:
+        """the chat_turn log line: what the turn did and where its time went."""
         log.info(
             "chat_turn",
             extra={
@@ -438,12 +555,13 @@ class Turn:
                 "retrieved": len(self.results),
                 "top_score": self.top_score,
                 "cited": len(self.rewriter.cited if self.rewriter else []),
+                "answer_check": self.answer_check and self.answer_check["status"],
+                "unsupported": (self.answer_check or {}).get("counts", {}).get("unsupported"),
                 "usage_tokens": self.usage_tokens,
-                "latency_ms": answer["latency_ms"],
+                "latency_ms": self.latency_ms,
                 **self.timings,
             },
         )
-        return message_id
 
     async def _store(self, outcome: str) -> tuple[dict[str, Any], str | None]:
         """the answer as saved, and its id; none when the thread is gone."""
@@ -462,6 +580,7 @@ class Turn:
             "model": self.model,
             "usage_tokens": self.usage_tokens,
             "latency_ms": round((time.perf_counter() - self.started) * 1000),
+            "answer_check": self.answer_check,
         }
         return answer, await self.store.save_answer(str(self.thread["id"]), answer, self.claim)
 
@@ -560,7 +679,9 @@ def _log_failure(task: asyncio.Task[Any]) -> None:
 
 
 def needs_rewrite(content: str, history: list[dict[str, str]]) -> bool:
-    # skip only explicit, short, single-subject definitions on a first turn.
+    # skip only explicit, short, single-subject definitions on a first turn. a question that describes a
+    # situation ("what is the problem when ...") may need its concept named (query_rewrite.v4), so it is
+    # rewritten.
     if history or not re.match(r"^(what (?:is|are)|define|explain)\s+", content.strip(), re.I):
         return True
     words = re.findall(r"[a-z0-9]+", content.lower())
@@ -583,5 +704,11 @@ def needs_rewrite(content: str, history: list[dict[str, str]]) -> bool:
         "instructions",
         "system",
         "prompt",
+        "when",
+        "why",
+        "how",
+        "if",
+        "happens",
+        "wrong",
     }
     return len(words) > 16 or bool(ambiguous.intersection(words)) or content.count("?") > 1

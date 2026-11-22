@@ -69,6 +69,8 @@ export class ChatComponent {
   readonly active = signal<Thread | null>(null);
   readonly messages = new Section<ChatMessage[]>();
   readonly streaming = signal(false);
+  /* answers whose sources are still being checked after they finished (adr 0025), by local and saved id. */
+  readonly checking = signal<string[]>([]);
   readonly announcement = signal('');
   readonly tried = signal(false);
   /* why an answer failed, by message id, shown under that answer instead of the generic note. */
@@ -175,6 +177,7 @@ export class ChatComponent {
     this.figures.set({});
     this.figureErrors.set({});
     this.failures.set({});
+    this.checking.set([]);
   }
   loadThreads(): void {
     const id = this.classroomId();
@@ -255,28 +258,43 @@ export class ChatComponent {
       this.announcement.set('Answering…');
       this.controller = new AbortController();
       let started = false,
-        failure = '';
-      const update = (change: Partial<ChatMessage>) =>
-        this.messages.set(
-          (this.messages.value() ?? []).map((m) => (m.id === answer.id ? { ...m, ...change } : m)),
-        );
-      try {
-        await this.chat.ask(thread.id, question, this.controller.signal, (event: StreamEvent) => {
-          started = true;
-          const current = this.messages.value()?.find((m) => m.id === answer.id);
-          if (event.event === 'token')
-            update({ content: (current?.content || '') + String(event.data['text'] ?? '') });
-          else if (event.event === 'citations')
-            update({ citations: (event.data['citations'] as Citation[]) || [] });
-          else if (event.event === 'done')
-            update({ outcome: event.data['outcome'] as ChatMessage['outcome'] });
-          else if (event.event === 'error') {
-            update({ outcome: 'error' });
-            failure = String(event.data['message'] || 'The assistant could not answer. Retry later.');
-            if (event.data['code'] === 'AI_SPEND_LIMIT' && typeof event.data['resets_at'] === 'string')
-              failure += ` It resets at ${resetTime(event.data['resets_at'])}.`;
+        failure = '',
+        savedId = '',
+        noticed = false;
+      // the answer, under its local id until the saved conversation replaces it, then under its saved id.
+      const mine = (m: ChatMessage) => m.id === answer.id || (!!savedId && m.id === savedId);
+      const update = (change: (m: ChatMessage) => Partial<ChatMessage>) =>
+        this.messages.set((this.messages.value() ?? []).map((m) => (mine(m) ? { ...m, ...change(m) } : m)));
+      // the turn ends at `done`; when a source check follows, the stream stays open for its notice.
+      let answered: () => void = () => undefined;
+      const finished = new Promise<void>((resolve) => (answered = resolve));
+      const stream = this.chat.ask(thread.id, question, this.controller.signal, (event: StreamEvent) => {
+        started = true;
+        if (event.event === 'token')
+          update((m) => ({ content: (m.content || '') + String(event.data['text'] ?? '') }));
+        else if (event.event === 'citations')
+          update(() => ({ citations: (event.data['citations'] as Citation[]) || [] }));
+        else if (event.event === 'done') {
+          update(() => ({ outcome: event.data['outcome'] as ChatMessage['outcome'] }));
+          if (event.data['checking'] === true && typeof event.data['message_id'] === 'string') {
+            savedId = event.data['message_id'];
+            this.checking.update((ids) => [...ids, answer.id, savedId]);
+            answered();
           }
-        });
+        } else if (event.event === 'notice') {
+          noticed = true;
+          const text = String(event.data['text'] ?? '');
+          // a saved copy re-read meanwhile may hold it already.
+          update((m) => (m.content.endsWith(text) ? {} : { content: (m.content || '') + text }));
+        } else if (event.event === 'error') {
+          update(() => ({ outcome: 'error' }));
+          failure = String(event.data['message'] || 'The assistant could not answer. Retry later.');
+          if (event.data['code'] === 'AI_SPEND_LIMIT' && typeof event.data['resets_at'] === 'string')
+            failure += ` It resets at ${resetTime(event.data['resets_at'])}.`;
+        }
+      });
+      try {
+        await Promise.race([stream, finished]);
       } catch (error) {
         if (!started) {
           this.messages.set(
@@ -287,7 +305,7 @@ export class ChatComponent {
           throw error;
         }
         if (!this.controller?.signal.aborted) failure = messageOf(error, 'The answer stopped. Retry later.');
-        update({ outcome: this.controller?.signal.aborted ? 'interrupted' : 'error' });
+        update(() => ({ outcome: this.controller?.signal.aborted ? 'interrupted' : 'error' }));
       } finally {
         this.streaming.set(false);
         this.streamingId = '';
@@ -299,7 +317,9 @@ export class ChatComponent {
       const done = this.messages.value()?.find((m) => m.id === answer.id);
       this.announcement.set(
         done?.outcome === 'answered'
-          ? 'Answer complete.'
+          ? savedId
+            ? 'Answer complete. Checking the sources…'
+            : 'Answer complete.'
           : done?.outcome === 'interrupted'
             ? 'Answer stopped.'
             : done?.outcome === 'no_results'
@@ -308,9 +328,36 @@ export class ChatComponent {
                 ? 'Answer failed.'
                 : '',
       );
+      if (savedId) {
+        // the question box is free again while the check runs; its end is handled on its own.
+        void this.afterCheck(thread, stream, [answer.id, savedId], () => noticed);
+        return;
+      }
       await this.sync(thread);
       if (failure) this.moveFailure(answer.id);
     });
+  }
+  /* once the source check's stream closes, with or without a notice, re-reads the saved answer. */
+  private async afterCheck(
+    thread: Thread,
+    stream: Promise<void>,
+    ids: string[],
+    noticed: () => boolean,
+  ): Promise<void> {
+    await stream.catch(() => undefined);
+    this.checking.update((all) => all.filter((id) => !ids.includes(id)));
+    this.usage.refresh();
+    // a later question's announcement is not overwritten.
+    if (!this.streaming() && this.announcement() === 'Answer complete. Checking the sources…')
+      this.announcement.set(
+        noticed() ? 'Sources checked: see the note under the answer.' : 'Sources checked.',
+      );
+    // a question asked meanwhile re-reads the conversation itself when it ends.
+    if (!this.streaming() && !this.state.busy()) await this.sync(thread);
+  }
+  /* whether the answer's sources are still being checked. */
+  isChecking(message: ChatMessage): boolean {
+    return this.checking().includes(message.id);
   }
   /* once the saved conversation replaces the streamed answer, its failure moves to the saved answer. */
   private moveFailure(localId: string): void {

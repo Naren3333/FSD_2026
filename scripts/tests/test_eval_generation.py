@@ -171,6 +171,7 @@ def test_probe_scoring_counts_catches_names_and_false_rejects():
         {"passed": False, "reason": "NOT_REVIEWED", "note": ""},
     ]
     s = run_generation.probe_summary(run_generation.judge(batch, verdicts, 1))
+    assert s["missed_after_checks"] == ["missed"]
     assert (
         s["not_reviewed"] == 1
         and s["catch_rate"] == round(2 / 3, 3)
@@ -234,10 +235,10 @@ def test_probe_drafts_are_valid_questions_with_known_reasons():
                     "sources": [{"text": b["passages"][s]} for s in d["sources"]],
                 }
             )
-            # the deterministic phrase check would stop it before the reviewer ever saw it.
-            assert not run_generation.checks.NEEDS_MATERIALS_PATTERN.search(
-                run_generation.checks.normalize(d["prompt"])
-            ), d["id"]
+            # only groups-shown is stopped by the agent's own checks before a review (adr 0026); the probe still
+            # sends it to measure the reviewer.
+            caught = run_generation.checks.needs_materials(run_generation.checks.normalize(d["prompt"]))
+            assert caught == (d["id"] == "groups-shown"), d["id"]
 
 
 @pytest.mark.parametrize(
@@ -331,3 +332,11 @@ def test_practice_is_its_own_mode_in_the_summary():
     student = practice_case([practised("What does a test stub stand in for?")])
     modes = run_generation.summarize([teacher, student])["modes"]
     assert set(modes) == {"review", "practice"} and modes["practice"]["returned_rate"] == 0.5
+
+
+def test_a_probe_miss_the_checks_catch_is_not_missed_after_the_checks():
+    batch = {"id": "b", "drafts": [{"id": "shown", "expect": "fail", "reason": "NEEDS_MATERIALS",
+                                    "prompt": "Using the three groups shown, which group does 404 belong to?"}]}  # fmt: skip
+    rows = run_generation.judge(batch, [{"passed": True, "reason": "NONE", "note": ""}], 1)
+    s = run_generation.probe_summary(rows)
+    assert s["missed"] == ["shown"] and s["missed_after_checks"] == []

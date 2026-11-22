@@ -42,71 +42,23 @@
             <p class="caption">Suggestions use the first 500 results.</p>
           }
         }
-        @if (studentsFull()) {
-          <p class="caption">{{ maxStudents }} students are chosen, the most a resit can have.</p>
+        @if (missingStudent()) {
+          <p class="caption">
+            The student you came from is not on this classroom's roster, so no one was chosen for them.
+          </p>
         }
-        @if (chosenStudentList().length) {
-          <p class="caption">Chosen students, including other pages:</p>
-          <ul class="tag-row" aria-label="Chosen students">
-            @for (student of chosenStudentList(); track student.id) {
-              <li>
-                <button
-                  type="button"
-                  class="secondary"
-                  [disabled]="state.busy()"
-                  (click)="toggleStudent(student.id, false)"
-                >
-                  Remove {{ studentName(student) }}
-                </button>
-              </li>
-            }
-          </ul>
-        }
-        <app-section-state [section]="roster" loading="Loading the classroom's students…" />
-        @if (roster.error()) {
-          <button type="button" class="secondary" (click)="loadRoster()">Try again</button>
-        }
-        @if (roster.ready() && roster.value(); as people) {
-          <ul class="resit-choices" aria-label="Students">
-            @for (student of people; track student.id) {
-              <li>
-                <label class="check">
-                  <input
-                    #studentBox
-                    type="checkbox"
-                    [checked]="students().has(student.id)"
-                    [disabled]="state.busy() || (studentsFull() && !students().has(student.id))"
-                    (change)="toggleStudent(student.id, studentBox.checked)"
-                  />
-                  <span class="resit-choice">
-                    <span>{{ studentName(student) }}</span>
-                    <span class="tag-row">
-                      @if (struggling().has(student.id)) {
-                        <span class="badge badge-warning">Lost marks</span>
-                      }
-                      @if (marksOf(student.id); as marks) {
-                        <span class="caption">{{ marks }}</span>
-                      }
-                    </span>
-                  </span>
-                </label>
-              </li>
-            } @empty {
-              <li class="empty">
-                No students are enrolled in this classroom yet. Your school admin enrolls them.
-              </li>
-            }
-          </ul>
-        }
-        <app-pager
-          label="Student pages"
-          [page]="roster.page()"
-          (pageChange)="roster.page.set($event)"
-          [pageSize]="roster.pageSize"
-          [total]="roster.total()"
-          noun="students"
-          [disabled]="roster.loading() || state.busy()"
-          (go)="loadRoster()"
+        <app-roster-picker
+          pickerId="resit-roster"
+          [classroomId]="classroomId"
+          [roster]="roster"
+          [chosen]="chosenNames()"
+          [max]="maxStudents"
+          [suggested]="struggling()"
+          suggestedLabel="Lost marks"
+          [notes]="marks()"
+          [disabled]="state.busy()"
+          (chosenChange)="chooseStudents($event)"
+          (rosterRead)="rosterRead()"
         />
       </fieldset>
 

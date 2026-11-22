@@ -432,9 +432,10 @@ func TestMarkerOutcomesAreStoredAsFailedSuggestions(t *testing.T) {
 				t.Fatal(err)
 			}
 		}, "AI_PROVIDER_FAILED", 0},
-		{"ungrounded quote", &fakeSuggester{output: reply(t, []map[string]any{criterion("c1", 3, "a mutex")}, "")}, nil, "UNGROUNDED", 1},
+		{"ungrounded quote", &fakeSuggester{output: reply(t, []map[string]any{criterion("c1", 3, "a mutex")}, "")}, nil, "UNGROUNDED", 2},
 		{"contradicted", &fakeSuggester{output: reply(t, []map[string]any{against(criterion("c1", 3, "Because"), "Because")}, "")}, nil, "CONTRADICTED", 1},
-		{"invalid output", &fakeSuggester{output: "Full marks!"}, nil, "INVALID_OUTPUT", 1},
+		{"invalid output", &fakeSuggester{output: "Full marks!"}, nil, "INVALID_OUTPUT", 2},
+		{"rejected output", &fakeSuggester{err: &platform.AIError{Status: 502, Code: "AI_OUTPUT_REJECTED"}}, nil, "AI_OUTPUT_REJECTED", 2},
 		{"empty output", &fakeSuggester{err: &platform.AIError{Status: 502, Code: "EMPTY_OUTPUT"}}, nil, "EMPTY_OUTPUT", 1},
 	}
 	for _, tc := range cases {
@@ -1512,5 +1513,70 @@ func TestTheCountsNameReadyDraftsWithDoubts(t *testing.T) {
 	}
 	if c, err = s.countEvaluations(ctx, "org", submissionID, submissionID, everyone); err != nil || c.Ready != 2 || c.ReadyDoubtful != 0 {
 		t.Fatalf("%+v %v", c, err)
+	}
+}
+
+// exactShort is a submission change: a short answer worth 2 that is an accepted answer only once its curly quotes
+// and full stop are ignored, so assessment's own rule leaves it to the teacher.
+var exactShort = map[string]any{
+	"questions": []map[string]any{{"id": questionID, "prompt": "What stops two threads updating at once?", "type": "short_answer", "options": nil, "answer": "", "tolerance": "",
+		"accepted_answers": []string{"mutual exclusion"}, "points": 2, "topic_id": topicID}},
+	"answers": map[string]string{questionID: "\u201cMutual exclusion.\u201d"},
+}
+
+// an exact short answer gets grading's own full-marks draft suggestion, without a model call or a second check,
+// and a redelivered submission makes no other (adr 0024).
+func TestAnExactShortAnswerIsSuggestedWithoutAModel(t *testing.T) {
+	db := testDB(t)
+	submit(t, db, submissionA, "student-a", exactShort)
+	e := load(t, db, submissionA).evidence[0]
+	if !e.NeedsMarking || e.Awarded != 0 {
+		t.Fatalf("assessment's rule should have left it to the teacher: %+v", e)
+	}
+	ai := &fakeSuggester{output: grounded3(t), review: grounded3(t)}
+	m := withCritic(db, ai)
+	markOnce(t, m)
+	submit(t, db, submissionA, "student-a", exactShort)
+	if _, found, err := m.lease(t.Context()); err != nil || found {
+		t.Fatalf("another job: %v %v", found, err)
+	}
+	e = load(t, db, submissionA).evidence[0]
+	s := e.Suggestion
+	if ai.calls != 0 || s == nil || s.Status != suggestionReady || s.Awarded != 2 || s.Model != modelExactMatch || s.Review == nil || s.Review.Status != reviewNotReviewed || s.Review.Reason != reasonExactMatch {
+		t.Fatalf("calls %d, %+v", ai.calls, s)
+	}
+	// still a draft suggestion: the teacher marks and finalizes.
+	if !e.NeedsMarking || e.Awarded != 0 || e.MarkedBy != "" || audits(t, db, submissionA) != 0 || jobs(t, db) != 0 {
+		t.Fatalf("an exact match became a mark: %+v", e)
+	}
+}
+
+// scriptedSuggester answers each call with the next of outputs, the last one from then on.
+type scriptedSuggester struct {
+	outputs []string
+	names   []string
+}
+
+func (f *scriptedSuggester) generate(_ context.Context, name string, _ []message, _ map[string]any, _ platform.Billed) (string, string, error) {
+	f.names = append(f.names, name)
+	return f.outputs[min(len(f.names), len(f.outputs))-1], "model-1", nil
+}
+
+// a reply fixed by its re-ask is stored once and reviewed once, however often the submission is delivered.
+func TestAReaskedSuggestionIsStoredAndReviewedOnce(t *testing.T) {
+	db := testDB(t)
+	submit(t, db, submissionA, "student-a", nil)
+	ai := &scriptedSuggester{outputs: []string{reply(t, []map[string]any{criterion("c1", 3, "a mutex")}, ""), grounded3(t), grounded3(t)}}
+	m := withCritic(db, ai)
+	markOnce(t, m)
+	submit(t, db, submissionA, "student-a", nil) // redelivered while the review waits
+	markOnce(t, m)
+	submit(t, db, submissionA, "student-a", nil)
+	if _, found, err := m.lease(t.Context()); err != nil || found {
+		t.Fatalf("another job: %v %v", found, err)
+	}
+	s := load(t, db, submissionA).evidence[0].Suggestion
+	if !slices.Equal(ai.names, []string{schemaSuggestion, schemaSuggestion, schemaReview}) || s.Status != suggestionReady || s.Awarded != 3 || s.Review.Status != reviewAgreed {
+		t.Fatalf("calls %v, %+v %+v", ai.names, s, s.Review)
 	}
 }

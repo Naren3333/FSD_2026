@@ -1,6 +1,10 @@
 """share authenticated retrieval and inference clients."""
 
+from collections.abc import Iterator
+from contextlib import contextmanager
+from contextvars import ContextVar
 from dataclasses import dataclass
+from typing import Any
 
 import httpx
 from learning_transport import TEACHER, Claims, UpstreamError, upstream_error
@@ -19,6 +23,21 @@ SEARCH_TIMEOUT = 15.0
 GENERATE_TIMEOUT = 135.0
 
 
+# this request's ai-core requests, re-asks included, while counted(); the shared helper does not report them.
+_CALLS: ContextVar[list[int] | None] = ContextVar("question_generation_calls", default=None)
+
+
+@contextmanager
+def counted() -> Iterator[list[int]]:
+    """counts the ai-core requests made inside the block, one per attempt (re-asks too) in the list's only item."""
+    calls = [0]
+    token = _CALLS.set(calls)
+    try:
+        yield calls
+    finally:
+        _CALLS.reset(token)
+
+
 def billed(claims: Claims) -> dict[str, str]:
     """whose daily ai allowance pays: the teacher who asked (adr 0003)."""
     return billed_to(claims, TEACHER)
@@ -33,6 +52,12 @@ class Topic:
 class Services(AgentClients):
     settings: Settings  # with curriculum's url
     generate_timeout = GENERATE_TIMEOUT
+
+    async def _generate_once(self, *args: Any, **kwargs: Any) -> str:
+        """one ai-core request of a generate call, counted for counted()."""
+        if (calls := _CALLS.get()) is not None:
+            calls[0] += 1
+        return await super()._generate_once(*args, **kwargs)
 
     # ---- caller-token calls
 

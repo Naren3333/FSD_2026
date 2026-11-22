@@ -26,7 +26,10 @@ const (
 	markingLease    = 5 * time.Minute
 	markingCall     = 90 * time.Second
 	markingIdle     = 3 * time.Second
-	markingTokens   = 1500
+	// markingTokens is the reply's visible budget: ai-core adds the reasoning headroom of each profile (adr 0023).
+	markingTokens = 1500
+	// markingReaskLeft is the least time left of markingCall that a re-ask is started with.
+	markingReaskLeft = 20 * time.Second
 	// markingWait is how long a job waits, without using an attempt, for ai to be set up on this server or for
 	// an allowance whose reset time ai-core did not say.
 	markingWait = 10 * time.Minute
@@ -50,6 +53,15 @@ const (
 	schemaReview     = "marking.review"
 )
 
+// profiles are the ai-core model profile each marking call uses (adr 0023): the critic checks on its own profile.
+var profiles = map[string]string{schemaSuggestion: "default", schemaReview: "check"}
+
+// an exact-match suggestion (adr 0024) is made by grading without a model call, and is not second-checked.
+const (
+	modelExactMatch  = "exact_match"
+	reasonExactMatch = "EXACT_MATCH"
+)
+
 // suggester asks a model for a structured reply, billed to a teacher's daily ai allowance.
 type suggester interface {
 	generate(ctx context.Context, name string, messages []message, schema map[string]any, who platform.Billed) (output, model string, err error)
@@ -64,7 +76,7 @@ type message struct {
 type aiSuggester struct{ platform.AICore }
 
 func (a aiSuggester) generate(ctx context.Context, name string, messages []message, schema map[string]any, who platform.Billed) (string, string, error) {
-	body, err := json.Marshal(map[string]any{"operation": "generate", "messages": messages, "response_schema": schema, "schema_name": name, "max_tokens": markingTokens, "billed_to": who})
+	body, err := json.Marshal(map[string]any{"operation": "generate", "messages": messages, "response_schema": schema, "schema_name": name, "model_profile": cmp.Or(profiles[name], "default"), "max_tokens": markingTokens, "billed_to": who})
 	if err != nil {
 		return "", "", err
 	}
@@ -155,30 +167,50 @@ func schemeTexts(q Question) []string {
 	return texts
 }
 
-// markingSchema is the reply's strict json schema.
-func markingSchema() map[string]any {
+// markingSchema is the reply's strict json schema for rubric r: each criterion's id and points are limited to its
+// own id and levels (adr 0024). checkSuggestion still checks that each criterion is marked exactly once.
+func markingSchema(r Rubric) map[string]any {
 	str := map[string]any{"type": "string"}
-	criterion := map[string]any{
-		"type": "object",
-		"properties": map[string]any{
-			"criterion_id":         str,
-			"points":               map[string]any{"type": "integer"},
-			"evidence_quotes":      map[string]any{"type": "array", "items": str},
-			"contradicting_quotes": map[string]any{"type": "array", "items": str},
-			"rationale":            str,
-		},
-		"required":             []string{"criterion_id", "points", "evidence_quotes", "contradicting_quotes", "rationale"},
-		"additionalProperties": false,
+	options := make([]any, len(r.Criteria))
+	for i, c := range r.Criteria {
+		options[i] = criterionSchema(c)
+	}
+	items := map[string]any{"anyOf": options}
+	if len(options) == 1 {
+		items = options[0].(map[string]any)
 	}
 	return map[string]any{
 		"type": "object",
 		"properties": map[string]any{
-			"criteria":            map[string]any{"type": "array", "items": criterion},
+			"criteria":            map[string]any{"type": "array", "items": items},
 			"feedback_to_student": str,
 			"confidence":          map[string]any{"type": "string", "enum": []string{"high", "medium", "low"}},
 			"flags":               map[string]any{"type": "array", "items": map[string]any{"type": "string", "enum": knownFlags}},
 		},
 		"required":             []string{"criteria", "feedback_to_student", "confidence", "flags"},
+		"additionalProperties": false,
+	}
+}
+
+// criterionSchema is one criterion's reply: its own id, and points that are one of its levels.
+func criterionSchema(c Criterion) map[string]any {
+	str := map[string]any{"type": "string"}
+	var points []int
+	for _, l := range c.Levels {
+		if !slices.Contains(points, l.Points) {
+			points = append(points, l.Points)
+		}
+	}
+	return map[string]any{
+		"type": "object",
+		"properties": map[string]any{
+			"criterion_id":         map[string]any{"type": "string", "enum": []string{c.ID}},
+			"points":               map[string]any{"type": "integer", "enum": points},
+			"evidence_quotes":      map[string]any{"type": "array", "items": str},
+			"contradicting_quotes": map[string]any{"type": "array", "items": str},
+			"rationale":            str,
+		},
+		"required":             []string{"criterion_id", "points", "evidence_quotes", "contradicting_quotes", "rationale"},
 		"additionalProperties": false,
 	}
 }
@@ -190,6 +222,32 @@ var errUngrounded = errors.New("UNGROUNDED")
 
 // reject suggestions that award marks while quoting contradictory evidence.
 var errContradicted = errors.New("CONTRADICTED")
+
+// checkFault is a failed check (errInvalidOutput or errUngrounded) with what was wrong, for a re-ask. its error
+// text is the code alone, which is what a failed suggestion stores.
+type checkFault struct {
+	code   error
+	detail string
+}
+
+func (f checkFault) Error() string { return f.code.Error() }
+func (f checkFault) Unwrap() error { return f.code }
+
+func fault(code error, format string, args ...any) error {
+	return checkFault{code, fmt.Sprintf(format, args...)}
+}
+
+// faultText says what was wrong with a reply, for the model.
+func faultText(err error) string {
+	var f checkFault
+	switch {
+	case errors.As(err, &f):
+		return f.detail
+	case errorCode(err) == "AI_OUTPUT_REJECTED":
+		return "the reply was refused, cut off or did not match the required json schema"
+	}
+	return "the reply was not a valid marking of every criterion"
+}
 
 // repliedCriterion is a criterion as the model replies with it.
 type repliedCriterion struct {
@@ -209,23 +267,24 @@ func checkSuggestion(q Question, r Rubric, answer, output, model string) (Sugges
 		Flags      []string           `json:"flags"`
 	}
 	if json.Unmarshal([]byte(output), &reply) != nil || !slices.Contains([]string{"high", "medium", "low"}, reply.Confidence) {
-		return Suggestion{}, errInvalidOutput
+		return Suggestion{}, fault(errInvalidOutput, "the reply was not json in the required schema")
 	}
 	byID := map[string]repliedCriterion{}
 	for _, c := range reply.Criteria {
 		if _, repeated := byID[c.Criterion]; repeated {
-			return Suggestion{}, errInvalidOutput
+			return Suggestion{}, fault(errInvalidOutput, "criterion %q was marked more than once", c.Criterion)
 		}
 		byID[c.Criterion] = c
 	}
 	s := Suggestion{Status: suggestionReady, Confidence: reply.Confidence, Model: model, SchemePassages: len(q.MarkingScheme)}
-	if len(byID) != len(r.Criteria) {
-		return Suggestion{}, errInvalidOutput
+	ids := make([]string, len(r.Criteria))
+	for i, c := range r.Criteria {
+		ids[i] = c.ID
 	}
 	for _, c := range r.Criteria {
 		got, ok := byID[c.ID]
-		if !ok {
-			return Suggestion{}, errInvalidOutput
+		if !ok || len(byID) != len(r.Criteria) {
+			return Suggestion{}, fault(errInvalidOutput, "mark every criterion exactly once, these and no others: %s", strings.Join(ids, ", "))
 		}
 		if err := checkCriterion(got, c, answer); err != nil {
 			return Suggestion{}, err
@@ -253,10 +312,19 @@ func checkSuggestion(q Question, r Rubric, answer, output, model string) (Sugges
 // evidence for anything above the lowest level and nothing quoted against it.
 func checkCriterion(got repliedCriterion, c Criterion, answer string) error {
 	switch {
-	case !fits(got.SuggestedCriterion, c) || len(got.Against) > maxQuotes:
-		return errInvalidOutput
-	case !grounded(got.SuggestedCriterion, c, answer) || !quoted(got.Against, answer):
-		return errUngrounded
+	case !fits(got.SuggestedCriterion, c):
+		return fault(errInvalidOutput, "criterion %q has %d points and %d evidence quotes: points must be one of its levels, with at most %d quotes", c.ID, got.Points, len(got.Quotes), maxQuotes)
+	case len(got.Against) > maxQuotes:
+		return fault(errInvalidOutput, "criterion %q has over %d contradicting quotes", c.ID, maxQuotes)
+	}
+	for _, quotes := range [][]string{got.Quotes, got.Against} {
+		if missing, ok := unquoted(quotes, answer); ok {
+			return fault(errUngrounded, "criterion %q quotes %q, which is not in the student's answer; copy quotes exactly from it", c.ID, clip(missing, 120))
+		}
+	}
+	switch {
+	case got.Points != lowest(c) && len(got.Quotes) == 0:
+		return fault(errUngrounded, "criterion %q gives %d points, above its lowest level, without an evidence quote", c.ID, got.Points)
 	case len(got.Against) > 0 && got.Points != lowest(c):
 		return errContradicted
 	}
@@ -268,21 +336,73 @@ func fits(got SuggestedCriterion, c Criterion) bool {
 	return len(got.Quotes) <= maxQuotes && slices.ContainsFunc(c.Levels, func(l Level) bool { return l.Points == got.Points })
 }
 
-// grounded reports whether every quote is in the answer (ignoring how whitespace runs), and a level above
-// the criterion's lowest has at least one.
-func grounded(got SuggestedCriterion, c Criterion, answer string) bool {
-	return quoted(got.Quotes, answer) && (got.Points == lowest(c) || len(got.Quotes) > 0)
-}
-
-// quoted reports whether every quote is in the answer, ignoring how whitespace runs.
-func quoted(quotes []string, answer string) bool {
-	text := squash(answer)
+// unquoted is the first quote that is blank or not in the answer, ignoring case, how whitespace runs and which
+// unicode quotes or dashes are used (fold).
+func unquoted(quotes []string, answer string) (string, bool) {
+	text := fold(answer)
 	for _, quote := range quotes {
-		if q := squash(quote); q == "" || !strings.Contains(text, q) {
-			return false
+		if q := fold(quote); q == "" || !strings.Contains(text, q) {
+			return quote, true
 		}
 	}
-	return true
+	return "", false
+}
+
+// fold is text as evidence is matched: plain, lowercased, with whitespace runs made one space.
+func fold(s string) string { return squash(strings.ToLower(plain(s))) }
+
+// plain makes curly quotes and unicode dashes ascii and drops invisible characters.
+func plain(s string) string {
+	return strings.Map(func(r rune) rune {
+		switch {
+		case strings.ContainsRune("\u2018\u2019\u201a\u201b\u2032", r):
+			return '\''
+		case strings.ContainsRune("\u201c\u201d\u201e\u201f\u2033\u00ab\u00bb", r):
+			return '"'
+		case strings.ContainsRune("\u2010\u2011\u2012\u2013\u2014\u2015\u2212\ufe58\ufe63\uff0d", r):
+			return '-'
+		case strings.ContainsRune("\u200b\u200c\u200d\u2060\ufeff\u00ad", r):
+			return -1
+		}
+		return r
+	}, s)
+}
+
+// exactMatch is a full-marks suggestion, made without a model call, for a short answer that equals an accepted
+// answer once quotes, dashes, invisible characters, closing full stops or exclamation marks and wrapping quotes
+// are ignored, and case unless it matters (adr 0024). answers equal under assessment's own rule (normalizeShort)
+// are marked correct already and never reach the marker.
+func exactMatch(q Question, r Rubric, answer string) (Suggestion, bool) {
+	given := matchable(answer, q.CaseSensitive)
+	if q.Type != typeShortAnswer || given == "" || len(r.Criteria) != 1 {
+		return Suggestion{}, false
+	}
+	i := slices.IndexFunc(q.AcceptedAnswers, func(a string) bool { return matchable(a, q.CaseSensitive) == given })
+	if i < 0 {
+		return Suggestion{}, false
+	}
+	c := r.Criteria[0]
+	top := slices.MaxFunc(c.Levels, func(a, b Level) int { return cmp.Compare(a.Points, b.Points) }).Points
+	ignored := "quotes, dashes and closing punctuation"
+	if !q.CaseSensitive {
+		ignored = "case, " + ignored
+	}
+	return Suggestion{
+		Status: suggestionReady, Awarded: top, Confidence: "high", Model: modelExactMatch, SchemePassages: len(q.MarkingScheme),
+		Criteria: []SuggestedCriterion{{Criterion: c.ID, Points: top, Quotes: []string{clip(strings.TrimSpace(answer), 200)},
+			Rationale: clip(fmt.Sprintf("The answer is the accepted answer %q once %s are ignored.", q.AcceptedAnswers[i], ignored), 1000)}},
+	}, true
+}
+
+// matchable is a short answer as exactMatch compares it.
+func matchable(s string, caseSensitive bool) string {
+	s = strings.TrimRight(squash(plain(s)), ".! ")
+	for _, quote := range []string{`"`, "'"} {
+		if len(s) >= 2 && strings.HasPrefix(s, quote) && strings.HasSuffix(s, quote) {
+			s = strings.TrimRight(squash(s[1:len(s)-1]), ".! ")
+		}
+	}
+	return normalizeShort(s, caseSensitive)
 }
 
 // lowest is the criterion's lowest level, in points.
@@ -435,6 +555,13 @@ func (m marker) work(ctx context.Context, j job) error {
 	if reason := t.stopReason(ok); reason != "" {
 		return m.finish(ctx, j, ended(reason))
 	}
+	if s, exact := exactMatch(q, r, t.answer); exact {
+		// grading's own match needs no second check: there is no model reply to doubt (adr 0024).
+		if m.markingCritic {
+			s.Review = notReviewed(reasonExactMatch)
+		}
+		return m.finish(ctx, j, replaced(&s))
+	}
 	s, err := m.mark(ctx, t, q, r, markingInstructions, schemaSuggestion)
 	if err != nil {
 		return m.failed(ctx, j, err, ended, func(reason string) outcome {
@@ -475,6 +602,8 @@ func (m marker) review(ctx context.Context, j job) error {
 		return m.finish(ctx, j, ended("NO_TEACHER")) // nobody to bill for it
 	case i < 0:
 		return m.finish(ctx, j, ended("NOT_MARKABLE"))
+	case of.Model == modelExactMatch:
+		return m.finish(ctx, j, ended(reasonExactMatch))
 	}
 	q := t.questions[i]
 	r, ok := markingRubric(q)
@@ -499,7 +628,9 @@ func (m marker) review(ctx context.Context, j job) error {
 }
 
 // mark asks the model to mark the task's question under instructions and checks the reply, which fails with the
-// check's reason; err is the call's own failure.
+// check's reason; err is the call's own failure. a reply ai-core rejected, or one that is not a valid marking or
+// quotes words that are not in the answer, is asked again once, with what was wrong, billed to the same teacher
+// and within the same markingCall (adr 0024). a contradicted reply is not: it saw evidence against its own level.
 func (m marker) mark(ctx context.Context, t markingTask, q Question, r Rubric, instructions, schema string) (Suggestion, error) {
 	messages, err := markingMessages(instructions, q, r, t.answer)
 	if err != nil {
@@ -507,15 +638,49 @@ func (m marker) mark(ctx context.Context, t markingTask, q Question, r Rubric, i
 	}
 	call, cancel := context.WithTimeout(ctx, markingCall)
 	defer cancel()
-	output, model, err := m.ai.generate(call, schema, messages, markingSchema(), t.billed())
-	if err != nil {
-		return Suggestion{}, err
+	output, model, err := m.ai.generate(call, schema, messages, markingSchema(r), t.billed())
+	s, faulty, err := checked(q, r, t.answer, output, model, err)
+	if faulty == nil || !reaskable(call) {
+		return s, err
 	}
-	s, err := checkSuggestion(q, r, t.answer, output, model)
+	output, model, err = m.ai.generate(call, schema, reaskMessages(messages, output, faultText(faulty)), markingSchema(r), t.billed())
+	s, _, err = checked(q, r, t.answer, output, model, err)
+	return s, err
+}
+
+// checked is a call's suggestion, or the call's failure; faulty is set when a re-ask may fix the reply.
+func checked(q Question, r Rubric, answer, output, model string, err error) (s Suggestion, faulty, failed error) {
 	if err != nil {
-		s = Suggestion{Status: suggestionFailed, Reason: err.Error(), Model: model}
+		if errorCode(err) == "AI_OUTPUT_REJECTED" {
+			return Suggestion{}, err, err
+		}
+		return Suggestion{}, nil, err
 	}
-	return s, nil
+	s, err = checkSuggestion(q, r, answer, output, model)
+	if err == nil {
+		return s, nil, nil
+	}
+	s = Suggestion{Status: suggestionFailed, Reason: err.Error(), Model: model}
+	if errors.Is(err, errContradicted) {
+		return s, nil, nil
+	}
+	return s, err, nil
+}
+
+// reaskable reports whether the call has time left for a re-ask.
+func reaskable(call context.Context) bool {
+	deadline, ok := call.Deadline()
+	return call.Err() == nil && (!ok || time.Until(deadline) >= markingReaskLeft)
+}
+
+// reaskMessages are the follow-up turn: the original messages, the faulty reply when there is one, and what was
+// wrong with it (the wording learning_transport.agents uses, adr 0023).
+func reaskMessages(messages []message, output, faults string) []message {
+	asked := slices.Clone(messages)
+	if strings.TrimSpace(output) != "" {
+		asked = append(asked, message{"assistant", output})
+	}
+	return append(asked, message{"user", "your previous reply failed these checks: " + faults + ". return a corrected reply."})
 }
 
 // failed settles a failed model call: it waits to be tried again when it may pass later, and ends otherwise.

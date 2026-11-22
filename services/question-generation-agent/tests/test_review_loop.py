@@ -30,6 +30,10 @@ STEMS = [
 GEN, REV = "questions.generated", "questions.reviewed"
 WRONG_KEY = ("WRONG_KEY", "The key does not match the passage.")
 WEAK = ("WEAK_DISTRACTORS", "The wrong options are absurd.")
+# weak options on a key the reviewer could not verify: a teacher's request still rewrites it.
+WEAK_UNSURE = (*WEAK, {"evidence_supports_key": False})
+# the reviewer's own answer and key checks, when they hold (adr 0026).
+KEY_HOLDS = {"own_answer": "x", "evidence_supports_key": True, "other_option_also_correct": False}
 
 
 @pytest.fixture(autouse=True)
@@ -49,12 +53,20 @@ def gen(*items: dict[str, Any]) -> httpx.Response:
     return reply({"questions": list(items)})
 
 
-def rev(*verdicts: str | tuple[str, str]) -> httpx.Response:
-    """a review reply: "pass", or a (reason, note) that fails the draft."""
+def rev(*verdicts: str | tuple[Any, ...]) -> httpx.Response:
+    """a review reply: "pass", or a (reason, note) that fails the draft, with a dict of other fields third."""
     reviews = [
-        {"question": i, "own_answer": "x", "verdict": "pass", "reason": "NONE", "note": ""}
+        {"question": i, **KEY_HOLDS, "verdict": "pass", "reason": "NONE", "note": "", "weak_options": []}
         if v == "pass"
-        else {"question": i, "own_answer": "x", "verdict": "fail", "reason": v[0], "note": v[1]}
+        else {
+            "question": i,
+            **KEY_HOLDS,
+            "verdict": "fail",
+            "reason": v[0],
+            "note": v[1],
+            "weak_options": [],
+            **(v[2] if len(v) > 2 else {}),
+        }
         for i, v in enumerate(verdicts, start=1)
     ]
     return reply({"reviews": reviews})
@@ -100,6 +112,18 @@ def test_everything_passes_in_one_round(api, fakes: Fakes):
             "sent_back": {},
         }
     ]
+
+
+def test_the_reviewer_runs_at_its_profiles_effort_unless_one_is_configured(api, fakes: Fakes):
+    fakes.replies = [gen(mc(0)), rev("pass")]
+    ask(api, count=1)
+    assert all("reasoning_effort" not in c for c in sent(fakes, GEN, REV))
+    configure(review_effort="none")
+    fakes.replies = [gen(mc(0)), rev("pass")]
+    ask(api, count=1)
+    write, check = fakes.calls("/v1/inference")[2:]
+    assert "reasoning_effort" not in write
+    assert (check["model_profile"], check["reasoning_effort"]) == ("check", "none")
 
 
 def test_a_rejected_key_is_sent_back_and_the_shortfall_rewritten(api, fakes: Fakes):
@@ -260,8 +284,34 @@ def test_weak_distractors_in_the_last_round_are_flagged_after_the_passed_drafts(
     assert data["questions"][0]["review"]["status"] == "passed" and data["dropped"] == {}
 
 
+def test_a_teachers_weak_draft_with_a_verified_key_is_served_flagged_without_a_rewrite(api, fakes: Fakes):
+    """the teacher reviews it anyway, so no round is paid to replace it (adr 0026)."""
+    fakes.replies = [gen(mc(0), mc(1)), rev("pass", WEAK)]
+    data = ask(api, count=2).json()
+    sent(fakes, GEN, REV)
+    assert [q["question"]["prompt"] for q in data["questions"]] == [STEMS[0], STEMS[1]]
+    assert statuses(data) == [("passed", 0), ("flagged", 0)] and data["model_calls"] == 2
+    assert data["questions"][1]["review"]["note"] == WEAK[1] and data["dropped"] == {}
+    (round_,) = data["rounds"]
+    assert round_["rejected"] == {"WEAK_DISTRACTORS": 1} and round_["sent_back"] == {}
+    assert not round_["retried"]
+
+
+def test_a_teachers_settled_weak_draft_counts_as_existing_while_another_is_rewritten(api, fakes: Fakes):
+    fakes.replies = [gen(mc(0), mc(1), mc(2)), rev(WEAK, WRONG_KEY, "pass"), gen(mc(3)), rev("pass")]
+    data = ask(api).json()
+    calls = sent(fakes, GEN, REV, GEN, REV)
+    retry = task(calls[2])
+    assert retry["counts"] == {"multiple_choice": 1}
+    assert [a["prompt"] for a in retry["previous_attempts"]] == [STEMS[1]]
+    assert STEMS[0] in retry["existing_questions"] and STEMS[0] in task(calls[3])["existing_questions"]
+    assert [q["question"]["prompt"] for q in data["questions"]] == [STEMS[2], STEMS[3], STEMS[0]]
+    assert statuses(data) == [("passed", 0), ("passed", 1), ("flagged", 0)]
+    assert data["dropped"] == {"WRONG_KEY": 1}
+
+
 def test_a_flagged_draft_is_dropped_when_a_retry_fills_the_count(api, fakes: Fakes):
-    fakes.replies = [gen(mc(0), mc(1)), rev("pass", WEAK), gen(mc(2)), rev("pass")]
+    fakes.replies = [gen(mc(0), mc(1)), rev("pass", WEAK_UNSURE), gen(mc(2)), rev("pass")]
     data = ask(api, count=2).json()
     sent(fakes, GEN, REV, GEN, REV)
     assert [q["question"]["prompt"] for q in data["questions"]] == [STEMS[0], STEMS[2]]
@@ -274,8 +324,8 @@ def test_the_reviewer_is_sent_neither_tokens_nor_ids_nor_the_explanation(api, fa
     ask(api, count=1)
     review = sent(fakes, GEN, REV)[1]
     # the evidence is a quote from the passage, so only its key can be absent.
-    text = json.dumps(review["messages"])
-    assert all(x not in text for x in (CHUNK_1, CHUNK_2, DOC, "Zebra", "evidence", "explanation", "Bearer"))
+    text = review["messages"][1]["content"]
+    assert all(x not in text for x in (CHUNK_1, CHUNK_2, DOC, "Zebra", '"evidence"', "explanation", "Bearer"))
     assert "Bearer" not in json.dumps(review) and CHUNK_1 not in json.dumps(review)
 
 
@@ -415,9 +465,9 @@ def tick(monkeypatch: pytest.MonkeyPatch, seconds_per_call: float) -> None:
     clock = Clock()
     ask_model = pipeline.Pipeline._ask
 
-    async def slow(self: Any, *args: Any) -> str:
+    async def slow(self: Any, *args: Any, **kwargs: Any) -> str:
         clock.now += seconds_per_call
-        return await ask_model(self, *args)
+        return await ask_model(self, *args, **kwargs)
 
     monkeypatch.setattr(pipeline, "time", clock)
     monkeypatch.setattr(agents, "time", clock)  # where a model call's deadline is checked
@@ -454,11 +504,11 @@ def test_a_retry_the_deadline_cuts_off_is_not_reported_as_unavailable(
     monkeypatch.setattr(agents, "time", clock)
     generate = clients.Services.generate
 
-    async def deadline_stops_the_third(self: Any, *args: Any) -> str:
+    async def deadline_stops_the_third(self: Any, *args: Any, **kwargs: Any) -> str:
         if len(fakes.calls("/v1/inference")) == 2:
             clock.now = 240.0  # the retry's call ran until the deadline cut it off
             raise UpstreamError("ai-core", 0, agents.OUT_OF_TIME)
-        return await generate(self, *args)
+        return await generate(self, *args, **kwargs)
 
     monkeypatch.setattr(clients.Services, "generate", deadline_stops_the_third)
     fakes.replies = [gen(mc(0)), rev(WRONG_KEY)]
@@ -472,10 +522,10 @@ def test_a_retry_that_loses_ai_core_before_the_deadline_is_still_unavailable(
     configure(review_deadline=240)
     generate = clients.Services.generate
 
-    async def unreachable_third(self: Any, *args: Any) -> str:
+    async def unreachable_third(self: Any, *args: Any, **kwargs: Any) -> str:
         if len(fakes.calls("/v1/inference")) == 2:
             raise UpstreamError("ai-core", 0)
-        return await generate(self, *args)
+        return await generate(self, *args, **kwargs)
 
     monkeypatch.setattr(clients.Services, "generate", unreachable_third)
     fakes.replies = [gen(mc(0)), rev(WRONG_KEY)]
@@ -555,7 +605,7 @@ def test_a_round_whose_review_did_not_run_is_not_marked_reviewed(api, fakes: Fak
 def test_a_corrected_rewrite_of_a_weak_draft_replaces_it_not_a_duplicate(api, fakes: Fakes):
     better = mc(0, options=["A single function in isolation", "The whole system", "A load test"])
     better["answer"] = "A single function in isolation"
-    fakes.replies = [gen(mc(0)), rev(WEAK), gen(better), rev("pass")]
+    fakes.replies = [gen(mc(0)), rev(WEAK_UNSURE), gen(better), rev("pass")]
     resp = ask(api, count=1)
     assert resp.status_code == 200, resp.text
     data = resp.json()
@@ -564,6 +614,17 @@ def test_a_corrected_rewrite_of_a_weak_draft_replaces_it_not_a_duplicate(api, fa
     assert [a["prompt"] for a in retry["previous_attempts"]] == [STEMS[0]]
     assert [q["question"]["options"] for q in data["questions"]] == [better["options"]]
     assert statuses(data) == [("passed", 1)] and "DUPLICATE" not in data["dropped"]
+
+
+def test_a_rewrite_is_told_which_wrong_options_were_weak(api, fakes: Fakes):
+    """the options the reviewer named go back as the draft wrote them; the key and unknown texts do not."""
+    named = ["the whole system END TO END ", "A single function or class in isolation", "Not an option"]
+    weak = (*WEAK_UNSURE[:2], {**WEAK_UNSURE[2], "weak_options": named})
+    fakes.replies = [gen(mc(0)), rev(weak), gen(mc(1)), rev("pass")]
+    ask(api, count=1)
+    (attempt,) = task(sent(fakes, GEN, REV, GEN, REV)[2])["previous_attempts"]
+    assert attempt["weak_options"] == ["The whole system end to end"]
+    assert "weak_options" in sent(fakes, GEN, REV, GEN, REV)[2]["messages"][0]["content"]
 
 
 REWRITE = "Exactly what does a unit test check?"
@@ -575,7 +636,7 @@ def rewrite_of(n: int) -> dict[str, Any]:
 
 def test_a_weak_draft_and_its_passed_rewrite_are_not_both_returned(api, fakes: Fakes):
     a2, b2 = rewrite_of(0), rewrite_of(1)
-    fakes.replies = [gen(mc(0), mc(1)), rev(WEAK, WEAK), gen(a2, b2), rev("pass", WEAK)]
+    fakes.replies = [gen(mc(0), mc(1)), rev(WEAK_UNSURE, WEAK_UNSURE), gen(a2, b2), rev("pass", WEAK)]
     configure(review_retries=1)
     data = ask(api, count=2).json()
     assert [q["question"]["prompt"] for q in data["questions"]] == [a2["prompt"], b2["prompt"]]
@@ -584,7 +645,7 @@ def test_a_weak_draft_and_its_passed_rewrite_are_not_both_returned(api, fakes: F
 
 def test_the_newest_of_two_weak_drafts_is_returned(api, fakes: Fakes):
     a2 = rewrite_of(0)
-    fakes.replies = [gen(mc(0)), rev(WEAK), gen(a2), rev(WEAK), gen(mc(5)), rev(WEAK)]
+    fakes.replies = [gen(mc(0)), rev(WEAK_UNSURE), gen(a2), rev(WEAK_UNSURE), gen(mc(5)), rev(WEAK_UNSURE)]
     data = ask(api, count=1).json()
     assert [q["question"]["prompt"] for q in data["questions"]] != [STEMS[0]]
     assert [q["review"]["round"] for q in data["questions"]] == [2]
@@ -628,7 +689,7 @@ def test_a_failed_provider_on_a_retry_is_reported_not_rejected(api, fakes: Fakes
 
 def test_an_unreadable_retry_with_nothing_kept_is_an_output_error(api, fakes: Fakes):
     bad = {"evidence": "This sentence is nowhere in the passages."}
-    fakes.replies = [gen(mc(0, **bad)), httpx.Response(200, json={"output": "nope"})]
+    fakes.replies = [gen(mc(0, **bad)), *[httpx.Response(200, json={"output": "nope"})] * 2]
     resp = ask(api, count=1)
     assert resp.status_code == 502 and resp.json()["error"]["code"] == "AI_OUTPUT_REJECTED"
 
@@ -678,3 +739,87 @@ def test_passages_under_the_floor_are_left_out_and_the_rest_numbered_in_order() 
     passages = pipeline.passages_of(results, 0.5)
     assert [(p.number, p.chunk_id) for p in passages] == [(1, CHUNK_1), (2, CHUNK_2)]
     assert pipeline.passages_of([hit(CHUNK_1, "Weak.", 0.4)], 0.5) == []
+
+
+# ---- independent review and re-asks (adr 0026)
+
+UNREADABLE = httpx.Response(200, json={"output": "{not json"})
+
+
+def test_the_reviewer_runs_on_the_check_profile_and_the_writer_on_default(api, fakes: Fakes):
+    fakes.replies = [gen(mc(0)), rev("pass")]
+    ask(api, count=1)
+    write, check = sent(fakes, GEN, REV)
+    assert write["model_profile"] == "default" and check["model_profile"] == "check"
+    assert "evidence_supports_key" in check["response_schema"]["properties"]["reviews"]["items"]["required"]
+    assert "before you read its key" in check["messages"][0]["content"]
+
+
+def test_a_key_the_passages_do_not_support_is_sent_back_with_that_problem(api, fakes: Fakes):
+    unsupported = reply({"reviews": [{"question": 1, **KEY_HOLDS, "evidence_supports_key": False,
+                                      "verdict": "pass", "reason": "NONE", "note": ""}]})  # fmt: skip
+    fakes.replies = [gen(mc(0)), unsupported, gen(mc(1)), rev("pass")]
+    data = ask(api, count=1).json()
+    calls = sent(fakes, GEN, REV, GEN, REV)
+    (attempt,) = task(calls[2])["previous_attempts"]
+    assert attempt == {"prompt": STEMS[0], "type": "multiple_choice", "problem": prompts.KEY_UNSUPPORTED}
+    assert data["dropped"] == {"NOT_ANSWERABLE": 1} and data["returned"] == 1
+
+
+def test_a_second_right_option_is_sent_back_as_ambiguous(api, fakes: Fakes):
+    two_right = reply({"reviews": [{"question": 1, **KEY_HOLDS, "other_option_also_correct": True,
+                                    "verdict": "pass", "reason": "NONE", "note": ""}]})  # fmt: skip
+    fakes.replies = [gen(mc(0)), two_right, gen(mc(1)), rev("pass")]
+    data = ask(api, count=1).json()
+    calls = sent(fakes, GEN, REV, GEN, REV)
+    assert task(calls[2])["previous_attempts"][0]["problem"] == prompts.SECOND_RIGHT_OPTION
+    assert data["rounds"][0]["rejected"] == {"AMBIGUOUS": 1}
+
+
+def test_an_unreadable_write_is_asked_again_before_the_review(api, fakes: Fakes):
+    fakes.replies = [UNREADABLE, gen(mc(0)), rev("pass")]
+    data = ask(api, count=1).json()
+    calls = sent(fakes, GEN, GEN, REV)
+    assert (
+        calls[1]["messages"][-1]["role"] == "user"
+        and "failed these checks" in calls[1]["messages"][-1]["content"]
+    )
+    assert data["model_calls"] == 3 and len(data["rounds"]) == 1 and data["returned"] == 1
+
+
+def test_a_re_ask_takes_the_place_of_the_last_round_so_six_calls_is_still_the_most(api, fakes: Fakes):
+    """round 0's re-ask makes it three calls; round 1 makes five, and round 2 would need a seventh, so it is not run."""
+    fakes.replies = [UNREADABLE, gen(mc(0)), rev(WRONG_KEY), gen(mc(1)), rev(WRONG_KEY)]
+    resp = ask(api, count=1)
+    sent(fakes, GEN, GEN, REV, GEN, REV)
+    assert resp.status_code == 422 and resp.json()["error"]["code"] == "GENERATION_REJECTED"
+
+
+def test_the_last_round_gets_no_re_ask_past_six_calls(api, fakes: Fakes):
+    fakes.replies = [gen(mc(0), mc(1)), rev("pass", WRONG_KEY), gen(mc(2)), rev(WRONG_KEY), UNREADABLE]
+    data = ask(api, count=2).json()
+    sent(fakes, GEN, REV, GEN, REV, GEN)
+    assert data["model_calls"] == 5 and data["rounds"][-1]["rejected"] == {"UNREADABLE_REPLY": 1}
+    assert data["returned"] == 1
+
+
+def test_every_round_rejected_still_makes_at_most_six_calls(api, fakes: Fakes):
+    fakes.replies = [
+        gen(mc(0)),
+        rev(WRONG_KEY),
+        UNREADABLE,
+        gen(mc(1)),
+        rev(WRONG_KEY),
+        gen(mc(2)),
+        rev(WRONG_KEY),
+    ]
+    resp = ask(api, count=1)
+    calls = sent(fakes, GEN, REV, GEN, GEN, REV)  # round 1's re-ask used round 2's calls
+    assert len(calls) <= pipeline.MAX_CALLS and resp.status_code == 422
+
+
+def test_a_re_asked_write_without_the_review_is_two_calls(api, fakes: Fakes):
+    fakes.replies = [UNREADABLE, gen(mc(0))]
+    data = ask(api, count=1, review=False).json()
+    sent(fakes, GEN, GEN)
+    assert data["model_calls"] == 2 and data["returned"] == 1

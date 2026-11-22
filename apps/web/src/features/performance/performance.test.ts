@@ -249,6 +249,32 @@ describe('performance interpretation', () => {
     expect(page.text()).toContain('Interpret again');
   });
 
+  it('links each cited assessment once to a resit for this student', async () => {
+    const twice: Interpretation = {
+      ...draft,
+      evidence: [
+        ...draft.evidence,
+        { ...draft.evidence[0], question_id: 'q2', prompt: 'Half of 1?' },
+        { ...draft.evidence[0], question_id: 'q3', assessment_id: 'a2', assessment_title: 'Decimals' },
+      ],
+      observations: [{ text: 'Halves.', evidence_ids: ['q1', 'q2', 'q3'] }],
+    };
+    const page = render(Promise.resolve([ana]), Promise.resolve(evidence([halves])), 's1', undefined, () =>
+      Promise.resolve(twice),
+    );
+    await page.settle();
+    page.click('#interpret-button');
+    await page.settle();
+    const links = [...(page.fixture.nativeElement as HTMLElement).querySelectorAll('a')].filter((a) =>
+      a.textContent?.includes('Create resit for this student'),
+    );
+    expect(links.map((a) => a.getAttribute('href'))).toEqual([
+      '/assessments?resit=a1&student=s1',
+      '/assessments?resit=a2&student=s1',
+    ]);
+    expect(links[0].textContent).toContain('of Fractions quiz');
+  });
+
   it('shows why an interpretation could not be drafted', async () => {
     const page = render(Promise.resolve([ana]), Promise.resolve(evidence([halves])), 's1', undefined, () =>
       Promise.reject(new Error("You've used today's AI allowance.")),

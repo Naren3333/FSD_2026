@@ -15,11 +15,11 @@ RESULTS = [
 def test_layout_order_and_tags() -> None:
     history = [{"role": "user", "content": "Hi"}, {"role": "assistant", "content": "Hello [doc:0a-1b] there"}]
     messages, version, tags = prompts.build_messages("student", RESULTS, history, "What is chlorophyll?")
-    assert version == "student_tutor.v3"
+    assert version == "student_tutor.v4"
     assert tags == {"S1": "c-1", "S2": "c-2"}
     assert [m["role"] for m in messages] == ["system", "system", "user", "user", "assistant", "user"]
     assert messages[0]["content"] == prompts.POLICY
-    assert messages[1]["content"] == prompts.INSTRUCTIONS["student_tutor.v3"]
+    assert messages[1]["content"] == prompts.INSTRUCTIONS["student_tutor.v4"]
 
     docs = messages[2]["content"]
     assert '<document id="S1" title="Bio &quot;Week 3&quot; &lt;slides&gt;" pages="12-13">' in docs
@@ -37,8 +37,8 @@ def test_our_delimiters_are_stripped_from_chunk_text() -> None:
 
 def test_teacher_prompt() -> None:
     messages, version, _ = prompts.build_messages("teacher", RESULTS, [], "q")
-    assert version == "teacher.v2"
-    assert messages[1]["content"] == prompts.INSTRUCTIONS["teacher.v2"]
+    assert version == "teacher.v3"
+    assert messages[1]["content"] == prompts.INSTRUCTIONS["teacher.v3"]
 
 
 def test_no_results_is_an_empty_documents_block() -> None:
@@ -74,6 +74,25 @@ def test_rewrite_schema() -> None:
         "type": "array",
         "items": {"type": "string"},
     }
+
+
+def test_rewrite_v4_names_a_described_concept_without_guessing() -> None:
+    assert prompts.QUERY_REWRITE == "query_rewrite.v4"
+    text = " ".join(prompts.REWRITE_INSTRUCTIONS.split())
+    assert '"problems with following a fixed plan rigidly (waterfall model)"' in text
+    assert "keep the user's words and add that term" in text
+    assert "Add a term only when the description fits it unambiguously; otherwise add none." in text
+    # the v3 rule against guessing an unnamed subject stays.
+    assert "Never guess a named method, technology or subject" in text
+    messages = prompts.rewrite_messages([], "what goes wrong when a team follows a fixed plan rigidly")
+    assert messages[0]["content"] == prompts.REWRITE_INSTRUCTIONS
+
+
+def test_the_policy_asks_for_each_topics_own_passage() -> None:
+    policy = " ".join(prompts.POLICY.split())
+    assert "cover every topic that has passages and cite, for each, a passage found for it" in policy
+    assert "preferring one whose subject is that topic over one that only mentions it" in policy
+    assert (prompts.STUDENT_TUTOR, prompts.TEACHER) == ("student_tutor.v4", "teacher.v3")
 
 
 def test_small_talk_prompt_has_no_documents() -> None:

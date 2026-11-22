@@ -389,11 +389,15 @@
           },
           "rerank_fallback": {
             "type": "boolean"
+          },
+          "embedding_fallback": {
+            "type": "boolean"
           }
         },
         "required": [
           "results",
-          "rerank_fallback"
+          "rerank_fallback",
+          "embedding_fallback"
         ],
         "additionalProperties": false
       }

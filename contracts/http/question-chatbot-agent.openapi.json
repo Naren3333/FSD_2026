@@ -342,7 +342,7 @@
         },
         "responses": {
           "200": {
-            "description": "The answer as server-sent events: token, citations, done or error",
+            "description": "The answer as server-sent events: token, citations, done (checking: whether a notice may follow), then notice, or error",
             "content": {
               "application/json": {
                 "schema": {}

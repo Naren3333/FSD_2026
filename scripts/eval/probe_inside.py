@@ -55,7 +55,8 @@ async def main() -> None:
         for d in batch["drafts"]
     ]
     async with httpx.AsyncClient() as http:
-        services = Services(config.load(), http)
+        settings = config.load()
+        services = Services(settings, http)
         output = await services.generate(
             prompts.review_messages(job["topic"], job["difficulty"], drafts, passages, batch["existing"]),
             pipeline.REVIEW_TOKENS,
@@ -63,8 +64,11 @@ async def main() -> None:
             "questions.reviewed",
             job["correlation"],
             {**job["billed_to"], "role": "teacher"},
+            profile="check",  # as the deployed reviewer runs (adr 0026)
+            # the effort asked for, or else the agent's QUESTION_REVIEW_EFFORT, as the deployed reviewer uses
+            reasoning_effort=job.get("review_effort") or settings.review_effort,
         )
-    verdicts = review.verdicts(output, len(drafts))
+    verdicts = review.verdicts(output, len(drafts), [d.question.type == "multiple_choice" for d in drafts])
     print(json.dumps([{"passed": v.passed, "reason": v.reason, "note": v.note} for v in verdicts]))
 
 

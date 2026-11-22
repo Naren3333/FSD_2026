@@ -59,6 +59,18 @@ MATERIAL_PHRASES = (
     "the described",
 )
 NEEDS_MATERIALS_PATTERN = re.compile(r"\b(?:" + "|".join(re.escape(p) for p in MATERIAL_PHRASES) + r")\b")
+# "the three groups shown," or "the steps listed above": a noun phrase that points at something on the page, either
+# "shown above" or ending the clause, so "the companies listed on the exchange" and "the values below the minimum"
+# pass (adr 0026).
+POINTING = r"(?:shown|listed|pictured|illustrated|depicted)"
+POINTING_PATTERN = re.compile(
+    rf"\bthe ((?:[\w'-]+ ){{1,4}})(?:{POINTING} (?:above|below|here|earlier)\b"
+    rf"|(?:{POINTING}|above|below)(?=\s*(?:[,.?;:!)]|$)))"
+)
+# what a question may point at, since the student sees them: its own options and answers.
+SEEN_NOUNS = frozenset(
+    {"option", "options", "choice", "choices", "answer", "answers", "statement", "statements"}
+)
 
 # reasons a question is dropped.
 INVALID_PROMPT = "INVALID_PROMPT"
@@ -84,6 +96,8 @@ class Rejected:
     prompt: str
     type: str
     reason: str
+    problem: str = ""  # in words when more specific than the reason's
+    weak_options: tuple[str, ...] = ()  # the wrong options a reviewer found weak
 
 
 class RuleBrokenError(Exception):
@@ -97,6 +111,28 @@ def normalize(text: str) -> str:
     for fancy, plain in (("‘", "'"), ("’", "'"), ("“", '"'), ("”", '"')):
         text = text.replace(fancy, plain)
     return " ".join(text.split()).casefold()
+
+
+def points_at_materials(normalized: str) -> bool:
+    """whether a normalized prompt points at something only the materials show ("using the three groups shown, ..."), not at its own options."""
+    return any(not SEEN_NOUNS & set(m.group(1).split()) for m in POINTING_PATTERN.finditer(normalized))
+
+
+def needs_materials(normalized: str) -> bool:
+    """whether a normalized prompt only makes sense with the materials open: a fixed phrase, or a pointer at what they show."""
+    return bool(NEEDS_MATERIALS_PATTERN.search(normalized)) or points_at_materials(normalized)
+
+
+UNREADABLE = "the reply was not a json object with the required fields"
+
+
+def reply_faults(output: str, key: str) -> list[str]:
+    """what makes a reply unusable as a whole, for a re-ask: not a json object, or without its `key` list (none: usable)."""
+    try:
+        items = read_reply(output).get(key)
+    except UnreadableOutputError:
+        return [UNREADABLE]
+    return [] if isinstance(items, list) else [f"the reply had no {key} list"]
 
 
 def read_reply(output: str) -> dict[str, Any]:
@@ -288,7 +324,7 @@ def question(item: Any, request: GenerateRequest, passages: list[Passage], seen:
     if not prompt or len(prompt) > MAX_PROMPT:
         raise RuleBrokenError(INVALID_PROMPT)
     normalized = normalize(prompt)
-    if NEEDS_MATERIALS_PATTERN.search(normalized):
+    if needs_materials(normalized):
         raise RuleBrokenError(NEEDS_MATERIALS)
     if kind not in request.question_types:
         raise RuleBrokenError(WRONG_TYPE)

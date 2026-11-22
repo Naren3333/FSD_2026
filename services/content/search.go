@@ -68,6 +68,8 @@ type hit struct {
 type searchResponse struct {
 	Results        []hit `json:"results"`
 	RerankFallback bool  `json:"rerank_fallback"`
+	// the query could not be embedded, so only the keyword leg searched (the rerank still scores it).
+	EmbeddingFallback bool `json:"embedding_fallback"`
 }
 
 // filter is the access filter (org and classroom, and teaching material only for students) narrowed by the
@@ -178,11 +180,19 @@ func (s server) runSearch(ctx context.Context, f filter, query string, topK int,
 		keyword <- legResult{rows, err}
 	}()
 	vector, model, err := s.embedQuery(ctx, query, who)
+	embeddingFallback := false
 	if err != nil {
-		<-keyword
-		return searchResponse{}, err
+		if !keywordOnly(ctx, err) {
+			<-keyword
+			return searchResponse{}, err
+		}
+		slog.Warn("embedding_fallback", "error", err.Error())
+		embeddingFallback, err = true, nil
 	}
-	vectorRows, err := s.store.vectorLeg(ctx, f, vector, model)
+	vectorRows := []hit{}
+	if !embeddingFallback {
+		vectorRows, err = s.store.vectorLeg(ctx, f, vector, model)
+	}
 	k := <-keyword
 	if err == nil {
 		err = k.err
@@ -203,8 +213,19 @@ func (s server) runSearch(ctx context.Context, f filter, query string, topK int,
 	if err = s.store.attachRelated(ctx, f, hits); err != nil {
 		return searchResponse{}, err
 	}
-	slog.Info("search", "vector_hits", len(vectorRows), "keyword_hits", len(k.rows), "returned", len(hits), "rerank", rerank, "rerank_fallback", fallback, "duration_ms", time.Since(started).Milliseconds())
-	return searchResponse{hits, fallback}, nil
+	slog.Info("search", "vector_hits", len(vectorRows), "keyword_hits", len(k.rows), "returned", len(hits), "rerank", rerank, "rerank_fallback", fallback, "embedding_fallback", embeddingFallback, "duration_ms", time.Since(started).Milliseconds())
+	return searchResponse{hits, fallback, embeddingFallback}, nil
+}
+
+// keywordonly reports whether a failed query embedding leaves the keyword leg to search alone: ai-core or
+// the provider failed or timed out. a used-up allowance, too many ai calls at once or a caller that went
+// away still fail the search.
+func keywordOnly(ctx context.Context, err error) bool {
+	if _, ok := spendLimit(err); ok || platform.AIBusy(err) || ctx.Err() != nil {
+		return false
+	}
+	var failed *aiError
+	return errors.As(err, &failed) || errors.Is(err, context.DeadlineExceeded)
 }
 
 func (s server) embedQuery(ctx context.Context, query string, who billed) ([]float32, string, error) {

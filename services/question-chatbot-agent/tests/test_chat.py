@@ -11,7 +11,7 @@ from uuid import UUID, uuid4
 import anyio
 import httpx
 import pytest
-from conftest import OTHER_ROOM, ROOM, SETTINGS, Fakes, MemoryStore, as_user, chat_stream, rewrite
+from conftest import CHECK, OTHER_ROOM, ROOM, SETTINGS, Fakes, MemoryStore, as_user, chat_stream, rewrite
 from fastapi.testclient import TestClient
 from learning_transport import sse_event
 from starlette.requests import Request
@@ -86,9 +86,9 @@ def test_answer_streams_cites_and_saves(api: TestClient, fakes: Fakes, store: Me
     assert set(citations[0]) == {"chunk_id", "document_id", "title", "section_path", "page_start", "page_end", "kind", "source",
                                  "content", "image"}  # fmt: skip
     answer = saved(store, tid)
-    assert events[-1][1] == {"message_id": answer["id"], "outcome": "answered"}
+    assert events[-1][1] == {"message_id": answer["id"], "outcome": "answered", "checking": True}
     assert (answer["outcome"], answer["prompt_version"], answer["model"], answer["usage_tokens"]) == (
-        "answered", "student_tutor.v3", "gpt-test", 42)  # fmt: skip
+        "answered", "student_tutor.v4", "gpt-test", 42)  # fmt: skip
     assert answer["rewritten_query"] == "How do plants get energy from light?"
     assert answer["retrieved_chunk_ids"] == [C1, C2, C3]
 
@@ -102,7 +102,8 @@ def test_answer_streams_cites_and_saves(api: TestClient, fakes: Fakes, store: Me
     rewrite_call, answer_call = fakes.calls("/v1/inference")
     assert (
         rewrite_call["response_schema"] == prompts.REWRITE_SCHEMA
-        and rewrite_call["schema_name"] == "query_rewrite.v3"
+        and rewrite_call["schema_name"] == "query_rewrite.v4"
+        and rewrite_call["model_profile"] == "fast"  # no reasoning for the rewrite (adr 0023)
     )
     assert answer_call["stream"] is True
     assert "Chlorophyll absorbs light." in answer_call["messages"][2]["content"]
@@ -251,6 +252,38 @@ def test_disconnect_saves_an_interrupted_answer(api: TestClient, fakes: Fakes, s
     assert (answer["content"], answer["outcome"]) == (f"Partial [doc:{C1}] ", "interrupted")
 
 
+def delayed_check(*verdicts: str, seconds: float = 0.2) -> httpx.Response:
+    """an answer_check.v1 reply that arrives after `seconds`, for statements 1, 2 and so on."""
+    out = [{"id": str(n), "verdict": v, "reason": "r"} for n, v in enumerate(verdicts, 1)]
+    body = json.dumps(
+        {"output": json.dumps({"verdicts": out}), "model_version": "gpt-check", "usage_tokens": 7}
+    )
+
+    async def later() -> AsyncIterator[bytes]:
+        await asyncio.sleep(seconds)
+        yield body.encode()
+
+    return httpx.Response(200, content=later(), headers={"content-type": "application/json"})  # type: ignore[arg-type]
+
+
+def test_leaving_after_done_still_saves_the_check_and_its_notice(
+    api: TestClient, fakes: Fakes, store: MemoryStore
+) -> None:
+    fakes.results = RESULTS
+    fakes.replies += [rewrite("q"), chat_stream(["Light is absorbed [S1]. Roots make sugar [S2]."])]
+    fakes.checks.append(delayed_check("supported", "unsupported"))
+    tid = thread(api)
+    sent = anyio.run(post_then_disconnect, api.app, tid, b"event: done")
+    assert b"event: notice" not in sent  # the client had gone before the check ended
+    answer = saved(store, tid)
+    assert answer["outcome"] == "answered"
+    assert answer["content"] == (
+        f"Light is absorbed [doc:{C1}]. Roots make sugar [doc:{C2}]."
+        "\n\nThe cited passages may not support: “Roots make sugar.”."
+    )
+    assert answer["answer_check"]["counts"]["unsupported"] == 1
+
+
 def test_a_client_gone_before_the_stream_starts_still_gets_an_answer_saved() -> None:
     """starlette never starts the events generator when sending the response start fails, so the response's finish saves the turn instead: the user's message never stands alone."""
     from starlette.requests import ClientDisconnect
@@ -279,10 +312,11 @@ def test_a_client_gone_before_the_stream_starts_still_gets_an_answer_saved() -> 
     assert (row["content"], row["outcome"]) == ("", "interrupted")
 
 
-async def post_then_disconnect(app: Any, tid: str) -> None:
-    """drive the asgi app directly: the client disconnects once the first token has been sent."""
+async def post_then_disconnect(app: Any, tid: str, at: bytes = b"event: token") -> bytes:
+    """drive the asgi app directly: the client disconnects once the first `at` event (a token) has been sent; what was sent."""
     first_token = asyncio.Event()
     body_sent = False
+    sent: list[bytes] = []
 
     async def receive() -> dict[str, Any]:
         nonlocal body_sent
@@ -293,7 +327,8 @@ async def post_then_disconnect(app: Any, tid: str) -> None:
         return {"type": "http.disconnect"}
 
     async def send(message: dict[str, Any]) -> None:
-        if message["type"] == "http.response.body" and b"event: token" in message.get("body", b""):
+        sent.append(message.get("body", b""))
+        if message["type"] == "http.response.body" and at in message.get("body", b""):
             first_token.set()
 
     path = f"/v1/threads/{tid}/messages"
@@ -305,6 +340,7 @@ async def post_then_disconnect(app: Any, tid: str) -> None:
     assert first_token.is_set()
     if app.state.pending:
         await asyncio.wait(set(app.state.pending), timeout=10)
+    return b"".join(sent)
 
 
 # ---- threads and access
@@ -930,6 +966,14 @@ def test_a_standalone_definition_skips_rewrite_but_still_requires_grounding(
     assert needs_rewrite("Compare X and Y", []) is True
 
 
+def test_a_question_describing_a_practice_is_rewritten() -> None:
+    # its concept may need naming (query_rewrite.v4), so the definition shortcut does not apply.
+    assert needs_rewrite("what goes wrong when a team follows a fixed plan rigidly", []) is True
+    assert needs_rewrite("explain why a team that follows a fixed plan struggles", []) is True
+    assert needs_rewrite("what is the problem if testing comes last", []) is True
+    assert needs_rewrite("What is the waterfall model?", []) is False
+
+
 def test_covered_topics_reuse_the_primary_search(api: TestClient, fakes: Fakes) -> None:
     main.app.state.settings = replace(SETTINGS, adaptive_search=True)
     fakes.results = [
@@ -1040,3 +1084,212 @@ def test_native_heading_markup_counts_toward_context_budget(api: TestClient, fak
     events = post(api, thread(api), "What about transactions?")
     assert events[-1][1]["outcome"] == "no_results"
     assert len(fakes.calls("/v1/inference")) == 1
+
+
+# ---- the support check (answer_check.v1, adr 0025)
+
+
+def notices(events: list[tuple[str, dict[str, Any]]]) -> list[dict[str, Any]]:
+    return [d for e, d in events if e == "notice"]
+
+
+def test_a_supported_answer_is_checked_on_the_check_profile_without_a_notice(
+    api: TestClient, fakes: Fakes, store: MemoryStore
+) -> None:
+    fakes.results = RESULTS
+    fakes.replies += [rewrite("q"), chat_stream(["Light is absorbed [S1]. Stomata let gas in [S2][S1]."])]
+    tid = thread(api)
+    events = post(api, tid, "q")
+    assert tokens(events) == f"Light is absorbed [doc:{C1}]. Stomata let gas in [doc:{C2}][doc:{C1}]."
+    assert events[-1] == (
+        "done",
+        {"message_id": saved(store, tid)["id"], "outcome": "answered", "checking": True},
+    )
+    [check] = fakes.calls(CHECK)
+    assert (check["model_profile"], check["schema_name"], check["response_schema"]) == (
+        "check", "answer_check.v1", prompts.ANSWER_CHECK_SCHEMA)  # fmt: skip
+    assert check["billed_to"] == fakes.calls("/v1/inference")[1]["billed_to"]  # the same student pays
+    body = check["messages"][-1]["content"]
+    assert '<statement id="1" cites="S1">Light is absorbed.</statement>' in body
+    assert '<statement id="2" cites="S2 S1">Stomata let gas in.</statement>' in body
+    assert "Chlorophyll absorbs light." in body and "Figure: the leaf." not in body  # cited passages only
+    answer = saved(store, tid)
+    assert answer["content"] == tokens(events)
+    assert answer["answer_check"]["status"] == "checked"
+    assert answer["answer_check"]["counts"] == {"supported": 2, "partial": 0, "unsupported": 0}
+    assert answer["answer_check"]["statements"][1] == {
+        "statement": "Stomata let gas in.", "chunk_ids": [C2, C1], "verdict": "supported"}  # fmt: skip
+
+
+def test_the_notice_follows_done_and_is_saved(api: TestClient, fakes: Fakes, store: MemoryStore) -> None:
+    fakes.results = RESULTS
+    fakes.replies += [rewrite("q"), chat_stream(["Light is absorbed [S1]. Roots *make* sugar [S2]."])]
+    fakes.checks.append(Fakes.reply_for(["supported", "unsupported"]))
+    tid = thread(api)
+    events = post(api, tid, "q")
+    notice = "\n\nThe cited passages may not support: “Roots make sugar.”."
+    # done comes first, without waiting for the check; the notice is the last event.
+    assert [e for e, _ in events][-3:] == ["citations", "done", "notice"]
+    assert events[-2][1]["checking"] is True
+    answer = saved(store, tid)
+    assert events[-1][1] == {"message_id": answer["id"], "text": notice}
+    assert notice not in tokens(events)
+    assert answer["content"] == tokens(events) + notice
+    assert answer["answer_check"]["counts"] == {"supported": 1, "partial": 0, "unsupported": 1}
+    # a reload of the thread shows it.
+    listed = api.get(f"/v1/threads/{tid}/messages", headers=as_user()).json()["messages"]
+    assert listed[-1]["content"].endswith(notice)
+
+
+def test_a_partial_statement_gets_no_notice(api: TestClient, fakes: Fakes, store: MemoryStore) -> None:
+    fakes.results = RESULTS
+    fakes.replies += [rewrite("q"), chat_stream(["Light is absorbed by green chlorophyll [S1]."])]
+    fakes.checks.append(Fakes.reply_for(["partial"]))
+    tid = thread(api)
+    events = post(api, tid, "q")
+    assert notices(events) == [] and events[-1][0] == "done"
+    assert saved(store, tid)["answer_check"]["counts"]["partial"] == 1
+
+
+@pytest.mark.parametrize(
+    "replies",
+    [
+        [httpx.Response(502, json={"error": {"code": "AI_PROVIDER_FAILED", "message": "x"}})],
+        [
+            httpx.Response(
+                429,
+                json={
+                    "error": {"code": "AI_SPEND_LIMIT", "message": "x"},
+                    "resets_at": "2026-10-14T00:00:00+08:00",
+                },
+            )
+        ],
+        # two replies missing a statement: the first is asked again, the second fails the check.
+        [Fakes.reply_for(["supported"]), Fakes.reply_for(["supported"])],
+    ],
+    ids=["provider", "spend-limit", "faulty-twice"],
+)
+def test_a_failed_check_shows_nothing_and_keeps_the_answer(
+    api: TestClient, fakes: Fakes, store: MemoryStore, replies: list[httpx.Response]
+) -> None:
+    fakes.results = RESULTS
+    fakes.replies += [rewrite("q"), chat_stream(["Light is absorbed [S1]. Stomata open wide [S2]."])]
+    fakes.checks += replies
+    tid = thread(api)
+    events = post(api, tid, "q")
+    text = f"Light is absorbed [doc:{C1}]. Stomata open wide [doc:{C2}]."
+    assert tokens(events) == text
+    assert events[-1][0] == "done" and events[-1][1]["outcome"] == "answered"
+    answer = saved(store, tid)
+    assert (answer["content"], answer["outcome"]) == (text, "answered")
+    assert answer["answer_check"] == {"status": "failed", "prompt_version": "answer_check.v1"}
+    assert len(fakes.calls(CHECK)) == len(replies)
+
+
+def test_a_check_that_cannot_be_saved_leaves_the_answer_as_saved(
+    api: TestClient, fakes: Fakes, store: MemoryStore, caplog: pytest.LogCaptureFixture
+) -> None:
+    async def broken(*_: Any) -> bool:
+        raise RuntimeError("the database went away")
+
+    store.save_check = broken  # type: ignore[method-assign]
+    fakes.results = RESULTS
+    fakes.replies += [rewrite("q"), chat_stream(["Light is absorbed [S1]. Roots make sugar [S2]."])]
+    fakes.checks.append(Fakes.reply_for(["supported", "unsupported"]))
+    tid = thread(api)
+    with caplog.at_level("INFO", logger="question-chatbot-agent.chat"):
+        events = post(api, tid, "q")
+    assert notices(events) == [] and events[-1][0] == "done"
+    answer = saved(store, tid)
+    assert (answer["content"], answer["answer_check"]) == (tokens(events), None)
+    assert "answer_check_save_failed" in [r.getMessage() for r in caplog.records]
+
+
+def test_a_thread_deleted_during_the_check_gets_no_notice(
+    api: TestClient, fakes: Fakes, store: MemoryStore, caplog: pytest.LogCaptureFixture
+) -> None:
+    record = store.save_check
+
+    async def deleted_first(message_id: str, answer_check: dict[str, Any], notice: str | None) -> bool:
+        store.gone.add(tid)  # the classroom's purge commits while the check runs
+        return await record(message_id, answer_check, notice)
+
+    store.save_check = deleted_first  # type: ignore[method-assign]
+    fakes.results = RESULTS
+    fakes.replies += [rewrite("q"), chat_stream(["Light is absorbed [S1]. Roots make sugar [S2]."])]
+    fakes.checks.append(Fakes.reply_for(["supported", "unsupported"]))
+    tid = thread(api)
+    with caplog.at_level("INFO", logger="question-chatbot-agent.chat"):
+        events = post(api, tid, "q")
+    assert notices(events) == [] and events[-1][0] == "done"
+    assert "chat_thread_gone" in [r.getMessage() for r in caplog.records]
+
+
+def test_the_turn_log_waits_for_the_check(
+    api: TestClient, fakes: Fakes, caplog: pytest.LogCaptureFixture
+) -> None:
+    fakes.results = RESULTS
+    fakes.replies += [rewrite("q"), chat_stream(["Light is absorbed [S1]. Roots make sugar [S2]."])]
+    fakes.checks.append(Fakes.reply_for(["supported", "unsupported"]))
+    with caplog.at_level("INFO", logger="question-chatbot-agent.chat"):
+        post(api, thread(api), "q")
+    [turn] = [r for r in caplog.records if r.getMessage() == "chat_turn"]
+    assert (turn.answer_check, turn.unsupported, turn.outcome) == ("checked", 1, "answered")  # type: ignore[attr-defined]
+    assert isinstance(turn.check_ms, int) and isinstance(turn.latency_ms, int)  # type: ignore[attr-defined]
+
+
+def test_a_faulty_check_reply_is_asked_again_once(api: TestClient, fakes: Fakes, store: MemoryStore) -> None:
+    fakes.results = RESULTS
+    fakes.replies += [rewrite("q"), chat_stream(["Light is absorbed [S1]. Roots make sugar [S2]."])]
+    fakes.checks += [Fakes.reply_for(["supported"]), Fakes.reply_for(["supported", "unsupported"])]
+    tid = thread(api)
+    [notice] = notices(post(api, tid, "q"))
+    assert "may not support: “Roots make sugar.”" in notice["text"]
+    first, second = fakes.calls(CHECK)
+    assert "no verdict for statements 2" in second["messages"][-1]["content"]
+    assert second["billed_to"] == first["billed_to"]
+
+
+def test_an_uncited_factual_answer_is_noted_without_a_check(
+    api: TestClient, fakes: Fakes, store: MemoryStore
+) -> None:
+    fakes.results = RESULTS
+    fakes.replies += [rewrite("q"), chat_stream(["Plants turn light into chemical energy in their leaves."])]
+    tid = thread(api)
+    events = post(api, tid, "q")
+    # noted at once, before done, since no model call is needed.
+    assert tokens(events).endswith("\n\nThis answer does not cite the materials.")
+    assert events[-1][0] == "done" and events[-1][1]["checking"] is False
+    assert saved(store, tid)["answer_check"] == {"status": "uncited"}
+    assert fakes.calls(CHECK) == []
+
+
+@pytest.mark.parametrize(
+    "reply",
+    [
+        "What do you think the leaf does with the light it absorbs?",
+        "I couldn't find that in the materials you were given. Try rephrasing, or check the document was uploaded.",
+    ],
+    ids=["guiding-question", "not-found"],
+)
+def test_an_uncited_reply_that_states_nothing_is_not_noted(
+    api: TestClient, fakes: Fakes, store: MemoryStore, reply: str
+) -> None:
+    fakes.results = RESULTS
+    fakes.replies += [rewrite("q"), chat_stream([reply])]
+    tid = thread(api)
+    assert tokens(post(api, tid, "q")) == reply
+    assert saved(store, tid)["answer_check"] is None
+
+
+def test_refusals_and_small_talk_are_not_checked(api: TestClient, fakes: Fakes, store: MemoryStore) -> None:
+    fakes.results = LOW
+    fakes.replies += [rewrite("q"), rewrite("hi", small_talk=True),
+                      chat_stream(["Hello there, it is lovely to see you studying today!"])]  # fmt: skip
+    tid = thread(api)
+    assert post(api, tid, "q")[-1][1] == {"message_id": saved(store, tid)["id"], "outcome": "no_results",
+                                          "checking": False}  # fmt: skip
+    assert saved(store, tid)["answer_check"] is None
+    assert "does not cite" not in tokens(post(api, tid, "hi"))
+    assert saved(store, tid)["answer_check"] is None
+    assert fakes.calls(CHECK) == []

@@ -13,6 +13,7 @@ import { PageHeaderComponent } from '../../shared/page-header';
 import { PagedSection } from '../../shared/paged-section';
 import { PagerComponent } from '../../shared/pager';
 import { RefreshButtonComponent } from '../../shared/refresh-button';
+import { RosterPickerComponent, readRosterPage } from '../../shared/roster-picker';
 import { Section } from '../../shared/section';
 import { SectionStateComponent } from '../../shared/section-state';
 import { StatusComponent } from '../../shared/status';
@@ -44,6 +45,7 @@ import { plural } from '../../shared/format';
     PageHeaderComponent,
     PagerComponent,
     RefreshButtonComponent,
+    RosterPickerComponent,
     SectionStateComponent,
     StatusComponent,
   ],
@@ -57,6 +59,8 @@ export class ResitBuilderComponent implements OnChanges {
   /* the published assessment to resit, from the address; '' while the view is not shown. */
   @Input() assessmentId = '';
   @Input() classroomId = '';
+  /* a student to choose first, from Learning performance (`&student=`); '' for the suggestions alone. */
+  @Input() studentId = '';
   @Input() shown = false;
   /* the new draft, which the page opens in the editor. */
   @Output() readonly created = new EventEmitter<Assessment>();
@@ -70,6 +74,18 @@ export class ResitBuilderComponent implements OnChanges {
   readonly roster = new PagedSection<Student>();
   readonly chosenStudents = signal<ReadonlyMap<string, Student>>(new Map());
   readonly chosenStudentList = computed(() => [...this.chosenStudents().values()]);
+  /* the chosen students' names for the roster picker, '' while one is unknown. */
+  readonly chosenNames = computed(
+    () =>
+      new Map(
+        [...this.students()].map((id) => {
+          const student = this.chosenStudents().get(id);
+          return [id, student ? studentName(student) : ''] as const;
+        }),
+      ),
+  );
+  /* the student the address named, when they are not on the roster, so they could not be chosen. */
+  readonly missingStudent = signal(false);
   readonly bank = new PagedSection<BankQuestion>();
   readonly students = signal<ReadonlySet<string>>(new Set());
   readonly copies = signal<ReadonlySet<string>>(new Set());
@@ -92,6 +108,10 @@ export class ResitBuilderComponent implements OnChanges {
   private readonly finalized = computed<Evaluation[]>(() => this.grades.value()?.grades ?? []);
   /* students who lost marks on a finalized grade. */
   readonly struggling = computed(() => new Set(strugglingStudents(this.finalized())));
+  /* each graded student's finalized marks, for the roster picker. */
+  readonly marks = computed(
+    () => new Map(this.finalized().map((g) => [g.student_id, this.marksOf(g.student_id)] as const)),
+  );
   /* the original's questions the chosen students lost marks on. */
   readonly suggested = computed(() => suggestedQuestions(this.finalized(), this.students()));
   readonly topics = computed(() =>
@@ -113,7 +133,10 @@ export class ResitBuilderComponent implements OnChanges {
   }
 
   ngOnChanges(): void {
-    const key = this.assessmentId && this.classroomId ? `${this.assessmentId}|${this.classroomId}` : '';
+    const key =
+      this.assessmentId && this.classroomId
+        ? `${this.assessmentId}|${this.classroomId}|${this.studentId}`
+        : '';
     if (key === this.opened) return;
     this.opened = key;
     this.reset();
@@ -139,6 +162,7 @@ export class ResitBuilderComponent implements OnChanges {
     this.roster.clear();
     this.roster.page.set(0);
     this.chosenStudents.set(new Map());
+    this.missingStudent.set(false);
     this.bank.clear();
     this.bank.page.set(0);
     this.students.set(new Set());
@@ -155,7 +179,7 @@ export class ResitBuilderComponent implements OnChanges {
 
   /* reads the original, then its grades and the roster beside each other; choices already made are kept. */
   load(): void {
-    const { assessmentId, classroomId } = this;
+    const { assessmentId, classroomId, studentId } = this;
     const current = () => this.assessmentId === assessmentId && this.classroomId === classroomId;
     void this.original
       .load(async () => {
@@ -166,6 +190,11 @@ export class ResitBuilderComponent implements OnChanges {
           throw new Error('Only a published assessment can have a resit. Publish it first.');
         // name every topic its questions use, archived ones included.
         await this.curriculum.need(assessment.questions.map((q) => q.topic_id)).catch(() => undefined);
+        // the student from learning performance is chosen before any suggestion, once.
+        if (studentId && !this.studentsTouched && !this.missingStudent()) {
+          const student = (await this.identityApi.roster(classroomId)).find((s) => s.id === studentId);
+          if (current()) this.preChoose(studentId, student);
+        }
         return assessment;
       })
       .then(() => {
@@ -190,15 +219,23 @@ export class ResitBuilderComponent implements OnChanges {
   }
 
   loadRoster(): void {
-    const { classroomId } = this;
-    void this.roster
-      .load(() =>
-        this.roster.readPage(async (offset, limit) => {
-          const page = await this.identityApi.rosterPage(classroomId, offset, limit);
-          return { items: page.students, total: page.total };
-        }),
-      )
-      .then(() => this.suggest());
+    void readRosterPage(this.identityApi, this.roster, this.classroomId).then(() => this.suggest());
+  }
+
+  /* the roster picker read another page. */
+  rosterRead(): void {
+    this.suggest();
+  }
+
+  /* chooses the student the address named, so suggestions add no one else; one not on the roster is said so. */
+  private preChoose(studentId: string, student: Student | undefined): void {
+    if (!student) {
+      this.missingStudent.set(true);
+      return;
+    }
+    this.students.set(new Set([studentId]));
+    this.chosenStudents.set(new Map([[studentId, student]]));
+    this.studentsTouched = true;
   }
 
   /* the header's refresh: every part again, keeping the choices. */
@@ -259,6 +296,13 @@ export class ResitBuilderComponent implements OnChanges {
 
   // --- choosing
   // -------------------------------------------------------------------------------------------
+
+  /* the roster picker's new choice, applied one student at a time. */
+  chooseStudents(next: ReadonlyMap<string, string>): void {
+    const current = this.students();
+    for (const id of current) if (!next.has(id)) this.toggleStudent(id, false);
+    for (const id of next.keys()) if (!current.has(id)) this.toggleStudent(id, true);
+  }
 
   toggleStudent(id: string, checked: boolean): void {
     if (checked && !this.students().has(id) && this.studentsFull()) return;

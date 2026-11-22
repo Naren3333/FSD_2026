@@ -117,8 +117,9 @@ def test_generate_from_input(api: TestClient, openai_fake: FakeOpenAI) -> None:
         "finish_reason": "stop",
     }
     [req] = openai_fake.requests
+    # the default profile reasons a little, so its 20 visible tokens get 1.5 times the allowance.
     assert (
-        req["messages"] == [{"role": "user", "content": "Say hello"}] and req["max_completion_tokens"] == 20
+        req["messages"] == [{"role": "user", "content": "Say hello"}] and req["max_completion_tokens"] == 30
     )
 
 

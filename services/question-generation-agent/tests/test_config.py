@@ -17,7 +17,12 @@ ENV = {
 def required_env(monkeypatch: pytest.MonkeyPatch) -> None:
     for key, value in ENV.items():
         monkeypatch.setenv(key, value)
-    for key in ("QUESTION_REVIEW", "QUESTION_REVIEW_RETRIES", "QUESTION_REVIEW_DEADLINE"):
+    for key in (
+        "QUESTION_REVIEW",
+        "QUESTION_REVIEW_RETRIES",
+        "QUESTION_REVIEW_DEADLINE",
+        "QUESTION_REVIEW_EFFORT",
+    ):
         monkeypatch.delenv(key, raising=False)
 
 
@@ -54,3 +59,21 @@ def test_retries_are_clamped(monkeypatch: pytest.MonkeyPatch):
 def test_deadline_is_clamped(monkeypatch: pytest.MonkeyPatch, value: str, expected: float):
     monkeypatch.setenv("QUESTION_REVIEW_DEADLINE", value)
     assert config.load().review_deadline == expected
+
+
+def test_the_review_effort_defaults_to_the_check_profiles_own():
+    assert config.load().review_effort is None
+
+
+@pytest.mark.parametrize(
+    ("value", "expected"), [("none", "none"), (" LOW ", "low"), ("medium", "medium"), ("", None)]
+)
+def test_the_review_effort_is_read(monkeypatch: pytest.MonkeyPatch, value: str, expected: str | None):
+    monkeypatch.setenv("QUESTION_REVIEW_EFFORT", value)
+    assert config.load().review_effort == expected
+
+
+def test_an_unknown_review_effort_is_refused(monkeypatch: pytest.MonkeyPatch):
+    monkeypatch.setenv("QUESTION_REVIEW_EFFORT", "high")
+    with pytest.raises(ValueError, match="QUESTION_REVIEW_EFFORT"):
+        config.load()

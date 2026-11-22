@@ -154,6 +154,17 @@
                             Create resit<span class="visually-hidden"> of {{ item.title }}</span>
                           </button>
                         }
+                        @if (item.resit_of) {
+                          <button
+                            type="button"
+                            class="secondary"
+                            [id]="'students-' + item.id"
+                            (click)="changeStudents(item.id, 'students-' + item.id)"
+                            [disabled]="state.busy()"
+                          >
+                            Change students<span class="visually-hidden"> of {{ item.title }}</span>
+                          </button>
+                        }
                         <button
                           type="button"
                           class="icon-button"
@@ -211,11 +222,13 @@
     [showStatus]="view() === 'edit' && !deleting()"
     (save)="save($event)"
     (cancel)="editing() ? stopEditing() : cancelEdit()"
+    (changeStudents)="changeStudents($event, 'resit-change-students')"
   />
 
   <app-resit-builder
     [assessmentId]="resitAddress()"
     [classroomId]="classroomId()"
+    [studentId]="resitStudent()"
     [shown]="view() === 'resit'"
     (created)="resitCreated($event)"
   />
@@ -312,6 +325,8 @@
 @if (!deleting() && (session.isTeacher() ? view() === 'preview' : !studentViewing())) {
   <app-status [state]="state" />
 }
+
+<app-resit-students (saved)="studentsSaved($event)" />
 
 <app-confirm-dialog
   #deleteDialog

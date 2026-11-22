@@ -103,3 +103,38 @@ export function resitRefusal(error: unknown): string {
   const known = error instanceof ApiError ? REFUSALS[error.code] : undefined;
   return known ?? messageOf(error, 'The resit could not be created. Retry later.');
 }
+
+export const ASSIGNEE_REFUSALS: Record<string, string> = {
+  HAS_SUBMISSIONS:
+    'A student you took off has submitted the resit since you opened this, so they stay on it. Reload the students, then save again.',
+  ASSESSMENT_CHANGED:
+    "The resit's students changed while you were choosing. Reload the students, then choose again.",
+  NOT_ASSIGNED: 'This assessment is for the whole class, not a resit, so its students cannot be chosen.',
+  STUDENT_DELETED: 'A student you chose has deleted their account. Take them off, then save again.',
+  STUDENT_NOT_ENROLLED: 'A student you added is no longer in this classroom. Take them off, then save again.',
+};
+
+/* why the server refused a resit's new students, in words that say what to do next. */
+export function assigneeRefusal(error: unknown): string {
+  const known = error instanceof ApiError ? ASSIGNEE_REFUSALS[error.code] : undefined;
+  return known ?? messageOf(error, "The resit's students could not be saved. Retry later.");
+}
+
+/* whether the refusal means the list should be read again before choosing. */
+export function needsReload(error: unknown): boolean {
+  return error instanceof ApiError && ['HAS_SUBMISSIONS', 'ASSESSMENT_CHANGED'].includes(error.code);
+}
+
+/* every student with a grade (draft or finalized) on the assessment, so who has submitted, read 100 at a time up to `pages`. */
+export async function submittedStudents(
+  fetch: (offset: number, limit: number) => Promise<EvaluationPage>,
+  pages = 5,
+): Promise<Set<string>> {
+  const read: Evaluation[] = [];
+  for (let page = 0; page < pages; page++) {
+    const result = await fetch(read.length, GRADE_PAGE);
+    read.push(...result.evaluations);
+    if (!result.evaluations.length || read.length >= result.total) break;
+  }
+  return new Set(read.map((e) => e.student_id));
+}

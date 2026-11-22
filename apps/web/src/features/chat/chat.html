@@ -123,6 +123,9 @@
                     }
                   </div>
                 }
+                @if (isChecking(message)) {
+                  <p class="caption" role="status">Checking the sources…</p>
+                }
                 @if (message.outcome && notes[message.outcome]) {
                   <p class="outcome" [class.error]="message.outcome === 'error'">
                     <span

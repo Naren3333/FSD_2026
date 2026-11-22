@@ -404,3 +404,21 @@ func TestSearchFusesRerankRelatedAndAccess(t *testing.T) {
 		t.Fatalf("fallback: %v", err)
 	}
 }
+
+func TestTheKeywordLegMatchesALongQuestionByAnyOfItsWords(t *testing.T) {
+	f := newFixture(t)
+	f.upload("teaching_material")
+	f.runAll()
+	all := filter{f.org, f.room, nil, nil}
+	// most of these words are in no passage; "leaves" is in one.
+	rows, err := f.s.store.keywordLeg(t.Context(), all, "Could you please explain to me how the leaves of a green plant turn sunlight into food?")
+	if err != nil || len(rows) != 1 || rows[0].Content != "Leaves" {
+		t.Fatalf("%v: %+v", err, rows)
+	}
+	// stop words alone, and punctuation a websearch query would read as operators, match nothing and fail nothing.
+	for _, q := range []string{"the and of", `"or" -not & | ! ' :*`} {
+		if rows, err = f.s.store.keywordLeg(t.Context(), all, q); err != nil || len(rows) != 0 {
+			t.Fatalf("%q: %v %+v", q, err, rows)
+		}
+	}
+}

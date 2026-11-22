@@ -1,8 +1,10 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"learning/platform"
 	"net/http"
 	"net/http/httptest"
@@ -120,9 +122,10 @@ func TestQuotesAgainstTheAnswerAreChecked(t *testing.T) {
 		// one contradicted criterion refuses the whole suggestion, though the other is fine.
 		"one criterion contradicted": {[]map[string]any{criterion("c1", 2, "both read the counter"), against(criterion("c2", 3, "lost"), "one update is lost")}, errContradicted},
 		"a blank quote against":      {[]map[string]any{criterion("c1", 0), against(criterion("c2", 0), "  ")}, errUngrounded},
-		// matching ignores how whitespace runs but not case, so a quote in other case is not in the answer.
-		"other case":       {[]map[string]any{criterion("c1", 0), against(criterion("c2", 0), "TWO THREADS")}, errUngrounded},
+		// matching ignores case, how whitespace runs and which unicode quotes or dashes are used (adr 0024).
+		"other case":       {[]map[string]any{criterion("c1", 0), against(criterion("c2", 0), "TWO THREADS")}, nil},
 		"other whitespace": {[]map[string]any{criterion("c1", 0), against(criterion("c2", 0), "both  read the\ncounter")}, nil},
+		"other words":      {[]map[string]any{criterion("c1", 0), against(criterion("c2", 0), "three threads")}, errUngrounded},
 		"too many quotes":  {[]map[string]any{criterion("c1", 0), against(criterion("c2", 0), tooMany...)}, errors.New("INVALID_OUTPUT")},
 		"none against":     {[]map[string]any{criterion("c1", 0), criterion("c2", 0)}, nil},
 	}
@@ -153,7 +156,7 @@ func TestThePromptAsksForTheWholeAnswerAndExclusions(t *testing.T) {
 	if !strings.Contains(messages[1].Content, "Do not accept Red or Refactor") {
 		t.Fatal("the marking scheme's exclusions were not sent")
 	}
-	c := markingSchema()["properties"].(map[string]any)["criteria"].(map[string]any)["items"].(map[string]any)
+	c := markingSchema(r)["properties"].(map[string]any)["criteria"].(map[string]any)["items"].(map[string]any)
 	if !slices.Contains(c["required"].([]string), "contradicting_quotes") {
 		t.Fatalf("the reply need not say what counts against the answer: %v", c)
 	}
@@ -197,9 +200,79 @@ func TestThePromptKeepsTheAnswerAsData(t *testing.T) {
 }
 
 func TestTheSchemaIsStrict(t *testing.T) {
-	schema := markingSchema()
+	_, r := essayRubric()
+	schema := markingSchema(r)
 	if schema["additionalProperties"] != false || len(schema["required"].([]string)) != 4 {
 		t.Fatalf("%v", schema)
+	}
+}
+
+// each criterion of the reply may only be one of the rubric's criteria, with one of that criterion's own levels.
+func TestTheSchemaNamesEachCriterionsOwnLevels(t *testing.T) {
+	_, r := essayRubric()
+	items := markingSchema(r)["properties"].(map[string]any)["criteria"].(map[string]any)["items"].(map[string]any)
+	options := items["anyOf"].([]any)
+	if len(options) != 2 {
+		t.Fatalf("%v", items)
+	}
+	for i, want := range []struct {
+		id     string
+		points []int
+	}{{"c1", []int{0, 1, 2}}, {"c2", []int{0, 3}}} {
+		o := options[i].(map[string]any)
+		props := o["properties"].(map[string]any)
+		ids := props["criterion_id"].(map[string]any)["enum"].([]string)
+		points := props["points"].(map[string]any)["enum"].([]int)
+		if !slices.Equal(ids, []string{want.id}) || !slices.Equal(points, want.points) || o["additionalProperties"] != false || len(o["required"].([]string)) != 5 {
+			t.Errorf("criterion %s: %v", want.id, o)
+		}
+	}
+	// one criterion needs no anyOf; a level repeated in a rubric is offered once.
+	single := markingSchema(Rubric{Criteria: []Criterion{{ID: "match", Levels: []Level{{0, "No"}, {1, "Yes"}, {1, "Also yes"}}}}})
+	items = single["properties"].(map[string]any)["criteria"].(map[string]any)["items"].(map[string]any)
+	if points := items["properties"].(map[string]any)["points"].(map[string]any)["enum"].([]int); !slices.Equal(points, []int{0, 1}) || items["anyOf"] != nil {
+		t.Fatalf("%v", items)
+	}
+	if body, err := json.Marshal(single); err != nil || len(body) > 20000 {
+		t.Fatalf("%d %v", len(body), err)
+	}
+}
+
+// evidence is matched whatever the case, curly quotes, dashes, invisible characters or whitespace (adr 0024).
+func TestEvidenceIsMatchedAsTheStudentMeantIt(t *testing.T) {
+	q, r := essayRubric()
+	answer := "The thread\u2019s read \u2014 then\u00a0write\u200b \u201closes\u201d an UPDATE."
+	for _, quote := range []string{"the thread's read - then write", `"loses" an update`, "THREAD\u2019S READ", "write \u201closes"} {
+		output := reply(t, []map[string]any{criterion("c1", 2, quote), criterion("c2", 0)}, "")
+		if s, err := checkSuggestion(q, r, answer, output, "m"); err != nil || s.Awarded != 2 {
+			t.Errorf("%q: %+v %v", quote, s, err)
+		}
+	}
+	for _, quote := range []string{"the threads read", "loses an update twice", "\u200b"} {
+		output := reply(t, []map[string]any{criterion("c1", 2, quote), criterion("c2", 0)}, "")
+		if _, err := checkSuggestion(q, r, answer, output, "m"); !errors.Is(err, errUngrounded) {
+			t.Errorf("%q kept: %v", quote, err)
+		}
+	}
+}
+
+// a failed check keeps its code as the suggestion's reason, and says what was wrong for a re-ask.
+func TestAFailedCheckSaysWhatWasWrong(t *testing.T) {
+	q, r := essayRubric()
+	cases := map[string]struct {
+		output, code, says string
+	}{
+		"invented quote":    {reply(t, []map[string]any{criterion("c1", 2, "uses a semaphore"), criterion("c2", 0)}, ""), "UNGROUNDED", `"uses a semaphore", which is not in the student's answer`},
+		"no evidence":       {reply(t, []map[string]any{criterion("c1", 2), criterion("c2", 0)}, ""), "UNGROUNDED", "without an evidence quote"},
+		"missing criterion": {reply(t, []map[string]any{criterion("c1", 0)}, ""), "INVALID_OUTPUT", "these and no others: c1, c2"},
+		"no such level":     {reply(t, []map[string]any{criterion("c1", 1, "lost"), criterion("c2", 2, "lost")}, ""), "INVALID_OUTPUT", `criterion "c2" has 2 points`},
+		"not json":          {"Full marks!", "INVALID_OUTPUT", "not json"},
+	}
+	for name, tc := range cases {
+		_, err := checkSuggestion(q, r, essayAnswer, tc.output, "m")
+		if err == nil || err.Error() != tc.code || !strings.Contains(faultText(err), tc.says) {
+			t.Errorf("%s: %v / %s", name, err, faultText(err))
+		}
 	}
 }
 
@@ -278,14 +351,15 @@ func (f *fakeAI) client() aiSuggester {
 func TestTheMarkingCallNamesWhoPays(t *testing.T) {
 	who := platform.Billed{UserID: "teacher-1", OrgID: "org", Role: "teacher"}
 	f := newFakeAI(t, `{"output":"{}","model_version":"m-2"}`)
-	output, model, err := f.client().generate(t.Context(), schemaSuggestion, []message{{"user", "hi"}}, markingSchema(), who)
+	_, r := essayRubric()
+	output, model, err := f.client().generate(t.Context(), schemaSuggestion, []message{{"user", "hi"}}, markingSchema(r), who)
 	billed, _ := f.body["billed_to"].(map[string]any)
 	if err != nil || output != "{}" || model != "m-2" || f.body["operation"] != "generate" || billed["user_id"] != "teacher-1" || billed["org_id"] != "org" || billed["role"] != "teacher" {
 		t.Fatalf("%q %q %v %v", output, model, err, f.body)
 	}
 	f = newFakeAI(t, `{"output":null,"model_version":"m-2"}`)
 	var e *platform.AIError
-	if _, _, err = f.client().generate(t.Context(), schemaSuggestion, nil, markingSchema(), who); !errors.As(err, &e) || e.Code != "EMPTY_OUTPUT" {
+	if _, _, err = f.client().generate(t.Context(), schemaSuggestion, nil, markingSchema(r), who); !errors.As(err, &e) || e.Code != "EMPTY_OUTPUT" {
 		t.Fatalf("a null output: %v", err)
 	}
 }
@@ -387,10 +461,15 @@ func TestTheCriticMarksBlind(t *testing.T) {
 	}
 }
 
-func TestTheReviewCallHasItsOwnSchemaName(t *testing.T) {
+func TestTheReviewCallHasItsOwnSchemaNameAndProfile(t *testing.T) {
 	who := platform.Billed{UserID: "teacher-1", OrgID: "org", Role: "teacher"}
+	_, r := essayRubric()
 	f := newFakeAI(t, `{"output":"{}","model_version":"m-2"}`)
-	if _, _, err := f.client().generate(t.Context(), schemaReview, []message{{"user", "hi"}}, markingSchema(), who); err != nil || f.body["schema_name"] != "marking.review" {
+	if _, _, err := f.client().generate(t.Context(), schemaSuggestion, []message{{"user", "hi"}}, markingSchema(r), who); err != nil || f.body["model_profile"] != "default" {
+		t.Fatalf("the marker is not on the default profile: %v %v", err, f.body)
+	}
+	// the critic checks on ai-core's check profile (adr 0023), the marker on the default one.
+	if _, _, err := f.client().generate(t.Context(), schemaReview, []message{{"user", "hi"}}, markingSchema(r), who); err != nil || f.body["schema_name"] != "marking.review" || f.body["model_profile"] != "check" {
 		t.Fatalf("%v %v", err, f.body)
 	}
 	if billed, _ := f.body["billed_to"].(map[string]any); billed["user_id"] != "teacher-1" {
@@ -426,5 +505,163 @@ func TestTookSuggestion(t *testing.T) {
 		if got := tookSuggestion(tc.e, s); got != tc.took {
 			t.Errorf("%s: %v", tc.name, got)
 		}
+	}
+}
+
+// scriptedAI answers each marking call with the next of its replies (output or error), keeping what it was sent.
+type scriptedAI struct {
+	replies  []scripted
+	messages [][]message
+	names    []string
+	who      []platform.Billed
+}
+
+type scripted struct {
+	output string
+	err    error
+}
+
+func (f *scriptedAI) generate(_ context.Context, name string, messages []message, _ map[string]any, who platform.Billed) (string, string, error) {
+	f.messages, f.names, f.who = append(f.messages, messages), append(f.names, name), append(f.who, who)
+	next := f.replies[min(len(f.messages), len(f.replies))-1]
+	return next.output, fmt.Sprintf("model-%d", len(f.messages)), next.err
+}
+
+func essayTask() markingTask {
+	return markingTask{status: statusDraft, teacher: "teacher-1", org: "org", answer: essayAnswer}
+}
+
+// a reply that quotes words not in the answer, or is not a valid marking, or that ai-core rejected, is asked
+// again once, with what was wrong and the faulty reply, billed to the same teacher.
+func TestAFaultyReplyIsAskedAgainOnce(t *testing.T) {
+	q, r := essayRubric()
+	good := reply(t, []map[string]any{criterion("c1", 2, "both read the counter"), criterion("c2", 0)}, "")
+	invented := reply(t, []map[string]any{criterion("c1", 2, "uses a semaphore"), criterion("c2", 0)}, "")
+	rejected := &platform.AIError{Status: 502, Code: "AI_OUTPUT_REJECTED"}
+	cases := []struct {
+		name      string
+		first     scripted
+		says      string
+		assistant bool
+	}{
+		{"ungrounded", scripted{output: invented}, "uses a semaphore", true},
+		{"invalid", scripted{output: "Full marks!"}, "not json", true},
+		{"rejected", scripted{err: rejected}, "did not match the required json schema", false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			ai := &scriptedAI{replies: []scripted{tc.first, {output: good}}}
+			s, err := marker{ai: ai}.mark(t.Context(), essayTask(), q, r, markingInstructions, schemaSuggestion)
+			if err != nil || s.Status != suggestionReady || s.Awarded != 2 || s.Model != "model-2" || len(ai.messages) != 2 {
+				t.Fatalf("%+v %v (calls %d)", s, err, len(ai.messages))
+			}
+			first, again := ai.messages[0], ai.messages[1]
+			if !slices.Equal(again[:len(first)], first) || ai.who[1] != ai.who[0] || ai.names[1] != schemaSuggestion {
+				t.Fatalf("the re-ask is not the same task, billed the same: %+v", again)
+			}
+			last := again[len(again)-1]
+			if last.Role != "user" || !strings.HasPrefix(last.Content, "your previous reply failed these checks: ") || !strings.Contains(last.Content, tc.says) || !strings.HasSuffix(last.Content, "return a corrected reply.") {
+				t.Fatalf("%+v", last)
+			}
+			if hasAssistant := len(again) == len(first)+2 && again[len(first)].Role == "assistant" && again[len(first)].Content == tc.first.output; hasAssistant != tc.assistant {
+				t.Fatalf("the faulty reply was not passed back as it should be: %+v", again)
+			}
+		})
+	}
+}
+
+// a re-ask that still fails ends as the first would have; a contradicted reply is never asked again.
+func TestAReaskThatStillFailsEndsTheSuggestion(t *testing.T) {
+	q, r := essayRubric()
+	invented := reply(t, []map[string]any{criterion("c1", 2, "uses a semaphore"), criterion("c2", 0)}, "")
+	contradicted := reply(t, []map[string]any{against(criterion("c1", 2, "both read the counter"), "one update is lost"), criterion("c2", 0)}, "")
+	rejected := &platform.AIError{Status: 502, Code: "AI_OUTPUT_REJECTED"}
+	cases := []struct {
+		name    string
+		replies []scripted
+		reason  string
+		code    string
+		calls   int
+	}{
+		{"ungrounded twice", []scripted{{output: invented}, {output: invented}}, "UNGROUNDED", "", 2},
+		{"ungrounded, then invalid", []scripted{{output: invented}, {output: "nope"}}, "INVALID_OUTPUT", "", 2},
+		{"rejected twice", []scripted{{err: rejected}, {err: rejected}}, "", "AI_OUTPUT_REJECTED", 2},
+		{"contradicted", []scripted{{output: contradicted}}, "CONTRADICTED", "", 1},
+		{"provider failure", []scripted{{err: &platform.AIError{Status: 502, Code: "AI_PROVIDER_FAILED"}}}, "", "AI_PROVIDER_FAILED", 1},
+		{"spend limit on the re-ask", []scripted{{output: invented}, {err: &platform.AIError{Status: 429, Code: "AI_SPEND_LIMIT"}}}, "", "AI_SPEND_LIMIT", 2},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			ai := &scriptedAI{replies: tc.replies}
+			s, err := marker{ai: ai}.mark(t.Context(), essayTask(), q, r, markingInstructions, schemaSuggestion)
+			if len(ai.messages) != tc.calls {
+				t.Fatalf("%d calls", len(ai.messages))
+			}
+			if tc.code != "" {
+				if errorCode(err) != tc.code {
+					t.Fatalf("%+v %v", s, err)
+				}
+				return
+			}
+			if err != nil || s.Status != suggestionFailed || s.Reason != tc.reason || s.Awarded != 0 {
+				t.Fatalf("%+v %v", s, err)
+			}
+		})
+	}
+}
+
+// a re-ask only starts while enough of the call's time is left.
+func TestAReaskNeedsTimeLeft(t *testing.T) {
+	short, cancel := context.WithTimeout(t.Context(), markingReaskLeft/2)
+	defer cancel()
+	if reaskable(short) {
+		t.Fatal("a re-ask with too little time left")
+	}
+	long, cancel := context.WithTimeout(t.Context(), markingReaskLeft*2)
+	defer cancel()
+	if !reaskable(long) {
+		t.Fatal("no re-ask with time left")
+	}
+	q, r := essayRubric()
+	invented := reply(t, []map[string]any{criterion("c1", 2, "uses a semaphore"), criterion("c2", 0)}, "")
+	ai := &scriptedAI{replies: []scripted{{output: invented}, {output: invented}}}
+	s, err := marker{ai: ai}.mark(short, essayTask(), q, r, markingInstructions, schemaSuggestion)
+	if err != nil || s.Reason != "UNGROUNDED" || len(ai.messages) != 1 {
+		t.Fatalf("%+v %v (calls %d)", s, err, len(ai.messages))
+	}
+}
+
+// a short answer that is an accepted answer once quotes, dashes, case and closing punctuation are ignored gets
+// full marks from grading itself; anything else goes to the model.
+func TestAnExactShortAnswerNeedsNoModel(t *testing.T) {
+	q := Question{ID: "q", Type: typeShortAnswer, AcceptedAnswers: []string{"mutual exclusion", "a mutex"}, Points: 2}
+	r, _ := markingRubric(q)
+	for _, answer := range []string{"Mutual exclusion.", "\u201cA mutex\u201d", " 'mutual   exclusion'! ", "a\u00a0mutex\u200b"} {
+		s, ok := exactMatch(q, r, answer)
+		if !ok || s.Status != suggestionReady || s.Awarded != 2 || s.Model != modelExactMatch || s.Confidence != "high" || len(s.Criteria) != 1 || s.Criteria[0].Points != 2 {
+			t.Errorf("%q: %v %+v", answer, ok, s)
+			continue
+		}
+		// the suggestion passes the checks any marking must pass.
+		if err := checkCriterion(repliedCriterion{SuggestedCriterion: s.Criteria[0]}, r.Criteria[0], answer); err != nil {
+			t.Errorf("%q: %v", answer, err)
+		}
+	}
+	for _, answer := range []string{"mutual exclusions", "a mutex or a semaphore", "mutex", "", "  .  ", "mutual-exclusion"} {
+		if s, ok := exactMatch(q, r, answer); ok {
+			t.Errorf("%q matched: %+v", answer, s)
+		}
+	}
+	q.CaseSensitive, q.AcceptedAnswers = true, []string{"NaCl"}
+	r, _ = markingRubric(q)
+	if _, ok := exactMatch(q, r, "nacl"); ok {
+		t.Fatal("case was ignored where it matters")
+	}
+	if _, ok := exactMatch(q, r, "\u201cNaCl.\u201d"); !ok {
+		t.Fatal("a case-sensitive answer in quotes did not match")
+	}
+	free, fr := essayRubric()
+	if _, ok := exactMatch(free, fr, free.Rubric.ModelAnswer); ok {
+		t.Fatal("a free response was exact-matched")
 	}
 }

@@ -71,6 +71,22 @@
           }
         </ul>
       }
+      @if (resits().length) {
+        <h4>Give a resit</h4>
+        <p class="caption">
+          Opens the resit builder with this student chosen, for you to pick questions and create a draft.
+        </p>
+        <ul>
+          @for (a of resits(); track a.id) {
+            <li>
+              {{ a.title }} ·
+              <a routerLink="/assessments" [queryParams]="{ resit: a.id, student: studentId }"
+                >Create resit for this student<span class="visually-hidden"> of {{ a.title }}</span></a
+              >
+            </li>
+          }
+        </ul>
+      }
       @if (dropped()) {
         <p class="caption">{{ dropped() }}</p>
       }

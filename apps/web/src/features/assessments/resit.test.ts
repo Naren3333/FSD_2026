@@ -169,6 +169,7 @@ function setup(
     evaluations: vi.fn(() => Promise.resolve({ evaluations: grades, total: options.total ?? grades.length })),
   };
   const identityApi = {
+    roster: vi.fn(() => Promise.resolve(options.roster ?? roster)),
     rosterPage: vi.fn((_classroom: string, offset: number, limit: number) =>
       Promise.resolve({
         students: (options.roster ?? roster).slice(offset, offset + limit),
@@ -197,14 +198,15 @@ function setup(
   const builder = fixture.componentInstance;
   const created: Assessment[] = [];
   builder.created.subscribe((a) => created.push(a));
-  const open = async (id = 'a1') => {
+  const open = async (id = 'a1', studentId = '') => {
+    fixture.componentRef.setInput('studentId', studentId);
     fixture.componentRef.setInput('assessmentId', id);
     fixture.componentRef.setInput('classroomId', 'c1');
     fixture.detectChanges();
     await settle();
     await settle();
   };
-  return { builder, open, created, assessmentApi, gradingApi };
+  return { builder, open, created, assessmentApi, gradingApi, identityApi };
 }
 
 const lostOnQ1 = [
@@ -360,5 +362,34 @@ describe('the resit builder', () => {
     expect([...builder.students()]).toEqual(['s1']);
     expect([...builder.copies()]).toEqual(['q1']);
     expect(created).toEqual([]);
+  });
+});
+
+describe('a resit for the student from Learning performance', () => {
+  it('chooses that student before suggesting, and suggests no one else', async () => {
+    const { builder, open, identityApi } = setup({ grades: lostOnQ1 });
+    await open('a1', 's2');
+    expect(identityApi.roster).toHaveBeenCalledWith('c1');
+    expect([...builder.students()]).toEqual(['s2']);
+    expect(builder.chosenNames().get('s2')).toBe('Ben');
+    // the questions still follow the chosen student, who lost no marks.
+    expect([...builder.copies()]).toEqual([]);
+    expect(builder.missingStudent()).toBe(false);
+  });
+
+  it('follows the suggestions, and says so, for a student not on the roster', async () => {
+    const { builder, open } = setup({ grades: lostOnQ1 });
+    await open('a1', 'gone');
+    expect(builder.missingStudent()).toBe(true);
+    expect([...builder.students()]).toEqual(['s1']);
+  });
+
+  it('takes the roster picker’s choices one student at a time', async () => {
+    const { builder, open } = setup({ grades: lostOnQ1 });
+    await open();
+    builder.chooseStudents(new Map([['s2', 'Ben']]));
+    expect([...builder.students()]).toEqual(['s2']);
+    expect(builder.chosenStudentList().map((s) => s.id)).toEqual(['s2']);
+    expect([...builder.copies()]).toEqual([]);
   });
 });

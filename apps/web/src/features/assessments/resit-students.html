@@ -1,0 +1,67 @@
+<dialog #dialog aria-labelledby="resit-students-title" (cancel)="onCancel($event)" (close)="onClose()">
+  <h2 id="resit-students-title" tabindex="-1">
+    {{ title() ? 'Change students: ' + title() : 'Change students' }}
+  </h2>
+  <app-section-state [section]="read" loading="Loading the resit's students…" />
+  @if (read.error()) {
+    <button type="button" class="secondary" (click)="load()">Try again</button>
+  }
+  @if (read.ready() && read.value(); as current) {
+    <p class="caption">Choose 1 to {{ maxStudents }} students: {{ chosen().size }} chosen.</p>
+    @if (published()) {
+      <p class="caption">
+        This resit is published: students you add see it at once, and students you take off stop seeing it.
+      </p>
+    } @else {
+      <p class="caption">This resit is a draft, so no student sees it until you publish it.</p>
+    }
+    @if (current.departed.length) {
+      <p class="caption">
+        {{ plural(current.departed.length, 'student') }} on this resit
+        {{ current.departed.length === 1 ? 'is' : 'are' }} no longer in this class and
+        {{ current.departed.length === 1 ? 'is' : 'are' }} shown by id.
+      </p>
+    }
+    <app-roster-picker
+      pickerId="resit-students"
+      [classroomId]="current.assessment.classroom_id"
+      [chosen]="chosen()"
+      [max]="maxStudents"
+      [locked]="locked()"
+      lockedReason="Students who have submitted the resit stay on it."
+      [names]="current.names"
+      [disabled]="state.busy()"
+      (chosenChange)="chosen.set($event)"
+    />
+  }
+  <app-status [state]="state" />
+  @if (stale()) {
+    <button type="button" class="secondary" [disabled]="state.busy()" (click)="load()">
+      Reload the students
+    </button>
+  }
+  <div class="actions">
+    <button type="button" class="secondary" [disabled]="state.busy()" (click)="close()">Cancel</button>
+    <button type="button" [disabled]="state.busy() || !read.ready() || !read.value()" (click)="save()">
+      Save students
+    </button>
+  </div>
+</dialog>
+
+<app-confirm-dialog
+  #removeDialog
+  dialogId="resit-remove"
+  tone="danger"
+  [heading]="'Take ' + plural(removed().length, 'student') + ' off this resit?'"
+  confirmLabel="Take off and save"
+  [state]="removeState"
+  (confirm)="confirmRemove()"
+>
+  <p>
+    <strong>{{ removedNames() }}</strong> will no longer see {{ title() }}. Their saved answers will be
+    deleted. This cannot be undone.
+  </p>
+  @if (added().length) {
+    <p>{{ plural(added().length, 'student') }} you added will see it at once.</p>
+  }
+</app-confirm-dialog>

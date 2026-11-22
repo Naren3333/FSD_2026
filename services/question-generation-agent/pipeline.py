@@ -1,8 +1,9 @@
-"""question generation and marking guidance (adr 0006), with a reviewer pass that sends rejected drafts back for a bounded number of rewrites (adr 0015), and a student's own practice on the same loop (adr 0022)."""
+"""question generation and marking guidance (adr 0006), with a reviewer pass that sends rejected drafts back for a bounded number of rewrites (adr 0015), and a student's own practice on the same loop (adr 0022); the reviewer runs on the check profile and also reviews guidance (adr 0026)."""
 
 import logging
 import time
 from collections import Counter
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import Any, cast
 from uuid import UUID
@@ -18,13 +19,20 @@ from learning_transport import (
     failure,
     require_relation,
 )
-from learning_transport.agents import OUT_OF_TIME, ai_core_refusal, billed_to, unusable_reply
+from learning_transport.agents import (
+    OUT_OF_TIME,
+    CheckFailedError,
+    ai_core_refusal,
+    billed_to,
+    reask_messages,
+    unusable_reply,
+)
 
 import checks
 import prompts
 import review
-from clients import Services, billed
-from config import Settings
+from clients import Services, billed, counted
+from config import MAX_REVIEW_RETRIES, Settings
 from contracts import (
     Generated,
     GenerateRequest,
@@ -49,10 +57,15 @@ GUIDANCE_PASSAGES = 6
 GENERATION_TOKENS = 6000
 GUIDANCE_TOKENS = 2000
 REVIEW_TOKENS = 3000
+GUIDANCE_REVIEW_TOKENS = 1000
+# a request's ai-core requests, re-asks included: three writes and three reviews (adr 0015, 0022). a write's
+# re-ask is only asked while it and the round's review still fit, so a re-ask costs a later round, not a 7th call.
+MAX_CALLS = 2 * (MAX_REVIEW_RETRIES + 1)
 WEAK_DISTRACTORS = "WEAK_DISTRACTORS"
 UNREADABLE_REPLY = "UNREADABLE_REPLY"
 NOT_TEACHER = ("FORBIDDEN", "Only the classroom's teacher can generate questions or marking guidance.")
 NOT_STUDENT = ("FORBIDDEN", "Only a student enrolled in this classroom can generate practice questions.")
+GUIDANCE_REJECTED = "The drafted guidance did not pass the checks. Try again."
 # a practice set with no topic runs the pipeline under this id; it never leaves the agent (adr 0022).
 NO_TOPIC = UUID(int=0)
 
@@ -121,6 +134,16 @@ def held(draft: Generated, review: Review) -> Generated:
     if checks.long_key(draft.question):
         review = Review(status="flagged", note=checks.LONG_KEY_NOTE, round=review.round, source="check")
     return draft.model_copy(update={"review": review})
+
+
+def weak_of(draft: Generated, verdict: review.Verdict) -> tuple[str, ...]:
+    """the draft's wrong options the reviewer named as weak, as the draft wrote them; a name that is not one of them is left out."""
+    q = draft.question
+    wrong = {
+        o.strip().casefold(): o for o in q.options if o.strip().casefold() != q.answer.strip().casefold()
+    }
+    named = (wrong.get(o.casefold()) for o in verdict.weak_options)
+    return tuple(dict.fromkeys(o for o in named if o is not None))
 
 
 def omitted(n: int) -> Review:
@@ -213,6 +236,9 @@ class Run:
     unreviewed: list[Generated] = field(default_factory=list)  # passed the checks; the review did not run
     # flagged drafts with their reason; kept if nothing better turns up
     weak: list[tuple[Generated, str]] = field(default_factory=list)
+    # a teacher's weak-distractor drafts whose key the reviewer verified: also in `weak`, served flagged
+    # and counted toward their type, so no round is paid to rewrite them
+    settled: list[Generated] = field(default_factory=list)
     # every refused question, fed back to the generator
     attempts: list[checks.Rejected] = field(default_factory=list)
     dropped: Counter[str] = field(default_factory=Counter)
@@ -224,9 +250,12 @@ class Run:
 
     @property
     def held(self) -> list[Generated]:
-        """the drafts that may be served."""
-        # practice serves no unreviewed draft, so one neither fills its type nor blocks a rewrite of it (adr 0022).
-        return self.accepted + self.unreviewed if self.audience.serves_unpassed else self.accepted
+        """the drafts that may be served and fill their type."""
+        # practice serves no unreviewed or flagged draft, so one neither fills its type nor blocks a rewrite of
+        # it (adr 0022).
+        if not self.audience.serves_unpassed:
+            return self.accepted
+        return self.accepted + self.unreviewed + self.settled
 
     def shortfall(self, body: GenerateRequest) -> dict[str, int]:
         """how many more of each type are still wanted, leaving out the types that are full."""
@@ -234,7 +263,7 @@ class Run:
         return {t: body.counts[t] - have[t] for t in body.question_types if body.counts[t] > have[t]}
 
     def next_request(self, body: GenerateRequest, shortfall: dict[str, int]) -> GenerateRequest:
-        """the next round's request: the shortfall, with the drafts held as existing; weak and rejected drafts go back only as previous_attempts, so a corrected rewrite is not a duplicate."""
+        """the next round's request: the shortfall, with the drafts held as existing; the other weak and rejected drafts go back only as previous_attempts, so a corrected rewrite is not a duplicate."""
         held = [g.question.prompt for g in self.held]
         # may pass max_existing: the checks compare against all of them, and the prompts keep the newest that fit.
         return body.model_copy(
@@ -275,15 +304,24 @@ class Run:
                 (checks.LONG_KEY, checks.LONG_KEY_NOTE) if long_key else (verdict.reason, verdict.note)
             )
             counts[reason] += 1
-            self.attempts.append(checks.Rejected(draft.question.prompt, draft.question.type, reason))
-            sent_back[reason] += 1
             if reason in (WEAK_DISTRACTORS, checks.LONG_KEY):
                 flagged = Review(
                     status="flagged", note=note, round=n, source="check" if long_key else "reviewer"
                 )
                 self.weak.append((draft.model_copy(update={"review": flagged}), reason))
+                if reason == WEAK_DISTRACTORS and verdict.key_holds and self.audience.serves_unpassed:
+                    # the teacher reviews it anyway, and its key is right: served flagged, not rewritten.
+                    self.settled.append(self.weak[-1][0])
+                    continue
             else:
                 self.dropped[verdict.reason] += 1
+            problem = "" if long_key else verdict.problem
+            self.attempts.append(
+                checks.Rejected(
+                    draft.question.prompt, draft.question.type, reason, problem, weak_of(draft, verdict)
+                )
+            )
+            sent_back[reason] += 1
         return passed
 
     def assembled(self, body: GenerateRequest) -> list[Generated]:
@@ -404,7 +442,7 @@ class Pipeline:
             raise failure(422, "UNKNOWN_TOPIC", unknown)
         return topic.name, f"{topic.name}. {focus}" if focus else topic.name
 
-    async def _ask(
+    async def _ask(  # noqa: PLR0913 - one call, its cut-off, profile and re-ask
         self,
         messages: list[dict[str, str]],
         tokens: int,
@@ -412,11 +450,27 @@ class Pipeline:
         name: str,
         deadline: float | None,
         run: Run,
+        *,
+        profile: str = "default",
+        effort: str | None = None,
+        check: Callable[[str], list[str]] | None = None,
+        reask: int = 0,
     ) -> str:
-        """one model call, paid from the audience's allowance; with a deadline it is cut off then (OUT_OF_TIME, not a failure to report, only the end of the retries), so the request ends before the gateway gives up."""
-        run.calls += 1
+        """one model call and its re-asks, paid from the audience's allowance and counted in run.calls; with a deadline it is cut off then (OUT_OF_TIME, not a failure to report, only the end of the retries), so the request ends before the gateway gives up."""
         payer = billed_to(self.claims, run.audience.payer)
-        return await self.services.generate(messages, tokens, schema, name, self.correlation, payer, deadline)
+        with counted() as calls:
+            try:
+                return await self.services.generate(
+                    messages, tokens, schema, name, self.correlation, payer, deadline,
+                    profile=profile, reasoning_effort=effort, check=check, reask=reask,
+                )  # fmt: skip
+            finally:
+                # one refused before any request still counts as attempted (adr 0015).
+                run.calls += max(calls[0], 1)
+
+    def _first_deadline(self, deadline: float) -> float:
+        """a request's first write is never cut off before its own timeout, as before re-asks; its re-ask must start inside that too. a moment past the timeout, so a slow reply is still ai-core's timeout, not OUT_OF_TIME."""
+        return max(deadline, time.monotonic() + self.services.generate_timeout + 1)
 
     async def _rounds(
         self,
@@ -427,7 +481,7 @@ class Pipeline:
         with_review: bool,
         audience: Audience,
     ) -> tuple[list[Generated], Run]:
-        """generate, review and retry the shortfall (adr 0006); without a review, one round of checks only. a retry needs 1.5 times the longest round to fit in review_deadline, and every call after the first generation is cut off at it. returns the drafts to serve, never none, and the run."""
+        """generate, review and retry the shortfall (adr 0006); without a review, one round of checks only. a retry needs 1.5 times the longest round to fit in review_deadline and its write and review to fit in MAX_CALLS; every call is cut off at the deadline. returns the drafts to serve, never none, and the run."""
         run = Run(audience=audience)
         job = Job(topic, body, passages, started + self.settings.review_deadline, with_review)
         round_started, longest = started, 0.0
@@ -438,6 +492,8 @@ class Pipeline:
                 longest = max(longest, now - round_started)
                 if not shortfall or now - started + 1.5 * longest > self.settings.review_deadline:
                     break
+                if run.calls + 1 + with_review > MAX_CALLS:
+                    break  # a re-ask used this round's calls
                 run.rounds[-1].retried = True
             round_started = now
             request = run.next_request(body, shortfall)
@@ -447,7 +503,9 @@ class Pipeline:
         return self._final(job, run), run
 
     async def _generate(self, job: Job, n: int, request: GenerateRequest, run: Run) -> str | None:
-        """round n's generation call; none when a retry's call failed and the run keeps what it has."""
+        """round n's generation call, asked once more when its reply is refused by ai-core or cannot be read and the re-ask and the round's review still fit in MAX_CALLS; none when a retry's call failed and the run keeps what it has."""
+        reask = int(run.calls + 2 + job.with_review <= MAX_CALLS)
+        deadline = job.deadline if n > 0 else self._first_deadline(job.deadline)
         try:
             output = await self._ask(
                 prompts.generation_messages(
@@ -456,9 +514,20 @@ class Pipeline:
                 GENERATION_TOKENS,
                 prompts.generation_schema(request.question_types),
                 run.audience.generated,
-                job.deadline if n > 0 else None,
+                deadline,
                 run,
+                check=lambda out: checks.reply_faults(out, "questions"),
+                reask=reask,
             )
+        except CheckFailedError:
+            # still unreadable after the re-ask: as an unreadable reply always was.
+            if n == 0:
+                raise unusable_reply() from None
+            run.rounds.append(
+                Round(generated=0, passed_checks=0, passed_review=0, rejected={UNREADABLE_REPLY: 1})
+            )
+            run.unreadable_retry = True
+            return None
         except UpstreamError as e:
             log.warning("generation_failed", extra={"error": str(e), "round": n})
             if n == 0:
@@ -514,6 +583,7 @@ class Pipeline:
                 "rounds": len(run.rounds),
                 "calls": run.calls,
                 "dropped": dict(run.dropped),
+                "prompt_version": prompts.PROMPT_VERSION,
             },
         )
         if not final:
@@ -543,36 +613,117 @@ class Pipeline:
             run.audience.reviewed,
             job.deadline,
             run,
+            profile="check",  # a second opinion, not the writer's settings (adr 0026)
+            effort=self.settings.review_effort,
         )
-        return review.verdicts(output, len(kept))
+        return review.verdicts(output, len(kept), [d.question.type == "multiple_choice" for d in kept])
 
     async def guidance(self, body: GuidanceRequest) -> Guidance:
+        """drafted marking guidance (adr 0006): written, asked once more when it fails the checks, then reviewed on the check profile; a failed review gets the one re-ask if it is unused, and the rewrite is reviewed again (adr 0026). at most four calls: write, review, rewrite, review; or write, re-ask, review."""
+        started = time.monotonic()
         classroom = str(body.classroom_id)
         await require_relation(
             self.services.identity, self.request, classroom, allowed=(RELATION_TEACHER,), denied=NOT_TEACHER
         )
+        deadline = started + self.settings.review_deadline
+        calls = [0]
         try:
             passages = await self._passages(classroom, body.prompt[:MAX_QUERY], body, GUIDANCE_PASSAGES)
-            output = await self.services.generate(
-                prompts.guidance_messages(body.prompt, body.type, body.points, passages),
-                GUIDANCE_TOKENS,
-                prompts.guidance_schema(),
-                "marking.guidance",
-                self.correlation,
-                billed(self.claims),
+            messages = prompts.guidance_messages(body.prompt, body.type, body.points, passages)
+            first = self._first_deadline(deadline)
+            output, guidance = await self._guidance_draft(messages, body, passages, first, 1, calls)
+            reasked = calls[0] > 1
+            if not self.settings.review:
+                return guidance
+            verdict = await self._guidance_review(body, guidance, passages, deadline, calls)
+            if verdict is None or verdict.passed:
+                return guidance
+            if reasked:
+                raise self._guidance_rejected(verdict.reason, calls)  # the re-ask is used up
+            finding = verdict.problem or prompts.PROBLEMS.get(verdict.reason, verdict.reason)
+            faults = [f"a reviewer found that {finding}" + (f" ({verdict.note})" if verdict.note else "")]
+            again = reask_messages(messages, output, faults)
+            _, guidance = await self._guidance_draft(again, body, passages, deadline, 0, calls)
+            verdict = await self._guidance_review(
+                body, guidance, passages, deadline, calls, after_rewrite=True
             )
+            if verdict is not None and not verdict.passed:
+                raise self._guidance_rejected(verdict.reason, calls)
+            return guidance
         except UpstreamError as e:
-            log.warning("guidance_failed", extra={"error": str(e)})
+            log.warning("guidance_failed", extra={"error": str(e), "calls": calls[0]})
             raise refused(e) from None
-        try:
-            return checks.guidance(output, body, passages)
-        except checks.UnreadableOutputError:
-            raise unusable_reply() from None
-        except checks.RuleBrokenError as d:
-            log.info("guidance rejected", extra={"reason": d.reason})
-            raise failure(
-                422, "GUIDANCE_REJECTED", "The drafted guidance did not pass the checks. Try again."
-            ) from None
+
+    async def _guidance_draft(
+        self,
+        messages: list[dict[str, str]],
+        body: GuidanceRequest,
+        passages: list[Passage],
+        deadline: float,
+        reask: int,
+        calls: list[int],
+    ) -> tuple[str, Guidance]:
+        """the drafted guidance and its reply, through the checks; refused as unusable or rejected when it still fails them."""
+
+        def faults(output: str) -> list[str]:
+            try:
+                checks.guidance(output, body, passages)
+            except checks.UnreadableOutputError:
+                return [checks.UNREADABLE]
+            except checks.RuleBrokenError as d:
+                return [prompts.PROBLEMS.get(d.reason, d.reason)]
+            return []
+
+        with counted() as made:
+            try:
+                output = await self.services.generate(
+                    messages, GUIDANCE_TOKENS, prompts.guidance_schema(), "marking.guidance",
+                    self.correlation, billed(self.claims), deadline, check=faults, reask=reask,
+                )  # fmt: skip
+            except CheckFailedError as e:
+                if e.errors == [checks.UNREADABLE]:
+                    raise unusable_reply() from None
+                raise self._guidance_rejected(e.errors[0], calls) from None
+            finally:
+                calls[0] += max(made[0], 1)
+        return output, checks.guidance(output, body, passages)
+
+    async def _guidance_review(
+        self,
+        body: GuidanceRequest,
+        guidance: Guidance,
+        passages: list[Passage],
+        deadline: float,
+        calls: list[int],
+        after_rewrite: bool = False,
+    ) -> review.Verdict | None:
+        """the reviewer's verdict on the guidance; none when it could not run, and the teacher gets the guidance to review as before, unless it is a rewrite of guidance the reviewer failed, which is not served unreviewed."""
+        with counted() as made:
+            try:
+                output = await self.services.generate(
+                    prompts.guidance_review_messages(body.prompt, guidance, body.points, passages),
+                    GUIDANCE_REVIEW_TOKENS, prompts.guidance_review_schema(), "marking.guidance.reviewed",
+                    self.correlation, billed(self.claims), deadline, profile="check",
+                    reasoning_effort=self.settings.review_effort,
+                )  # fmt: skip
+                return review.guidance_verdict(output)
+            except (UpstreamError, checks.UnreadableOutputError) as e:
+                log.warning("guidance_review_failed", extra={"error": str(e)})
+                if not after_rewrite:
+                    return None
+                if isinstance(e, UpstreamError) and e.code != OUT_OF_TIME:
+                    raise
+                raise self._guidance_rejected("NOT_REVIEWED", calls) from None
+            finally:
+                calls[0] += max(made[0], 1)
+
+    @staticmethod
+    def _guidance_rejected(reason: str, calls: list[int]) -> HTTPException:
+        log.info(
+            "guidance rejected",
+            extra={"reason": reason, "calls": calls[0], "prompt_version": prompts.PROMPT_VERSION},
+        )
+        return failure(422, "GUIDANCE_REJECTED", GUIDANCE_REJECTED)
 
     async def _passages(
         self,

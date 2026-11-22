@@ -471,7 +471,14 @@ search_request = obj(
     },
     ["classroom_id", "query"],
 )
-search_response = obj({"results": array(search_hit, maximum=30), "rerank_fallback": {"type": "boolean"}})
+search_response = obj(
+    {
+        "results": array(search_hit, maximum=30),
+        "rerank_fallback": {"type": "boolean"},
+        # the query could not be embedded, so only the keyword leg searched; the rerank still scores it.
+        "embedding_fallback": {"type": "boolean"},
+    }
+)
 classroom = obj({"id": UUID, "name": TEXT, "teacher_id": TEXT})
 TOPIC_NAME = {"type": "string", "minLength": 1, "maxLength": 160}
 curriculum_topic = obj({"id": UUID, "name": TOPIC_NAME})

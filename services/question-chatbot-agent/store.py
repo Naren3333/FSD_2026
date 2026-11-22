@@ -54,6 +54,10 @@ class Store(Protocol):
         """the saved answer's id, ending its claim; none, saving nothing, when the thread is gone."""
         ...
 
+    async def save_check(self, message_id: str, answer_check: dict[str, Any], notice: str | None) -> bool:
+        """records a saved answer's support check (adr 0025), appending its notice to the content; false when the answer is gone."""
+        ...
+
 
 class PostgresStore(AsyncPooled):
     MIGRATIONS = MIGRATIONS
@@ -163,8 +167,8 @@ class PostgresStore(AsyncPooled):
                 ]
             cur = await conn.execute(
                 "INSERT INTO messages (thread_id, role, content, outcome, rewritten_query, sub_queries, is_on_topic,"
-                " retrieved_chunk_ids, citations, prompt_version, model, usage_tokens, latency_ms)"
-                " VALUES (%s, 'assistant', %s, %s, %s, %s, %s, %s::uuid[], %s, %s, %s, %s, %s) RETURNING id",
+                " retrieved_chunk_ids, citations, prompt_version, model, usage_tokens, latency_ms, answer_check)"
+                " VALUES (%s, 'assistant', %s, %s, %s, %s, %s, %s::uuid[], %s, %s, %s, %s, %s, %s) RETURNING id",
                 (
                     thread_id,
                     answer["content"],
@@ -178,6 +182,9 @@ class PostgresStore(AsyncPooled):
                     answer.get("model"),
                     answer.get("usage_tokens"),
                     answer.get("latency_ms"),
+                    None
+                    if answer.get("answer_check") is None
+                    else Jsonb(answer["answer_check"], dumps=json.dumps),
                 ),
             )
             row = await cur.fetchone()
@@ -187,6 +194,16 @@ class PostgresStore(AsyncPooled):
             await conn.execute(RELEASE_TURN, (thread_id, claim))
             assert row is not None
             return str(row["id"])
+
+    async def save_check(self, message_id: str, answer_check: dict[str, Any], notice: str | None) -> bool:
+        async with self.pool.connection() as conn:
+            # appended in sql, so nothing written to the row since the answer was saved is lost.
+            cur = await conn.execute(
+                "UPDATE messages SET answer_check=%s, content=content || %s WHERE id=%s AND role='assistant'"
+                " RETURNING id",
+                (Jsonb(answer_check, dumps=json.dumps), notice or "", message_id),
+            )
+            return await cur.fetchone() is not None
 
 
 async def _hold_thread(conn: AsyncConnection[Any], thread_id: str) -> bool:

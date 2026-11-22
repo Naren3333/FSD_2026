@@ -1,9 +1,11 @@
 import asyncio
 import base64
 import contextlib
+import functools
 import logging
 import os
 import tempfile
+import time
 from collections.abc import AsyncGenerator, AsyncIterator, Awaitable, Callable, Coroutine
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -32,7 +34,16 @@ import openai_client
 import rerank
 import spend
 import spend_report
-from billing import Billing, Slot, StreamBill, ingest_charges, ledger_unavailable, priced, reply_charge
+from billing import (
+    Billing,
+    Slot,
+    StreamBill,
+    ingest_charges,
+    ledger_unavailable,
+    priced,
+    reply_charge,
+    timed,
+)
 from contracts import (
     IngestChunk,
     IngestFigure,
@@ -236,23 +247,39 @@ async def infer(request: RequestContract, http: Request, slot: Slot) -> Any:
     settings = get_settings()
     billed, billing, correlation = request.billed_to, billing_of(http), correlation_of(http)
     await billing.check(billed)
+    # the model, effort and token allowance the reply is sent with: what the ledger records (adr 0023).
+    sent = (
+        openai_client.stream_route(request.max_tokens, request.reasoning_effort)
+        if request.stream
+        else openai_client.route(request.model_profile, request.max_tokens, request.reasoning_effort)
+    )
+    messages = (
+        [m.model_dump() for m in request.messages]
+        if request.messages
+        else [{"role": "user", "content": request.input}]
+    )
+    started, attempts = time.monotonic(), openai_client.Attempts()
+    charge_timeouts = functools.partial(
+        timeouts_charged, billing, billed, correlation, sent=sent, messages=messages, started=started
+    )
     try:
         if request.operation == "embed":
             vectors, tokens = await openai_client.embed([request.input or ""])
-            await billing.charge(billed, correlation, priced("embed", settings.embedding_model, tokens))
+            used = priced("embed", settings.embedding_model, tokens)
+            await billing.charge(billed, correlation, timed(used, "ok", started))
             return ResponseContract(
                 vectors=vectors, model_version=settings.embedding_model, usage_tokens=tokens
             )
-        messages = (
-            [m.model_dump() for m in request.messages]
-            if request.messages
-            else [{"role": "user", "content": request.input}]
-        )
         if request.stream:
             # opened before the response starts, so a provider failure is still a plain error status.
-            stream = openai_client.stream_chat(messages, request.max_tokens)
+            stream = openai_client.stream_chat(
+                messages, request.max_tokens, attempts, request.reasoning_effort
+            )
             first = await anext(stream)
-            bill = StreamBill(billing, billed, correlation, settings.chat_model, messages, request.max_tokens)
+            await charge_timeouts("stream", attempts.timeouts)  # attempts before the one that opened
+            bill = StreamBill(
+                billing, billed, correlation, sent.model, messages, sent.max_completion, started
+            )
 
             async def finish() -> None:
                 try:
@@ -270,40 +297,60 @@ async def infer(request: RequestContract, http: Request, slot: Slot) -> Any:
             request.response_schema,
             name=request.schema_name or "",
             timeout=request.timeout,
+            profile=request.model_profile,
+            effort=request.reasoning_effort,
+            attempts=attempts,
         )
     except openai_client.StructuredOutputError as error:
         # openai bills a refused or cut-off reply like any other: charge it, then refuse it.
-        prompt = message_text(messages)
-        await billing.charge(
-            billed,
-            correlation,
-            reply_charge("generate", settings.chat_model, prompt, error.text, error.usage),
-        )
+        await charge_timeouts("generate", attempts.timeouts)
+        refused = reply_charge("generate", sent.model, message_text(messages), error.text, error.usage)
+        await billing.charge(billed, correlation, timed(refused, "rejected", started))
         provider_error(error)
     except openai.APITimeoutError as error:
         # openai may still finish, and bill, a reply nobody waited for: charge what it could cost (adr
         # 0003).
         if request.operation == "embed":
             embedded = [{"content": request.input}]
-            await billing.charge_timeout(billed, correlation, "embed", settings.embedding_model, embedded, 0)
+            await billing.charge_timeout(
+                billed, correlation, "embed", settings.embedding_model, embedded, 0, started=started
+            )
         else:
             operation = "stream" if request.stream else "generate"
-            await billing.charge_timeout(
-                billed, correlation, operation, settings.chat_model, messages, request.max_tokens
-            )
+            await charge_timeouts(operation, max(attempts.timeouts, 1))
             if operation == "generate":
                 raise failure(504, "AI_TIMEOUT", "The model did not answer in time.") from None
         provider_error(error)
     except PROVIDER_ERRORS as error:
+        await charge_timeouts("stream" if request.stream else "generate", attempts.timeouts)
         provider_error(error)
-    charge = reply_charge("generate", settings.chat_model, message_text(messages), reply.text, reply.usage)
-    await billing.charge(billed, correlation, charge)
+    await charge_timeouts("generate", attempts.timeouts)
+    charge = reply_charge("generate", sent.model, message_text(messages), reply.text, reply.usage)
+    await billing.charge(billed, correlation, timed(charge, "ok", started))
     return ResponseContract(
         output=reply.text,
-        model_version=settings.chat_model,
+        model_version=sent.model,
         usage_tokens=total(reply.usage),
         finish_reason=reply.finish_reason,
     )
+
+
+async def timeouts_charged(  # noqa: PLR0913 - one call's accounting context
+    billing: Billing,
+    billed: spend.Billed,
+    correlation: str,
+    operation: str,
+    count: int,
+    *,
+    sent: openai_client.Route,
+    messages: list[dict[str, Any]],
+    started: float,
+) -> None:
+    """openai may still finish, and bill, each attempt that timed out: charge what each could cost (adr 0003)."""
+    for _ in range(count):
+        await billing.charge_timeout(
+            billed, correlation, operation, sent.model, messages, sent.max_completion, started=started
+        )
 
 
 class ClosingStream(StreamingResponse):
@@ -326,7 +373,7 @@ async def events(
     bill: StreamBill,
 ) -> AsyncIterator[str]:
     """`delta` events with the text, then `done` with the usage; `error` if the provider fails mid-stream."""
-    model = get_settings().chat_model
+    model = bill.model
     item: str | openai_client.Usage | None = first
     try:
         while item is not None:
@@ -339,6 +386,7 @@ async def events(
             item = await anext(stream, None)
     except openai.OpenAIError as error:
         log.warning("provider_failed", extra={"error": type(error).__name__})
+        bill.outcome = "failed"
         if isinstance(error, openai.APITimeoutError):
             await bill.timed_out()  # charged as a non-streamed timeout is
         yield sse_event(
@@ -370,6 +418,7 @@ async def rerank_reserved(request: RerankRequest, http: Request) -> RerankRespon
 async def rerank_billed(request: RerankRequest, http: Request, billing: Billing) -> RerankResponse:
     await billing.check(request.billed_to)
     documents = [passage_text(p.title, p.section_path, p.content, p.source) for p in request.passages]
+    started = time.monotonic()
     try:
         scores, tokens = await rerank.rerank(request.query, documents)
     except PROVIDER_ERRORS as error:
@@ -381,7 +430,7 @@ async def rerank_billed(request: RerankRequest, http: Request, billing: Billing)
         charge = priced("rerank", model, guess, estimated=True)
     else:
         charge = priced("rerank", model, tokens)
-    await billing.charge(request.billed_to, correlation_of(http), charge)
+    await billing.charge(request.billed_to, correlation_of(http), timed(charge, "ok", started))
     return RerankResponse(scores=scores, model_version=model, usage_tokens=tokens)
 
 

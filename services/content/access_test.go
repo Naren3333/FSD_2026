@@ -11,6 +11,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 )
 
 // searchrecorder is a store and an ai-core that record what a search asked for and find nothing.
@@ -173,6 +174,38 @@ func TestStudentsCannotSeeRubricFigures(t *testing.T) {
 		}
 		if served && (files.opened[0] != figureKey("org", tc.id, figure) || w.Body.String() != "png") {
 			t.Errorf("%s: served %v %q", tc.name, files.opened, w.Body.String())
+		}
+	}
+}
+
+// embedfailure is a searchrecorder whose query embedding fails with err.
+type embedFailure struct {
+	*searchRecorder
+	err error
+}
+
+func (e embedFailure) embed(context.Context, string, billed) ([]float32, string, error) {
+	return nil, "", e.err
+}
+
+func TestAFailedQueryEmbeddingSearchesKeywordsOnly(t *testing.T) {
+	body := `{"classroom_id":"` + classID + `","query":"how do leaves make food"}`
+	for _, err := range []error{&aiError{Status: http.StatusBadGateway, Code: "AI_PROVIDER_FAILED"}, context.DeadlineExceeded} {
+		rec := &searchRecorder{}
+		s := server{store: rec, ai: embedFailure{rec, err}, access: platformtest.Access(platform.RelationStudent)}
+		w := platformtest.Serve(s.routes, http.MethodPost, "/v1/search", body, "user", "student")
+		// the keyword leg and the related lookup ran, the vector leg did not.
+		if w.Code != http.StatusOK || !strings.Contains(w.Body.String(), `"embedding_fallback":true`) || len(rec.filters) != 2 {
+			t.Fatalf("%v: %d %s, filters %v", err, w.Code, w.Body.String(), rec.filters)
+		}
+	}
+	// a used-up allowance or too many ai calls still fail the search.
+	limit := &aiError{Status: http.StatusTooManyRequests, Code: "AI_SPEND_LIMIT", ResetsAt: time.Now().Add(time.Hour)}
+	for _, err := range []error{limit, &aiError{Status: http.StatusTooManyRequests, Code: "AI_BUSY"}} {
+		rec := &searchRecorder{}
+		s := server{store: rec, ai: embedFailure{rec, err}, access: platformtest.Access(platform.RelationStudent)}
+		if w := platformtest.Serve(s.routes, http.MethodPost, "/v1/search", body, "user", "student"); w.Code != http.StatusTooManyRequests {
+			t.Fatalf("%v: %d %s", err, w.Code, w.Body.String())
 		}
 	}
 }

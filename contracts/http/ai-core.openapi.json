@@ -1452,9 +1452,29 @@
           },
           "model_profile": {
             "type": "string",
-            "const": "default",
+            "enum": [
+              "default",
+              "check",
+              "fast"
+            ],
             "title": "Model Profile",
             "default": "default"
+          },
+          "reasoning_effort": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "none",
+                  "low",
+                  "medium"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reasoning Effort"
           },
           "timeout": {
             "anyOf": [

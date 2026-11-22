@@ -517,6 +517,10 @@ _EMPTY: dict[str, Any] = {
     "embedding_model": "text-embedding-3-small",
     "chat_model": "gpt-test",
     "chat_reasoning_effort": "none",
+    # the profiles' own models and efforts, so a test can tell which one a call used.
+    "structured_reasoning_effort": "low",
+    "check_model": "gpt-check",
+    "check_reasoning_effort": "medium",
     "voyage_api_key": None,
     "voyage_base_url": "https://voyage.test/v1",
     "reranker_model": "rerank-test",

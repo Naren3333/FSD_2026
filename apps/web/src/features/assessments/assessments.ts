@@ -36,6 +36,7 @@ import {
 import { AnswerSheetComponent, schedule } from './answer-sheet';
 import { AssessmentEditorComponent } from './editor-view';
 import { ResitBuilderComponent } from './resit-builder';
+import { ResitStudentsComponent } from './resit-students';
 import { focusLater } from '../../shared/focus';
 import { plural } from '../../shared/format';
 
@@ -63,6 +64,7 @@ export type AssessmentsView = 'list' | 'edit' | 'preview' | 'resit';
     AnswerSheetComponent,
     AssessmentEditorComponent,
     ResitBuilderComponent,
+    ResitStudentsComponent,
   ],
   templateUrl: './assessments.html',
 })
@@ -103,6 +105,8 @@ export class AssessmentsComponent {
   });
   readonly submittedBy = submittedBy;
   @ViewChild('deleteDialog') deleteDialog?: ConfirmDialogComponent;
+  /* the dialog that changes a resit's students. */
+  @ViewChild(ResitStudentsComponent) resitStudents?: ResitStudentsComponent;
   /* the assessment a link such as student home asked to open (or a teacher's address to edit), until the classroom's list has it. */
   private requested: { id: string; edit: boolean } | null = null;
   /* the assessment the address names to open (`?open=`, or a teacher's `?preview=`), or ''. */
@@ -111,6 +115,8 @@ export class AssessmentsComponent {
   private editAddress = '';
   /* the published assessment the teacher's address names to resit (`?resit=`), or ''. */
   readonly resitAddress = signal('');
+  /* the student the resit is for, from Learning performance (`&student=`), or ''. */
+  readonly resitStudent = signal('');
   /* what to announce once the editor has opened a resit draft just created. */
   private announce: { id: string; message: string } | null = null;
   /* the address's changes, followed one after another since leaving an assessment can wait on a save. */
@@ -143,6 +149,7 @@ export class AssessmentsComponent {
       if (shownClassroom && classroomId !== shownClassroom && named) {
         this.requested = null;
         this.resitAddress.set('');
+        this.resitStudent.set('');
         this.showList();
       }
       shownClassroom = classroomId;
@@ -154,10 +161,11 @@ export class AssessmentsComponent {
       const open = params.get('open') ?? '';
       const edit = params.get('edit') ?? '';
       const resit = edit ? '' : (params.get('resit') ?? '');
+      const student = resit ? (params.get('student') ?? '') : '';
       // a teacher's `?open=` (from a link such as home) is their preview, as it always was.
       const preview = edit || resit ? '' : params.get('preview') || open;
       this.following = this.following.then(() =>
-        this.session.isTeacher() ? this.followTeacher(edit, preview, resit) : this.follow(open),
+        this.session.isTeacher() ? this.followTeacher(edit, preview, resit, student) : this.follow(open),
       );
     });
     // only the list: the topics, documents and any open form stay as they are.
@@ -245,10 +253,11 @@ export class AssessmentsComponent {
   }
 
   /* follows a teacher's address: the assessment it names to edit, to preview or to resit, or the list. */
-  private async followTeacher(edit: string, preview: string, resit = ''): Promise<void> {
+  private async followTeacher(edit: string, preview: string, resit = '', student = ''): Promise<void> {
     this.address = preview;
     this.editAddress = edit;
     this.resitAddress.set(resit);
+    this.resitStudent.set(student);
     this.requested = null;
     const shown = this.sheet?.selected()?.id ?? '';
     if (shown && shown !== preview) this.sheet?.closePreview();
@@ -397,6 +406,22 @@ export class AssessmentsComponent {
       .reload(() => this.readList(classroomId))
       .catch(() => undefined)
       .then(() => this.showEditor(saved.id, true));
+  }
+
+  /* opens the dialog for a resit's students, from its row or the editor's caption. */
+  changeStudents(assessmentId: string, openerId: string): void {
+    this.resitStudents?.open(assessmentId, openerId);
+  }
+
+  /* the resit's new students: the editor's caption and the list's counts follow. */
+  studentsSaved(saved: Assessment): void {
+    const classroomId = this.classroomId();
+    const editing = this.editing();
+    if (editing?.id === saved.id) this.editing.set({ ...editing, assignees: saved.assignees });
+    const count = saved.assignees?.length ?? 0;
+    this.state.error.set('');
+    this.state.message.set(`Students saved: ${saved.title} is assigned to ${plural(count, 'student')}.`);
+    if (classroomId) void this.assessments.reload(() => this.readList(classroomId)).catch(() => undefined);
   }
 
   previewFromList(id: string): void {

@@ -43,6 +43,21 @@ describe('SseParser', () => {
   });
 });
 
+describe('the late notice', () => {
+  it('follows done in the same stream, and renders as the paragraphs it adds', () => {
+    const text = '\n\nThe cited passages may not support: “Roots make sugar.”.';
+    expect(
+      new SseParser().push(
+        `event: done\ndata: {"message_id":"m2","outcome":"answered","checking":true}\n\nevent: notice\ndata: ${JSON.stringify({ message_id: 'm2', text })}\n\n`,
+      ),
+    ).toEqual([
+      { event: 'done', data: { message_id: 'm2', outcome: 'answered', checking: true } },
+      { event: 'notice', data: { message_id: 'm2', text } },
+    ]);
+    expect(markdown('Roots make sugar.' + text, []).map((b) => b.kind)).toEqual(['p', 'p']);
+  });
+});
+
 describe('markdown', () => {
   it('renders the answer subset as data, numbering citations by first use', () => {
     const text = `The materials cover:\n\n- **Processes:** how \`join()\` waits [doc:${B}].\n- *States* [doc:${A}][doc:${'3'.repeat(8)}-3333-4333-8333-333333333333]\n\n1. One\n2. Two`;
@@ -82,6 +97,25 @@ describe('markdown', () => {
       { kind: 'h', items: [[{ kind: 'text', text: 'Steps', ref: 0 }]] },
       { kind: 'pre', items: [[{ kind: 'code', text: 'Thread t = new Thread();\n**x**', ref: 0 }]] },
     ]);
+  });
+  it('shows the support-check notices as their own plain paragraph after a list', () => {
+    const notice = 'The cited passages may not support: “Roots make sugar.”.';
+    expect(markdown(`- Light [doc:${A}]\n\n${notice}`, [cite(A)])).toEqual([
+      {
+        kind: 'ul',
+        items: [
+          [
+            { kind: 'text', text: 'Light ', ref: 0 },
+            { kind: 'ref', text: '', ref: 1 },
+          ],
+        ],
+      },
+      { kind: 'p', items: [[{ kind: 'text', text: notice, ref: 0 }]] },
+    ]);
+    expect(markdown('Plants use light.\n\nThis answer does not cite the materials.', [])[1]).toEqual({
+      kind: 'p',
+      items: [[{ kind: 'text', text: 'This answer does not cite the materials.', ref: 0 }]],
+    });
   });
   it('describes page ranges', () => {
     expect(pages({ page_start: 4, page_end: 4 })).toBe('page 4');

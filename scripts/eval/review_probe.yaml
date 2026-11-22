@@ -1,6 +1,8 @@
 # the reviewer probe (adr 0015): drafts with a known fault, and good controls, sent straight to the deployed
 # reviewer. the passages are written for this probe. `reason` is the fault the reviewer should name; `also` lists
 # other reasons that are a fair reading of the same fault.
+# groups-shown is also dropped by the agent's own pointing check before any review (adr 0026); the probe still sends
+# it, and the summary's missed_after_checks leaves it out.
 topic: Web and database basics
 difficulty: intermediate
 
