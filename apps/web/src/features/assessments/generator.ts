@@ -27,26 +27,22 @@ import { FieldComponent, FieldControlDirective } from '../../shared/field';
 import { IconComponent } from '../../shared/icon';
 import { Section } from '../../shared/section';
 import { SectionStateComponent } from '../../shared/section-state';
+import {
+  MAX_COUNT,
+  MAX_EXISTING,
+  MAX_FOCUS,
+  MAX_SOURCE_DOCUMENTS,
+  sourceDocuments,
+} from '../../shared/generation';
 import { MAX_PROMPT, clipText, draftQuestion, excerptLabel, fromAgent, marksText } from './editor';
 import { focusLater } from '../../shared/focus';
 import { plural } from '../../shared/format';
-
-/* the agent's limits (adr 0006). */
-export const MAX_SOURCE_DOCUMENTS = 10;
-export const MAX_COUNT = 10;
-export const MAX_FOCUS = 300;
-const MAX_EXISTING = 50;
 
 export const GENERATABLE: { value: GeneratableType; label: string }[] = [
   { value: 'multiple_choice', label: 'Multiple choice' },
   { value: 'short_answer', label: 'Short answer' },
   { value: 'free_response', label: 'Written response' },
 ];
-
-/* what questions are generated from: the classroom's indexed teaching materials. */
-export function sourceDocuments(documents: readonly DocumentRecord[]): DocumentRecord[] {
-  return documents.filter((d) => d.doc_type === 'teaching_material' && d.status === 'indexed');
-}
 
 /* why the agent's checks refused drafts, in the teacher's words. */
 const DROPPED: Record<string, string> = {

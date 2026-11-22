@@ -1,0 +1,42 @@
+:host {
+  display: block;
+}
+
+/* one column, wide enough for a question and its options; the page never scrolls sideways. */
+.practice-setup,
+.practice-set {
+  max-width: 960px;
+  margin-bottom: 16px;
+}
+
+.practice-list {
+  list-style: none;
+  padding: 0;
+  margin: 0 0 12px;
+}
+
+.practice-question .choice {
+  margin-bottom: 12px;
+}
+
+.practice-question .option.key {
+  border-color: var(--good);
+}
+
+.practice-feedback {
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px solid var(--line);
+}
+
+.practice-feedback p,
+.practice-feedback blockquote {
+  overflow-wrap: anywhere;
+}
+
+.source-line {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 12px;
+}

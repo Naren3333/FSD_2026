@@ -112,6 +112,14 @@ export const SECTIONS: WorkspaceSection[] = [
     load: () => import('./features/chat/chat').then((m) => m.ChatComponent),
   },
   {
+    path: 'practice',
+    label: 'Practice',
+    studentOnly: true,
+    icon: 'practice',
+    group: 'Learn',
+    load: () => import('./features/practice/practice').then((m) => m.PracticeComponent),
+  },
+  {
     path: 'classrooms',
     label: 'Classrooms',
     teacherOnly: true,

@@ -73,6 +73,40 @@ Rules:
 - Judge only these things. Do not fail a question for style.
 - Return one review for every question, with its number."""
 
+
+def adapted(instructions: str, header: str, changed: dict[str, str]) -> str:
+    """`instructions` with `header` for its first line, and each rule that starts with a key of `changed` replaced by its value (dropped when the value is empty)."""
+    lines = [header]
+    for line in instructions.split("\n")[1:]:
+        key = next((k for k in changed if line.startswith(k)), None)
+        if key is None:
+            lines.append(line)
+        elif changed[key]:
+            lines.append(changed[key])
+    return "\n".join(lines)
+
+
+# a student's practice (adr 0022): the same rules, written for a student revising alone with no teacher review.
+PRACTICE_GENERATION_CHANGES = {
+    "- Write exactly": "- Write exactly the number of questions of each type given in counts, and no other types, at the requested difficulty, about the requested topic and focus when they are given, otherwise about the main ideas of the passages.",
+    "- explanation:": "- explanation: one or two sentences to the student on why the answer is right, saying what the materials state. Do not just repeat the answer.",
+    "- free_response:": "",
+    "- points:": "- points: always 1.",
+}
+PRACTICE_GENERATION_INSTRUCTIONS = adapted(
+    GENERATION_INSTRUCTIONS,
+    "You write practice questions for a student revising on their own from passages of their class materials. No teacher checks them: the student answers them, then sees your key and explanation, so every question and key must be right as written.",
+    PRACTICE_GENERATION_CHANGES,
+)
+PRACTICE_REVIEW_CHANGES = {
+    "- note:": "- note: one sentence on what is wrong. Leave it empty on a pass.",
+}
+PRACTICE_REVIEW_INSTRUCTIONS = adapted(
+    REVIEW_INSTRUCTIONS,
+    "You check practice questions that another writer drafted from passages of a student's class materials. No teacher sees them before the student answers them alone, so fail any question that is not plainly right.",
+    PRACTICE_REVIEW_CHANGES,
+)
+
 STR: dict[str, Any] = {"type": "string"}
 STRS: dict[str, Any] = {"type": "array", "items": STR}
 INT: dict[str, Any] = {"type": "integer"}
@@ -233,8 +267,9 @@ def generation_messages(
     request: GenerateRequest,
     passages: list[Passage],
     previous_attempts: Sequence[Attempt] = (),
+    instructions: str = GENERATION_INSTRUCTIONS,
 ) -> list[dict[str, str]]:
-    """the system and task messages. previous_attempts and existing_questions get what room the rest of the task leaves in one ai-core message, newest first: the older ones beyond it are left out rather than the call refused."""
+    """the system and task messages, under a teacher's or a student's `instructions`. previous_attempts and existing_questions get what room the rest of the task leaves in one ai-core message, newest first: the older ones beyond it are left out rather than the call refused."""
     task: dict[str, Any] = {
         "topic": topic,
         "focus": request.focus,
@@ -243,7 +278,6 @@ def generation_messages(
         "existing_questions": [],
         "passages": _passages(passages),
     }
-    instructions = GENERATION_INSTRUCTIONS
     if previous_attempts:
         # at most a third of the room, so the editor's own questions still fit.
         attempts = _problems(previous_attempts, (MAX_MESSAGE - _size(task)) // 3)
@@ -284,8 +318,9 @@ def review_messages(
     drafts: list[Generated],
     passages: list[Passage],
     existing: list[str],
+    instructions: str = REVIEW_INSTRUCTIONS,
 ) -> list[dict[str, str]]:
-    """the reviewer's system and task messages. the drafts come first, using at most four fifths of one ai-core message (each passage is cut to the same length when they would not fit); existing_questions get what room is left, newest first."""
+    """the reviewer's system and task messages, under a teacher's or a student's `instructions`. the drafts come first, using at most four fifths of one ai-core message (each passage is cut to the same length when they would not fit); existing_questions get what room is left, newest first."""
     cap: int | None = None
     longest = max((len(p.text) for p in passages), default=0)
     while True:
@@ -300,7 +335,7 @@ def review_messages(
         cap = max(((cap or longest) * 3) // 4, MIN_PASSAGE_CAP)
     task["existing_questions"] = _recent(existing, MAX_MESSAGE - _size(task))
     return [
-        {"role": "system", "content": REVIEW_INSTRUCTIONS},
+        {"role": "system", "content": instructions},
         {"role": "user", "content": json.dumps(task, ensure_ascii=False)},
     ]
 

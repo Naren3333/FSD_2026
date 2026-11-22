@@ -247,3 +247,87 @@ def test_probe_drafts_are_valid_questions_with_known_reasons():
 def test_the_probe_plants_every_reviewer_reason(reason):
     _, batches = run_generation.probe_batches()
     assert any(d.get("reason") == reason for b in batches for d in b["drafts"])
+
+
+# ---- practice (adr 0022)
+
+
+def practised(prompt: str, **change) -> dict:
+    return {
+        "prompt": prompt,
+        "type": "multiple_choice",
+        "options": ["Stub", "Driver", "Mock", "Spy"],
+        "answer": "Stub",
+        "accepted_answers": [],
+        "explanation": "A stub stands in for a callee.",
+        "evidence": "A stub stands in for a callee.",
+        "sources": [
+            {"document_id": DOC, "chunk_id": CHUNK, "page": 3, "text": "A stub stands in for a callee."}
+        ],
+        "topic_id": None,
+        **change,
+    }
+
+
+def practice_case(questions: list[dict], **run) -> dict:
+    case = {
+        "run": "x/practice",
+        "review": True,
+        "practice": True,
+        "counts": {"multiple_choice": 2},
+        "document_ids": [DOC],
+        "topic_id": str(uuid.uuid4()),
+        "status": 200,
+        "body": {
+            "questions": questions,
+            "requested": 2,
+            "returned": len(questions),
+            "dropped": {"WEAK_DISTRACTORS": 1},
+            "model_calls": 2,
+        },
+        "latency_ms": 1000,
+        "cost_usd": 0.003,
+        "generate_calls": 2,
+        **run,
+    }
+    run_generation.assess(case, CHUNKS)
+    return case
+
+
+def test_practice_runs_leave_out_what_a_student_cannot_practise():
+    runs = run_generation.practice_runs(
+        [
+            {"id": "a", "counts": {"multiple_choice": 2, "free_response": 1}},
+            {"id": "b", "counts": {"free_response": 2}},
+        ]
+    )
+    assert [(r["run"], r["counts"], r["practice"]) for r in runs] == [
+        ("a/practice", {"multiple_choice": 2}, True)
+    ]
+
+
+def test_practice_questions_are_held_to_the_same_rules_and_carry_their_keys():
+    case = practice_case(
+        [
+            practised("What does a test stub stand in for?"),
+            practised("Which double drives the unit?", answer="Driver"),
+        ]
+    )
+    assert case["failures"] == [] and case["digest"]["statuses"] == {"passed": 2}
+    assert case["digest"]["rejected"] == {"WEAK_DISTRACTORS": 1}
+    bad = practice_case(
+        [
+            practised("Which records calls?", explanation=""),
+            practised("Name a double.", type="short_answer", options=[], answer="", accepted_answers=[]),
+            practised("According to the passage, what is a stub?"),
+        ]
+    )["failures"]
+    for expected in ("no explanation", "no accepted answers", "leans on the materials"):
+        assert any(expected in f for f in bad), expected
+
+
+def test_practice_is_its_own_mode_in_the_summary():
+    teacher = assessed(GOOD)
+    student = practice_case([practised("What does a test stub stand in for?")])
+    modes = run_generation.summarize([teacher, student])["modes"]
+    assert set(modes) == {"review", "practice"} and modes["practice"]["returned_rate"] == 0.5

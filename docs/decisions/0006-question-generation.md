@@ -2,7 +2,7 @@
 
 Status: accepted 2026-10-17. The project owner asked for the plan in `plans/question-generation-design.md` to be built, with these decisions: teachers only, no numerical questions in the first version, and generation before a question bank.
 
-Amended by ADR 0015 (reviewer pass and retries).
+Amended by ADR 0015 (reviewer pass and retries) and ADR 0022 (student self-practice).
 
 ## Context
 
@@ -14,7 +14,7 @@ A teacher who has uploaded a classroom's PDFs still writes every question, accep
 
 - `POST /v1/questions` takes a classroom, 1–10 of its documents, one curriculum topic (called a skill until ADR 0007), 1–3 question types (multiple choice, short answer, free response), a difficulty, a count for each type, 1–10 each and at most 10 in total (amended 2026-10-24), an optional focus, and the prompts already in the editor. It returns drafts in Assessment's own question shape with `requires_teacher_review: true`. Nothing is saved.
 - `POST /v1/marking-guidance` takes a question the teacher wrote (short answer or free response) and documents, and returns suggested accepted answers or a rubric and model answer, plus marking points written as a marking-scheme passage.
-- Only the classroom's teacher may call either (checked at Identity); students and service accounts get 403. Student self-practice would need its own ADR.
+- Only the classroom's teacher may call either (checked at Identity); students and service accounts get 403. Student self-practice is a separate route under ADR 0022.
 - Each request: the topic is read from Curriculum and Content `POST /v1/search` runs with the teacher's token over the chosen documents (12 passages for questions, 6 for guidance). If the best reranked passage is below the relevance floor (`RELEVANCE_FLOOR`, default 0.5, calibrated on the eval corpus on 2026-10-19), the request fails with `422 INSUFFICIENT_SOURCE` instead of generating from too little. If reranking fell back to unscored order, the floor cannot be applied and the request fails with `503 RERANK_UNAVAILABLE`, as the chatbot's turn does. Then one structured `generate` call to ai-core as the `question-generation-agent` service account, billed to the teacher (ADR 0003: spend limit and AI_BUSY become 429).
 
 **Every draft is checked before the teacher sees it; failures are dropped and counted, never padded.**
@@ -37,4 +37,4 @@ A teacher who has uploaded a classroom's PDFs still writes every question, accep
 
 - An existing local setup needs `python scripts/upgrade_local.py` (adds `QUESTION_GENERATION_AGENT_CLIENT_SECRET` and the Keycloak client), then `docker compose up -d --build` and `docker compose restart kong` for the new route.
 - Without provider keys, generation answers `503 SEARCH_UNAVAILABLE` or `AI_PROVIDER_NOT_CONFIGURED`; the editor shows the message.
-- Not built yet: numerical questions, student self-practice, and measuring how many generated questions teachers keep. The relevance floor needs calibrating with real documents. The question bank came in ADR 0017: it keeps `origin` but not `sources`, which stay with their classroom's assessments.
+- Not built yet: numerical questions and measuring how many generated questions teachers keep. The relevance floor needs calibrating with real documents. The question bank came in ADR 0017: it keeps `origin` but not `sources`, which stay with their classroom's assessments.

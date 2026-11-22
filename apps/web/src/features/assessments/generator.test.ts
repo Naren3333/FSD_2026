@@ -8,13 +8,7 @@ import type { DocumentRecord, GenerateResult, Question } from '../../api/models'
 import { AiUsage } from '../../core/ai-usage';
 import { CurriculumNames } from '../../core/curriculum-names';
 import { Section } from '../../shared/section';
-import {
-  QuestionGeneratorComponent,
-  droppedSummary,
-  reviewNote,
-  roundSummary,
-  sourceDocuments,
-} from './generator';
+import { QuestionGeneratorComponent, droppedSummary, reviewNote, roundSummary } from './generator';
 
 beforeAll(() => TestBed.initTestEnvironment(BrowserTestingModule, platformBrowserTesting()));
 
@@ -79,15 +73,6 @@ function setup() {
 }
 
 describe('generation sources', () => {
-  it('offers only indexed teaching materials', () => {
-    const docs = [
-      doc({}),
-      doc({ id: 'scheme', doc_type: 'marking_scheme' }),
-      doc({ id: 'x', status: 'failed' }),
-    ];
-    expect(sourceDocuments(docs).map((d) => d.id)).toEqual(['d1']);
-  });
-
   it('says why drafts were left out', () => {
     expect(droppedSummary({})).toBe('');
     expect(droppedSummary({ EVIDENCE_NOT_FOUND: 1, DUPLICATE: 2 })).toBe(

@@ -1,4 +1,4 @@
-"""fakes for the agent's tests: identity, curriculum, content, ai-core and keycloak's token endpoint behind one httpx MockTransport."""
+"""fakes for the agent's tests: identity, curriculum, content (search and its document list), ai-core and keycloak's token endpoint behind one httpx MockTransport."""
 
 import json
 from collections.abc import Iterator
@@ -65,6 +65,10 @@ class Fakes:
         self.search_body: dict[str, Any] | None = None  # replaces the search reply when set
         self.search_status = 200
         self.search_error: dict[str, Any] = {"error": {"code": "SEARCH_UNAVAILABLE", "message": "x"}}
+        # content's document list, as the caller sees it.
+        self.documents: list[dict[str, Any]] = [
+            {"id": DOC, "classroom_id": ROOM, "title": "Testing slides", "doc_type": "teaching_material"}
+        ]
         self.replies: list[httpx.Response] = []
         self.requests: list[tuple[str, dict[str, Any], httpx.Request]] = []
 
@@ -77,18 +81,17 @@ class Fakes:
         if path == "/token":
             return httpx.Response(200, json={"access_token": "service-token", "expires_in": 300})
         if path.endswith("/access"):
-            classroom = path.split("/")[3]
-            if (token, classroom) in self.teachers:
-                return httpx.Response(200, json={"allowed": True, "relation": "teacher"})
-            if (token, classroom) in self.students:
-                return httpx.Response(200, json={"allowed": True, "relation": "student"})
-            return httpx.Response(403, json={"error": {"code": "FORBIDDEN", "message": "denied"}})
+            return self.access(token, path.split("/")[3])
         if path.startswith("/v1/topics/"):
             if self.topic_status != 200:
                 return httpx.Response(self.topic_status)
             if self.topic is None:
                 return httpx.Response(404, json={"error": {"code": "NOT_FOUND", "message": "x"}})
             return httpx.Response(200, json=self.topic)
+        if path == "/v1/documents/page":
+            offset, limit = int(request.url.params["offset"]), int(request.url.params["limit"])
+            page = self.documents[offset : offset + limit]
+            return httpx.Response(200, json={"items": page, "total": len(self.documents)})
         if path == "/v1/search":
             if self.search_status != 200:
                 return httpx.Response(self.search_status, json=self.search_error)
@@ -99,6 +102,14 @@ class Fakes:
             assert token == "Bearer service-token", "ai-core must get the agent's token"
             return self.replies.pop(0)
         return httpx.Response(404)
+
+    def access(self, token: str | None, classroom: str) -> httpx.Response:
+        """identity's answer: the caller's relation to the classroom, or 403."""
+        if (token, classroom) in self.teachers:
+            return httpx.Response(200, json={"allowed": True, "relation": "teacher"})
+        if (token, classroom) in self.students:
+            return httpx.Response(200, json={"allowed": True, "relation": "student"})
+        return httpx.Response(403, json={"error": {"code": "FORBIDDEN", "message": "denied"}})
 
     def calls(self, path: str) -> list[dict[str, Any]]:
         return [body for p, body, _ in self.requests if p == path]

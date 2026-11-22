@@ -165,7 +165,7 @@ flowchart TD
 
 ## 3. Question generation critic loop
 
-Built. A reviewer model pass checks each generated question against its cited passages only: answerable, key matches what the reviewer worked out, one right answer, plausible wrong options, not a repeat. Rejected drafts go back to the generator with the reason, up to two retries inside one deadline; weak wrong options are flagged for the teacher instead of dropped, and a reviewer failure returns drafts marked not reviewed. Teachers can skip the review per request. Services: question-generation-agent, ai-core, web generator panel. See ADR 0015.
+Built. A reviewer model pass checks each generated question against its cited passages only: answerable, key matches what the reviewer worked out, one right answer, plausible wrong options, not a repeat. Rejected drafts go back to the generator with the reason, up to two retries inside one deadline; weak wrong options are flagged for the teacher instead of dropped, and a reviewer failure returns drafts marked not reviewed. Teachers can skip the review per request. Student practice (ADR 0022) runs the same loop with the review always on and keeps only passed drafts. Services: question-generation-agent, ai-core, web generator panel and Practice page. See ADR 0015.
 
 One request, from passages to drafts (defaults: two retries, a 240-second deadline, so at most three writes and three reviews):
 

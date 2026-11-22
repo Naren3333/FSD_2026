@@ -122,7 +122,9 @@
     }
   }
   @if (session.isStudent() && classroomId()) {
-    <p class="caption">Generated practice is not available yet.</p>
+    <p class="caption">
+      Want to check what you know? <a routerLink="/practice">Practise from your class's materials</a>.
+    </p>
   }
 </section>
 @if (session.isTeacher() && result.ready() && result.value(); as shown) {

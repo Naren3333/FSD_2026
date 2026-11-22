@@ -2,7 +2,7 @@ import { DecimalPipe, PercentPipe } from '@angular/common';
 import { Component, computed, inject } from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { FormControl, ReactiveFormsModule } from '@angular/forms';
-import { ActivatedRoute } from '@angular/router';
+import { ActivatedRoute, RouterLink } from '@angular/router';
 import { AnalyticsApi, IdentityApi } from '../../api/clients';
 import type { Performance, Student } from '../../api/models';
 import { ClassroomContext, onClassroomChange } from '../../core/classroom-context';
@@ -22,6 +22,7 @@ import { InterpretationComponent } from './interpretation';
   selector: 'app-performance',
   standalone: true,
   imports: [
+    RouterLink,
     PageHeaderComponent,
     RefreshButtonComponent,
     NoClassroomComponent,

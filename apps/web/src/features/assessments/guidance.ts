@@ -18,7 +18,7 @@ import {
   optionLines,
   type QuestionForm,
 } from './editor';
-import { MAX_SOURCE_DOCUMENTS, sourceDocuments } from './generator';
+import { MAX_SOURCE_DOCUMENTS, sourceDocuments } from '../../shared/generation';
 import { focusLater } from '../../shared/focus';
 
 /* the accepted answers with the suggested ones added after them, without repeats, up to assessment's limit. */

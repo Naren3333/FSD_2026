@@ -20,7 +20,7 @@ Students start on Home. On wide screens the to-do list sits on the left and ever
 - The current item has the `--navy-2` fill and a 3px `--accent` bar on its left. Grading review shows a count badge of drafts waiting, with hidden text "N grades to review".
 - Navigation groups, in order (`apps/web/src/app.routes.ts`):
   - Teacher: Class dashboard; **Teach**: Assessments, Question bank, Teaching materials, Students, Curriculum; **Review**: Grading review, Learning performance; **Assistant**: Ask the materials; **Setup**: Classrooms.
-  - Student: Home; **My work**: Assessments, My results, My progress; **Learn**: Teaching materials, Ask the materials.
+  - Student: Home; **My work**: Assessments, My results, My progress; **Learn**: Teaching materials, Ask the materials, Practice.
   - School admin (ADR 0019): **School admin**: Classrooms, Accounts, Monitoring, in its own shell with no classroom select or AI meter.
 - The classroom choice is remembered per user in this browser (`apps/web/src/core/classroom-context.ts`). If the saved classroom is gone, or storage is blocked, the first classroom in the list is chosen.
 - A 56px sticky top bar (`styles.css:619`) holds the AI meter pill on the right.

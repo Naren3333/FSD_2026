@@ -1,0 +1,290 @@
+<app-page-header
+  title="Practice"
+  subtitle="Questions AI writes from your class's teaching materials, to check what you know. Nothing is saved or graded."
+>
+  <app-refresh-button
+    label="Refresh materials"
+    [busy]="documents.loading()"
+    [disabled]="state.busy() || !classroomId()"
+    (refresh)="refresh()"
+  />
+</app-page-header>
+@if (!classroomId()) {
+  <app-no-classroom>
+    <p class="empty">Choose a classroom to practise from its teaching materials.</p>
+  </app-no-classroom>
+} @else {
+  <section class="panel practice-setup" aria-labelledby="practice-setup-title">
+    <h3 id="practice-setup-title">Choose what to practise</h3>
+    <p class="caption">
+      AI writes each set from the materials you choose, and a second AI check reviews every question against
+      them; questions it doubts are left out. A mistake in the materials can still appear in a question. Each
+      set uses your daily AI allowance.
+    </p>
+    <app-section-state [section]="documents" loading="Loading teaching materials…" />
+    @if (documents.error()) {
+      <button type="button" class="secondary" (click)="refresh()">Try again</button>
+    }
+    @if (documents.ready()) {
+      @if (choices().length) {
+        <fieldset class="levels">
+          <legend>Teaching materials (up to {{ maxDocuments }})</legend>
+          @for (doc of choices(); track doc.id) {
+            <label class="check">
+              <input
+                #docBox
+                type="checkbox"
+                [checked]="chosen().includes(doc.id)"
+                [disabled]="state.busy()"
+                (change)="toggleDocument(doc.id, docBox.checked)"
+              />
+              {{ doc.title }}
+            </label>
+          }
+        </fieldset>
+        <div class="field-row">
+          <app-field
+            controlId="practice-topic"
+            label="Topic (optional)"
+            [hint]="topicList.error() ? 'Topics could not be loaded; you can practise without one.' : ''"
+          >
+            <select appFieldControl id="practice-topic" [formControl]="topic">
+              <option value="">Any topic</option>
+              @for (t of topicList.value() ?? []; track t.id) {
+                <option [value]="t.id">{{ t.name }}</option>
+              }
+            </select>
+          </app-field>
+          <app-field controlId="practice-difficulty" label="Difficulty">
+            <select appFieldControl id="practice-difficulty" [formControl]="difficulty">
+              <option value="introductory">Introductory</option>
+              <option value="intermediate">Intermediate</option>
+              <option value="advanced">Advanced</option>
+            </select>
+          </app-field>
+        </div>
+        <app-field
+          controlId="practice-focus"
+          label="Focus (optional)"
+          [hint]="
+            'An idea or chapter to concentrate on. ' + focus.value.length + ' of ' + maxFocus + ' characters.'
+          "
+        >
+          <input
+            appFieldControl
+            id="practice-focus"
+            [formControl]="focus"
+            [maxlength]="maxFocus"
+            (keydown.enter)="$event.preventDefault(); generate()"
+          />
+        </app-field>
+        <fieldset class="levels">
+          <legend>How many questions</legend>
+          @for (type of types; track type.value) {
+            <div class="type-row">
+              <label class="check" [for]="'practice-count-' + type.value">{{ type.label }}</label>
+              <input
+                #countBox
+                type="number"
+                min="0"
+                [max]="maxCount"
+                [id]="'practice-count-' + type.value"
+                [value]="counts()[type.value]"
+                (input)="setCount(type.value, countBox.valueAsNumber)"
+                (keydown.enter)="$event.preventDefault(); generate()"
+              />
+            </div>
+          }
+          <p class="caption" aria-live="polite">{{ totalText() }}</p>
+        </fieldset>
+        <div class="button-row">
+          <button id="practice-generate" type="button" (click)="generate()" [disabled]="state.busy()">
+            Generate practice
+          </button>
+        </div>
+        @if (note()) {
+          <p class="error" role="alert">{{ note() }}</p>
+        }
+      } @else {
+        <p class="empty">
+          No indexed teaching materials in this classroom yet. Your teacher adds them under Teaching
+          materials; once one is indexed you can practise from it here.
+        </p>
+      }
+    }
+    @if (state.busy()) {
+      <p role="status" aria-live="polite">
+        Writing and checking your questions… this can take a few minutes.
+      </p>
+    }
+    <app-status [state]="state" />
+  </section>
+
+  @if (attempts().length) {
+    <section class="panel practice-set" aria-labelledby="practice-set-title">
+      <div class="panel-heading">
+        <h3 id="practice-set-title">Your practice</h3>
+        <p class="caption" aria-live="polite">{{ score() }}</p>
+      </div>
+      @if (short().missing) {
+        <p class="caption">{{ shortText() }}</p>
+      }
+      @if (openError()) {
+        <p role="alert" class="error">{{ openError() }}</p>
+      }
+      <ol class="practice-list">
+        @for (a of attempts(); track $index; let i = $index) {
+          <li class="suggestion practice-question">
+            <p class="draft-head">
+              <span class="badge ai-chip"><app-icon name="sparkles" [size]="14" />AI-written practice</span>
+              <span class="caption">
+                Question {{ i + 1 }} · {{ typeName(a.question.type) }}
+                @if (topicName(a.question.topic_id); as name) {
+                  · {{ name }}
+                }
+              </span>
+            </p>
+            <p class="answer-text" [id]="'practice-' + i + '-prompt'" tabindex="-1">
+              {{ a.question.prompt }}
+            </p>
+            @if (a.question.type === 'multiple_choice') {
+              <fieldset
+                class="choice"
+                role="radiogroup"
+                [attr.aria-labelledby]="'practice-' + i + '-prompt'"
+                [attr.aria-describedby]="missing() === i ? 'practice-' + i + '-missing' : null"
+              >
+                @for (option of a.question.options; track option; let first = $first) {
+                  <label class="option" [class.key]="a.correct !== null && option === a.question.answer">
+                    <!-- one name per question makes a real radio group: one tab stop, arrow keys between options. -->
+                    <input
+                      type="radio"
+                      [attr.name]="'practice-' + i"
+                      [id]="first ? 'practice-' + i + '-answer' : null"
+                      [value]="option"
+                      [checked]="a.answer === option"
+                      [disabled]="a.correct !== null"
+                      (change)="setAnswer(i, option)"
+                    />
+                    <span>{{ option }}</span>
+                    @if (a.correct !== null && option === a.question.answer) {
+                      <span class="badge badge-good">Answer</span>
+                    }
+                  </label>
+                }
+              </fieldset>
+            } @else {
+              <app-field
+                class="answer-short"
+                [controlId]="'practice-' + i + '-answer'"
+                label="Your answer"
+                error="Type an answer first."
+                [invalid]="missing() === i"
+              >
+                <input
+                  #shortBox
+                  appFieldControl
+                  [id]="'practice-' + i + '-answer'"
+                  maxlength="500"
+                  [value]="a.answer"
+                  [disabled]="a.correct !== null"
+                  (input)="setAnswer(i, shortBox.value)"
+                  (keydown.enter)="$event.preventDefault(); check(i)"
+                />
+              </app-field>
+            }
+            @if (missing() === i && a.question.type === 'multiple_choice') {
+              <p class="error" [id]="'practice-' + i + '-missing'">Choose an answer first.</p>
+            }
+            @if (a.correct === null) {
+              <div class="button-row">
+                <button type="button" class="secondary" [id]="'practice-' + i + '-check'" (click)="check(i)">
+                  Check answer<span class="visually-hidden"> to question {{ i + 1 }}</span>
+                </button>
+              </div>
+            } @else {
+              <div
+                class="practice-feedback"
+                role="group"
+                tabindex="-1"
+                [id]="'practice-' + i + '-feedback'"
+                [attr.aria-label]="'Feedback on question ' + (i + 1)"
+              >
+                <p>
+                  @if (a.correct) {
+                    <span class="badge badge-good">Correct</span>
+                  } @else if (a.question.type === 'multiple_choice') {
+                    <span class="badge badge-danger">Incorrect</span>
+                  } @else {
+                    <span class="badge badge-warning">Compare your answer</span>
+                  }
+                </p>
+                @if (a.question.type === 'multiple_choice') {
+                  @if (!a.correct) {
+                    <p>You chose: {{ a.answer }}. The answer is: {{ a.question.answer }}</p>
+                  }
+                } @else {
+                  <p>Your answer: {{ a.answer }}</p>
+                  <p>Accepted answers: {{ a.question.accepted_answers.join('; ') }}</p>
+                  @if (!a.correct) {
+                    <p class="caption">
+                      Your answer did not match these exactly. If it says the same thing in other words, it
+                      may still be right.
+                    </p>
+                  }
+                }
+                <p>Why: {{ a.question.explanation }}</p>
+                <blockquote>{{ a.question.evidence }}</blockquote>
+                <details class="scheme-used">
+                  <summary>
+                    From {{ a.question.sources.length }}
+                    {{ a.question.sources.length === 1 ? 'passage' : 'passages' }} of your materials
+                  </summary>
+                  @for (excerpt of a.question.sources; track $index) {
+                    <p class="caption source-line">
+                      {{ source(excerpt) }}
+                      @if (excerpt.document_id) {
+                        <button type="button" class="quiet" (click)="open(excerpt)">
+                          Open document<span class="visually-hidden"> {{ source(excerpt) }}</span>
+                        </button>
+                      }
+                    </p>
+                    <p class="passage">{{ excerpt.text }}</p>
+                  }
+                </details>
+              </div>
+            }
+          </li>
+        }
+      </ol>
+      <div class="button-row">
+        <button
+          type="button"
+          class="secondary"
+          id="practice-more"
+          (click)="generate(true)"
+          [disabled]="state.busy() || attempts().length >= maxExisting"
+        >
+          More questions
+        </button>
+        <button type="button" class="quiet" (click)="clear()" [disabled]="state.busy()">New set</button>
+      </div>
+      @if (attempts().length >= maxExisting) {
+        <p class="caption">This set has as many questions as it can hold. Start a new set to keep going.</p>
+      }
+    </section>
+  }
+  <app-confirm-dialog
+    #replaceDialog
+    dialogId="replace-practice"
+    heading="Replace this practice set?"
+    confirmLabel="Generate new set"
+    [state]="replaceState"
+    (confirm)="confirmReplace()"
+  >
+    <p>
+      {{ uncheckedText() }} A new set replaces this one and they are lost. To add questions to this set
+      instead, use More questions.
+    </p>
+  </app-confirm-dialog>
+}

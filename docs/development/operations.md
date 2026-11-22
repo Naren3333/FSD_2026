@@ -254,6 +254,8 @@ The summary pools every case: struggling precision (against analytics' truth), s
 
 The summary compares the two modes: returned rate, review statuses, reasons, calls, cost and latency.
 
+`--practice` runs the same cases through `/v1/practice` (ADR 0022) as the corpus classroom's enrolled student (`student` for C1, `eval-student2` for C2), billed to that student, with free-response counts left out and the review always on. A practice run also fails when a question comes back without a passed review, or without its key, explanation or sources.
+
 `--probe` adds the reviewer probe and `--probe-only` runs it alone (no corpus needed). It sends the planted drafts of `review_probe.yaml` (passages written for it; good controls and drafts with each fault the reviewer names) to the deployed reviewer. `probe_inside.py` runs inside the `question-generation-agent` container with its own prompt, client and verdict reader, billed to the teacher through ai-core. It reports:
 
 - the catch rate (faulty drafts failed);

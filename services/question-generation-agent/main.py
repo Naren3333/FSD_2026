@@ -1,4 +1,4 @@
-"""question generation (adr 0006): a classroom's teacher generates assessment questions, or marking guidance for a question they wrote, from the classroom's documents they choose."""
+"""question generation (adr 0006): a classroom's teacher generates assessment questions, or marking guidance for a question they wrote, from the classroom's documents they choose; an enrolled student generates practice questions for themselves (adr 0022)."""
 
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
@@ -8,6 +8,7 @@ import httpx
 from fastapi import Depends, Request
 from learning_transport import (
     OIDC_SETTINGS,
+    STUDENT,
     TEACHER,
     Claims,
     ErrorResponse,
@@ -18,7 +19,14 @@ from learning_transport import (
 
 import config
 from clients import Services
-from contracts import GenerateRequest, GenerateResponse, Guidance, GuidanceRequest
+from contracts import (
+    GenerateRequest,
+    GenerateResponse,
+    Guidance,
+    GuidanceRequest,
+    PracticeRequest,
+    PracticeResponse,
+)
 from pipeline import Pipeline
 
 ERRORS: dict[int | str, dict[str, Any]] = {
@@ -40,6 +48,8 @@ app = application("question-generation-agent", lifespan=lifespan)
 
 # teachers only; students and service accounts may not (adr 0006).
 TEACHER_ONLY = requires(TEACHER)
+# practice is a student's own; teachers and service accounts may not (adr 0022).
+STUDENT_ONLY = requires(STUDENT)
 
 
 def pipeline(request: Request, claims: Claims) -> Pipeline:
@@ -64,3 +74,9 @@ async def marking_guidance(
 ) -> Any:
     """a rubric or accepted answers, and marking points, for a question the teacher wrote; nothing is saved."""
     return await pipeline(request, claims).guidance(body)
+
+
+@app.post("/v1/practice", response_model=PracticeResponse, responses=ERRORS)
+async def practice(body: PracticeRequest, request: Request, claims: Claims = Depends(STUDENT_ONLY)) -> Any:
+    """reviewed practice questions with their keys, from the classroom's documents the student chooses, for their own ungraded use; nothing is saved."""
+    return await pipeline(request, claims).practice(body)

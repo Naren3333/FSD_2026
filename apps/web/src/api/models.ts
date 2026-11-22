@@ -161,6 +161,11 @@ export type GenerateRound = Generation['Round'];
 /* marking guidance for a short answer or free response the teacher wrote. */
 export type GuidanceRequest = Generation['GuidanceRequest'];
 export type Guidance = Generation['Guidance'];
+/* what a student asks for to practise from the classroom's materials, and the reviewed questions with their keys (adr 0022). */
+export type PracticeRequest = Generation['PracticeRequest'];
+export type PracticeType = Generation['PracticeQuestion']['type'];
+export type PracticeQuestion = Generation['PracticeQuestion'];
+export type PracticeResult = Generation['PracticeResponse'];
 
 /* the performance agent's draft interpretation of one student's finalized results, for their teacher (adr 0014). */
 export type Interpretation = PerformanceAgentApi['schemas']['ResponseContract'];

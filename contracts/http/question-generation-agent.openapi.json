@@ -237,6 +237,95 @@
           }
         }
       }
+    },
+    "/v1/practice": {
+      "post": {
+        "summary": "Practice",
+        "description": "reviewed practice questions with their keys, from the classroom's documents the student chooses, for their own ungraded use; nothing is saved.",
+        "operationId": "practice_v1_practice_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PracticeRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PracticeResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Unprocessable Content",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Too Many Requests",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "Bad Gateway",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Service Unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
     }
   },
   "components": {
@@ -769,6 +858,205 @@
           "descriptor"
         ],
         "title": "Level"
+      },
+      "PracticeQuestion": {
+        "properties": {
+          "prompt": {
+            "type": "string",
+            "title": "Prompt"
+          },
+          "type": {
+            "type": "string",
+            "enum": [
+              "multiple_choice",
+              "short_answer"
+            ],
+            "title": "Type"
+          },
+          "options": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Options"
+          },
+          "answer": {
+            "type": "string",
+            "title": "Answer"
+          },
+          "accepted_answers": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Accepted Answers"
+          },
+          "explanation": {
+            "type": "string",
+            "title": "Explanation"
+          },
+          "evidence": {
+            "type": "string",
+            "title": "Evidence"
+          },
+          "sources": {
+            "items": {
+              "$ref": "#/components/schemas/Excerpt"
+            },
+            "type": "array",
+            "maxItems": 5,
+            "minItems": 1,
+            "title": "Sources"
+          },
+          "topic_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Topic Id"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "prompt",
+          "type",
+          "options",
+          "answer",
+          "accepted_answers",
+          "explanation",
+          "evidence",
+          "sources",
+          "topic_id"
+        ],
+        "title": "PracticeQuestion",
+        "description": "a question with its key, for the student's own ungraded use: never stored or marked (adr 0022)."
+      },
+      "PracticeRequest": {
+        "properties": {
+          "classroom_id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Classroom Id"
+          },
+          "document_ids": {
+            "items": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "type": "array",
+            "maxItems": 10,
+            "minItems": 1,
+            "title": "Document Ids"
+          },
+          "topic_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Topic Id"
+          },
+          "counts": {
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "propertyNames": {
+              "enum": [
+                "multiple_choice",
+                "short_answer"
+              ]
+            },
+            "type": "object",
+            "title": "Counts"
+          },
+          "difficulty": {
+            "type": "string",
+            "enum": [
+              "introductory",
+              "intermediate",
+              "advanced"
+            ],
+            "title": "Difficulty"
+          },
+          "focus": {
+            "type": "string",
+            "maxLength": 300,
+            "title": "Focus",
+            "default": ""
+          },
+          "existing_prompts": {
+            "items": {
+              "type": "string",
+              "maxLength": 2000
+            },
+            "type": "array",
+            "maxItems": 50,
+            "title": "Existing Prompts",
+            "default": []
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "classroom_id",
+          "document_ids",
+          "counts",
+          "difficulty"
+        ],
+        "title": "PracticeRequest",
+        "description": "practice questions a student asks for from the classroom's documents they choose (adr 0022)."
+      },
+      "PracticeResponse": {
+        "properties": {
+          "questions": {
+            "items": {
+              "$ref": "#/components/schemas/PracticeQuestion"
+            },
+            "type": "array",
+            "title": "Questions"
+          },
+          "requested": {
+            "type": "integer",
+            "title": "Requested"
+          },
+          "returned": {
+            "type": "integer",
+            "title": "Returned"
+          },
+          "dropped": {
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "type": "object",
+            "title": "Dropped"
+          },
+          "model_calls": {
+            "type": "integer",
+            "minimum": 0.0,
+            "title": "Model Calls",
+            "description": "Workflow inference requests attempted, including failed or refused requests; not provider attempts or cost.",
+            "default": 0
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "questions",
+          "requested",
+          "returned",
+          "dropped"
+        ],
+        "title": "PracticeResponse"
       },
       "Review": {
         "properties": {

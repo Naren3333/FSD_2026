@@ -1,4 +1,4 @@
-"""run the question generation eval (adr 0006, 0015) within a cost cap: each case through kong as the teacher with the review on and off, and with --probe planted drafts sent straight to the deployed reviewer to measure what it catches."""
+"""run the question generation eval (adr 0006, 0015) within a cost cap: each case through kong as the teacher with the review on and off, with --practice as the classroom's enrolled student through the practice route (adr 0022), and with --probe planted drafts sent straight to the deployed reviewer to measure what it catches."""
 
 import argparse
 import json
@@ -12,7 +12,7 @@ from typing import Any
 
 import yaml
 from budget import DEFAULT_CAP, Budget, CapReachedError, correlation, ledger_calls
-from common import ROOT, RUNS, Session, load_state, save_state, service_modules
+from common import ROOT, RUNS, STUDENT2, Session, load_state, save_state, service_modules
 from local_stack import check, psql_json
 from reporting import checkpoint, select_cases
 
@@ -23,6 +23,10 @@ CASES = Path(__file__).with_name("generation_cases.yaml")
 PROBE = Path(__file__).with_name("review_probe.yaml")
 INSIDE = Path(__file__).with_name("probe_inside.py")
 PATH = "/question-generation/questions"
+PRACTICE_PATH = "/question-generation/practice"
+PRACTICE_TYPES = ("multiple_choice", "short_answer")  # what a student may practise
+# the corpus classrooms' enrolled students (load_corpus.py).
+STUDENTS = {"C1": "student", "C2": STUDENT2}
 TIMEOUT = 310
 MAX_CALLS = 6  # three writes and three reviews (adr 0015)
 MAX_LATENCY_MS = 300_000  # kong's read timeout
@@ -41,6 +45,26 @@ def runs_of(cases: list[dict], ab: bool) -> list[dict]:
         if ab and c.get("ab", True):
             out.append({**c, "run": f"{c['id']}/no-review", "review": False})
     return out
+
+
+def practice_runs(cases: list[dict]) -> list[dict]:
+    """each case once as practice, with the types a student may not practise left out; a case left with none is skipped."""
+    out = []
+    for c in cases:
+        counts = {t: n for t, n in c["counts"].items() if t in PRACTICE_TYPES}
+        if counts:
+            out.append(
+                {**c, "run": f"{c['id']}/practice", "review": True, "practice": True, "counts": counts}
+            )
+    return out
+
+
+def room_of(run: dict, state: dict) -> str:
+    """the corpus classroom (C1, C2) the case's documents share."""
+    rooms = {state["documents"][t]["class"] for t in run["documents"]}
+    if len(rooms) != 1:
+        raise SystemExit(f"{run['id']}: documents {run['documents']} are in different classrooms")
+    return rooms.pop()
 
 
 def ensure_topics(teacher: Session, prefix: str, cases: list[dict], state: dict) -> dict[str, str]:
@@ -64,24 +88,24 @@ def chunks_of(document_ids: list[str]) -> dict[str, str]:
     return {r["id"]: r["document_id"] for r in rows}
 
 
-def run_case(run: dict, teacher: Session, state: dict, topics: dict[str, str]) -> dict:
+def run_case(run: dict, caller: Session, state: dict, topics: dict[str, str]) -> dict:
+    """one case through kong: as the teacher, or for a practice run as the classroom's enrolled student (`caller`), who cannot skip the review."""
     docs = [state["documents"][t] for t in run["documents"]]
-    rooms = {d["class"] for d in docs}
-    if len(rooms) != 1:
-        raise SystemExit(f"{run['id']}: documents {run['documents']} are in different classrooms")
     body = {
-        "classroom_id": state["classrooms"][rooms.pop()],
+        "classroom_id": state["classrooms"][room_of(run, state)],
         "document_ids": [d["id"] for d in docs],
         "topic_id": topics[run["topic"]],
         "counts": run["counts"],
         "difficulty": run["difficulty"],
         "focus": run.get("focus", ""),
         "existing_prompts": run.get("existing", []),
-        "review": run["review"],
     }
+    if not run.get("practice"):
+        body["review"] = run["review"]
     sent = correlation()
     started = time.monotonic()
-    res = teacher.request("POST", PATH, json=body, headers={"X-Correlation-ID": sent}, timeout=TIMEOUT)
+    path = PRACTICE_PATH if run.get("practice") else PATH
+    res = caller.request("POST", path, json=body, headers={"X-Correlation-ID": sent}, timeout=TIMEOUT)
     try:
         reply = res.json()
     except ValueError:
@@ -89,11 +113,52 @@ def run_case(run: dict, teacher: Session, state: dict, topics: dict[str, str]) -
     return {
         **run,
         "document_ids": body["document_ids"],
+        "topic_id": body["topic_id"],
         "correlation": sent,
         "status": res.status_code,
         "body": reply,
         "latency_ms": round((time.monotonic() - started) * 1000),
     }
+
+
+def drafts_of(run: dict) -> list[dict]:
+    """the run's questions in the teacher's draft shape; practice returns only questions its reviewer passed (adr 0022), so each is marked passed."""
+    questions = run["body"].get("questions", [])
+    if not run.get("practice"):
+        return questions
+    return [
+        {
+            "question": {
+                "prompt": q.get("prompt", ""),
+                "type": q.get("type"),
+                "topic_id": q.get("topic_id") or run["topic_id"],
+                "points": 1,
+                "options": q.get("options", []),
+                "answer": q.get("answer", ""),
+                "accepted_answers": q.get("accepted_answers", []),
+                "sources": q.get("sources", []),
+            },
+            "evidence": q.get("evidence", ""),
+            "explanation": q.get("explanation", ""),
+            "review": {"status": "passed", "note": ""},
+        }
+        for q in questions
+    ]
+
+
+def practice_failures(body: dict) -> list[str]:
+    """what a practice question must carry for the student to check an answer and learn from it."""
+    failures = []
+    for n, q in enumerate(body.get("questions", []), 1):
+        if q.get("type") not in PRACTICE_TYPES:
+            failures.append(f"question {n} is a {q.get('type')}, which practice never asks for")
+        if q.get("type") == "short_answer" and not q.get("accepted_answers"):
+            failures.append(f"question {n} has no accepted answers")
+        if not (q.get("explanation") or "").strip():
+            failures.append(f"question {n} has no explanation")
+        if not q.get("sources"):
+            failures.append(f"question {n} has no sources")
+    return failures
 
 
 def assess(run: dict, chunks: dict[str, str]) -> None:
@@ -110,7 +175,9 @@ def assess(run: dict, chunks: dict[str, str]) -> None:
         if run["generate_calls"]:
             failures.append(f"{run['generate_calls']} generate calls for a refusal; it should make none")
     else:
-        drafts = body.get("questions", [])
+        drafts = drafts_of(run)
+        if run.get("practice"):
+            failures += practice_failures(body)
         chosen = set(run["document_ids"])
         for n, g in enumerate(drafts, 1):
             q = g["question"]
@@ -145,17 +212,20 @@ def assess(run: dict, chunks: dict[str, str]) -> None:
 
 def digest(run: dict) -> dict:
     body = run["body"]
+    drafts = drafts_of(run) if run["status"] == 200 else []
     rejected: Counter[str] = Counter()
     for r in body.get("rounds", []):
         rejected.update(r.get("rejected", {}))
+    if run.get("practice"):
+        rejected.update(body.get("dropped", {}))  # practice reports no rounds, only what it dropped
     return {
         "returned": body.get("returned"),
         "requested": body.get("requested"),
-        "statuses": dict(Counter(g["review"]["status"] for g in body.get("questions", []))),
+        "statuses": dict(Counter(g["review"]["status"] for g in drafts)),
         "drafts": [
             f"[{g['review']['status']}] {g['question']['type']}: {g['question']['prompt']}"
             + (f" — {g['review']['note']}" if g["review"].get("note") else "")
-            for g in body.get("questions", [])
+            for g in drafts
         ],
         "rounds": len(body.get("rounds", [])),
         "rejected": dict(rejected),
@@ -165,10 +235,16 @@ def digest(run: dict) -> dict:
     }
 
 
+def mode_of(run: dict) -> str:
+    if run.get("practice"):
+        return "practice"
+    return "review" if run["review"] else "no-review"
+
+
 def summarize(runs: list[dict]) -> dict:
     modes: dict[str, dict] = {}
-    for mode, review in (("review", True), ("no-review", False)):
-        rows = [r for r in runs if r["review"] is review and r["status"] == 200]
+    for mode in ("review", "no-review", "practice"):
+        rows = [r for r in runs if mode_of(r) == mode and r["status"] == 200]
         if not rows:
             continue
         statuses: Counter[str] = Counter()
@@ -301,6 +377,11 @@ def main() -> None:
         "--max-usd", type=float, default=DEFAULT_CAP, help=f"cost cap for the run (default {DEFAULT_CAP})"
     )
     ap.add_argument("--no-ab", action="store_true", help="run each case with the review on only")
+    ap.add_argument(
+        "--practice",
+        action="store_true",
+        help="run each case as student practice (adr 0022), as the classroom's enrolled student",
+    )
     part = ap.add_mutually_exclusive_group()
     part.add_argument("--probe", action="store_true", help="also run the reviewer probe")
     part.add_argument("--probe-only", action="store_true", help="run only the reviewer probe")
@@ -319,7 +400,8 @@ def main() -> None:
     claims = teacher.claims()
     budget = Budget(args.max_usd, claims["sub"])
     budget.preflight()
-    runs = runs_of(cases, not args.no_ab)
+    runs = practice_runs(cases) if args.practice else runs_of(cases, not args.no_ab)
+    students = {room: Session(user, state) for room, user in STUDENTS.items()} if args.practice else {}
     topics = ensure_topics(teacher, prefix, cases, state) if runs else {}
     chunks = (
         chunks_of(sorted({state["documents"][t]["id"] for c in cases for t in c["documents"]}))
@@ -349,7 +431,8 @@ def main() -> None:
     try:
         for run in runs:
             budget.before("generation")
-            completed = run_case(run, teacher, state, topics)
+            caller = students[room_of(run, state)] if run.get("practice") else teacher
+            completed = run_case(run, caller, state, topics)
             completed["cost_usd"] = budget.after("generation", completed["correlation"])
             completed["generate_calls"] = ledger_calls(completed["correlation"], "generate")
             assess(completed, chunks)

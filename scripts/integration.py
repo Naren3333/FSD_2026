@@ -589,6 +589,45 @@ def question_generation(u: Users, room_id: str) -> None:
     assert unknown["error"]["code"] == "UNKNOWN_TOPIC", unknown
 
 
+def practice(u: Users, room_id: str) -> None:
+    """only a student enrolled in the classroom may generate practice for themselves, billed to them (adr 0022)."""
+    pdf = next(
+        d
+        for d in request(u.student, "GET", f"/content/documents?classroom_id={room_id}")
+        if d["title"] == "PDF"
+    )
+    path = "/question-generation/practice"
+    # no topic or focus: the query is the chosen documents' titles, read with the student's token.
+    body = {
+        "classroom_id": room_id,
+        "document_ids": [pdf["id"]],
+        "counts": {"multiple_choice": 1, "short_answer": 1},
+        "difficulty": "introductory",
+    }
+    assert httpx.post(BASE + path, json=body).status_code == 401
+    request(u.teacher, "POST", path, 403, json=body)
+    request(u.other, "POST", path, 403, json=body)
+    outsider, outsider_id, _ = fresh_person("student")
+    try:
+        refused = request(outsider, "POST", path, 403, json=body)
+        assert refused["error"]["code"] == "FORBIDDEN", refused
+    finally:
+        delete_me(outsider, outsider_id)
+    request(u.student, "POST", path, 422, json={**body, "document_ids": []})
+    request(u.student, "POST", path, 422, json={**body, "counts": {"free_response": 1}})
+    request(u.student, "POST", path, 422, json={**body, "review": False})
+    # the classroom's only pdf has no text, so with live ai there is nothing to practise from.
+    answered = u.student.post(path, json=body, timeout=120)
+    expected = (
+        {422: "INSUFFICIENT_SOURCE"} if LIVE_AI else {422: "INSUFFICIENT_SOURCE", 503: "SEARCH_UNAVAILABLE"}
+    )
+    assert answered.status_code in expected, answered.text
+    assert answered.json()["error"]["code"] == expected[answered.status_code], answered.text
+    validate_response("POST", path, answered.status_code, answered.json())
+    unknown = request(u.student, "POST", path, 422, json={**body, "topic_id": room_id})
+    assert unknown["error"]["code"] == "UNKNOWN_TOPIC", unknown
+
+
 @dataclass
 class Graded:
     submission_id: str
@@ -1639,7 +1678,7 @@ def main() -> None:
     print(
         "PASS: gateway auth, school admin accounts, classrooms and enrollment, classroom isolation, enrollment by username, rosters, unenrollment, account deletion and its cross-service purge, classroom deletion and its cross-service purge, deleting a graded assessment with its grades, the question bank and resits for assigned students only, curriculum, "
         "S3 upload/extraction, PDF indexing jobs, document deletion, search access, chat threads and streaming, "
-        "teacher-only question generation and marking guidance, "
+        "teacher-only question generation and marking guidance, enrolled-student-only practice, "
         "AI spend allowance, answer-key secrecy, submissions, draft grading, teacher finalization, students' own "
         "finalized results, the class dashboard's counts and class performance, Kafka analytics, consumer restart, duplicate event and business-key idempotency, "
         "draft and scheduled assessments, saved answers, late submissions, short-answer and rubric marking, "
@@ -1656,6 +1695,7 @@ def run() -> None:
     step("Search", lambda: search(users, room_id))
     step("Chat", lambda: chat(users, room_id))
     step("Question generation", lambda: question_generation(users, room_id))
+    step("Student practice", lambda: practice(users, room_id))
     graded = step("Assessment and grading", lambda: assess_and_grade(users, room_id))
     step("Restart and replayed events", lambda: replayed_events(users, room_id, graded))
     step("Class dashboard", lambda: class_dashboard(users, room_id, graded))

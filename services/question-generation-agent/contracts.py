@@ -1,6 +1,6 @@
 """the question-generation agent's http contract (adr 0006)."""
 
-from collections.abc import Sequence
+from collections.abc import Collection, Sequence
 from typing import Annotated, Literal, Self, get_args
 from uuid import UUID
 
@@ -30,6 +30,7 @@ MAX_EXISTING = 50
 
 Generatable = Literal["multiple_choice", "short_answer", "free_response"]
 TYPE_ORDER = get_args(Generatable)
+Practicable = Literal["multiple_choice", "short_answer"]  # what a student practises: checked without a marker
 TeacherMarked = Literal["short_answer", "free_response"]
 Difficulty = Literal["introductory", "intermediate", "advanced"]
 Prompt = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=MAX_PROMPT)]
@@ -40,28 +41,37 @@ def _distinct(values: Sequence[object], what: str) -> None:
         raise ValueError(f"{what} must not repeat")
 
 
+def _asked(document_ids: Sequence[UUID], counts: Collection[int]) -> None:
+    """the documents each once, and 1 to MAX_COUNT questions of each type asked for (`counts`, one per type), at most MAX_COUNT in all."""
+    _distinct(document_ids, "document_ids")
+    if not counts:
+        raise ValueError("Choose at least one question type.")
+    if any(not 1 <= n <= MAX_COUNT for n in counts):
+        raise ValueError(f"Ask for 1 to {MAX_COUNT} questions of each type.")
+    if sum(counts) > MAX_COUNT:
+        raise ValueError(f"Ask for at most {MAX_COUNT} questions in total.")
+
+
+Focus = Annotated[str, StringConstraints(strip_whitespace=True, max_length=MAX_FOCUS)]
+# questions the caller already has, so the agent can drop near-duplicates.
+Existing = Annotated[
+    list[Annotated[str, StringConstraints(max_length=MAX_PROMPT)]], Field(default=[], max_length=MAX_EXISTING)
+]
+
+
 class GenerateRequest(Contract):
     classroom_id: UUID
     document_ids: list[UUID] = Field(min_length=1, max_length=MAX_DOCUMENTS)
     topic_id: UUID
     counts: dict[Generatable, int]  # how many of each type to write
     difficulty: Difficulty
-    focus: Annotated[str, StringConstraints(strip_whitespace=True, max_length=MAX_FOCUS)] = ""
-    # the questions the editor already holds, so the agent can drop near-duplicates.
-    existing_prompts: list[Annotated[str, StringConstraints(max_length=MAX_PROMPT)]] = Field(
-        default=[], max_length=MAX_EXISTING
-    )
+    focus: Focus = ""
+    existing_prompts: Existing  # the questions the editor already holds
     review: bool = True  # false skips the reviewer pass for this request
 
     @model_validator(mode="after")
     def distinct(self) -> Self:
-        _distinct(self.document_ids, "document_ids")
-        if not self.counts:
-            raise ValueError("Choose at least one question type.")
-        if any(not 1 <= n <= MAX_COUNT for n in self.counts.values()):
-            raise ValueError(f"Ask for 1 to {MAX_COUNT} questions of each type.")
-        if sum(self.counts.values()) > MAX_COUNT:
-            raise ValueError(f"Ask for at most {MAX_COUNT} questions in total.")
+        _asked(self.document_ids, self.counts.values())
         return self
 
     @property
@@ -181,3 +191,48 @@ class Guidance(Contract):
     sources: list[Excerpt]
     evidence: str
     requires_teacher_review: Literal[True] = True
+
+
+class PracticeRequest(Contract):
+    """practice questions a student asks for from the classroom's documents they choose (adr 0022)."""
+
+    classroom_id: UUID
+    document_ids: list[UUID] = Field(min_length=1, max_length=MAX_DOCUMENTS)
+    topic_id: UUID | None = None  # none: the focus, or else the documents' titles, says what to ask about
+    counts: dict[Practicable, int]
+    difficulty: Difficulty
+    focus: Focus = ""
+    existing_prompts: Existing  # the questions the student already has, for "more questions"
+
+    @model_validator(mode="after")
+    def distinct(self) -> Self:
+        _asked(self.document_ids, self.counts.values())
+        return self
+
+
+class PracticeQuestion(Contract):
+    """a question with its key, for the student's own ungraded use: never stored or marked (adr 0022)."""
+
+    prompt: str
+    type: Practicable
+    options: list[str]  # multiple choice only
+    answer: str  # the multiple-choice key; blank for a short answer
+    accepted_answers: list[str]  # a short answer's accepted answers; empty for multiple choice
+    explanation: str  # why the key is right, for the student
+    evidence: str  # quoted from a source passage
+    sources: list[Excerpt] = Field(min_length=1, max_length=MAX_SOURCES)
+    topic_id: UUID | None
+
+
+class PracticeResponse(Contract):
+    questions: list[PracticeQuestion]  # each one the reviewer passed
+    requested: int
+    returned: int
+    dropped: dict[
+        str, int
+    ]  # questions the checks or the reviewer refused, or the reviewer did not judge, by reason
+    model_calls: int = Field(
+        default=0,
+        ge=0,
+        description="Workflow inference requests attempted, including failed or refused requests; not provider attempts or cost.",
+    )

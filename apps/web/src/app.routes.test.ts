@@ -92,7 +92,7 @@ describe('sections for one role', () => {
       'review',
       'classrooms',
     ]);
-    expect(studentOnly).toEqual(['home', 'results']);
+    expect(studentOnly).toEqual(['home', 'results', 'practice']);
   });
 
   it.each(teacherOnly)(
@@ -136,7 +136,7 @@ describe('navigation', () => {
     expect(outline('student')).toEqual([
       ['', ['Home']],
       ['My work', ['Assessments', 'My results', 'My progress']],
-      ['Learn', ['Teaching materials', 'Ask the materials']],
+      ['Learn', ['Teaching materials', 'Ask the materials', 'Practice']],
     ]);
   });
 

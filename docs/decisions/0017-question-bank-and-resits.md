@@ -34,7 +34,7 @@ A question exists only inside the assessment it was written for. A teacher who w
 
 **The teacher picks, with suggestions and no model call.** The bank list filters by topic, type, prompt text and origin. Given one of the teacher's classrooms and a student on its roster, it marks each bank question the student has already answered in any of that teacher's classrooms, including ones the student has since left (they submitted an assessment holding a question linked to it), and can hide them. Reaching past the current roster is deliberate: it is the teacher's own past assessment of a student they teach now, shown only as a hint and never as a grade or list, so ADR 0010's roster rule for teacher lists does not apply. Assessment owns the links and the submissions, so this is a local indexed query; the caller must teach that classroom and the student must be on its roster, so no teacher can probe another student's history. The resit builder suggests students and topics from the original's finalized grades in Grading, whose evidence carries each question's topic and marks; drafts are left out, since a question waiting to be marked shows no marks yet. The web app reads them with the teacher's token. Filling gaps with question generation and the adaptive resit agent (`docs/architecture/agentic-workflows.md`, workflow 4) are later work.
 
-**Student self-practice is not part of this decision.** Ungraded practice that no teacher finalizes needs its own rules about grades and evidence, and gets its own ADR.
+**Student self-practice is not part of this decision.** Ungraded practice that no teacher finalizes needs its own rules about grades and evidence; ADR 0022 adds it, with no grades, evidence or saved sets.
 
 ## Consequences
 

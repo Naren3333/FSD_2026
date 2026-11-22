@@ -259,7 +259,7 @@ describe('performance interpretation', () => {
     expect(page.text()).toContain("You've used today's AI allowance.");
   });
 
-  it('is for teachers only; students see that practice is not available yet', async () => {
+  it('is for teachers only; students get a link to practice instead', async () => {
     const page = render(
       Promise.resolve([]),
       Promise.resolve(evidence([halves])),
@@ -270,7 +270,9 @@ describe('performance interpretation', () => {
     );
     await page.settle();
     expect(page.text()).not.toContain('Interpret results');
-    expect(page.text()).toContain('Generated practice is not available yet.');
+    expect(page.text()).not.toContain('not available yet');
+    const link = (page.fixture.nativeElement as HTMLElement).querySelector('a[href="/practice"]');
+    expect(link?.textContent).toContain('Practise from your class');
     expect(page.button('Practice unavailable')).toBeUndefined();
   });
 });

@@ -40,6 +40,8 @@ import type {
   OwnSubmission,
   Performance,
   PersonRole,
+  PracticeRequest,
+  PracticeResult,
   Profile,
   ResitRequest,
   SchoolClassroomPage,
@@ -575,7 +577,7 @@ export class ChatApi {
 /* generation reads the documents, waits for the model and its reviewer, and retries; kong allows it five minutes. */
 const GENERATION_TIMEOUT = 5 * 60 * 1000 + 10 * 1000;
 
-/* drafts from the classroom's documents for its teacher (adr 0006). */
+/* drafts from the classroom's documents for its teacher (adr 0006), and practice for its students (adr 0022). */
 @Injectable({ providedIn: 'root' })
 export class QuestionGenerationApi {
   private readonly gateway = inject(Gateway);
@@ -590,6 +592,14 @@ export class QuestionGenerationApi {
   /* accepted answers or a rubric, and marking points, for a question the teacher wrote. */
   guidance(request: GuidanceRequest): Promise<Guidance> {
     return this.gateway.request('question-generation', '/marking-guidance', {
+      method: 'POST',
+      body: request,
+      timeout: GENERATION_TIMEOUT,
+    });
+  }
+  /* reviewed practice questions with their keys, for the signed-in student's own use; nothing is saved. */
+  practice(request: PracticeRequest): Promise<PracticeResult> {
+    return this.gateway.request('question-generation', '/practice', {
       method: 'POST',
       body: request,
       timeout: GENERATION_TIMEOUT,

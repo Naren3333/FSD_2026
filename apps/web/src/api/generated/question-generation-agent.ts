@@ -90,6 +90,37 @@ export interface components {
       points: number;
       descriptor: string;
     };
+    PracticeQuestion: {
+      prompt: string;
+      type: 'multiple_choice' | 'short_answer';
+      options: string[];
+      answer: string;
+      accepted_answers: string[];
+      explanation: string;
+      evidence: string;
+      sources: components['schemas']['Excerpt'][];
+      topic_id: string | null;
+    };
+    PracticeRequest: {
+      classroom_id: string;
+      document_ids: string[];
+      topic_id?: string | null;
+      counts: {
+        [key: string]: number;
+      };
+      difficulty: 'introductory' | 'intermediate' | 'advanced';
+      focus?: string;
+      existing_prompts?: string[];
+    };
+    PracticeResponse: {
+      questions: components['schemas']['PracticeQuestion'][];
+      requested: number;
+      returned: number;
+      dropped: {
+        [key: string]: number;
+      };
+      model_calls?: number;
+    };
     Review: {
       status?: 'passed' | 'flagged' | 'not_reviewed';
       note?: string;
